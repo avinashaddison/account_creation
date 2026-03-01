@@ -38,8 +38,10 @@ async function getBrowser(): Promise<Browser> {
   }
 
   if (launching) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    if (browserInstance && browserInstance.isConnected()) return browserInstance;
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (browserInstance && browserInstance.isConnected()) return browserInstance;
+    }
   }
 
   launching = true;
@@ -64,91 +66,171 @@ async function getBrowser(): Promise<Browser> {
   }
 }
 
-async function dismissOverlays(page: Page): Promise<void> {
-  try {
-    const cookieSelectors = [
-      'button:has-text("Accept")',
-      'button:has-text("Accept All")',
-      'button:has-text("Accept Cookies")',
-      'button:has-text("I Accept")',
-      'button:has-text("OK")',
-      'button:has-text("Got it")',
-      'button:has-text("Agree")',
-      '[id*="cookie"] button',
-      '[class*="cookie"] button',
-      '[id*="consent"] button',
-      '[class*="consent"] button',
-      '[id*="onetrust"] button#onetrust-accept-btn-handler',
-      '.onetrust-close-btn-handler',
+async function forceRemoveOverlays(page: Page): Promise<void> {
+  await page.evaluate(`(() => {
+    var selectors = [
+      '[id*="onetrust"]', '[class*="onetrust"]',
+      '[id*="cookie"]', '[class*="cookie-banner"]',
+      '[class*="cookie-consent"]', '[class*="consent-banner"]',
+      '[id*="consent"]', '[class*="gdpr"]', '[id*="gdpr"]',
+      '.modal-overlay', '.overlay', '[role="dialog"]'
     ];
-
-    for (const sel of cookieSelectors) {
-      try {
-        const btn = page.locator(sel).first();
-        if (await btn.isVisible({ timeout: 500 })) {
-          await btn.click({ timeout: 2000 });
-          console.log(`[Playwright] Dismissed overlay with selector: ${sel}`);
-          await page.waitForTimeout(1000);
-          break;
-        }
-      } catch {}
+    for (var i = 0; i < selectors.length; i++) {
+      var els = document.querySelectorAll(selectors[i]);
+      for (var j = 0; j < els.length; j++) {
+        els[j].style.display = 'none';
+        els[j].remove();
+      }
     }
-  } catch {}
+    var divs = document.querySelectorAll('div');
+    for (var k = 0; k < divs.length; k++) {
+      var style = window.getComputedStyle(divs[k]);
+      if (style.position === 'fixed' && style.zIndex && parseInt(style.zIndex) > 999 && divs[k].offsetHeight > 100) {
+        divs[k].remove();
+      }
+    }
+  })()`);
+  console.log("[Playwright] Force-removed overlays");
 }
 
-async function waitForRegistrationForm(page: Page): Promise<void> {
-  console.log("[Playwright] Waiting for registration form to appear...");
-
-  await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
-  await page.waitForTimeout(3000);
-
-  await dismissOverlays(page);
-
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const emailInputs = page.locator('input[data-gigya-name="email"]');
-    const count = await emailInputs.count();
-    console.log(`[Playwright] Found ${count} email input(s), checking visibility...`);
-
-    for (let i = 0; i < count; i++) {
-      try {
-        const input = emailInputs.nth(i);
-        const isVisible = await input.isVisible({ timeout: 1000 });
-        if (isVisible) {
-          console.log(`[Playwright] Email input #${i} is visible`);
-          return;
+async function fillViaJS(page: Page, gigyaName: string, value: string): Promise<boolean> {
+  return page.evaluate(`((name, val) => {
+    var inputs = document.querySelectorAll('input[data-gigya-name="' + name + '"]');
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      var rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        if (setter && setter.set) {
+          setter.set.call(el, val);
+        } else {
+          el.value = val;
         }
-      } catch {}
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        return true;
+      }
     }
+    return false;
+  })("${gigyaName}", "${value.replace(/"/g, '\\"')}")`);
+}
 
-    const allInputs = page.locator('input[name="email"], input[type="email"]');
-    const allCount = await allInputs.count();
-    for (let i = 0; i < allCount; i++) {
-      try {
-        const input = allInputs.nth(i);
-        const isVisible = await input.isVisible({ timeout: 1000 });
-        if (isVisible) {
-          console.log(`[Playwright] Fallback email input #${i} is visible`);
-          return;
+async function selectViaJS(page: Page, gigyaName: string, searchText: string): Promise<boolean> {
+  return page.evaluate(`((name, text) => {
+    var selects = document.querySelectorAll('select[data-gigya-name="' + name + '"]');
+    for (var i = 0; i < selects.length; i++) {
+      var sel = selects[i];
+      var rect = sel.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        var options = Array.from(sel.options);
+        var match = options.find(function(o) { return o.text.toLowerCase().includes(text.toLowerCase()); });
+        if (match) {
+          sel.value = match.value;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         }
-      } catch {}
+      }
     }
+    return false;
+  })("${gigyaName}", "${searchText.replace(/"/g, '\\"')}")`);
+}
 
-    console.log(`[Playwright] No visible email input yet, attempt ${attempt + 1}/6, waiting...`);
-    await dismissOverlays(page);
-    await page.waitForTimeout(3000);
+async function checkAllCheckboxesViaJS(page: Page): Promise<number> {
+  return page.evaluate(`(() => {
+    var checked = 0;
+    var checkboxes = document.querySelectorAll('input[type="checkbox"]');
+    for (var i = 0; i < checkboxes.length; i++) {
+      var el = checkboxes[i];
+      if (!el.checked) {
+        el.checked = true;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('click', { bubbles: true }));
+        checked++;
+      }
+    }
+    return checked;
+  })()`);
+}
+
+async function waitForGigyaForm(page: Page, maxWaitSec: number = 30): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitSec * 1000) {
+    const found = await page.evaluate(`(() => {
+      var inputs = document.querySelectorAll('input[data-gigya-name="email"]');
+      for (var i = 0; i < inputs.length; i++) {
+        var rect = inputs[i].getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return true;
+      }
+      return false;
+    })()`);
+    if (found) return true;
+    await page.waitForTimeout(2000);
+    await forceRemoveOverlays(page);
   }
-
-  const html = await page.evaluate(() => document.body.innerHTML.substring(0, 2000));
-  console.log("[Playwright] Page HTML snippet:", html);
-  throw new Error("Registration form did not become visible after waiting");
+  return false;
 }
 
-function getVisibleInput(page: Page, gigyaName: string) {
-  return page.locator(`input[data-gigya-name="${gigyaName}"]`).and(page.locator(':visible')).first();
+async function getPageText(page: Page): Promise<string> {
+  return page.evaluate(`document.body.innerText`) as Promise<string>;
 }
 
-function getVisibleSelect(page: Page, gigyaName: string) {
-  return page.locator(`select[data-gigya-name="${gigyaName}"]`).and(page.locator(':visible')).first();
+async function getFormErrors(page: Page): Promise<string[]> {
+  return page.evaluate(`(() => {
+    var errorEls = document.querySelectorAll('.gigya-error-msg-active, .gigya-error-msg');
+    var results = [];
+    for (var i = 0; i < errorEls.length; i++) {
+      var el = errorEls[i];
+      if (el.offsetParent !== null && el.textContent && el.textContent.trim().length > 0) {
+        results.push(el.textContent.trim());
+      }
+    }
+    return results;
+  })()`) as Promise<string[]>;
+}
+
+async function clickSubmitViaJS(page: Page): Promise<boolean> {
+  return page.evaluate(`(() => {
+    var submits = document.querySelectorAll('input[type="submit"]');
+    for (var i = 0; i < submits.length; i++) {
+      var rect = submits[i].getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        submits[i].click();
+        return true;
+      }
+    }
+    var buttons = document.querySelectorAll('button[type="submit"], .gigya-input-submit');
+    for (var j = 0; j < buttons.length; j++) {
+      var rect2 = buttons[j].getBoundingClientRect();
+      if (rect2.width > 0 && rect2.height > 0) {
+        buttons[j].click();
+        return true;
+      }
+    }
+    return false;
+  })()`) as Promise<boolean>;
+}
+
+async function fillCodeViaJS(page: Page, code: string): Promise<boolean> {
+  return page.evaluate(`((codeVal) => {
+    var selectors = ['input[data-gigya-name="code"]', 'input[name="code"]', 'input.gigya-input-text'];
+    for (var s = 0; s < selectors.length; s++) {
+      var inputs = document.querySelectorAll(selectors[s]);
+      for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && el.type !== 'hidden') {
+          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          if (setter && setter.set) setter.set.call(el, codeVal);
+          else el.value = codeVal;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+      }
+    }
+    return false;
+  })("${code}")`) as Promise<boolean>;
 }
 
 export async function fullRegistrationFlow(
@@ -183,129 +265,146 @@ export async function fullRegistrationFlow(
     await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
 
     try {
-      await page.waitForLoadState("networkidle", { timeout: 15000 });
+      await page.waitForLoadState("networkidle", { timeout: 20000 });
     } catch {
-      console.log("[Playwright] Network idle timeout, continuing anyway...");
+      console.log("[Playwright] Network idle timeout, continuing...");
     }
 
-    await waitForRegistrationForm(page);
+    await page.waitForTimeout(3000);
+    await forceRemoveOverlays(page);
+    await page.waitForTimeout(1000);
 
-    console.log("[Playwright] Filling form fields...");
-    const emailInput = getVisibleInput(page, "email");
-    await emailInput.click({ timeout: 5000 });
-    await emailInput.fill(email);
-    console.log("[Playwright] Filled email");
+    console.log("[Playwright] Waiting for Gigya registration form...");
+    const formFound = await waitForGigyaForm(page, 30);
+    if (!formFound) {
+      const snapshot = (await getPageText(page)).substring(0, 500);
+      await context.close();
+      return { success: false, error: "Registration form did not load", pageContent: snapshot };
+    }
 
-    const firstNameInput = getVisibleInput(page, "firstName");
-    await firstNameInput.click({ timeout: 5000 });
-    await firstNameInput.fill(firstName);
-    console.log("[Playwright] Filled firstName");
+    await forceRemoveOverlays(page);
 
-    const lastNameInput = getVisibleInput(page, "lastName");
-    await lastNameInput.click({ timeout: 5000 });
-    await lastNameInput.fill(lastName);
-    console.log("[Playwright] Filled lastName");
-
-    const passwordInput = getVisibleInput(page, "password");
-    await passwordInput.click({ timeout: 5000 });
-    await passwordInput.fill(password);
-    console.log("[Playwright] Filled password");
-
-    console.log("[Playwright] Selecting country...");
-    try {
-      const residenceSelect = getVisibleSelect(page, "profile.country");
-      const hasResidence = await residenceSelect.count();
-      if (hasResidence > 0) {
-        const options = await residenceSelect.evaluate((sel) =>
-          Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
-        );
-        const countryOpt = options.find((o) => o.text.toLowerCase().includes(country.toLowerCase()));
-        if (countryOpt) {
-          await residenceSelect.selectOption(countryOpt.value);
-          console.log(`[Playwright] Selected country: ${countryOpt.text}`);
-        }
+    const allFields = await page.evaluate(`(() => {
+      var inputs = document.querySelectorAll('input[data-gigya-name], select[data-gigya-name]');
+      var result = [];
+      for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        var rect = el.getBoundingClientRect();
+        result.push({
+          tag: el.tagName,
+          type: el.type || '',
+          gigyaName: el.getAttribute('data-gigya-name'),
+          name: el.getAttribute('name'),
+          visible: rect.width > 0 && rect.height > 0,
+          w: rect.width,
+          h: rect.height
+        });
       }
-    } catch (e: any) {
-      console.log(`[Playwright] Country select issue: ${e.message}`);
-      try {
-        const fallbackSelect = page.locator("select:visible").first();
-        const options = await fallbackSelect.evaluate((sel) =>
-          Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
-        );
-        const countryOpt = options.find((o) => o.text.toLowerCase().includes(country.toLowerCase()));
-        if (countryOpt) await fallbackSelect.selectOption(countryOpt.value);
-      } catch {}
-    }
+      return result;
+    })()`);
+    console.log("[Playwright] All Gigya form fields:", JSON.stringify(allFields));
 
-    console.log("[Playwright] Selecting language...");
-    try {
-      const langSelect = getVisibleSelect(page, "data.personalization.siteLanguage");
-      const hasLang = await langSelect.count();
-      if (hasLang > 0) {
-        const langOpts = await langSelect.evaluate((sel) =>
-          Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
-        );
-        const langOpt = langOpts.find((o) => o.text.toLowerCase().includes(language.toLowerCase()));
-        if (langOpt) await langSelect.selectOption(langOpt.value);
-      }
-    } catch (e: any) {
-      console.log(`[Playwright] Language select issue: ${e.message}`);
-    }
+    console.log("[Playwright] Form found, filling fields via JS...");
 
-    console.log("[Playwright] Checking checkboxes...");
-    const checkboxNames = [
-      "preferences.confirmationAge.isConsentGranted",
-      "preferences.terms.LA2028siteTerms.isConsentGranted",
-      "subscriptions.la2028EmailMarketingCommunications.email.isSubscribed",
-    ];
-    for (const name of checkboxNames) {
-      try {
-        const cb = page.locator(`input[data-gigya-name="${name}"]`).and(page.locator(':visible')).first();
-        if (await cb.count() > 0 && !(await cb.isChecked())) {
-          await cb.check({ force: true });
+    const emailFilled = await fillViaJS(page, "email", email);
+    console.log(`[Playwright] Email filled: ${emailFilled}`);
+
+    let fnFilled = await fillViaJS(page, "firstName", firstName);
+    if (!fnFilled) fnFilled = await fillViaJS(page, "profile.firstName", firstName);
+    if (!fnFilled) fnFilled = await fillViaJS(page, "first_name", firstName);
+    if (!fnFilled) {
+      fnFilled = await page.evaluate(`((val) => {
+        var inputs = document.querySelectorAll('input[name="firstName"], input[name="first_name"], input[placeholder*="irst"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+            if (setter && setter.set) setter.set.call(el, val);
+            else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
         }
-      } catch {}
+        return false;
+      })("${firstName.replace(/"/g, '\\"')}")`) as boolean;
+    }
+    console.log(`[Playwright] FirstName filled: ${fnFilled}`);
+
+    let lnFilled = await fillViaJS(page, "lastName", lastName);
+    if (!lnFilled) lnFilled = await fillViaJS(page, "profile.lastName", lastName);
+    if (!lnFilled) lnFilled = await fillViaJS(page, "last_name", lastName);
+    if (!lnFilled) {
+      lnFilled = await page.evaluate(`((val) => {
+        var inputs = document.querySelectorAll('input[name="lastName"], input[name="last_name"], input[placeholder*="ast"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+            if (setter && setter.set) setter.set.call(el, val);
+            else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+        }
+        return false;
+      })("${lastName.replace(/"/g, '\\"')}")`) as boolean;
+    }
+    console.log(`[Playwright] LastName filled: ${lnFilled}`);
+
+    const pwFilled = await fillViaJS(page, "password", password);
+    console.log(`[Playwright] Password filled: ${pwFilled}`);
+
+    if (!emailFilled || !pwFilled) {
+      await context.close();
+      return { success: false, error: `Critical form fill failed - email:${emailFilled} pw:${pwFilled}` };
     }
 
-    const fallbackCheckboxes = page.locator('input[type="checkbox"]:visible');
-    const cbCount = await fallbackCheckboxes.count();
-    for (let i = 0; i < cbCount; i++) {
-      try {
-        if (!(await fallbackCheckboxes.nth(i).isChecked())) {
-          await fallbackCheckboxes.nth(i).check({ force: true });
-        }
-      } catch {}
-    }
+    const countrySelected = await selectViaJS(page, "profile.country", country);
+    console.log(`[Playwright] Country selected: ${countrySelected}`);
+
+    const langSelected = await selectViaJS(page, "data.personalization.siteLanguage", language);
+    console.log(`[Playwright] Language selected: ${langSelected}`);
+
+    const cbCount = await checkAllCheckboxesViaJS(page);
+    console.log(`[Playwright] Checked ${cbCount} checkboxes`);
+
+    await page.waitForTimeout(500);
 
     console.log("[Playwright] Submitting form...");
-    const submitBtn = page.locator('input[type="submit"]:visible').first();
-    await submitBtn.click();
+    const submitted = await clickSubmitViaJS(page);
+    console.log(`[Playwright] Submit clicked: ${submitted}`);
+
+    if (!submitted) {
+      await context.close();
+      return { success: false, error: "Could not find submit button" };
+    }
 
     console.log("[Playwright] Waiting for response...");
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(6000);
 
-    const pageText = await page.evaluate(() => document.body.innerText);
+    const pageText = await getPageText(page);
 
     if (pageText.includes("already exists")) {
       await context.close();
       return { success: false, error: "Account already exists for this email" };
     }
 
-    const formErrors = await page.evaluate(() => {
-      const errorEls = document.querySelectorAll('.gigya-error-msg-active, .gigya-error-msg');
-      return Array.from(errorEls)
-        .filter((el) => (el as HTMLElement).offsetParent !== null && el.textContent?.trim())
-        .map((el) => el.textContent?.trim() || "");
-    });
-    if (formErrors.length > 0 && formErrors.some(e => e.length > 0)) {
-      const realErrors = formErrors.filter(e => e.length > 0);
-      if (realErrors.length > 0) {
-        await context.close();
-        return { success: false, error: realErrors.join("; ") };
-      }
+    const realErrors = await getFormErrors(page);
+    if (realErrors.length > 0) {
+      await context.close();
+      return { success: false, error: realErrors.join("; ") };
     }
 
-    if (!pageText.includes("Enter the code") && !pageText.includes("code") && !pageText.includes("Code") && !pageText.includes("verify") && !pageText.includes("Verify")) {
+    const lowerText = pageText.toLowerCase();
+    const needsCode = lowerText.includes("code") ||
+                      lowerText.includes("verify") ||
+                      lowerText.includes("confirmation");
+
+    if (!needsCode) {
       await context.close();
       return { success: false, error: "Unexpected page state after submit", pageContent: pageText.substring(0, 500) };
     }
@@ -322,17 +421,16 @@ export async function fullRegistrationFlow(
     onStatusUpdate("verifying");
     console.log(`[Playwright] Entering verification code: ${code}`);
 
-    const codeInput = page.locator('input[data-gigya-name="code"], input.gigya-input-text').and(page.locator(':visible')).first();
-    await codeInput.waitFor({ state: "visible", timeout: 10000 });
-    await codeInput.click();
-    await codeInput.fill(code);
+    const codeFilled = await fillCodeViaJS(page, code);
+    console.log(`[Playwright] Code filled: ${codeFilled}`);
     await page.waitForTimeout(500);
 
     console.log("[Playwright] Clicking Verify...");
-    await page.locator('input[type="submit"]:visible').first().click();
+    await clickSubmitViaJS(page);
+
     await page.waitForTimeout(8000);
 
-    const finalText = await page.evaluate(() => document.body.innerText);
+    const finalText = await getPageText(page);
     console.log("[Playwright] Final page content (first 300):", finalText.substring(0, 300));
 
     const hasError = finalText.toLowerCase().includes("invalid code") ||
