@@ -120,39 +120,56 @@ async function forceRemoveOverlays(page: Page): Promise<void> {
 async function fillViaJS(page: Page, gigyaName: string, value: string): Promise<boolean> {
   return page.evaluate(`((name, val) => {
     var inputs = document.querySelectorAll('input[data-gigya-name="' + name + '"]');
+    var visible = null;
+    var lastNonHidden = null;
     for (var i = 0; i < inputs.length; i++) {
       var el = inputs[i];
       if (el.type === 'hidden') continue;
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) {
-        setter.set.call(el, val);
-      } else {
-        el.value = val;
+      lastNonHidden = el;
+      var rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        visible = el;
       }
-      el.dispatchEvent(new Event('focus', { bubbles: true }));
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-      return true;
     }
-    return false;
+    var target = visible || lastNonHidden;
+    if (!target) return false;
+    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    if (setter && setter.set) {
+      setter.set.call(target, val);
+    } else {
+      target.value = val;
+    }
+    target.dispatchEvent(new Event('focus', { bubbles: true }));
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    target.dispatchEvent(new Event('blur', { bubbles: true }));
+    return true;
   })("${gigyaName}", "${value.replace(/"/g, '\\"')}")`);
 }
 
 async function selectViaJS(page: Page, gigyaName: string, searchText: string): Promise<boolean> {
   return page.evaluate(`((name, text) => {
     var selects = document.querySelectorAll('select[data-gigya-name="' + name + '"]');
+    var visible = null;
+    var lastSel = null;
     for (var i = 0; i < selects.length; i++) {
       var sel = selects[i];
-      var options = Array.from(sel.options);
-      var match = options.find(function(o) { return o.text.toLowerCase().includes(text.toLowerCase()); });
-      if (match) {
-        sel.value = match.value;
-        sel.dispatchEvent(new Event('focus', { bubbles: true }));
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-        sel.dispatchEvent(new Event('blur', { bubbles: true }));
-        return true;
+      lastSel = sel;
+      var rect = sel.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        visible = sel;
       }
+    }
+    var target = visible || lastSel;
+    if (!target) return false;
+    var options = Array.from(target.options);
+    var match = options.find(function(o) { return o.text.toLowerCase().includes(text.toLowerCase()); });
+    if (match) {
+      target.value = match.value;
+      target.dispatchEvent(new Event('focus', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      target.dispatchEvent(new Event('blur', { bubbles: true }));
+      return true;
     }
     return false;
   })("${gigyaName}", "${searchText.replace(/"/g, '\\"')}")`);
@@ -164,6 +181,7 @@ async function checkAllCheckboxesViaJS(page: Page): Promise<number> {
     var checkboxes = document.querySelectorAll('input[type="checkbox"]');
     for (var i = 0; i < checkboxes.length; i++) {
       var el = checkboxes[i];
+      if (el.type === 'hidden') continue;
       if (!el.checked) {
         el.checked = true;
         el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -209,21 +227,22 @@ async function getFormErrors(page: Page): Promise<string[]> {
 
 async function clickSubmitViaJS(page: Page): Promise<boolean> {
   return page.evaluate(`(() => {
-    var submits = document.querySelectorAll('input[type="submit"]');
-    for (var i = 0; i < submits.length; i++) {
-      var rect = submits[i].getBoundingClientRect();
+    var all = document.querySelectorAll('input[type="submit"], button[type="submit"], .gigya-input-submit');
+    var visible = null;
+    var last = null;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.type === 'hidden') continue;
+      last = el;
+      var rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        submits[i].click();
-        return true;
+        visible = el;
       }
     }
-    var buttons = document.querySelectorAll('button[type="submit"], .gigya-input-submit');
-    for (var j = 0; j < buttons.length; j++) {
-      var rect2 = buttons[j].getBoundingClientRect();
-      if (rect2.width > 0 && rect2.height > 0) {
-        buttons[j].click();
-        return true;
-      }
+    var target = visible || last;
+    if (target) {
+      target.click();
+      return true;
     }
     return false;
   })()`) as Promise<boolean>;
@@ -375,6 +394,9 @@ async function doRegistration(
     const emailFilled = await fillViaJS(page, "email", email);
     console.log(`[Playwright] Email filled: ${emailFilled}`);
 
+    const profileEmailFilled = await fillViaJS(page, "profile.email", email);
+    console.log(`[Playwright] Profile email filled: ${profileEmailFilled}`);
+
     let fnFilled = await fillViaJS(page, "firstName", firstName);
     if (!fnFilled) fnFilled = await fillViaJS(page, "profile.firstName", firstName);
     if (!fnFilled) fnFilled = await fillViaJS(page, "first_name", firstName);
@@ -432,8 +454,12 @@ async function doRegistration(
     const countrySelected = await selectViaJS(page, "profile.country", country);
     console.log(`[Playwright] Country selected: ${countrySelected}`);
 
+    await page.waitForTimeout(1000);
+
     const langSelected = await selectViaJS(page, "data.personalization.siteLanguage", language);
     console.log(`[Playwright] Language selected: ${langSelected}`);
+
+    await page.waitForTimeout(500);
 
     const zipCode = generateUSZip();
     const zipFilled = await fillViaJS(page, "profile.zip", zipCode);
@@ -468,16 +494,33 @@ async function doRegistration(
     }
 
     console.log("[Playwright] Waiting for response...");
-    await page.waitForTimeout(6000);
 
-    const pageText = await getPageText(page);
+    let pageText = "";
+    try {
+      await page.waitForTimeout(6000);
+      pageText = await Promise.race([
+        getPageText(page),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("Page text timeout")), 10000)),
+      ]);
+    } catch (e: any) {
+      console.log("[Playwright] Error getting page text after submit:", e.message);
+      await context.close();
+      return { success: false, error: `Post-submit error: ${e.message}` };
+    }
+
+    console.log("[Playwright] Page text after submit (first 200):", pageText.substring(0, 200));
 
     if (pageText.includes("already exists")) {
       await context.close();
       return { success: false, error: "Account already exists for this email" };
     }
 
-    const realErrors = await getFormErrors(page);
+    let realErrors: string[] = [];
+    try {
+      realErrors = await getFormErrors(page);
+    } catch (e: any) {
+      console.log("[Playwright] Error getting form errors:", e.message);
+    }
     if (realErrors.length > 0) {
       await context.close();
       return { success: false, error: realErrors.join("; ") };
@@ -496,7 +539,16 @@ async function doRegistration(
     console.log("[Playwright] Verification code needed. Waiting for code from email...");
     onStatusUpdate("waiting_code");
 
-    const code = await getVerificationCode();
+    let code: string | null = null;
+    try {
+      code = await Promise.race([
+        getVerificationCode(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 150000)),
+      ]);
+    } catch (e: any) {
+      console.log("[Playwright] Error getting verification code:", e.message);
+    }
+
     if (!code) {
       await context.close();
       return { success: false, error: "Timed out waiting for verification email" };
@@ -505,16 +557,31 @@ async function doRegistration(
     onStatusUpdate("verifying");
     console.log(`[Playwright] Entering verification code: ${code}`);
 
-    const codeFilled = await fillCodeViaJS(page, code);
-    console.log(`[Playwright] Code filled: ${codeFilled}`);
-    await page.waitForTimeout(500);
+    try {
+      const codeFilled = await fillCodeViaJS(page, code);
+      console.log(`[Playwright] Code filled: ${codeFilled}`);
+      await page.waitForTimeout(500);
 
-    console.log("[Playwright] Clicking Verify...");
-    await clickSubmitViaJS(page);
+      console.log("[Playwright] Clicking Verify...");
+      await clickSubmitViaJS(page);
 
-    await page.waitForTimeout(8000);
+      await page.waitForTimeout(8000);
+    } catch (e: any) {
+      console.log("[Playwright] Error during code verification:", e.message);
+      await context.close();
+      return { success: false, error: `Verification submit error: ${e.message}` };
+    }
 
-    const finalText = await getPageText(page);
+    let finalText = "";
+    try {
+      finalText = await Promise.race([
+        getPageText(page),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("Final page text timeout")), 10000)),
+      ]);
+    } catch (e: any) {
+      console.log("[Playwright] Error getting final page text:", e.message);
+    }
+
     console.log("[Playwright] Final page content (first 300):", finalText.substring(0, 300));
 
     const hasError = finalText.toLowerCase().includes("invalid code") ||

@@ -72,6 +72,18 @@ const COST_PER_ACCOUNT = 0.11;
 
 let wsClients: Map<WebSocket, string> = new Map();
 
+const batchLogs: Map<string, Array<{ accountId: string; message: string; timestamp: string }>> = new Map();
+const batchOwners: Map<string, string> = new Map();
+const BATCH_LOG_TTL = 30 * 60 * 1000;
+
+function addBatchLog(batchId: string, accountId: string, message: string) {
+  if (!batchLogs.has(batchId)) {
+    batchLogs.set(batchId, []);
+    setTimeout(() => { batchLogs.delete(batchId); batchOwners.delete(batchId); }, BATCH_LOG_TTL);
+  }
+  batchLogs.get(batchId)!.push({ accountId, message, timestamp: new Date().toISOString() });
+}
+
 function broadcast(data: any, ownerId?: string) {
   const msg = JSON.stringify(data);
   wsClients.forEach((userId, ws) => {
@@ -84,6 +96,7 @@ function broadcast(data: any, ownerId?: string) {
 }
 
 function broadcastLog(batchId: string, accountId: string, message: string, ownerId?: string) {
+  addBatchLog(batchId, accountId, message);
   broadcast({ type: "log", batchId, accountId, message, timestamp: new Date().toISOString() }, ownerId);
 }
 
@@ -92,6 +105,7 @@ function broadcastAccountUpdate(account: any, ownerId?: string) {
 }
 
 function broadcastBatchComplete(batchId: string, ownerId?: string) {
+  addBatchLog(batchId, "", "Batch complete");
   broadcast({ type: "batch_complete", batchId }, ownerId);
 }
 
@@ -170,11 +184,13 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  const pgModule = await import("pg");
+  const wsPool = new pgModule.default.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
   wss.on("connection", (ws, req) => {
     const cookieHeader = req.headers.cookie || "";
-    const sidMatch = cookieHeader.match(/connect\.sid=s%3A([^.]+)/);
-    const sessionId = sidMatch ? sidMatch[1] : null;
+    const sidMatch = cookieHeader.match(/connect\.sid=(?:s(?:%3A|:))?([^.;\s]+)/);
+    const sessionId = sidMatch ? decodeURIComponent(sidMatch[1]) : null;
 
     if (!sessionId) {
       wsClients.set(ws, "");
@@ -182,11 +198,8 @@ export async function registerRoutes(
       return;
     }
 
-    const pg = require("pg");
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-    pool.query(`SELECT sess FROM user_sessions WHERE sid = $1`, [sessionId])
+    wsPool.query(`SELECT sess FROM user_sessions WHERE sid = $1`, [sessionId])
       .then((result: any) => {
-        pool.end();
         if (result.rows.length > 0 && result.rows[0].sess?.userId) {
           wsClients.set(ws, result.rows[0].sess.userId);
         } else {
@@ -194,7 +207,6 @@ export async function registerRoutes(
         }
       })
       .catch(() => {
-        pool.end();
         wsClients.set(ws, "");
       });
     ws.on("close", () => wsClients.delete(ws));
@@ -469,6 +481,7 @@ export async function registerRoutes(
         created.push(account);
       }
 
+      batchOwners.set(batchId, userId);
       res.json({ batchId, accounts: created, count: numAccounts });
 
       (async () => {
@@ -623,6 +636,27 @@ export async function registerRoutes(
       createdAt: a.createdAt,
     }));
     res.json(emails);
+  });
+
+  app.get("/api/batch-logs/:batchId", requireAuth, async (req, res) => {
+    const batchId = req.params.batchId;
+    const userId = req.session.userId!;
+    const owner = batchOwners.get(batchId);
+    if (owner && owner !== userId && req.session.role !== "superadmin") {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    const logs = batchLogs.get(batchId) || [];
+    const since = parseInt(req.query.since as string) || 0;
+    const filtered = logs.slice(since);
+    const accounts = await storage.getAccountsByBatch(batchId);
+    const isComplete = logs.some(l => l.message === "Batch complete") ||
+      accounts.every(a => a.status === "verified" || a.status === "failed");
+    res.json({
+      logs: filtered,
+      nextSince: logs.length,
+      accounts: accounts.map(a => ({ id: a.id, email: a.email, firstName: a.firstName, lastName: a.lastName, status: a.status, errorMessage: a.errorMessage })),
+      isComplete,
+    });
   });
 
   app.get("/api/emails/:id/inbox", requireAuth, async (req, res) => {

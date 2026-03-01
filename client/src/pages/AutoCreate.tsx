@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,9 @@ export default function AutoCreate() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const pollSinceRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsReceivedRef = useRef(false);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -46,6 +49,7 @@ export default function AutoCreate() {
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
+      wsReceivedRef.current = true;
       if (msg.type === "log" && msg.batchId === batchIdRef.current) {
         setLogs((prev) => [...prev, { accountId: msg.accountId, message: msg.message, timestamp: msg.timestamp }]);
       }
@@ -61,12 +65,68 @@ export default function AutoCreate() {
     return unsub;
   }, []);
 
+  const pollForLogs = useCallback(async () => {
+    const currentBatchId = batchIdRef.current;
+    if (!currentBatchId) return;
+
+    try {
+      const res = await fetch(`/api/batch-logs/${currentBatchId}?since=${pollSinceRef.current}`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.logs.length > 0) {
+        setLogs((prev) => {
+          const existingSet = new Set(prev.map((l) => `${l.timestamp}-${l.message}`));
+          const newLogs = data.logs.filter(
+            (l: LogEntry) => !existingSet.has(`${l.timestamp}-${l.message}`) && l.message !== "Batch complete"
+          );
+          return [...prev, ...newLogs];
+        });
+      }
+      pollSinceRef.current = data.nextSince;
+
+      if (data.accounts) {
+        setBatchAccounts((prev) =>
+          prev.map((a) => {
+            const updated = data.accounts.find((u: any) => u.id === a.id);
+            return updated ? { ...a, status: updated.status } : a;
+          })
+        );
+      }
+
+      if (data.isComplete) {
+        setIsRunning(false);
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (isRunning && batchId) {
+      pollSinceRef.current = 0;
+      const timer = setInterval(pollForLogs, 2000);
+      pollTimerRef.current = timer;
+      pollForLogs();
+      return () => {
+        clearInterval(timer);
+        pollTimerRef.current = null;
+      };
+    }
+  }, [isRunning, batchId, pollForLogs]);
+
   async function startBatch(numAccounts: number) {
     setIsRunning(true);
     setLogs([]);
     setBatchAccounts([]);
     setBatchId(null);
     setError(null);
+    wsReceivedRef.current = false;
+    pollSinceRef.current = 0;
 
     try {
       const res = await fetch("/api/create-batch", {
@@ -109,6 +169,7 @@ export default function AutoCreate() {
   const completedCount = batchAccounts.filter((a) => a.status === "verified").length;
   const failedCount = batchAccounts.filter((a) => a.status === "failed").length;
   const totalCount = batchAccounts.length;
+  const doneCount = completedCount + failedCount;
   const estimatedCost = (count * 0.11).toFixed(2);
 
   return (
@@ -193,7 +254,7 @@ export default function AutoCreate() {
               {isRunning ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating {totalCount} accounts...
+                  Creating {totalCount} accounts... ({doneCount}/{totalCount})
                 </>
               ) : (
                 <>
@@ -213,7 +274,7 @@ export default function AutoCreate() {
             </CardTitle>
             {totalCount > 0 && (
               <div className="flex items-center gap-2">
-                <Badge variant="outline">{completedCount}/{totalCount} done</Badge>
+                <Badge variant="outline">{doneCount}/{totalCount} done</Badge>
                 {failedCount > 0 && <Badge variant="destructive">{failedCount} failed</Badge>}
               </div>
             )}
@@ -243,7 +304,14 @@ export default function AutoCreate() {
             <ScrollArea className="h-[400px] rounded-md border bg-zinc-950 p-4">
               {logs.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-zinc-500 text-sm">
-                  Logs will appear here when you start creating accounts...
+                  {isRunning ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Waiting for logs...
+                    </div>
+                  ) : (
+                    "Logs will appear here when you start creating accounts..."
+                  )}
                 </div>
               ) : (
                 <div className="space-y-1 font-mono text-xs">
