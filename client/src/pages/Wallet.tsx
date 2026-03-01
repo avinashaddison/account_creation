@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Wallet as WalletIcon, Copy, CheckCircle2, Clock, XCircle, Loader2, Send } from "lucide-react";
+import { Wallet as WalletIcon, Copy, CheckCircle2, Clock, XCircle, Loader2, Send, MessageCircle } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -23,6 +23,7 @@ type WalletData = {
   freeAccountsUsed: number;
   freeAccountLimit: number;
   trc20Address: string;
+  whatsappNumber: string;
   payments: PaymentRequest[];
 };
 
@@ -58,10 +59,20 @@ export default function Wallet() {
     }
   }
 
+  function openWhatsApp(paymentAmount: string, hash: string) {
+    const message = encodeURIComponent(
+      `Hi, I have made a USDT (TRC20) payment of $${paymentAmount} to the Addison Panel wallet.\n\nTransaction Hash: ${hash || "Not provided"}\n\nPlease approve my payment request. Thank you!`
+    );
+    const whatsappUrl = `https://wa.me/${data?.whatsappNumber || "919142647797"}?text=${message}`;
+    window.open(whatsappUrl, "_blank");
+  }
+
   async function submitPaymentRequest(e: React.FormEvent) {
     e.preventDefault();
     if (!amount || parseFloat(amount) <= 0) return;
     setSubmitting(true);
+    const submittedAmount = amount;
+    const submittedHash = txHash;
     try {
       const res = await fetch("/api/wallet/payment-request", {
         method: "POST",
@@ -76,6 +87,7 @@ export default function Wallet() {
         setAmount("");
         setTxHash("");
         fetchWallet();
+        openWhatsApp(submittedAmount, submittedHash);
       } else {
         toast({ title: "Error", description: result.error, variant: "destructive" });
       }
@@ -87,7 +99,7 @@ export default function Wallet() {
   }
 
   const balance = parseFloat(data?.balance || "0");
-  const freeRemaining = Math.max(0, (data?.freeAccountLimit || 0) - (data?.freeAccountsUsed || 0));
+  const accountsCanCreate = Math.floor(balance / 0.11);
 
   if (loading) {
     return (
@@ -120,14 +132,14 @@ export default function Wallet() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Free Accounts</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Accounts Available</CardTitle>
             <div className="p-2 rounded-lg text-blue-600 bg-blue-50">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{freeRemaining}</div>
-            <p className="text-xs text-muted-foreground mt-1">of {data?.freeAccountLimit} remaining</p>
+            <div className="text-3xl font-bold">{accountsCanCreate}</div>
+            <p className="text-xs text-muted-foreground mt-1">Based on wallet balance</p>
           </CardContent>
         </Card>
 
@@ -140,7 +152,7 @@ export default function Wallet() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">$0.11</div>
-            <p className="text-xs text-muted-foreground mt-1">After free tier</p>
+            <p className="text-xs text-muted-foreground mt-1">Per account created</p>
           </CardContent>
         </Card>
       </div>
@@ -199,9 +211,13 @@ export default function Wallet() {
               </form>
             </div>
 
-            <p className="text-xs text-muted-foreground text-center">
-              After submitting, the admin will verify your payment and add funds to your wallet.
-            </p>
+            <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+              <div className="flex items-center gap-2 mb-1">
+                <MessageCircle className="w-4 h-4 text-green-700" />
+                <p className="text-sm font-medium text-green-800">Step 3: Notify admin on WhatsApp</p>
+              </div>
+              <p className="text-xs text-green-700">After submitting, WhatsApp will open automatically so you can message the admin for quick approval.</p>
+            </div>
           </CardContent>
         </Card>
 

@@ -14,13 +14,14 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 
 ## Roles
 - **superadmin** - Can see all data, manage admins, add funds, approve/reject payments, unlimited accounts (avinashaddison@gmail.com / @AJAYkn8085123)
-- **admin** - Can only see own data, 30 free accounts, then wallet-funded at $0.11/account
+- **admin** - Can only see own data, every account costs $0.11 from wallet balance (no free accounts)
 
 ## Wallet System
-- Admins have a `walletBalance` that funds account creation after the 30 free account limit
+- Every account costs $0.11 — charged from admin's wallet balance at creation time (no free tier)
 - Admins can submit TRC20 (USDT) payment requests via Binance to address `TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB`
 - Admin submits TX hash + amount, superadmin approves/rejects the request
 - On approval, the amount is added to the admin's wallet balance
+- After submitting payment, WhatsApp opens automatically to message the super admin at +91 9142647797 for quick approval
 - Superadmin can also directly add funds to any admin wallet from Manage Admins page
 
 ## Pages

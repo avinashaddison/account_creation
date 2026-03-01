@@ -24,8 +24,9 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
   return res.status(403).json({ error: "Super admin access required" });
 }
 
-const FREE_ACCOUNT_LIMIT = 30;
+const FREE_ACCOUNT_LIMIT = 0;
 const TRC20_ADDRESS = "TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB";
+const WHATSAPP_NUMBER = "919142647797";
 
 const FIRST_NAMES = [
   "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
@@ -382,6 +383,7 @@ export async function registerRoutes(
       freeAccountsUsed: user.freeAccountsUsed,
       freeAccountLimit: FREE_ACCOUNT_LIMIT,
       trc20Address: TRC20_ADDRESS,
+      whatsappNumber: WHATSAPP_NUMBER,
       payments,
     });
   });
