@@ -2,10 +2,10 @@ import { useLocation, Link } from "wouter";
 import { LayoutDashboard, Archive, Receipt, Zap } from "lucide-react";
 
 const nav = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/accounts", label: "Account Stock", icon: Archive },
-  { href: "/billing", label: "Billing", icon: Receipt },
-  { href: "/auto-create", label: "Auto Create", icon: Zap },
+  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/accounts", label: "Account Stock", icon: Archive },
+  { href: "/admin/billing", label: "Billing", icon: Receipt },
+  { href: "/admin/auto-create", label: "Auto Create", icon: Zap },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
