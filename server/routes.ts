@@ -21,15 +21,18 @@ const FIRST_NAMES = [
   "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
   "David", "Elizabeth", "William", "Barbara", "Richard", "Susan", "Joseph", "Jessica",
   "Thomas", "Sarah", "Charles", "Karen", "Daniel", "Lisa", "Matthew", "Nancy",
-  "Arjun", "Priya", "Rahul", "Anita", "Vikram", "Sneha", "Amit", "Pooja",
-  "Raj", "Neha", "Sanjay", "Divya", "Arun", "Kavita", "Suresh", "Meena",
+  "Christopher", "Betty", "Andrew", "Margaret", "Joshua", "Sandra", "Kenneth", "Ashley",
+  "Kevin", "Dorothy", "Brian", "Kimberly", "George", "Emily", "Timothy", "Donna",
+  "Ronald", "Michelle", "Jason", "Carol", "Edward", "Amanda", "Ryan", "Melissa",
+  "Jacob", "Deborah", "Gary", "Stephanie", "Nicholas", "Rebecca", "Eric", "Sharon",
 ];
 
 const LAST_NAMES = [
   "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis",
   "Rodriguez", "Martinez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore",
-  "Kumar", "Sharma", "Singh", "Patel", "Gupta", "Mehta", "Verma", "Jain",
-  "Reddy", "Nair", "Rao", "Mishra", "Chopra", "Malhotra", "Bhat", "Das",
+  "Jackson", "Martin", "Lee", "Thompson", "White", "Harris", "Clark", "Lewis",
+  "Robinson", "Walker", "Young", "Allen", "King", "Wright", "Scott", "Adams",
+  "Baker", "Nelson", "Hill", "Campbell", "Mitchell", "Roberts", "Carter", "Phillips",
 ];
 
 function randomFrom<T>(arr: T[]): T {
@@ -37,18 +40,21 @@ function randomFrom<T>(arr: T[]): T {
 }
 
 function generatePassword(): string {
-  const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const lower = "abcdefghijklmnopqrstuvwxyz";
-  const digits = "0123456789";
-  const special = "@#$!%&";
-  const all = upper + lower + digits + special;
-  let pwd = special[Math.floor(Math.random() * special.length)]
-    + upper[Math.floor(Math.random() * upper.length)]
-    + upper[Math.floor(Math.random() * upper.length)]
-    + lower[Math.floor(Math.random() * lower.length)]
-    + lower[Math.floor(Math.random() * lower.length)];
-  for (let i = 0; i < 7; i++) pwd += all[Math.floor(Math.random() * all.length)];
-  return pwd.split("").sort(() => Math.random() - 0.5).join("");
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghjkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const special = "!@#$%&*";
+  const pick = (s: string) => s[Math.floor(Math.random() * s.length)];
+  let pwd = pick(upper) + pick(upper) + pick(lower) + pick(lower) + pick(lower)
+    + pick(digits) + pick(digits) + pick(special) + pick(special);
+  const all = upper + lower + digits;
+  for (let i = 0; i < 5; i++) pwd += pick(all);
+  const arr = pwd.split("");
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.join("");
 }
 
 const COST_PER_ACCOUNT = 0.11;
