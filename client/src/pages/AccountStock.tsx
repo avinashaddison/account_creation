@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 
 type Account = {
   id: string;
-  tempEmail: string;
+  email: string;
   firstName: string;
   lastName: string;
   la28Password: string;
@@ -79,7 +79,7 @@ export default function AccountStock() {
       .concat(
         verified.map(
           (a) =>
-            `${a.tempEmail},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.verificationCode || ""},${new Date(a.createdAt).toISOString()}`
+            `${a.email},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.verificationCode || ""},${new Date(a.createdAt).toISOString()}`
         )
       )
       .join("\n");
@@ -87,7 +87,7 @@ export default function AccountStock() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `la28-accounts-${new Date().toISOString().split("T")[0]}.csv`;
+    link.download = `addison-accounts-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -166,7 +166,7 @@ export default function AccountStock() {
                         </TableCell>
                         <TableCell className="font-medium">{acc.firstName} {acc.lastName}</TableCell>
                         <TableCell>
-                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{acc.tempEmail}</code>
+                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{acc.email}</code>
                         </TableCell>
                         <TableCell>
                           <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{acc.la28Password}</code>
@@ -186,7 +186,7 @@ export default function AccountStock() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => copyToClipboard(`${acc.tempEmail}\t${acc.la28Password}`)}
+                              onClick={() => copyToClipboard(`${acc.email}\t${acc.la28Password}`)}
                               data-testid={`button-copy-${acc.id}`}
                             >
                               <Copy className="w-3.5 h-3.5" />

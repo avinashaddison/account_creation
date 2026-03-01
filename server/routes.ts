@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername } from "./mailService";
+import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
 import { fullRegistrationFlow } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
 
@@ -16,6 +16,15 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
   return res.status(401).json({ error: "Not authenticated" });
 }
+
+function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.session && req.session.role === "superadmin") {
+    return next();
+  }
+  return res.status(403).json({ error: "Super admin access required" });
+}
+
+const FREE_ACCOUNT_LIMIT = 30;
 
 const FIRST_NAMES = [
   "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
@@ -59,25 +68,33 @@ function generatePassword(): string {
 
 const COST_PER_ACCOUNT = 0.11;
 
-let wsClients: Set<WebSocket> = new Set();
+let wsClients: Map<WebSocket, string> = new Map();
 
-function broadcast(data: any) {
+function broadcast(data: any, ownerId?: string) {
   const msg = JSON.stringify(data);
-  wsClients.forEach((ws) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  wsClients.forEach((userId, ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      if (!ownerId || userId === ownerId) {
+        ws.send(msg);
+      }
+    }
   });
 }
 
-function broadcastLog(batchId: string, accountId: string, message: string) {
-  broadcast({ type: "log", batchId, accountId, message, timestamp: new Date().toISOString() });
+function broadcastLog(batchId: string, accountId: string, message: string, ownerId?: string) {
+  broadcast({ type: "log", batchId, accountId, message, timestamp: new Date().toISOString() }, ownerId);
 }
 
-function broadcastAccountUpdate(account: any) {
-  broadcast({ type: "account_update", account });
+function broadcastAccountUpdate(account: any, ownerId?: string) {
+  broadcast({ type: "account_update", account }, ownerId);
 }
 
-function broadcastBatchComplete(batchId: string) {
-  broadcast({ type: "batch_complete", batchId });
+function broadcastBatchComplete(batchId: string, ownerId?: string) {
+  broadcast({ type: "batch_complete", batchId }, ownerId);
+}
+
+function broadcastEmailUpdate(data: any, ownerId?: string) {
+  broadcast({ type: "email_update", ...data }, ownerId);
 }
 
 async function processAccount(
@@ -88,17 +105,18 @@ async function processAccount(
   password: string,
   country: string,
   language: string,
-  tempEmail: string,
-  tempEmailPassword: string
+  addisonEmail: string,
+  addisonEmailPassword: string,
+  ownerId: string
 ) {
   try {
-    broadcastLog(batchId, accountId, `Creating temp email: ${tempEmail}`);
-    await createTempEmail(tempEmail, tempEmailPassword);
-    const token = await getAuthToken(tempEmail, tempEmailPassword);
-    broadcastLog(batchId, accountId, `Temp email ready, starting registration...`);
+    broadcastLog(batchId, accountId, `Creating Addison email: ${addisonEmail}`, ownerId);
+    await createTempEmail(addisonEmail, addisonEmailPassword);
+    const token = await getAuthToken(addisonEmail, addisonEmailPassword);
+    broadcastLog(batchId, accountId, `Addison email ready, starting registration...`, ownerId);
 
     const result = await fullRegistrationFlow(
-      tempEmail,
+      addisonEmail,
       firstName,
       lastName,
       password,
@@ -106,17 +124,17 @@ async function processAccount(
       language,
       async (status) => {
         const updated = await storage.updateAccount(accountId, { status: status as any });
-        if (updated) broadcastAccountUpdate(updated);
-        broadcastLog(batchId, accountId, `Status: ${status}`);
+        if (updated) broadcastAccountUpdate(updated, ownerId);
+        broadcastLog(batchId, accountId, `Status: ${status}`, ownerId);
       },
       async () => {
-        broadcastLog(batchId, accountId, `Polling for verification code...`);
+        broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
         const code = await pollForVerificationCode(token, 40, 3000);
         if (code) {
           await storage.updateAccount(accountId, { verificationCode: code });
-          broadcastLog(batchId, accountId, `Got verification code: ${code}`);
+          broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
         } else {
-          broadcastLog(batchId, accountId, `Timed out waiting for code`);
+          broadcastLog(batchId, accountId, `Timed out waiting for code`, ownerId);
         }
         return code;
       }
@@ -124,23 +142,29 @@ async function processAccount(
 
     if (result.success) {
       const updated = await storage.updateAccount(accountId, { status: "verified" });
-      if (updated) broadcastAccountUpdate(updated);
-      broadcastLog(batchId, accountId, `Account verified successfully!`);
+      if (updated) broadcastAccountUpdate(updated, ownerId);
+      broadcastLog(batchId, accountId, `Account verified successfully!`, ownerId);
 
       await storage.createBillingRecord({
         accountId,
         amount: COST_PER_ACCOUNT.toFixed(2),
-        description: `Account creation: ${firstName} ${lastName} (${tempEmail})`,
+        description: `Account creation: ${firstName} ${lastName} (${addisonEmail})`,
+        ownerId,
       });
+
+      const user = await storage.getUser(ownerId);
+      if (user) {
+        await storage.updateUserFreeAccountsUsed(ownerId, user.freeAccountsUsed + 1);
+      }
     } else {
       const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: result.error || "Failed" });
-      if (updated) broadcastAccountUpdate(updated);
-      broadcastLog(batchId, accountId, `Failed: ${result.error}`);
+      if (updated) broadcastAccountUpdate(updated, ownerId);
+      broadcastLog(batchId, accountId, `Failed: ${result.error}`, ownerId);
     }
   } catch (err: any) {
     const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: err.message });
-    if (updated) broadcastAccountUpdate(updated);
-    broadcastLog(batchId, accountId, `Error: ${err.message}`);
+    if (updated) broadcastAccountUpdate(updated, ownerId);
+    broadcastLog(batchId, accountId, `Error: ${err.message}`, ownerId);
   }
 }
 
@@ -149,24 +173,48 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
-  wss.on("connection", (ws) => {
-    wsClients.add(ws);
+  wss.on("connection", (ws, req) => {
+    const cookieHeader = req.headers.cookie || "";
+    const sidMatch = cookieHeader.match(/connect\.sid=s%3A([^.]+)/);
+    const sessionId = sidMatch ? sidMatch[1] : null;
+
+    if (!sessionId) {
+      wsClients.set(ws, "");
+      ws.on("close", () => wsClients.delete(ws));
+      return;
+    }
+
+    const pg = require("pg");
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    pool.query(`SELECT sess FROM user_sessions WHERE sid = $1`, [sessionId])
+      .then((result: any) => {
+        pool.end();
+        if (result.rows.length > 0 && result.rows[0].sess?.userId) {
+          wsClients.set(ws, result.rows[0].sess.userId);
+        } else {
+          wsClients.set(ws, "");
+        }
+      })
+      .catch(() => {
+        pool.end();
+        wsClients.set(ws, "");
+      });
     ws.on("close", () => wsClients.delete(ws));
   });
 
-  async function ensureDefaultAdmin() {
+  async function ensureDefaultSuperAdmin() {
     const existing = await storage.getUserByEmail("admin@la28panel.com");
     if (!existing) {
       await storage.createUser({
         username: "admin",
         email: "admin@la28panel.com",
         password: hashPassword("admin123"),
-        role: "admin",
+        role: "superadmin",
       });
-      console.log("[Auth] Default admin created: admin@la28panel.com / admin123");
+      console.log("[Auth] Default super admin created: admin@la28panel.com / admin123");
     }
   }
-  await ensureDefaultAdmin();
+  await ensureDefaultSuperAdmin();
 
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -198,13 +246,81 @@ export async function registerRoutes(
     }
     const user = await storage.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: "User not found" });
-    res.json({ id: user.id, username: user.username, email: user.email, role: user.role });
+    res.json({ id: user.id, username: user.username, email: user.email, role: user.role, freeAccountsUsed: user.freeAccountsUsed });
+  });
+
+  app.get("/api/admin/users", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      const safeUsers = allUsers.map(u => ({
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        freeAccountsUsed: u.freeAccountsUsed,
+      }));
+      res.json(safeUsers);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/users", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { username, email, password, role = "admin" } = req.body;
+      if (!username || !email || !password) {
+        return res.status(400).json({ error: "Username, email, and password are required" });
+      }
+      if (role === "superadmin") {
+        return res.status(400).json({ error: "Cannot create another super admin" });
+      }
+      const existing = await storage.getUserByEmail(email);
+      if (existing) {
+        return res.status(400).json({ error: "Email already exists" });
+      }
+      const user = await storage.createUser({
+        username,
+        email,
+        password: hashPassword(password),
+        role,
+      });
+      res.json({ id: user.id, username: user.username, email: user.email, role: user.role });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/admin/users/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.role === "superadmin") return res.status(400).json({ error: "Cannot delete super admin" });
+      await storage.deleteUser(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/create-batch", requireAuth, async (req, res) => {
     try {
-      const { count = 1, country = "India", language = "English" } = req.body;
+      const userId = req.session.userId!;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const { count = 1, country = "United States", language = "English" } = req.body;
       const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
+
+      if (user.role !== "superadmin" && user.freeAccountsUsed + numAccounts > FREE_ACCOUNT_LIMIT) {
+        const remaining = Math.max(0, FREE_ACCOUNT_LIMIT - user.freeAccountsUsed);
+        return res.status(403).json({
+          error: `Free limit reached. You have ${remaining} free accounts remaining out of ${FREE_ACCOUNT_LIMIT}. Please contact admin for payment to continue.`,
+          remaining,
+          limit: FREE_ACCOUNT_LIMIT,
+          used: user.freeAccountsUsed,
+        });
+      }
+
       const batchId = randomUUID();
       const domain = await getAvailableDomain();
 
@@ -214,12 +330,12 @@ export async function registerRoutes(
         const ln = randomFrom(LAST_NAMES);
         const pw = generatePassword();
         const username = generateRandomUsername();
-        const tempEmail = `${username}@${domain}`;
-        const tempEmailPassword = "TempPass123!";
+        const addisonEmail = `${username}@${domain}`;
+        const addisonEmailPassword = "TempPass123!";
 
         const account = await storage.createAccount({
-          tempEmail,
-          tempEmailPassword,
+          email: addisonEmail,
+          emailPassword: addisonEmailPassword,
           firstName: fn,
           lastName: ln,
           la28Password: pw,
@@ -227,6 +343,7 @@ export async function registerRoutes(
           language,
           status: "pending",
           batchId,
+          ownerId: userId,
           verificationCode: null,
           errorMessage: null,
         });
@@ -238,13 +355,13 @@ export async function registerRoutes(
 
       (async () => {
         for (const acc of created) {
-          broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`);
+          broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.country, acc.language, acc.tempEmail, acc.tempEmailPassword
+            acc.country, acc.language, acc.email, acc.emailPassword, userId
           );
         }
-        broadcastBatchComplete(batchId);
+        broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -253,20 +370,30 @@ export async function registerRoutes(
 
   app.post("/api/create-single", requireAuth, async (req, res) => {
     try {
-      const { firstName, lastName, password, country = "India", language = "English" } = req.body;
+      const userId = req.session.userId!;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      if (user.role !== "superadmin" && user.freeAccountsUsed >= FREE_ACCOUNT_LIMIT) {
+        return res.status(403).json({
+          error: `Free limit reached (${FREE_ACCOUNT_LIMIT}). Please contact admin for payment.`,
+        });
+      }
+
+      const { firstName, lastName, password, country = "United States", language = "English" } = req.body;
       if (!firstName || !lastName || !password) {
         return res.status(400).json({ error: "firstName, lastName, and password are required" });
       }
 
       const domain = await getAvailableDomain();
       const username = generateRandomUsername();
-      const tempEmail = `${username}@${domain}`;
-      const tempEmailPassword = "TempPass123!";
+      const addisonEmail = `${username}@${domain}`;
+      const addisonEmailPassword = "TempPass123!";
       const batchId = randomUUID();
 
       const account = await storage.createAccount({
-        tempEmail,
-        tempEmailPassword,
+        email: addisonEmail,
+        emailPassword: addisonEmailPassword,
         firstName,
         lastName,
         la28Password: password,
@@ -274,6 +401,7 @@ export async function registerRoutes(
         language,
         status: "pending",
         batchId,
+        ownerId: userId,
         verificationCode: null,
         errorMessage: null,
       });
@@ -283,41 +411,118 @@ export async function registerRoutes(
       (async () => {
         await processAccount(
           account.id, batchId, firstName, lastName, password,
-          country, language, tempEmail, tempEmailPassword
+          country, language, addisonEmail, addisonEmailPassword, userId
         );
-        broadcastBatchComplete(batchId);
+        broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.get("/api/accounts", requireAuth, async (_req, res) => {
-    const all = await storage.getAllAccounts();
+  app.get("/api/accounts", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const all = role === "superadmin"
+      ? await storage.getAllAccounts()
+      : await storage.getAccountsByOwner(userId);
     res.json(all);
   });
 
-  app.get("/api/accounts/stats", requireAuth, async (_req, res) => {
-    const stats = await storage.getAccountStats();
+  app.get("/api/accounts/stats", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const stats = role === "superadmin"
+      ? await storage.getAccountStats()
+      : await storage.getAccountStats(userId);
     res.json(stats);
   });
 
   app.get("/api/accounts/:id", requireAuth, async (req, res) => {
     const account = await storage.getAccount(req.params.id);
     if (!account) return res.status(404).json({ error: "Not found" });
+    if (req.session.role !== "superadmin" && account.ownerId !== req.session.userId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     res.json(account);
   });
 
-  app.get("/api/billing", requireAuth, async (_req, res) => {
-    const records = await storage.getAllBillingRecords();
-    const total = await storage.getBillingTotal();
+  app.get("/api/billing", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const records = role === "superadmin"
+      ? await storage.getAllBillingRecords()
+      : await storage.getAllBillingRecords(userId);
+    const total = role === "superadmin"
+      ? await storage.getBillingTotal()
+      : await storage.getBillingTotal(userId);
     res.json({ records, total });
   });
 
-  app.get("/api/dashboard", requireAuth, async (_req, res) => {
-    const stats = await storage.getAccountStats();
-    const total = await storage.getBillingTotal();
-    res.json({ stats, billingTotal: total });
+  app.get("/api/dashboard", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const user = await storage.getUser(userId);
+    const stats = role === "superadmin"
+      ? await storage.getAccountStats()
+      : await storage.getAccountStats(userId);
+    const total = role === "superadmin"
+      ? await storage.getBillingTotal()
+      : await storage.getBillingTotal(userId);
+    res.json({
+      stats,
+      billingTotal: total,
+      freeAccountsUsed: user?.freeAccountsUsed || 0,
+      freeAccountLimit: FREE_ACCOUNT_LIMIT,
+      role,
+    });
+  });
+
+  app.get("/api/emails", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const allAccounts = role === "superadmin"
+      ? await storage.getAllAccounts()
+      : await storage.getAccountsByOwner(userId);
+    const emails = allAccounts.map(a => ({
+      id: a.id,
+      email: a.email,
+      password: a.emailPassword,
+      firstName: a.firstName,
+      lastName: a.lastName,
+      status: a.status,
+      createdAt: a.createdAt,
+    }));
+    res.json(emails);
+  });
+
+  app.get("/api/emails/:id/inbox", requireAuth, async (req, res) => {
+    try {
+      const account = await storage.getAccount(req.params.id);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (req.session.role !== "superadmin" && account.ownerId !== req.session.userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const token = await getAuthToken(account.email, account.emailPassword);
+      const messages = await fetchMessages(token);
+
+      const fullMessages = [];
+      for (const msg of messages.slice(0, 20)) {
+        const content = await fetchMessageContent(token, msg.id);
+        fullMessages.push({
+          id: msg.id,
+          from: msg.from?.address || "unknown",
+          subject: msg.subject || "(no subject)",
+          text: content,
+          createdAt: msg.createdAt,
+        });
+      }
+
+      res.json(fullMessages);
+    } catch (err: any) {
+      res.json([]);
+    }
   });
 
   return httpServer;

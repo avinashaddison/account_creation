@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ type LogEntry = {
 
 type BatchAccount = {
   id: string;
-  tempEmail: string;
+  email: string;
   firstName: string;
   lastName: string;
   status: string;
@@ -26,12 +26,13 @@ const QUICK_AMOUNTS = [1, 5, 10, 20, 30];
 
 export default function AutoCreate() {
   const [count, setCount] = useState(1);
-  const [country, setCountry] = useState("India");
+  const [country, setCountry] = useState("United States");
   const [language, setLanguage] = useState("English");
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchAccounts, setBatchAccounts] = useState<BatchAccount[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export default function AutoCreate() {
     setLogs([]);
     setBatchAccounts([]);
     setBatchId(null);
+    setError(null);
 
     try {
       const res = await fetch("/api/create-batch", {
@@ -75,11 +77,24 @@ export default function AutoCreate() {
       });
       if (res.status === 401) { const { handleUnauthorized } = await import("@/lib/auth"); handleUnauthorized(); return; }
       const data = await res.json();
+
+      if (res.status === 403) {
+        setError(data.error);
+        setIsRunning(false);
+        return;
+      }
+
+      if (!res.ok) {
+        setError(data.error || "Failed to start batch");
+        setIsRunning(false);
+        return;
+      }
+
       setBatchId(data.batchId);
       setBatchAccounts(
         data.accounts.map((a: any) => ({
           id: a.id,
-          tempEmail: a.tempEmail,
+          email: a.email,
           firstName: a.firstName,
           lastName: a.lastName,
           status: a.status,
@@ -162,6 +177,12 @@ export default function AutoCreate() {
                 <span className="font-bold text-green-600">${estimatedCost}</span>
               </div>
             </div>
+
+            {error && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700" data-testid="text-batch-error">
+                {error}
+              </div>
+            )}
 
             <Button
               className="w-full h-12 text-base font-semibold"

@@ -49,7 +49,7 @@ export default function Login({ onLogin }: LoginProps) {
             <Lock className="w-7 h-7 text-white" />
           </div>
           <CardTitle className="text-2xl font-black text-white tracking-tight" data-testid="text-login-title">
-            LA28 Admin Panel
+            Addison Panel
           </CardTitle>
           <p className="text-sm text-zinc-400 mt-1">Sign in to manage accounts</p>
         </CardHeader>

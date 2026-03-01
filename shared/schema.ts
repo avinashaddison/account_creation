@@ -3,7 +3,7 @@ import { pgTable, text, varchar, timestamp, numeric, integer, pgEnum } from "dri
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const roleEnum = pgEnum("role", ["admin", "user"]);
+export const roleEnum = pgEnum("role", ["superadmin", "admin", "user"]);
 export const accountStatusEnum = pgEnum("account_status", ["pending", "registering", "waiting_code", "verifying", "verified", "failed"]);
 
 export const users = pgTable("users", {
@@ -11,22 +11,25 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
-  role: roleEnum("role").notNull().default("user"),
+  role: roleEnum("role").notNull().default("admin"),
+  freeAccountsUsed: integer("free_accounts_used").notNull().default(0),
+  createdBy: varchar("created_by"),
 });
 
 export const accounts = pgTable("accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  tempEmail: text("temp_email").notNull(),
-  tempEmailPassword: text("temp_email_password").notNull(),
+  email: text("temp_email").notNull(),
+  emailPassword: text("temp_email_password").notNull(),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   la28Password: text("la28_password").notNull(),
-  country: text("country").notNull().default("India"),
+  country: text("country").notNull().default("United States"),
   language: text("language").notNull().default("English"),
   status: accountStatusEnum("status").notNull().default("pending"),
   verificationCode: text("verification_code"),
   errorMessage: text("error_message"),
   batchId: text("batch_id"),
+  ownerId: varchar("owner_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -35,6 +38,7 @@ export const billingRecords = pgTable("billing_records", {
   accountId: varchar("account_id").notNull(),
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull().default("0.11"),
   description: text("description").notNull(),
+  ownerId: varchar("owner_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

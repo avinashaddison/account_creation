@@ -1,5 +1,5 @@
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, Zap, LogOut, User } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, Zap, LogOut, User, Mail, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type LayoutProps = {
@@ -8,21 +8,23 @@ type LayoutProps = {
   onLogout: () => void;
 };
 
-const nav = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/accounts", label: "Account Stock", icon: Archive },
-  { href: "/admin/billing", label: "Billing", icon: Receipt },
-  { href: "/admin/auto-create", label: "Auto Create", icon: Zap },
-];
-
 export default function Layout({ children, user, onLogout }: LayoutProps) {
   const [location] = useLocation();
+
+  const nav = [
+    { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/accounts", label: "Account Stock", icon: Archive },
+    { href: "/admin/email-server", label: "Email Server", icon: Mail },
+    { href: "/admin/billing", label: "Billing", icon: Receipt },
+    { href: "/admin/auto-create", label: "Auto Create", icon: Zap },
+    ...(user.role === "superadmin" ? [{ href: "/admin/manage-admins", label: "Manage Admins", icon: Users }] : []),
+  ];
 
   return (
     <div className="min-h-screen flex bg-slate-50">
       <aside className="w-64 bg-zinc-900 text-white flex flex-col shrink-0" data-testid="sidebar">
         <div className="p-6 border-b border-zinc-800">
-          <h2 className="text-xl font-black tracking-tight" data-testid="text-brand">LA28 Panel</h2>
+          <h2 className="text-xl font-black tracking-tight" data-testid="text-brand">Addison Panel</h2>
           <p className="text-xs text-zinc-400 mt-1">Account Management</p>
         </div>
 

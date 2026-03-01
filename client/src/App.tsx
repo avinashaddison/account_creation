@@ -10,15 +10,18 @@ import Dashboard from "@/pages/Dashboard";
 import AccountStock from "@/pages/AccountStock";
 import Billing from "@/pages/Billing";
 import AutoCreate from "@/pages/AutoCreate";
+import EmailServer from "@/pages/EmailServer";
+import ManageAdmins from "@/pages/ManageAdmins";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
-type AuthUser = {
+export type AuthUser = {
   id: string;
   username: string;
   email: string;
   role: string;
+  freeAccountsUsed?: number;
 };
 
 function AdminRoutes({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
@@ -29,6 +32,10 @@ function AdminRoutes({ user, onLogout }: { user: AuthUser; onLogout: () => void 
         <Route path="/admin/accounts" component={AccountStock} />
         <Route path="/admin/billing" component={Billing} />
         <Route path="/admin/auto-create" component={AutoCreate} />
+        <Route path="/admin/email-server" component={EmailServer} />
+        {user.role === "superadmin" && (
+          <Route path="/admin/manage-admins" component={ManageAdmins} />
+        )}
         <Route component={NotFound} />
       </Switch>
     </Layout>
@@ -61,6 +68,10 @@ function App() {
     setUser(null);
   }
 
+  function handleLogin(u: AuthUser) {
+    setUser(u);
+  }
+
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-900">
@@ -90,7 +101,7 @@ function App() {
             <Route component={NotFound} />
           </Switch>
         ) : (
-          <Login onLogin={setUser} />
+          <Login onLogin={handleLogin} />
         )}
       </TooltipProvider>
     </QueryClientProvider>

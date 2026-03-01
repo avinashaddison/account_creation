@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2 } from "lucide-react";
+import { Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2, Shield } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 
 type DashboardData = {
   stats: { total: number; verified: number; failed: number; pending: number };
   billingTotal: number;
+  freeAccountsUsed: number;
+  freeAccountLimit: number;
+  role: string;
 };
 
 export default function Dashboard() {
@@ -61,6 +64,31 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
+      {data && data.role !== "superadmin" && (
+        <Card data-testid="card-free-limit">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Free Account Usage</CardTitle>
+            <div className="p-2 rounded-lg text-orange-600 bg-orange-50">
+              <Shield className="w-4 h-4" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{data.freeAccountsUsed} / {data.freeAccountLimit}</div>
+            <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  data.freeAccountsUsed >= data.freeAccountLimit ? "bg-red-500" : "bg-green-500"
+                }`}
+                style={{ width: `${Math.min(100, (data.freeAccountsUsed / data.freeAccountLimit) * 100)}%` }}
+              />
+            </div>
+            {data.freeAccountsUsed >= data.freeAccountLimit && (
+              <p className="text-xs text-red-500 mt-2">Free limit reached. Contact admin for payment to continue.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

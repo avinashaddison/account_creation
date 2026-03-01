@@ -1,22 +1,27 @@
 import { db } from "./db";
 import { users, accounts, billingRecords } from "@shared/schema";
 import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling } from "@shared/schema";
-import { eq, desc, sql, count } from "drizzle-orm";
+import { eq, desc, sql, count, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  getAllUsers(): Promise<User[]>;
+  getUsersByCreator(creatorId: string): Promise<User[]>;
+  updateUserFreeAccountsUsed(id: string, count: number): Promise<void>;
+  deleteUser(id: string): Promise<void>;
   createAccount(data: InsertAccount): Promise<Account>;
   updateAccount(id: string, updates: Partial<Account>): Promise<Account | undefined>;
   getAccount(id: string): Promise<Account | undefined>;
   getAllAccounts(): Promise<Account[]>;
+  getAccountsByOwner(ownerId: string): Promise<Account[]>;
   getAccountsByBatch(batchId: string): Promise<Account[]>;
-  getAccountStats(): Promise<{ total: number; verified: number; failed: number; pending: number }>;
+  getAccountStats(ownerId?: string): Promise<{ total: number; verified: number; failed: number; pending: number }>;
   createBillingRecord(data: InsertBilling): Promise<BillingRecord>;
-  getAllBillingRecords(): Promise<BillingRecord[]>;
-  getBillingTotal(): Promise<number>;
+  getAllBillingRecords(ownerId?: string): Promise<BillingRecord[]>;
+  getBillingTotal(ownerId?: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -40,6 +45,22 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users).orderBy(desc(users.id));
+  }
+
+  async getUsersByCreator(creatorId: string): Promise<User[]> {
+    return db.select().from(users).where(eq(users.createdBy, creatorId)).orderBy(desc(users.id));
+  }
+
+  async updateUserFreeAccountsUsed(id: string, usedCount: number): Promise<void> {
+    await db.update(users).set({ freeAccountsUsed: usedCount }).where(eq(users.id, id));
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
   async createAccount(data: InsertAccount): Promise<Account> {
     const [account] = await db.insert(accounts).values(data).returning();
     return account;
@@ -59,14 +80,19 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(accounts).orderBy(desc(accounts.createdAt));
   }
 
+  async getAccountsByOwner(ownerId: string): Promise<Account[]> {
+    return db.select().from(accounts).where(eq(accounts.ownerId, ownerId)).orderBy(desc(accounts.createdAt));
+  }
+
   async getAccountsByBatch(batchId: string): Promise<Account[]> {
     return db.select().from(accounts).where(eq(accounts.batchId, batchId)).orderBy(desc(accounts.createdAt));
   }
 
-  async getAccountStats(): Promise<{ total: number; verified: number; failed: number; pending: number }> {
-    const [totalResult] = await db.select({ count: count() }).from(accounts);
-    const [verifiedResult] = await db.select({ count: count() }).from(accounts).where(eq(accounts.status, "verified"));
-    const [failedResult] = await db.select({ count: count() }).from(accounts).where(eq(accounts.status, "failed"));
+  async getAccountStats(ownerId?: string): Promise<{ total: number; verified: number; failed: number; pending: number }> {
+    const condition = ownerId ? eq(accounts.ownerId, ownerId) : undefined;
+    const [totalResult] = await db.select({ count: count() }).from(accounts).where(condition);
+    const [verifiedResult] = await db.select({ count: count() }).from(accounts).where(condition ? and(condition, eq(accounts.status, "verified")) : eq(accounts.status, "verified"));
+    const [failedResult] = await db.select({ count: count() }).from(accounts).where(condition ? and(condition, eq(accounts.status, "failed")) : eq(accounts.status, "failed"));
     const total = totalResult?.count || 0;
     const verified = verifiedResult?.count || 0;
     const failed = failedResult?.count || 0;
@@ -78,12 +104,16 @@ export class DatabaseStorage implements IStorage {
     return record;
   }
 
-  async getAllBillingRecords(): Promise<BillingRecord[]> {
+  async getAllBillingRecords(ownerId?: string): Promise<BillingRecord[]> {
+    if (ownerId) {
+      return db.select().from(billingRecords).where(eq(billingRecords.ownerId, ownerId)).orderBy(desc(billingRecords.createdAt));
+    }
     return db.select().from(billingRecords).orderBy(desc(billingRecords.createdAt));
   }
 
-  async getBillingTotal(): Promise<number> {
-    const [result] = await db.select({ total: sql<string>`COALESCE(SUM(${billingRecords.amount}), 0)` }).from(billingRecords);
+  async getBillingTotal(ownerId?: string): Promise<number> {
+    const condition = ownerId ? eq(billingRecords.ownerId, ownerId) : undefined;
+    const [result] = await db.select({ total: sql<string>`COALESCE(SUM(${billingRecords.amount}), 0)` }).from(billingRecords).where(condition);
     return parseFloat(result?.total || "0");
   }
 }
