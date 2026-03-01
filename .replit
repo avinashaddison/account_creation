@@ -15,7 +15,7 @@ PORT = "5000"
 
 [deployment]
 deploymentTarget = "vm"
-build = ["npm", "run", "build"]
+build = ["bash", "-c", "npm run build && npx playwright install chromium"]
 publicDir = "dist/public"
 run = ["npm", "run", "start"]
 
