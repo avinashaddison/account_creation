@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   UserPlus,
   RefreshCw,
+  Shuffle,
 } from "lucide-react";
 
 type Registration = {
@@ -38,10 +39,55 @@ const STATUS_CONFIG: Record<string, { label: string; icon: React.ReactNode; colo
   failed: { label: "Failed", icon: <XCircle className="w-4 h-4" />, color: "text-red-600 bg-red-50" },
 };
 
+const FIRST_NAMES = [
+  "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
+  "David", "Elizabeth", "William", "Barbara", "Richard", "Susan", "Joseph", "Jessica",
+  "Thomas", "Sarah", "Charles", "Karen", "Daniel", "Lisa", "Matthew", "Nancy",
+  "Anthony", "Betty", "Mark", "Margaret", "Donald", "Sandra", "Steven", "Ashley",
+  "Andrew", "Dorothy", "Paul", "Kimberly", "Joshua", "Emily", "Kenneth", "Donna",
+  "Arjun", "Priya", "Rahul", "Anita", "Vikram", "Sneha", "Amit", "Pooja",
+  "Raj", "Neha", "Sanjay", "Divya", "Arun", "Kavita", "Suresh", "Meena",
+];
+
+const LAST_NAMES = [
+  "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis",
+  "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson",
+  "Thomas", "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson",
+  "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson",
+  "Kumar", "Sharma", "Singh", "Patel", "Gupta", "Mehta", "Verma", "Jain",
+  "Reddy", "Nair", "Rao", "Mishra", "Chopra", "Malhotra", "Bhat", "Das",
+];
+
+function randomFrom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function generateRandomPassword(): string {
+  const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const lower = "abcdefghijklmnopqrstuvwxyz";
+  const digits = "0123456789";
+  const special = "@#$!%&";
+  const all = upper + lower + digits + special;
+
+  let pwd = "";
+  pwd += special[Math.floor(Math.random() * special.length)];
+  pwd += upper[Math.floor(Math.random() * upper.length)];
+  pwd += upper[Math.floor(Math.random() * upper.length)];
+  pwd += lower[Math.floor(Math.random() * lower.length)];
+  pwd += lower[Math.floor(Math.random() * lower.length)];
+  for (let i = 0; i < 7; i++) {
+    pwd += all[Math.floor(Math.random() * all.length)];
+  }
+  return pwd
+    .split("")
+    .sort(() => Math.random() - 0.5)
+    .join("");
+}
+
 export default function Home() {
-  const [firstName, setFirstName] = useState("AJAY");
-  const [lastName, setLastName] = useState("kumar");
-  const [password, setPassword] = useState("@AJAYkn8085123");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [password, setPassword] = useState("");
   const [country, setCountry] = useState("India");
   const [language, setLanguage] = useState("English");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -49,9 +95,16 @@ export default function Home() {
   const [activeReg, setActiveReg] = useState<Registration | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
 
-  useEffect(() => {
-    fetchRegistrations();
+  const randomizeDetails = useCallback(() => {
+    setFirstName(randomFrom(FIRST_NAMES));
+    setLastName(randomFrom(LAST_NAMES));
+    setPassword(generateRandomPassword());
   }, []);
+
+  useEffect(() => {
+    randomizeDetails();
+    fetchRegistrations();
+  }, [randomizeDetails]);
 
   useEffect(() => {
     if (!activeRegId) return;
@@ -109,6 +162,45 @@ export default function Home() {
     }
   }
 
+  async function handleRandomAndStart() {
+    const fn = randomFrom(FIRST_NAMES);
+    const ln = randomFrom(LAST_NAMES);
+    const pw = generateRandomPassword();
+    setFirstName(fn);
+    setLastName(ln);
+    setPassword(pw);
+
+    setIsSubmitting(true);
+    setActiveReg(null);
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName: fn, lastName: ln, password: pw, country, language }),
+      });
+      const data = await res.json();
+      if (data.id) {
+        setActiveRegId(data.id);
+        setActiveReg({
+          id: data.id,
+          tempEmail: data.tempEmail,
+          firstName: fn,
+          lastName: ln,
+          country,
+          language,
+          status: "pending",
+          verificationCode: null,
+          errorMessage: null,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   function getStatusBadge(status: string) {
     const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
     return (
@@ -135,8 +227,18 @@ export default function Home() {
 
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Registration Details</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={randomizeDetails}
+                disabled={!!isProcessing}
+                data-testid="button-randomize"
+              >
+                <Shuffle className="w-3.5 h-3.5 mr-1.5" />
+                Randomize
+              </Button>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -165,11 +267,11 @@ export default function Home() {
                 <Label htmlFor="password">LA28 Password</Label>
                 <Input
                   id="password"
-                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={!!isProcessing}
                   data-testid="input-password"
+                  className="font-mono text-sm"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -194,24 +296,45 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <Button
-                className="w-full h-12 text-base font-semibold mt-2"
-                onClick={handleStartRegistration}
-                disabled={isSubmitting || !!isProcessing}
-                data-testid="button-start-registration"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Starting...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4 mr-2" />
-                    Start Auto Registration
-                  </>
-                )}
-              </Button>
+              <div className="flex gap-3 mt-2">
+                <Button
+                  className="flex-1 h-12 text-base font-semibold"
+                  onClick={handleStartRegistration}
+                  disabled={isSubmitting || !!isProcessing}
+                  data-testid="button-start-registration"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 mr-2" />
+                      Start
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1 h-12 text-base font-semibold"
+                  onClick={handleRandomAndStart}
+                  disabled={isSubmitting || !!isProcessing}
+                  data-testid="button-random-start"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    <>
+                      <Shuffle className="w-4 h-4 mr-2" />
+                      Random + Start
+                    </>
+                  )}
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -255,7 +378,7 @@ export default function Home() {
                     </div>
                   )}
 
-                  <AnimatePresence>
+                  <div className="space-y-1">
                     {["pending", "registering", "waiting_code", "verifying", "verified"].map((step) => {
                       const stepOrder = ["pending", "registering", "waiting_code", "verifying", "verified"];
                       const currentIndex = stepOrder.indexOf(activeReg.status);
@@ -283,7 +406,7 @@ export default function Home() {
                         </motion.div>
                       );
                     })}
-                  </AnimatePresence>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
