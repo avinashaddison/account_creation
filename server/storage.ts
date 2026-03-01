@@ -1,7 +1,8 @@
 import { db } from "./db";
-import { users, accounts, billingRecords } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest } from "@shared/schema";
 import { eq, desc, sql, count, and } from "drizzle-orm";
+import pg from "pg";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -9,8 +10,8 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   getAllUsers(): Promise<User[]>;
-  getUsersByCreator(creatorId: string): Promise<User[]>;
   updateUserFreeAccountsUsed(id: string, count: number): Promise<void>;
+  updateUserWalletBalance(id: string, balance: string): Promise<void>;
   deleteUser(id: string): Promise<void>;
   createAccount(data: InsertAccount): Promise<Account>;
   updateAccount(id: string, updates: Partial<Account>): Promise<Account | undefined>;
@@ -22,6 +23,13 @@ export interface IStorage {
   createBillingRecord(data: InsertBilling): Promise<BillingRecord>;
   getAllBillingRecords(ownerId?: string): Promise<BillingRecord[]>;
   getBillingTotal(ownerId?: string): Promise<number>;
+  createPaymentRequest(data: InsertPaymentRequest): Promise<PaymentRequest>;
+  getPaymentRequestsByUser(userId: string): Promise<PaymentRequest[]>;
+  getAllPaymentRequests(): Promise<PaymentRequest[]>;
+  getPaymentRequest(id: string): Promise<PaymentRequest | undefined>;
+  updatePaymentRequest(id: string, updates: Partial<PaymentRequest>): Promise<PaymentRequest | undefined>;
+  debitWallet(userId: string, amount: number): Promise<boolean>;
+  approvePaymentAtomic(requestId: string): Promise<{ success: boolean; newBalance?: string; error?: string }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -49,12 +57,12 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(users).orderBy(desc(users.id));
   }
 
-  async getUsersByCreator(creatorId: string): Promise<User[]> {
-    return db.select().from(users).where(eq(users.createdBy, creatorId)).orderBy(desc(users.id));
-  }
-
   async updateUserFreeAccountsUsed(id: string, usedCount: number): Promise<void> {
     await db.update(users).set({ freeAccountsUsed: usedCount }).where(eq(users.id, id));
+  }
+
+  async updateUserWalletBalance(id: string, balance: string): Promise<void> {
+    await db.update(users).set({ walletBalance: balance }).where(eq(users.id, id));
   }
 
   async deleteUser(id: string): Promise<void> {
@@ -115,6 +123,90 @@ export class DatabaseStorage implements IStorage {
     const condition = ownerId ? eq(billingRecords.ownerId, ownerId) : undefined;
     const [result] = await db.select({ total: sql<string>`COALESCE(SUM(${billingRecords.amount}), 0)` }).from(billingRecords).where(condition);
     return parseFloat(result?.total || "0");
+  }
+
+  async createPaymentRequest(data: InsertPaymentRequest): Promise<PaymentRequest> {
+    const [record] = await db.insert(paymentRequests).values(data).returning();
+    return record;
+  }
+
+  async getPaymentRequestsByUser(userId: string): Promise<PaymentRequest[]> {
+    return db.select().from(paymentRequests).where(eq(paymentRequests.userId, userId)).orderBy(desc(paymentRequests.createdAt));
+  }
+
+  async getAllPaymentRequests(): Promise<PaymentRequest[]> {
+    return db.select().from(paymentRequests).orderBy(desc(paymentRequests.createdAt));
+  }
+
+  async getPaymentRequest(id: string): Promise<PaymentRequest | undefined> {
+    const [record] = await db.select().from(paymentRequests).where(eq(paymentRequests.id, id));
+    return record;
+  }
+
+  async updatePaymentRequest(id: string, updates: Partial<PaymentRequest>): Promise<PaymentRequest | undefined> {
+    const [record] = await db.update(paymentRequests).set(updates).where(eq(paymentRequests.id, id)).returning();
+    return record;
+  }
+
+  async debitWallet(userId: string, amount: number): Promise<boolean> {
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const res = await client.query(
+        `UPDATE users SET wallet_balance = wallet_balance - $1 WHERE id = $2 AND wallet_balance >= $1 RETURNING wallet_balance`,
+        [amount.toFixed(2), userId]
+      );
+      if (res.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await client.query("COMMIT");
+      return true;
+    } catch {
+      await client.query("ROLLBACK");
+      return false;
+    } finally {
+      client.release();
+      pool.end();
+    }
+  }
+
+  async approvePaymentAtomic(requestId: string): Promise<{ success: boolean; newBalance?: string; error?: string }> {
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const reqRes = await client.query(
+        `SELECT * FROM payment_requests WHERE id = $1 AND status = 'pending' FOR UPDATE`,
+        [requestId]
+      );
+      if (reqRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Request not found or already processed" };
+      }
+      const request = reqRes.rows[0];
+      const balRes = await client.query(
+        `UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id = $2 RETURNING wallet_balance`,
+        [request.amount, request.user_id]
+      );
+      if (balRes.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "User not found" };
+      }
+      await client.query(
+        `UPDATE payment_requests SET status = 'approved', admin_note = 'Approved' WHERE id = $1`,
+        [requestId]
+      );
+      await client.query("COMMIT");
+      return { success: true, newBalance: balRes.rows[0].wallet_balance };
+    } catch (err: any) {
+      await client.query("ROLLBACK");
+      return { success: false, error: err.message };
+    } finally {
+      client.release();
+      pool.end();
+    }
   }
 }
 

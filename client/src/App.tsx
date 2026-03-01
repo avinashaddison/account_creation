@@ -12,6 +12,7 @@ import Billing from "@/pages/Billing";
 import AutoCreate from "@/pages/AutoCreate";
 import EmailServer from "@/pages/EmailServer";
 import ManageAdmins from "@/pages/ManageAdmins";
+import WalletPage from "@/pages/Wallet";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -22,6 +23,7 @@ export type AuthUser = {
   email: string;
   role: string;
   freeAccountsUsed?: number;
+  walletBalance?: string;
 };
 
 function AdminRoutes({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
@@ -33,6 +35,7 @@ function AdminRoutes({ user, onLogout }: { user: AuthUser; onLogout: () => void 
         <Route path="/admin/billing" component={Billing} />
         <Route path="/admin/auto-create" component={AutoCreate} />
         <Route path="/admin/email-server" component={EmailServer} />
+        <Route path="/admin/wallet" component={WalletPage} />
         {user.role === "superadmin" && (
           <Route path="/admin/manage-admins" component={ManageAdmins} />
         )}

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 export const roleEnum = pgEnum("role", ["superadmin", "admin", "user"]);
 export const accountStatusEnum = pgEnum("account_status", ["pending", "registering", "waiting_code", "verifying", "verified", "failed"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "approved", "rejected"]);
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -13,6 +14,7 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   role: roleEnum("role").notNull().default("admin"),
   freeAccountsUsed: integer("free_accounts_used").notNull().default(0),
+  walletBalance: numeric("wallet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   createdBy: varchar("created_by"),
 });
 
@@ -42,6 +44,16 @@ export const billingRecords = pgTable("billing_records", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const paymentRequests = pgTable("payment_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  txHash: text("tx_hash"),
+  status: paymentStatusEnum("status").notNull().default("pending"),
+  adminNote: text("admin_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   email: true,
@@ -59,9 +71,16 @@ export const insertBillingSchema = createInsertSchema(billingRecords).omit({
   createdAt: true,
 });
 
+export const insertPaymentRequestSchema = createInsertSchema(paymentRequests).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type InsertAccount = z.infer<typeof insertAccountSchema>;
 export type BillingRecord = typeof billingRecords.$inferSelect;
 export type InsertBilling = z.infer<typeof insertBillingSchema>;
+export type PaymentRequest = typeof paymentRequests.$inferSelect;
+export type InsertPaymentRequest = z.infer<typeof insertPaymentRequestSchema>;

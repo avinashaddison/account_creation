@@ -25,6 +25,7 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 const FREE_ACCOUNT_LIMIT = 30;
+const TRC20_ADDRESS = "TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB";
 
 const FIRST_NAMES = [
   "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
@@ -91,10 +92,6 @@ function broadcastAccountUpdate(account: any, ownerId?: string) {
 
 function broadcastBatchComplete(batchId: string, ownerId?: string) {
   broadcast({ type: "batch_complete", batchId }, ownerId);
-}
-
-function broadcastEmailUpdate(data: any, ownerId?: string) {
-  broadcast({ type: "email_update", ...data }, ownerId);
 }
 
 async function processAccount(
@@ -203,15 +200,19 @@ export async function registerRoutes(
   });
 
   async function ensureDefaultSuperAdmin() {
-    const existing = await storage.getUserByEmail("admin@la28panel.com");
+    const existing = await storage.getUserByEmail("avinashaddison@gmail.com");
     if (!existing) {
+      const oldAdmin = await storage.getUserByEmail("admin@la28panel.com");
+      if (oldAdmin) {
+        await storage.deleteUser(oldAdmin.id);
+      }
       await storage.createUser({
-        username: "admin",
-        email: "admin@la28panel.com",
-        password: hashPassword("admin123"),
+        username: "avinash",
+        email: "avinashaddison@gmail.com",
+        password: hashPassword("@AJAYkn8085123"),
         role: "superadmin",
       });
-      console.log("[Auth] Default super admin created: admin@la28panel.com / admin123");
+      console.log("[Auth] Super admin created: avinashaddison@gmail.com");
     }
   }
   await ensureDefaultSuperAdmin();
@@ -246,7 +247,14 @@ export async function registerRoutes(
     }
     const user = await storage.getUser(req.session.userId);
     if (!user) return res.status(401).json({ error: "User not found" });
-    res.json({ id: user.id, username: user.username, email: user.email, role: user.role, freeAccountsUsed: user.freeAccountsUsed });
+    res.json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      freeAccountsUsed: user.freeAccountsUsed,
+      walletBalance: user.walletBalance,
+    });
   });
 
   app.get("/api/admin/users", requireAuth, requireSuperAdmin, async (_req, res) => {
@@ -258,6 +266,7 @@ export async function registerRoutes(
         email: u.email,
         role: u.role,
         freeAccountsUsed: u.freeAccountsUsed,
+        walletBalance: u.walletBalance,
       }));
       res.json(safeUsers);
     } catch (err: any) {
@@ -302,6 +311,100 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/add-funds", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { userId, amount } = req.body;
+      if (!userId || !amount || parseFloat(amount) <= 0) {
+        return res.status(400).json({ error: "Valid userId and amount are required" });
+      }
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.role === "superadmin") return res.status(400).json({ error: "Cannot add funds to super admin" });
+
+      const currentBalance = parseFloat(user.walletBalance || "0");
+      const newBalance = currentBalance + parseFloat(amount);
+      await storage.updateUserWalletBalance(userId, newBalance.toFixed(2));
+
+      res.json({ success: true, newBalance: newBalance.toFixed(2) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/payment-requests", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const requests = await storage.getAllPaymentRequests();
+      const enriched = [];
+      for (const r of requests) {
+        const user = await storage.getUser(r.userId);
+        enriched.push({
+          ...r,
+          userEmail: user?.email || "unknown",
+          userName: user?.username || "unknown",
+        });
+      }
+      res.json(enriched);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/payment-requests/:id/approve", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const result = await storage.approvePaymentAtomic(req.params.id);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+      res.json({ success: true, newBalance: result.newBalance });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/payment-requests/:id/reject", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      await storage.updatePaymentRequest(req.params.id, {
+        status: "rejected",
+        adminNote: req.body.note || "Rejected",
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/wallet", requireAuth, async (req, res) => {
+    const user = await storage.getUser(req.session.userId!);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const payments = await storage.getPaymentRequestsByUser(user.id);
+    res.json({
+      balance: user.walletBalance,
+      freeAccountsUsed: user.freeAccountsUsed,
+      freeAccountLimit: FREE_ACCOUNT_LIMIT,
+      trc20Address: TRC20_ADDRESS,
+      payments,
+    });
+  });
+
+  app.post("/api/wallet/payment-request", requireAuth, async (req, res) => {
+    try {
+      const { amount, txHash } = req.body;
+      if (!amount || parseFloat(amount) <= 0) {
+        return res.status(400).json({ error: "Valid amount is required" });
+      }
+      const request = await storage.createPaymentRequest({
+        userId: req.session.userId!,
+        amount: parseFloat(amount).toFixed(2),
+        txHash: txHash || null,
+        status: "pending",
+        adminNote: null,
+      });
+      res.json(request);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/create-batch", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -311,14 +414,27 @@ export async function registerRoutes(
       const { count = 1, country = "United States", language = "English" } = req.body;
       const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
 
-      if (user.role !== "superadmin" && user.freeAccountsUsed + numAccounts > FREE_ACCOUNT_LIMIT) {
-        const remaining = Math.max(0, FREE_ACCOUNT_LIMIT - user.freeAccountsUsed);
-        return res.status(403).json({
-          error: `Free limit reached. You have ${remaining} free accounts remaining out of ${FREE_ACCOUNT_LIMIT}. Please contact admin for payment to continue.`,
-          remaining,
-          limit: FREE_ACCOUNT_LIMIT,
-          used: user.freeAccountsUsed,
-        });
+      if (user.role !== "superadmin") {
+        const freeRemaining = Math.max(0, FREE_ACCOUNT_LIMIT - user.freeAccountsUsed);
+        if (numAccounts > freeRemaining) {
+          const paidAccounts = numAccounts - freeRemaining;
+          const walletBalance = parseFloat(user.walletBalance || "0");
+          const requiredBalance = paidAccounts * COST_PER_ACCOUNT;
+          if (walletBalance < requiredBalance) {
+            return res.status(403).json({
+              error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${paidAccounts} paid accounts. Your wallet balance is $${walletBalance.toFixed(2)}. Free accounts remaining: ${freeRemaining}.`,
+              walletBalance,
+              freeRemaining,
+              required: requiredBalance,
+            });
+          }
+          const debited = await storage.debitWallet(userId, requiredBalance);
+          if (!debited) {
+            return res.status(403).json({
+              error: "Failed to debit wallet. Insufficient balance.",
+            });
+          }
+        }
       }
 
       const batchId = randomUUID();
@@ -374,10 +490,20 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      if (user.role !== "superadmin" && user.freeAccountsUsed >= FREE_ACCOUNT_LIMIT) {
-        return res.status(403).json({
-          error: `Free limit reached (${FREE_ACCOUNT_LIMIT}). Please contact admin for payment.`,
-        });
+      if (user.role !== "superadmin") {
+        const freeRemaining = Math.max(0, FREE_ACCOUNT_LIMIT - user.freeAccountsUsed);
+        if (freeRemaining <= 0) {
+          const walletBalance = parseFloat(user.walletBalance || "0");
+          if (walletBalance < COST_PER_ACCOUNT) {
+            return res.status(403).json({
+              error: `Insufficient balance. Add funds to your wallet to continue. Balance: $${walletBalance.toFixed(2)}`,
+            });
+          }
+          const debited = await storage.debitWallet(userId, COST_PER_ACCOUNT);
+          if (!debited) {
+            return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
+          }
+        }
       }
 
       const { firstName, lastName, password, country = "United States", language = "English" } = req.body;
@@ -474,6 +600,7 @@ export async function registerRoutes(
       billingTotal: total,
       freeAccountsUsed: user?.freeAccountsUsed || 0,
       freeAccountLimit: FREE_ACCOUNT_LIMIT,
+      walletBalance: user?.walletBalance || "0.00",
       role,
     });
   });

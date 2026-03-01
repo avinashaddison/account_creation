@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2, Shield } from "lucide-react";
+import { Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2, Shield, Wallet } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 
 type DashboardData = {
@@ -8,6 +8,7 @@ type DashboardData = {
   billingTotal: number;
   freeAccountsUsed: number;
   freeAccountLimit: number;
+  walletBalance: string;
   role: string;
 };
 
@@ -25,6 +26,8 @@ export default function Dashboard() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  const walletBalance = parseFloat(data?.walletBalance || "0");
 
   const cards = [
     { title: "Total Accounts", value: data?.stats.total || 0, icon: Users, color: "text-blue-600 bg-blue-50" },
@@ -66,28 +69,43 @@ export default function Dashboard() {
       </div>
 
       {data && data.role !== "superadmin" && (
-        <Card data-testid="card-free-limit">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Free Account Usage</CardTitle>
-            <div className="p-2 rounded-lg text-orange-600 bg-orange-50">
-              <Shield className="w-4 h-4" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.freeAccountsUsed} / {data.freeAccountLimit}</div>
-            <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  data.freeAccountsUsed >= data.freeAccountLimit ? "bg-red-500" : "bg-green-500"
-                }`}
-                style={{ width: `${Math.min(100, (data.freeAccountsUsed / data.freeAccountLimit) * 100)}%` }}
-              />
-            </div>
-            {data.freeAccountsUsed >= data.freeAccountLimit && (
-              <p className="text-xs text-red-500 mt-2">Free limit reached. Contact admin for payment to continue.</p>
-            )}
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card data-testid="card-wallet-balance">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Wallet Balance</CardTitle>
+              <div className="p-2 rounded-lg text-green-600 bg-green-50">
+                <Wallet className="w-4 h-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600">${walletBalance.toFixed(2)}</div>
+              <p className="text-xs text-muted-foreground mt-1">Available for account creation after free tier</p>
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-free-limit">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Free Account Usage</CardTitle>
+              <div className="p-2 rounded-lg text-orange-600 bg-orange-50">
+                <Shield className="w-4 h-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{data.freeAccountsUsed} / {data.freeAccountLimit}</div>
+              <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    data.freeAccountsUsed >= data.freeAccountLimit ? "bg-red-500" : "bg-green-500"
+                  }`}
+                  style={{ width: `${Math.min(100, (data.freeAccountsUsed / data.freeAccountLimit) * 100)}%` }}
+                />
+              </div>
+              {data.freeAccountsUsed >= data.freeAccountLimit && (
+                <p className="text-xs text-red-500 mt-2">Free limit reached. Add funds to your wallet to continue.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

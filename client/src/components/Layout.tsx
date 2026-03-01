@@ -1,5 +1,5 @@
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, Zap, LogOut, User, Mail, Users } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, Zap, LogOut, User, Mail, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type LayoutProps = {
@@ -16,6 +16,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
     { href: "/admin/accounts", label: "Account Stock", icon: Archive },
     { href: "/admin/email-server", label: "Email Server", icon: Mail },
     { href: "/admin/billing", label: "Billing", icon: Receipt },
+    { href: "/admin/wallet", label: "Wallet", icon: Wallet },
     { href: "/admin/auto-create", label: "Auto Create", icon: Zap },
     ...(user.role === "superadmin" ? [{ href: "/admin/manage-admins", label: "Manage Admins", icon: Users }] : []),
   ];
