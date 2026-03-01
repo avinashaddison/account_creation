@@ -5,6 +5,23 @@ let browserInstance: Browser | null = null;
 let launching = false;
 let browserInstalled = false;
 
+const US_ZIP_CODES = [
+  "10001", "10019", "10036", "10128", "10010",
+  "90001", "90012", "90024", "90036", "90210",
+  "60601", "60614", "60657", "60611", "60640",
+  "77001", "77002", "77019", "77030", "77056",
+  "85001", "85004", "85016", "85028", "85044",
+  "19101", "19102", "19103", "19106", "19130",
+  "78201", "78205", "78209", "78215", "78230",
+  "92101", "92103", "92109", "92117", "92126",
+  "75201", "75204", "75214", "75225", "75240",
+  "95101", "95112", "95125", "95131", "95148",
+];
+
+function generateUSZip(): string {
+  return US_ZIP_CODES[Math.floor(Math.random() * US_ZIP_CODES.length)];
+}
+
 async function ensureBrowserInstalled(): Promise<void> {
   if (browserInstalled) return;
 
@@ -105,19 +122,18 @@ async function fillViaJS(page: Page, gigyaName: string, value: string): Promise<
     var inputs = document.querySelectorAll('input[data-gigya-name="' + name + '"]');
     for (var i = 0; i < inputs.length; i++) {
       var el = inputs[i];
-      var rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-        if (setter && setter.set) {
-          setter.set.call(el, val);
-        } else {
-          el.value = val;
-        }
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-        return true;
+      if (el.type === 'hidden') continue;
+      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      if (setter && setter.set) {
+        setter.set.call(el, val);
+      } else {
+        el.value = val;
       }
+      el.dispatchEvent(new Event('focus', { bubbles: true }));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+      return true;
     }
     return false;
   })("${gigyaName}", "${value.replace(/"/g, '\\"')}")`);
@@ -128,15 +144,14 @@ async function selectViaJS(page: Page, gigyaName: string, searchText: string): P
     var selects = document.querySelectorAll('select[data-gigya-name="' + name + '"]');
     for (var i = 0; i < selects.length; i++) {
       var sel = selects[i];
-      var rect = sel.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        var options = Array.from(sel.options);
-        var match = options.find(function(o) { return o.text.toLowerCase().includes(text.toLowerCase()); });
-        if (match) {
-          sel.value = match.value;
-          sel.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
+      var options = Array.from(sel.options);
+      var match = options.find(function(o) { return o.text.toLowerCase().includes(text.toLowerCase()); });
+      if (match) {
+        sel.value = match.value;
+        sel.dispatchEvent(new Event('focus', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        sel.dispatchEvent(new Event('blur', { bubbles: true }));
+        return true;
       }
     }
     return false;
@@ -165,11 +180,7 @@ async function waitForGigyaForm(page: Page, maxWaitSec: number = 30): Promise<bo
   while (Date.now() - start < maxWaitSec * 1000) {
     const found = await page.evaluate(`(() => {
       var inputs = document.querySelectorAll('input[data-gigya-name="email"]');
-      for (var i = 0; i < inputs.length; i++) {
-        var rect = inputs[i].getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) return true;
-      }
-      return false;
+      return inputs.length > 0;
     })()`);
     if (found) return true;
     await page.waitForTimeout(2000);
@@ -325,9 +336,9 @@ async function doRegistration(
       console.log("[Playwright] Network idle timeout, continuing...");
     }
 
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
     await forceRemoveOverlays(page);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
 
     console.log("[Playwright] Waiting for Gigya registration form...");
     const formFound = await waitForGigyaForm(page, 30);
@@ -423,6 +434,24 @@ async function doRegistration(
 
     const langSelected = await selectViaJS(page, "data.personalization.siteLanguage", language);
     console.log(`[Playwright] Language selected: ${langSelected}`);
+
+    const zipCode = generateUSZip();
+    const zipFilled = await fillViaJS(page, "profile.zip", zipCode);
+    if (!zipFilled) {
+      await page.evaluate(`((val) => {
+        var inputs = document.querySelectorAll('input[name="profile.zip"], input[name="zip"], input[data-gigya-name="profile.zip"], input[placeholder*="ip"], input[placeholder*="ostal"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          if (setter && setter.set) setter.set.call(el, val);
+          else el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+        }
+      })("${zipCode}")`);
+    }
+    console.log(`[Playwright] ZIP filled: ${zipFilled} (${zipCode})`);
 
     const cbCount = await checkAllCheckboxesViaJS(page);
     console.log(`[Playwright] Checked ${cbCount} checkboxes`);
