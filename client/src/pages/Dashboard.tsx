@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, CheckCircle2, XCircle, Clock, DollarSign } from "lucide-react";
+import { Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2 } from "lucide-react";
+import { handleUnauthorized } from "@/lib/auth";
 
 type DashboardData = {
   stats: { total: number; verified: number; failed: number; pending: number };
@@ -9,12 +10,17 @@ type DashboardData = {
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((r) => r.json())
-      .then(setData)
-      .catch(console.error);
+    fetch("/api/dashboard", { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) { handleUnauthorized(); return null; }
+        return r.json();
+      })
+      .then((d) => { if (d) setData(d); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   const cards = [
@@ -24,6 +30,14 @@ export default function Dashboard() {
     { title: "In Progress", value: data?.stats.pending || 0, icon: Clock, color: "text-yellow-600 bg-yellow-50" },
     { title: "Total Cost", value: `$${(data?.billingTotal || 0).toFixed(2)}`, icon: DollarSign, color: "text-purple-600 bg-purple-50" },
   ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

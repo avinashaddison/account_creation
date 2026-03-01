@@ -1,12 +1,37 @@
 import { chromium, type Browser, type Page } from "playwright";
 
 let browserInstance: Browser | null = null;
+let launching = false;
 
 async function getBrowser(): Promise<Browser> {
-  if (!browserInstance || !browserInstance.isConnected()) {
-    browserInstance = await chromium.launch({ headless: true });
+  if (browserInstance && browserInstance.isConnected()) {
+    return browserInstance;
   }
-  return browserInstance;
+
+  if (launching) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (browserInstance && browserInstance.isConnected()) return browserInstance;
+  }
+
+  launching = true;
+  try {
+    browserInstance = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--single-process",
+      ],
+    });
+    browserInstance.on("disconnected", () => {
+      browserInstance = null;
+    });
+    return browserInstance;
+  } finally {
+    launching = false;
+  }
 }
 
 export async function fullRegistrationFlow(
@@ -19,9 +44,21 @@ export async function fullRegistrationFlow(
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
-  const browser = await getBrowser();
-  const context = await browser.newContext();
+  let browser: Browser;
+  try {
+    browser = await getBrowser();
+  } catch (err: any) {
+    return { success: false, error: `Failed to launch browser: ${err.message}` };
+  }
+
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 720 },
+  });
+
   const page = await context.newPage();
+  page.setDefaultTimeout(30000);
 
   try {
     onStatusUpdate("registering");
@@ -153,8 +190,7 @@ export async function fullRegistrationFlow(
     console.log("[Playwright] Final page content (first 300):", finalText.substring(0, 300));
 
     const hasError = finalText.toLowerCase().includes("invalid code") ||
-                     finalText.toLowerCase().includes("expired") ||
-                     finalText.toLowerCase().includes("error");
+                     finalText.toLowerCase().includes("expired");
 
     await context.close();
 
@@ -176,3 +212,13 @@ export async function closeBrowser(): Promise<void> {
     browserInstance = null;
   }
 }
+
+process.on("SIGTERM", async () => {
+  console.log("[Playwright] Shutting down browser...");
+  await closeBrowser();
+});
+
+process.on("SIGINT", async () => {
+  console.log("[Playwright] Shutting down browser...");
+  await closeBrowser();
+});

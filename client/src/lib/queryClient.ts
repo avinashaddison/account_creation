@@ -1,7 +1,12 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { handleUnauthorized } from "./auth";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error("Session expired");
+    }
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
   }
@@ -35,6 +40,11 @@ export const getQueryFn: <T>(options: {
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
+    }
+
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error("Session expired");
     }
 
     await throwIfResNotOk(res);

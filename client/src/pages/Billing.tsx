@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DollarSign, Receipt, TrendingUp } from "lucide-react";
+import { DollarSign, Receipt, TrendingUp, Loader2 } from "lucide-react";
+import { handleUnauthorized } from "@/lib/auth";
 
 type BillingRecord = {
   id: string;
@@ -18,16 +19,29 @@ type BillingData = {
 
 export default function Billing() {
   const [data, setData] = useState<BillingData | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/billing")
-      .then((r) => r.json())
-      .then(setData)
-      .catch(console.error);
+    fetch("/api/billing", { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) { handleUnauthorized(); return null; }
+        return r.json();
+      })
+      .then((d) => { if (d) setData(d); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   const totalCost = data?.total || 0;
   const totalRecords = data?.records.length || 0;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

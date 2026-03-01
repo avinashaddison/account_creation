@@ -4,6 +4,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { setLogoutCallback } from "./lib/auth";
 import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
 import AccountStock from "@/pages/AccountStock";
@@ -47,6 +48,12 @@ function App() {
       .then(setUser)
       .catch(() => setUser(null))
       .finally(() => setChecking(false));
+  }, []);
+
+  useEffect(() => {
+    setLogoutCallback(() => {
+      setUser(null);
+    });
   }, []);
 
   async function handleLogout() {

@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
+import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download } from "lucide-react";
 import { subscribe } from "@/lib/ws";
+import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 
 type Account = {
@@ -36,8 +37,11 @@ export default function AccountStock() {
 
   function fetchAccounts() {
     setLoading(true);
-    fetch("/api/accounts")
-      .then((r) => r.json())
+    fetch("/api/accounts", { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) { handleUnauthorized(); return []; }
+        return r.json();
+      })
       .then((data) => { setAccounts(data); setLoading(false); })
       .catch(() => setLoading(false));
   }
@@ -65,6 +69,29 @@ export default function AccountStock() {
     toast({ title: "Copied", description: "Copied to clipboard" });
   }
 
+  function exportVerified() {
+    const verified = accounts.filter((a) => a.status === "verified");
+    if (verified.length === 0) {
+      toast({ title: "No data", description: "No verified accounts to export" });
+      return;
+    }
+    const csv = ["Email,Password,Name,Country,Code,Created"]
+      .concat(
+        verified.map(
+          (a) =>
+            `${a.tempEmail},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.verificationCode || ""},${new Date(a.createdAt).toISOString()}`
+        )
+      )
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `la28-accounts-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function getStatusIcon(status: string) {
     switch (status) {
       case "verified": return <CheckCircle2 className="w-4 h-4 text-green-500" />;
@@ -87,10 +114,16 @@ export default function AccountStock() {
             {verified.length} verified, {inProgress.length} in progress, {failed.length} failed
           </p>
         </div>
-        <Button variant="outline" onClick={fetchAccounts} data-testid="button-refresh-accounts">
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={exportVerified} data-testid="button-export-accounts">
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button variant="outline" onClick={fetchAccounts} data-testid="button-refresh-accounts">
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Card>

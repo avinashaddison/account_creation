@@ -1,8 +1,10 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import pg from "pg";
 
 const app = express();
 const httpServer = createServer(app);
@@ -20,6 +22,15 @@ declare module "express-session" {
   }
 }
 
+if (!process.env.DATABASE_URL) {
+  console.error("FATAL: DATABASE_URL environment variable is not set");
+  process.exit(1);
+}
+
+const pgPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+
+const PgStore = connectPgSimple(session);
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -30,15 +41,22 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+app.set("trust proxy", 1);
+
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "la28-admin-secret-key-2026",
+    store: new PgStore({
+      pool: pgPool,
+      createTableIfMissing: true,
+      tableName: "user_sessions",
+    }),
+    secret: process.env.SESSION_SECRET || (process.env.NODE_ENV === "production" ? (() => { console.error("FATAL: SESSION_SECRET is required in production"); process.exit(1); return ""; })() : "la28-admin-dev-secret-key"),
     resave: false,
     saveUninitialized: false,
     cookie: {
       maxAge: 24 * 60 * 60 * 1000,
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
     },
   })

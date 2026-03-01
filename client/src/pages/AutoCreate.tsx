@@ -71,7 +71,9 @@ export default function AutoCreate() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ count: numAccounts, country, language }),
+        credentials: "include",
       });
+      if (res.status === 401) { const { handleUnauthorized } = await import("@/lib/auth"); handleUnauthorized(); return; }
       const data = await res.json();
       setBatchId(data.batchId);
       setBatchAccounts(
