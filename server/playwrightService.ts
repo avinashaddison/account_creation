@@ -64,6 +64,93 @@ async function getBrowser(): Promise<Browser> {
   }
 }
 
+async function dismissOverlays(page: Page): Promise<void> {
+  try {
+    const cookieSelectors = [
+      'button:has-text("Accept")',
+      'button:has-text("Accept All")',
+      'button:has-text("Accept Cookies")',
+      'button:has-text("I Accept")',
+      'button:has-text("OK")',
+      'button:has-text("Got it")',
+      'button:has-text("Agree")',
+      '[id*="cookie"] button',
+      '[class*="cookie"] button',
+      '[id*="consent"] button',
+      '[class*="consent"] button',
+      '[id*="onetrust"] button#onetrust-accept-btn-handler',
+      '.onetrust-close-btn-handler',
+    ];
+
+    for (const sel of cookieSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 500 })) {
+          await btn.click({ timeout: 2000 });
+          console.log(`[Playwright] Dismissed overlay with selector: ${sel}`);
+          await page.waitForTimeout(1000);
+          break;
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+async function waitForRegistrationForm(page: Page): Promise<void> {
+  console.log("[Playwright] Waiting for registration form to appear...");
+
+  await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  await dismissOverlays(page);
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const emailInputs = page.locator('input[data-gigya-name="email"]');
+    const count = await emailInputs.count();
+    console.log(`[Playwright] Found ${count} email input(s), checking visibility...`);
+
+    for (let i = 0; i < count; i++) {
+      try {
+        const input = emailInputs.nth(i);
+        const isVisible = await input.isVisible({ timeout: 1000 });
+        if (isVisible) {
+          console.log(`[Playwright] Email input #${i} is visible`);
+          return;
+        }
+      } catch {}
+    }
+
+    const allInputs = page.locator('input[name="email"], input[type="email"]');
+    const allCount = await allInputs.count();
+    for (let i = 0; i < allCount; i++) {
+      try {
+        const input = allInputs.nth(i);
+        const isVisible = await input.isVisible({ timeout: 1000 });
+        if (isVisible) {
+          console.log(`[Playwright] Fallback email input #${i} is visible`);
+          return;
+        }
+      } catch {}
+    }
+
+    console.log(`[Playwright] No visible email input yet, attempt ${attempt + 1}/6, waiting...`);
+    await dismissOverlays(page);
+    await page.waitForTimeout(3000);
+  }
+
+  const html = await page.evaluate(() => document.body.innerHTML.substring(0, 2000));
+  console.log("[Playwright] Page HTML snippet:", html);
+  throw new Error("Registration form did not become visible after waiting");
+}
+
+function getVisibleInput(page: Page, gigyaName: string) {
+  return page.locator(`input[data-gigya-name="${gigyaName}"]`).and(page.locator(':visible')).first();
+}
+
+function getVisibleSelect(page: Page, gigyaName: string) {
+  return page.locator(`select[data-gigya-name="${gigyaName}"]`).and(page.locator(':visible')).first();
+}
+
 export async function fullRegistrationFlow(
   email: string,
   firstName: string,
@@ -93,78 +180,106 @@ export async function fullRegistrationFlow(
   try {
     onStatusUpdate("registering");
     console.log("[Playwright] Navigating to LA28 registration...");
-    await page.goto("https://la28id.la28.org/register/", { waitUntil: "networkidle", timeout: 45000 });
+    await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    await page.waitForSelector('input[data-gigya-name="email"]', { state: "visible", timeout: 15000 });
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 15000 });
+    } catch {
+      console.log("[Playwright] Network idle timeout, continuing anyway...");
+    }
+
+    await waitForRegistrationForm(page);
 
     console.log("[Playwright] Filling form fields...");
-    await page.locator('input[data-gigya-name="email"]:visible').fill(email);
+    const emailInput = getVisibleInput(page, "email");
+    await emailInput.click({ timeout: 5000 });
+    await emailInput.fill(email);
+    console.log("[Playwright] Filled email");
 
-    await page.waitForSelector('input[data-gigya-name="firstName"]', { state: "visible", timeout: 5000 });
-    await page.locator('input[data-gigya-name="firstName"]:visible').fill(firstName);
+    const firstNameInput = getVisibleInput(page, "firstName");
+    await firstNameInput.click({ timeout: 5000 });
+    await firstNameInput.fill(firstName);
+    console.log("[Playwright] Filled firstName");
 
-    await page.waitForSelector('input[data-gigya-name="lastName"]', { state: "visible", timeout: 5000 });
-    await page.locator('input[data-gigya-name="lastName"]:visible').fill(lastName);
+    const lastNameInput = getVisibleInput(page, "lastName");
+    await lastNameInput.click({ timeout: 5000 });
+    await lastNameInput.fill(lastName);
+    console.log("[Playwright] Filled lastName");
 
-    await page.waitForSelector('input[data-gigya-name="password"]', { state: "visible", timeout: 5000 });
-    await page.locator('input[data-gigya-name="password"]:visible').fill(password);
+    const passwordInput = getVisibleInput(page, "password");
+    await passwordInput.click({ timeout: 5000 });
+    await passwordInput.fill(password);
+    console.log("[Playwright] Filled password");
 
     console.log("[Playwright] Selecting country...");
-    const residenceSelect = page.locator('select[data-gigya-name="profile.country"]:visible');
-    const hasResidence = await residenceSelect.count();
-    if (hasResidence > 0) {
-      const options = await residenceSelect.evaluate((sel) =>
-        Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
-      );
-      const countryOpt = options.find((o) => o.text.toLowerCase().includes(country.toLowerCase()));
-      if (countryOpt) {
-        await residenceSelect.selectOption(countryOpt.value);
-        console.log(`[Playwright] Selected country: ${countryOpt.text}`);
+    try {
+      const residenceSelect = getVisibleSelect(page, "profile.country");
+      const hasResidence = await residenceSelect.count();
+      if (hasResidence > 0) {
+        const options = await residenceSelect.evaluate((sel) =>
+          Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
+        );
+        const countryOpt = options.find((o) => o.text.toLowerCase().includes(country.toLowerCase()));
+        if (countryOpt) {
+          await residenceSelect.selectOption(countryOpt.value);
+          console.log(`[Playwright] Selected country: ${countryOpt.text}`);
+        }
       }
-    } else {
-      const fallbackSelect = page.locator("select:visible").first();
-      const options = await fallbackSelect.evaluate((sel) =>
-        Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
-      );
-      const countryOpt = options.find((o) => o.text.toLowerCase().includes(country.toLowerCase()));
-      if (countryOpt) await fallbackSelect.selectOption(countryOpt.value);
+    } catch (e: any) {
+      console.log(`[Playwright] Country select issue: ${e.message}`);
+      try {
+        const fallbackSelect = page.locator("select:visible").first();
+        const options = await fallbackSelect.evaluate((sel) =>
+          Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
+        );
+        const countryOpt = options.find((o) => o.text.toLowerCase().includes(country.toLowerCase()));
+        if (countryOpt) await fallbackSelect.selectOption(countryOpt.value);
+      } catch {}
     }
 
     console.log("[Playwright] Selecting language...");
-    const langSelect = page.locator('select[data-gigya-name="data.personalization.siteLanguage"]:visible');
-    const hasLang = await langSelect.count();
-    if (hasLang > 0) {
-      const langOpts = await langSelect.evaluate((sel) =>
-        Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
-      );
-      const langOpt = langOpts.find((o) => o.text.toLowerCase().includes(language.toLowerCase()));
-      if (langOpt) await langSelect.selectOption(langOpt.value);
+    try {
+      const langSelect = getVisibleSelect(page, "data.personalization.siteLanguage");
+      const hasLang = await langSelect.count();
+      if (hasLang > 0) {
+        const langOpts = await langSelect.evaluate((sel) =>
+          Array.from((sel as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.textContent?.trim() || "" }))
+        );
+        const langOpt = langOpts.find((o) => o.text.toLowerCase().includes(language.toLowerCase()));
+        if (langOpt) await langSelect.selectOption(langOpt.value);
+      }
+    } catch (e: any) {
+      console.log(`[Playwright] Language select issue: ${e.message}`);
     }
 
     console.log("[Playwright] Checking checkboxes...");
-    const ageCheckbox = page.locator('input[data-gigya-name="preferences.confirmationAge.isConsentGranted"]:visible');
-    if (await ageCheckbox.count() > 0 && !(await ageCheckbox.isChecked())) {
-      await ageCheckbox.check({ force: true });
-    }
-    const termsCheckbox = page.locator('input[data-gigya-name="preferences.terms.LA2028siteTerms.isConsentGranted"]:visible');
-    if (await termsCheckbox.count() > 0 && !(await termsCheckbox.isChecked())) {
-      await termsCheckbox.check({ force: true });
-    }
-    const marketingCheckbox = page.locator('input[data-gigya-name="subscriptions.la2028EmailMarketingCommunications.email.isSubscribed"]:visible');
-    if (await marketingCheckbox.count() > 0 && !(await marketingCheckbox.isChecked())) {
-      await marketingCheckbox.check({ force: true });
+    const checkboxNames = [
+      "preferences.confirmationAge.isConsentGranted",
+      "preferences.terms.LA2028siteTerms.isConsentGranted",
+      "subscriptions.la2028EmailMarketingCommunications.email.isSubscribed",
+    ];
+    for (const name of checkboxNames) {
+      try {
+        const cb = page.locator(`input[data-gigya-name="${name}"]`).and(page.locator(':visible')).first();
+        if (await cb.count() > 0 && !(await cb.isChecked())) {
+          await cb.check({ force: true });
+        }
+      } catch {}
     }
 
     const fallbackCheckboxes = page.locator('input[type="checkbox"]:visible');
     const cbCount = await fallbackCheckboxes.count();
     for (let i = 0; i < cbCount; i++) {
-      if (!(await fallbackCheckboxes.nth(i).isChecked())) {
-        await fallbackCheckboxes.nth(i).check({ force: true });
-      }
+      try {
+        if (!(await fallbackCheckboxes.nth(i).isChecked())) {
+          await fallbackCheckboxes.nth(i).check({ force: true });
+        }
+      } catch {}
     }
 
     console.log("[Playwright] Submitting form...");
-    await page.locator('input[type="submit"]:visible').first().click();
+    const submitBtn = page.locator('input[type="submit"]:visible').first();
+    await submitBtn.click();
 
     console.log("[Playwright] Waiting for response...");
     await page.waitForTimeout(5000);
@@ -190,7 +305,7 @@ export async function fullRegistrationFlow(
       }
     }
 
-    if (!pageText.includes("Enter the code") && !pageText.includes("code")) {
+    if (!pageText.includes("Enter the code") && !pageText.includes("code") && !pageText.includes("Code") && !pageText.includes("verify") && !pageText.includes("Verify")) {
       await context.close();
       return { success: false, error: "Unexpected page state after submit", pageContent: pageText.substring(0, 500) };
     }
@@ -207,8 +322,9 @@ export async function fullRegistrationFlow(
     onStatusUpdate("verifying");
     console.log(`[Playwright] Entering verification code: ${code}`);
 
-    const codeInput = page.locator('input[data-gigya-name="code"]:visible, input.gigya-input-text:visible').first();
-    await codeInput.waitFor({ state: "visible", timeout: 5000 });
+    const codeInput = page.locator('input[data-gigya-name="code"], input.gigya-input-text').and(page.locator(':visible')).first();
+    await codeInput.waitFor({ state: "visible", timeout: 10000 });
+    await codeInput.click();
     await codeInput.fill(code);
     await page.waitForTimeout(500);
 
