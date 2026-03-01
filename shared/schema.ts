@@ -9,6 +9,7 @@ export const accountStatusEnum = pgEnum("account_status", ["pending", "registeri
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
+  email: text("email").notNull().unique(),
   password: text("password").notNull(),
   role: roleEnum("role").notNull().default("user"),
 });
@@ -39,6 +40,7 @@ export const billingRecords = pgTable("billing_records", {
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
+  email: true,
   password: true,
   role: true,
 });

@@ -1,10 +1,21 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername } from "./mailService";
 import { fullRegistrationFlow } from "./playwrightService";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
+
+function hashPassword(password: string): string {
+  return createHash("sha256").update(password).digest("hex");
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.session && req.session.userId) {
+    return next();
+  }
+  return res.status(401).json({ error: "Not authenticated" });
+}
 
 const FIRST_NAMES = [
   "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
@@ -137,7 +148,54 @@ export async function registerRoutes(
     ws.on("close", () => wsClients.delete(ws));
   });
 
-  app.post("/api/create-batch", async (req, res) => {
+  async function ensureDefaultAdmin() {
+    const existing = await storage.getUserByEmail("admin@la28panel.com");
+    if (!existing) {
+      await storage.createUser({
+        username: "admin",
+        email: "admin@la28panel.com",
+        password: hashPassword("admin123"),
+        role: "admin",
+      });
+      console.log("[Auth] Default admin created: admin@la28panel.com / admin123");
+    }
+  }
+  await ensureDefaultAdmin();
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+      const user = await storage.getUserByEmail(email);
+      if (!user || user.password !== hashPassword(password)) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+      req.session.userId = user.id;
+      req.session.role = user.role;
+      res.json({ id: user.id, username: user.username, email: user.email, role: user.role });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ success: true });
+    });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const user = await storage.getUser(req.session.userId);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    res.json({ id: user.id, username: user.username, email: user.email, role: user.role });
+  });
+
+  app.post("/api/create-batch", requireAuth, async (req, res) => {
     try {
       const { count = 1, country = "India", language = "English" } = req.body;
       const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
@@ -187,7 +245,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/create-single", async (req, res) => {
+  app.post("/api/create-single", requireAuth, async (req, res) => {
     try {
       const { firstName, lastName, password, country = "India", language = "English" } = req.body;
       if (!firstName || !lastName || !password) {
@@ -228,29 +286,29 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/accounts", async (_req, res) => {
+  app.get("/api/accounts", requireAuth, async (_req, res) => {
     const all = await storage.getAllAccounts();
     res.json(all);
   });
 
-  app.get("/api/accounts/stats", async (_req, res) => {
+  app.get("/api/accounts/stats", requireAuth, async (_req, res) => {
     const stats = await storage.getAccountStats();
     res.json(stats);
   });
 
-  app.get("/api/accounts/:id", async (req, res) => {
+  app.get("/api/accounts/:id", requireAuth, async (req, res) => {
     const account = await storage.getAccount(req.params.id);
     if (!account) return res.status(404).json({ error: "Not found" });
     res.json(account);
   });
 
-  app.get("/api/billing", async (_req, res) => {
+  app.get("/api/billing", requireAuth, async (_req, res) => {
     const records = await storage.getAllBillingRecords();
     const total = await storage.getBillingTotal();
     res.json({ records, total });
   });
 
-  app.get("/api/dashboard", async (_req, res) => {
+  app.get("/api/dashboard", requireAuth, async (_req, res) => {
     const stats = await storage.getAccountStats();
     const total = await storage.getBillingTotal();
     res.json({ stats, billingTotal: total });

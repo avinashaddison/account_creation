@@ -1,5 +1,12 @@
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, Zap } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, Zap, LogOut, User } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+type LayoutProps = {
+  children: React.ReactNode;
+  user: { id: string; username: string; email: string; role: string };
+  onLogout: () => void;
+};
 
 const nav = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -8,7 +15,7 @@ const nav = [
   { href: "/admin/auto-create", label: "Auto Create", icon: Zap },
 ];
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default function Layout({ children, user, onLogout }: LayoutProps) {
   const [location] = useLocation();
 
   return (
@@ -40,8 +47,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-zinc-800">
-          <div className="text-xs text-zinc-500">$0.11 per account</div>
+        <div className="p-4 border-t border-zinc-800 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+              <User className="w-4 h-4 text-zinc-300" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-zinc-200 truncate" data-testid="text-user-email">{user.email}</p>
+              <p className="text-xs text-zinc-500 capitalize" data-testid="text-user-role">{user.role}</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-zinc-400 hover:text-white hover:bg-white/5"
+            onClick={onLogout}
+            data-testid="button-logout"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Sign Out
+          </Button>
         </div>
       </aside>
 
