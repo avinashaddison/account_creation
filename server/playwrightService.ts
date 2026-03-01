@@ -54,7 +54,14 @@ async function getBrowser(): Promise<Browser> {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--single-process",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--no-first-run",
+        "--no-zygote",
+        "--js-flags=--max-old-space-size=256",
       ],
     });
     browserInstance.on("disconnected", () => {
@@ -243,6 +250,46 @@ export async function fullRegistrationFlow(
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+  const maxRetries = 2;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      console.log(`[Playwright] Retry attempt ${attempt + 1}/${maxRetries}...`);
+      if (browserInstance) {
+        try { await browserInstance.close(); } catch {}
+        browserInstance = null;
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    const result = await doRegistration(email, firstName, lastName, password, country, language, onStatusUpdate, getVerificationCode);
+
+    if (result.error?.includes("Target page, context or browser has been closed") ||
+        result.error?.includes("browser has been closed") ||
+        result.error?.includes("crashed")) {
+      console.log(`[Playwright] Browser crashed, will retry...`);
+      if (browserInstance) {
+        try { await browserInstance.close(); } catch {}
+        browserInstance = null;
+      }
+      continue;
+    }
+
+    return result;
+  }
+
+  return { success: false, error: "Browser crashed after multiple retries" };
+}
+
+async function doRegistration(
+  email: string,
+  firstName: string,
+  lastName: string,
+  password: string,
+  country: string,
+  language: string,
+  onStatusUpdate: (status: string) => void,
+  getVerificationCode: () => Promise<string | null>
+): Promise<{ success: boolean; error?: string; pageContent?: string }> {
   let browser: Browser;
   try {
     browser = await getBrowser();
@@ -259,13 +306,21 @@ export async function fullRegistrationFlow(
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
 
+  await page.route("**/*", (route) => {
+    const resourceType = route.request().resourceType();
+    if (["image", "media", "font", "stylesheet"].includes(resourceType)) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+
   try {
     onStatusUpdate("registering");
     console.log("[Playwright] Navigating to LA28 registration...");
     await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
 
     try {
-      await page.waitForLoadState("networkidle", { timeout: 20000 });
+      await page.waitForLoadState("networkidle", { timeout: 30000 });
     } catch {
       console.log("[Playwright] Network idle timeout, continuing...");
     }
