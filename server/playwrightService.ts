@@ -1,7 +1,36 @@
 import { chromium, type Browser, type Page } from "playwright";
+import { execSync } from "child_process";
 
 let browserInstance: Browser | null = null;
 let launching = false;
+let browserInstalled = false;
+
+async function ensureBrowserInstalled(): Promise<void> {
+  if (browserInstalled) return;
+
+  try {
+    const execPath = chromium.executablePath();
+    const fs = await import("fs");
+    if (fs.existsSync(execPath)) {
+      browserInstalled = true;
+      console.log("[Playwright] Chromium found at:", execPath);
+      return;
+    }
+  } catch {}
+
+  console.log("[Playwright] Chromium not found, installing...");
+  try {
+    execSync("npx playwright install chromium", {
+      stdio: "inherit",
+      timeout: 120000,
+    });
+    browserInstalled = true;
+    console.log("[Playwright] Chromium installed successfully");
+  } catch (err: any) {
+    console.error("[Playwright] Failed to install Chromium:", err.message);
+    throw new Error("Failed to install Chromium browser. Check system dependencies.");
+  }
+}
 
 async function getBrowser(): Promise<Browser> {
   if (browserInstance && browserInstance.isConnected()) {
@@ -9,12 +38,13 @@ async function getBrowser(): Promise<Browser> {
   }
 
   if (launching) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     if (browserInstance && browserInstance.isConnected()) return browserInstance;
   }
 
   launching = true;
   try {
+    await ensureBrowserInstalled();
     browserInstance = await chromium.launch({
       headless: true,
       args: [
