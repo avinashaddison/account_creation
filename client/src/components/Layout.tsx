@@ -1,5 +1,5 @@
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, Zap, LogOut, User, Mail, Users, Wallet } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type LayoutProps = {
@@ -17,7 +17,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
     { href: "/admin/email-server", label: "Email Server", icon: Mail },
     { href: "/admin/billing", label: "Billing", icon: Receipt },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet },
-    { href: "/admin/auto-create", label: "Auto Create", icon: Zap },
+    { href: "/admin/create-server", label: "Account Create Server", icon: Server },
     ...(user.role === "superadmin" ? [{ href: "/admin/manage-admins", label: "Manage Admins", icon: Users }] : []),
   ];
 
@@ -31,7 +31,7 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
 
         <nav className="flex-1 p-3 space-y-1">
           {nav.map((item) => {
-            const isActive = location === item.href;
+            const isActive = location === item.href || (item.href === "/admin/create-server" && location === "/admin/la28-create");
             return (
               <Link key={item.href} href={item.href}>
                 <div

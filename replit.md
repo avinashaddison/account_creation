@@ -31,7 +31,8 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - **Email Server** (`/admin/email-server`) - Browse Addison emails, copy addresses, view real-time inbox
 - **Billing** (`/admin/billing`) - Cost tracking at $0.11 per account
 - **Wallet** (`/admin/wallet`) - View balance, submit TRC20 payment requests, see payment history
-- **Auto Create** (`/admin/auto-create`) - Batch account creation (1-30) with live terminal logs
+- **Account Create Server** (`/admin/create-server`) - Platform selection page with LA28 card
+- **LA28 Account Creator** (`/admin/la28-create`) - Batch account creation (1-30) with live terminal logs
 - **Manage Admins** (`/admin/manage-admins`) - Superadmin only: create/delete admins, add funds, approve/reject payment requests
 
 ## Key Files

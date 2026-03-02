@@ -10,6 +10,7 @@ import Dashboard from "@/pages/Dashboard";
 import AccountStock from "@/pages/AccountStock";
 import Billing from "@/pages/Billing";
 import AutoCreate from "@/pages/AutoCreate";
+import CreateServer from "@/pages/CreateServer";
 import EmailServer from "@/pages/EmailServer";
 import ManageAdmins from "@/pages/ManageAdmins";
 import WalletPage from "@/pages/Wallet";
@@ -33,7 +34,9 @@ function AdminRoutes({ user, onLogout }: { user: AuthUser; onLogout: () => void 
         <Route path="/admin" component={Dashboard} />
         <Route path="/admin/accounts" component={AccountStock} />
         <Route path="/admin/billing" component={Billing} />
-        <Route path="/admin/auto-create" component={AutoCreate} />
+        <Route path="/admin/create-server" component={CreateServer} />
+        <Route path="/admin/la28-create" component={AutoCreate} />
+        <Route path="/admin/auto-create"><Redirect to="/admin/create-server" /></Route>
         <Route path="/admin/email-server" component={EmailServer} />
         <Route path="/admin/wallet" component={WalletPage} />
         {user.role === "superadmin" && (
