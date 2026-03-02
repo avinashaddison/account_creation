@@ -1,8 +1,23 @@
+import { useState } from "react";
 import { useLocation } from "wouter";
-import { ArrowRight, Globe, Shield, Zap, Server } from "lucide-react";
+import { ArrowRight, Globe, Shield, Zap, Server, Ticket, Trophy, Lock } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
 
-const platforms = [
+type Platform = {
+  id: string;
+  name: string;
+  description: string;
+  href: string | null;
+  gradient: string;
+  badge: string;
+  badgeColor: string;
+  icon?: React.ReactNode;
+  stats: { label: string; icon: React.ComponentType<{ className?: string }> }[];
+  comingSoon?: boolean;
+};
+
+const platforms: Platform[] = [
   {
     id: "la28",
     name: "LA28 Accounts",
@@ -17,10 +32,52 @@ const platforms = [
       { label: "US Region", icon: Globe },
     ],
   },
+  {
+    id: "ticketmaster",
+    name: "Ticket Master",
+    description: "Automated Ticketmaster account creation with email verification and profile setup",
+    href: null,
+    gradient: "from-sky-600 via-blue-700 to-indigo-800",
+    badge: "Coming Soon",
+    badgeColor: "bg-amber-400/20 text-amber-300",
+    comingSoon: true,
+    stats: [
+      { label: "Auto Verify", icon: Shield },
+      { label: "Bulk Create", icon: Zap },
+      { label: "Global", icon: Globe },
+    ],
+  },
+  {
+    id: "uefa",
+    name: "UEFA Account",
+    description: "Create verified UEFA accounts for European football events and ticket access",
+    href: null,
+    gradient: "from-emerald-600 via-teal-700 to-cyan-800",
+    badge: "Coming Soon",
+    badgeColor: "bg-amber-400/20 text-amber-300",
+    comingSoon: true,
+    stats: [
+      { label: "Auto Verify", icon: Shield },
+      { label: "Bulk Create", icon: Zap },
+      { label: "EU Region", icon: Globe },
+    ],
+  },
 ];
 
 export default function CreateServer() {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+
+  function handleClick(platform: Platform) {
+    if (platform.comingSoon || !platform.href) {
+      toast({
+        title: "Coming Soon",
+        description: `${platform.name} account creation is not available yet. Stay tuned!`,
+      });
+      return;
+    }
+    navigate(platform.href);
+  }
 
   return (
     <div className="space-y-8">
@@ -35,20 +92,30 @@ export default function CreateServer() {
         {platforms.map((platform) => (
           <div
             key={platform.id}
-            onClick={() => navigate(platform.href)}
+            onClick={() => handleClick(platform)}
             className="group relative cursor-pointer"
             data-testid={`card-platform-${platform.id}`}
           >
-            <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} rounded-2xl opacity-80 group-hover:opacity-100 transition-all duration-300`} />
+            <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} rounded-2xl ${platform.comingSoon ? "opacity-50 group-hover:opacity-65" : "opacity-80 group-hover:opacity-100"} transition-all duration-300`} />
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent rounded-2xl" />
             <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 group-hover:ring-white/25 transition-all" />
 
             <div className="relative p-6 rounded-2xl min-h-[280px] flex flex-col justify-between text-white">
               <div>
                 <div className="flex items-start justify-between mb-5">
-                  <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden">
-                    <img src={la28Logo} alt="LA28" className="w-16 h-16 object-contain" />
-                  </div>
+                  {platform.id === "la28" ? (
+                    <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden">
+                      <img src={la28Logo} alt="LA28" className="w-16 h-16 object-contain" />
+                    </div>
+                  ) : platform.id === "ticketmaster" ? (
+                    <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-2xl shadow-black/30 border border-white/10">
+                      <Ticket className="w-10 h-10 text-white/90" />
+                    </div>
+                  ) : (
+                    <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-2xl shadow-black/30 border border-white/10">
+                      <Trophy className="w-10 h-10 text-white/90" />
+                    </div>
+                  )}
                   <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${platform.badgeColor} backdrop-blur-sm`}>
                     {platform.badge}
                   </span>
@@ -68,20 +135,16 @@ export default function CreateServer() {
                   ))}
                 </div>
                 <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-white/25 transition-all duration-300">
-                  <ArrowRight className="w-4 h-4 text-white group-hover:translate-x-0.5 transition-transform duration-300" />
+                  {platform.comingSoon ? (
+                    <Lock className="w-4 h-4 text-white/60" />
+                  ) : (
+                    <ArrowRight className="w-4 h-4 text-white group-hover:translate-x-0.5 transition-transform duration-300" />
+                  )}
                 </div>
               </div>
             </div>
           </div>
         ))}
-
-        <div className="relative rounded-2xl border border-dashed border-zinc-800 min-h-[280px] flex flex-col items-center justify-center text-zinc-600 p-6">
-          <div className="w-14 h-14 rounded-xl bg-zinc-800/50 flex items-center justify-center mb-3">
-            <Server className="w-6 h-6 text-zinc-600" />
-          </div>
-          <p className="text-sm font-medium text-zinc-500">More Platforms</p>
-          <p className="text-xs text-zinc-700 mt-1">Coming Soon</p>
-        </div>
       </div>
     </div>
   );
