@@ -3,6 +3,8 @@ import { useLocation } from "wouter";
 import { ArrowRight, Globe, Shield, Zap, Server, Ticket, Trophy, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
+import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
+import uefaLogo from "@assets/UEFA_Champions_League.svg_1772418059822.png";
 
 type Platform = {
   id: string;
@@ -108,12 +110,12 @@ export default function CreateServer() {
                       <img src={la28Logo} alt="LA28" className="w-16 h-16 object-contain" />
                     </div>
                   ) : platform.id === "ticketmaster" ? (
-                    <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-2xl shadow-black/30 border border-white/10">
-                      <Ticket className="w-10 h-10 text-white/90" />
+                    <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden">
+                      <img src={ticketmasterLogo} alt="Ticketmaster" className="w-full h-full object-cover" />
                     </div>
                   ) : (
-                    <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center shadow-2xl shadow-black/30 border border-white/10">
-                      <Trophy className="w-10 h-10 text-white/90" />
+                    <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden p-2">
+                      <img src={uefaLogo} alt="UEFA" className="w-14 h-14 object-contain" />
                     </div>
                   )}
                   <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${platform.badgeColor} backdrop-blur-sm`}>
