@@ -94,10 +94,10 @@ export default function AccountStock() {
 
   function getStatusIcon(status: string) {
     switch (status) {
-      case "verified": return <CheckCircle2 className="w-4 h-4 text-green-500" />;
-      case "failed": return <XCircle className="w-4 h-4 text-red-500" />;
-      case "pending": return <Clock className="w-4 h-4 text-yellow-500" />;
-      default: return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
+      case "verified": return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+      case "failed": return <XCircle className="w-4 h-4 text-red-400" />;
+      case "pending": return <Clock className="w-4 h-4 text-amber-400" />;
+      default: return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />;
     }
   }
 
@@ -173,7 +173,7 @@ export default function AccountStock() {
                         </TableCell>
                         <TableCell>
                           {acc.verificationCode ? (
-                            <code className="text-xs font-bold text-green-600">{acc.verificationCode}</code>
+                            <code className="text-xs font-bold text-emerald-400">{acc.verificationCode}</code>
                           ) : (
                             <span className="text-xs text-muted-foreground">-</span>
                           )}

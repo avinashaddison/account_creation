@@ -267,7 +267,7 @@ export default function ManageAdmins() {
                             {admin.role === "superadmin" ? (
                               <span className="text-xs text-muted-foreground">N/A</span>
                             ) : (
-                              <span className="text-sm font-mono font-medium text-green-600">
+                              <span className="text-sm font-mono font-medium text-emerald-400">
                                 ${parseFloat(admin.walletBalance || "0").toFixed(2)}
                               </span>
                             )}
@@ -410,7 +410,7 @@ export default function ManageAdmins() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="text-green-600 border-green-200 hover:bg-green-50"
+                                  className="text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10"
                                   onClick={() => handlePaymentAction(p.id, "approve")}
                                   data-testid={`button-approve-${p.id}`}
                                 >
@@ -419,7 +419,7 @@ export default function ManageAdmins() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="text-red-600 border-red-200 hover:bg-red-50"
+                                  className="text-red-400 border-red-500/20 hover:bg-red-500/10"
                                   onClick={() => handlePaymentAction(p.id, "reject")}
                                   data-testid={`button-reject-${p.id}`}
                                 >

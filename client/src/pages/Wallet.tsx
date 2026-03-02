@@ -120,12 +120,12 @@ export default function Wallet() {
         <Card data-testid="card-wallet-balance">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Wallet Balance</CardTitle>
-            <div className="p-2 rounded-lg text-green-600 bg-green-50">
+            <div className="p-2 rounded-lg text-emerald-400 bg-emerald-500/10">
               <WalletIcon className="w-4 h-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-green-600">${balance.toFixed(2)}</div>
+            <div className="text-3xl font-bold text-emerald-400">${balance.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground mt-1">Available for account creation</p>
           </CardContent>
         </Card>
@@ -133,7 +133,7 @@ export default function Wallet() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Accounts Available</CardTitle>
-            <div className="p-2 rounded-lg text-blue-600 bg-blue-50">
+            <div className="p-2 rounded-lg text-blue-400 bg-blue-500/10">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -146,7 +146,7 @@ export default function Wallet() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Cost per Account</CardTitle>
-            <div className="p-2 rounded-lg text-purple-600 bg-purple-50">
+            <div className="p-2 rounded-lg text-purple-400 bg-purple-500/10">
               <WalletIcon className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -163,10 +163,10 @@ export default function Wallet() {
             <CardTitle className="text-lg">Add Funds via Binance (TRC20 - USDT)</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="p-4 rounded-lg bg-yellow-50 border border-yellow-200">
-              <p className="text-sm font-medium text-yellow-800 mb-2">Step 1: Send USDT to this TRC20 address</p>
+            <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/15">
+              <p className="text-sm font-medium text-amber-300 mb-2">Step 1: Send USDT to this TRC20 address</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs bg-white px-3 py-2 rounded border font-mono break-all" data-testid="text-trc20-address">
+                <code className="flex-1 text-xs bg-white/5 text-zinc-300 px-3 py-2 rounded border border-white/10 font-mono break-all" data-testid="text-trc20-address">
                   {data?.trc20Address}
                 </code>
                 <Button variant="outline" size="sm" onClick={copyAddress} data-testid="button-copy-trc20">
@@ -175,11 +175,11 @@ export default function Wallet() {
               </div>
             </div>
 
-            <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
-              <p className="text-sm font-medium text-blue-800 mb-2">Step 2: Submit payment details for approval</p>
+            <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+              <p className="text-sm font-medium text-blue-300 mb-2">Step 2: Submit payment details for approval</p>
               <form onSubmit={submitPaymentRequest} className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-blue-800">Amount (USDT)</Label>
+                  <Label className="text-blue-300">Amount (USDT)</Label>
                   <Input
                     type="number"
                     step="0.01"
@@ -192,7 +192,7 @@ export default function Wallet() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-blue-800">Transaction Hash (optional)</Label>
+                  <Label className="text-blue-300">Transaction Hash (optional)</Label>
                   <Input
                     value={txHash}
                     onChange={(e) => setTxHash(e.target.value)}
@@ -211,12 +211,12 @@ export default function Wallet() {
               </form>
             </div>
 
-            <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+            <div className="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/15">
               <div className="flex items-center gap-2 mb-1">
-                <MessageCircle className="w-4 h-4 text-green-700" />
-                <p className="text-sm font-medium text-green-800">Step 3: Notify admin on WhatsApp</p>
+                <MessageCircle className="w-4 h-4 text-emerald-400" />
+                <p className="text-sm font-medium text-emerald-300">Step 3: Notify admin on WhatsApp</p>
               </div>
-              <p className="text-xs text-green-700">After submitting, WhatsApp will open automatically so you can message the admin for quick approval.</p>
+              <p className="text-xs text-emerald-400/70">After submitting, WhatsApp will open automatically so you can message the admin for quick approval.</p>
             </div>
           </CardContent>
         </Card>

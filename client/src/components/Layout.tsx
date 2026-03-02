@@ -22,27 +22,27 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
   ];
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
-      <aside className="w-64 bg-zinc-900 text-white flex flex-col shrink-0" data-testid="sidebar">
-        <div className="p-6 border-b border-zinc-800">
-          <h2 className="text-xl font-black tracking-tight" data-testid="text-brand">Addison Panel</h2>
-          <p className="text-xs text-zinc-400 mt-1">Account Management</p>
+    <div className="min-h-screen flex bg-[#0a0a0f]">
+      <aside className="w-64 bg-[#111118] border-r border-white/5 text-white flex flex-col shrink-0" data-testid="sidebar">
+        <div className="p-6 border-b border-white/5">
+          <h2 className="text-xl font-black tracking-tight bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent" data-testid="text-brand">Addison Panel</h2>
+          <p className="text-[11px] text-zinc-500 mt-1">Account Management</p>
         </div>
 
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-0.5">
           {nav.map((item) => {
             const isActive = location === item.href || (item.href === "/admin/create-server" && location === "/admin/la28-create");
             return (
               <Link key={item.href} href={item.href}>
                 <div
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-all duration-200 ${
                     isActive
-                      ? "bg-white/10 text-white"
-                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                      ? "bg-gradient-to-r from-blue-600/20 to-purple-600/20 text-white border border-blue-500/20"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
                   }`}
                   data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
                 >
-                  <item.icon className="w-4 h-4" />
+                  <item.icon className={`w-4 h-4 ${isActive ? "text-blue-400" : ""}`} />
                   {item.label}
                 </div>
               </Link>
@@ -50,20 +50,20 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-zinc-800 space-y-3">
+        <div className="p-4 border-t border-white/5 space-y-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-              <User className="w-4 h-4 text-zinc-300" />
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center">
+              <User className="w-4 h-4 text-zinc-400" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-zinc-200 truncate" data-testid="text-user-email">{user.email}</p>
-              <p className="text-xs text-zinc-500 capitalize" data-testid="text-user-role">{user.role}</p>
+              <p className="text-sm font-medium text-zinc-300 truncate" data-testid="text-user-email">{user.email}</p>
+              <p className="text-[11px] text-zinc-600 capitalize" data-testid="text-user-role">{user.role}</p>
             </div>
           </div>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-zinc-400 hover:text-white hover:bg-white/5"
+            className="w-full justify-start text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
             onClick={onLogout}
             data-testid="button-logout"
           >

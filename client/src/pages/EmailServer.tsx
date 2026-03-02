@@ -141,7 +141,7 @@ export default function EmailServer() {
                     <div
                       key={em.id}
                       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedEmail?.id === em.id ? "border-blue-500 bg-blue-50" : "hover:bg-muted/50"
+                        selectedEmail?.id === em.id ? "border-blue-500/40 bg-blue-500/10" : "hover:bg-white/5"
                       }`}
                       onClick={() => fetchInbox(em)}
                       data-testid={`email-account-${em.id}`}
@@ -210,7 +210,7 @@ export default function EmailServer() {
                         <p className="text-[10px] text-muted-foreground">{new Date(msg.createdAt).toLocaleString()}</p>
                       </div>
                       <p className="text-sm font-semibold mb-2">{msg.subject}</p>
-                      <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap">
+                      <div className="text-xs text-muted-foreground bg-white/5 p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap">
                         {msg.text}
                       </div>
                     </div>

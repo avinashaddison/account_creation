@@ -25,10 +25,10 @@ export default function CreateServer() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight" data-testid="text-create-server-title">
+        <h1 className="text-3xl font-bold tracking-tight text-white" data-testid="text-create-server-title">
           Account Create Server
         </h1>
-        <p className="text-muted-foreground mt-1">Select a platform to start creating accounts</p>
+        <p className="text-zinc-500 mt-1">Select a platform to start creating accounts</p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -39,15 +39,15 @@ export default function CreateServer() {
             className="group relative cursor-pointer"
             data-testid={`card-platform-${platform.id}`}
           >
-            <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} rounded-2xl opacity-90 group-hover:opacity-100 transition-all duration-300`} />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent rounded-2xl" />
-            <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 group-hover:ring-white/20 transition-all" />
+            <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} rounded-2xl opacity-80 group-hover:opacity-100 transition-all duration-300`} />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent rounded-2xl" />
+            <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 group-hover:ring-white/25 transition-all" />
 
-            <div className="relative p-6 rounded-2xl min-h-[260px] flex flex-col justify-between text-white">
+            <div className="relative p-6 rounded-2xl min-h-[280px] flex flex-col justify-between text-white">
               <div>
-                <div className="flex items-center justify-between mb-5">
-                  <div className="w-14 h-14 rounded-xl bg-white flex items-center justify-center shadow-lg shadow-black/20 overflow-hidden">
-                    <img src={la28Logo} alt="LA28" className="w-12 h-12 object-contain" />
+                <div className="flex items-start justify-between mb-5">
+                  <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden">
+                    <img src={la28Logo} alt="LA28" className="w-16 h-16 object-contain" />
                   </div>
                   <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${platform.badgeColor} backdrop-blur-sm`}>
                     {platform.badge}
@@ -55,13 +55,13 @@ export default function CreateServer() {
                 </div>
 
                 <h3 className="text-2xl font-bold mb-2 tracking-tight">{platform.name}</h3>
-                <p className="text-sm text-white/70 leading-relaxed">{platform.description}</p>
+                <p className="text-sm text-white/60 leading-relaxed">{platform.description}</p>
               </div>
 
               <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/10">
                 <div className="flex gap-4">
                   {platform.stats.map((stat) => (
-                    <div key={stat.label} className="flex items-center gap-1.5 text-xs text-white/60">
+                    <div key={stat.label} className="flex items-center gap-1.5 text-xs text-white/50">
                       <stat.icon className="w-3.5 h-3.5" />
                       <span>{stat.label}</span>
                     </div>
@@ -75,12 +75,12 @@ export default function CreateServer() {
           </div>
         ))}
 
-        <div className="relative rounded-2xl border-2 border-dashed border-slate-200 min-h-[260px] flex flex-col items-center justify-center text-slate-400 p-6">
-          <div className="w-14 h-14 rounded-xl bg-slate-100 flex items-center justify-center mb-3">
-            <Server className="w-6 h-6 text-slate-300" />
+        <div className="relative rounded-2xl border border-dashed border-zinc-800 min-h-[280px] flex flex-col items-center justify-center text-zinc-600 p-6">
+          <div className="w-14 h-14 rounded-xl bg-zinc-800/50 flex items-center justify-center mb-3">
+            <Server className="w-6 h-6 text-zinc-600" />
           </div>
-          <p className="text-sm font-medium text-slate-400">More Platforms</p>
-          <p className="text-xs text-slate-300 mt-1">Coming Soon</p>
+          <p className="text-sm font-medium text-zinc-500">More Platforms</p>
+          <p className="text-xs text-zinc-700 mt-1">Coming Soon</p>
         </div>
       </div>
     </div>

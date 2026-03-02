@@ -54,7 +54,7 @@ export default function Billing() {
         <Card data-testid="card-total-cost">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Cost</CardTitle>
-            <div className="p-2 rounded-lg text-green-600 bg-green-50">
+            <div className="p-2 rounded-lg text-emerald-400 bg-emerald-500/10">
               <DollarSign className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -66,7 +66,7 @@ export default function Billing() {
         <Card data-testid="card-total-charges">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Charges</CardTitle>
-            <div className="p-2 rounded-lg text-blue-600 bg-blue-50">
+            <div className="p-2 rounded-lg text-blue-400 bg-blue-500/10">
               <Receipt className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -78,7 +78,7 @@ export default function Billing() {
         <Card data-testid="card-rate">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Rate per Account</CardTitle>
-            <div className="p-2 rounded-lg text-purple-600 bg-purple-50">
+            <div className="p-2 rounded-lg text-purple-400 bg-purple-500/10">
               <TrendingUp className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -112,7 +112,7 @@ export default function Billing() {
                       <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
                       <TableCell className="text-sm">{rec.description}</TableCell>
                       <TableCell>
-                        <span className="font-mono font-medium text-green-600">${parseFloat(rec.amount).toFixed(2)}</span>
+                        <span className="font-mono font-medium text-emerald-400">${parseFloat(rec.amount).toFixed(2)}</span>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(rec.createdAt).toLocaleString()}
