@@ -587,12 +587,112 @@ async function doRegistration(
     const hasError = finalText.toLowerCase().includes("invalid code") ||
                      finalText.toLowerCase().includes("expired");
 
-    await context.close();
-
     if (hasError) {
+      await context.close();
       return { success: false, error: "Verification failed", pageContent: finalText.substring(0, 500) };
     }
 
+    onStatusUpdate("verifying");
+    console.log("[Playwright] Registration verified! Now logging in to tickets portal...");
+
+    try {
+      await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 20000 });
+      } catch {
+        console.log("[Playwright] Tickets portal network idle timeout, continuing...");
+      }
+      await page.waitForTimeout(5000);
+      await forceRemoveOverlays(page);
+
+      const ticketsPageText = await getPageText(page);
+      const ticketsLower = ticketsPageText.toLowerCase();
+      console.log("[Playwright] Tickets portal text (first 300):", ticketsPageText.substring(0, 300));
+
+      const needsLogin = ticketsLower.includes("sign in") || ticketsLower.includes("log in") || ticketsLower.includes("login") || ticketsLower.includes("email") && ticketsLower.includes("password");
+
+      if (needsLogin) {
+        console.log("[Playwright] Login form detected on tickets portal, filling credentials...");
+        await forceRemoveOverlays(page);
+        await page.waitForTimeout(2000);
+
+        const loginFormReady = await page.evaluate(`(() => {
+          var inputs = document.querySelectorAll('input[type="email"], input[name="email"], input[data-gigya-name="loginID"], input[data-gigya-name="email"], input[placeholder*="mail"]');
+          return inputs.length > 0;
+        })()`);
+
+        if (loginFormReady) {
+          const loginEmailFilled = await page.evaluate(`((emailVal) => {
+            var selectors = ['input[data-gigya-name="loginID"]', 'input[type="email"]', 'input[name="email"]', 'input[data-gigya-name="email"]', 'input[placeholder*="mail"]'];
+            for (var s = 0; s < selectors.length; s++) {
+              var inputs = document.querySelectorAll(selectors[s]);
+              for (var i = 0; i < inputs.length; i++) {
+                var el = inputs[i];
+                if (el.type === 'hidden') continue;
+                var rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                  if (setter && setter.set) setter.set.call(el, emailVal);
+                  else el.value = emailVal;
+                  el.dispatchEvent(new Event('focus', { bubbles: true }));
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                  el.dispatchEvent(new Event('blur', { bubbles: true }));
+                  return true;
+                }
+              }
+            }
+            return false;
+          })("${email.replace(/"/g, '\\"')}")`) as boolean;
+          console.log(`[Playwright] Login email filled: ${loginEmailFilled}`);
+
+          const loginPwFilled = await page.evaluate(`((pwVal) => {
+            var inputs = document.querySelectorAll('input[type="password"], input[data-gigya-name="password"]');
+            for (var i = 0; i < inputs.length; i++) {
+              var el = inputs[i];
+              if (el.type === 'hidden') continue;
+              var rect = el.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                if (setter && setter.set) setter.set.call(el, pwVal);
+                else el.value = pwVal;
+                el.dispatchEvent(new Event('focus', { bubbles: true }));
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                return true;
+              }
+            }
+            return false;
+          })("${password.replace(/"/g, '\\"')}")`) as boolean;
+          console.log(`[Playwright] Login password filled: ${loginPwFilled}`);
+
+          await page.waitForTimeout(500);
+          await clickSubmitViaJS(page);
+          console.log("[Playwright] Login submitted, waiting for redirect...");
+
+          await page.waitForTimeout(8000);
+
+          const afterLoginText = await getPageText(page);
+          const afterLoginUrl = page.url();
+          console.log("[Playwright] After login URL:", afterLoginUrl);
+          console.log("[Playwright] After login text (first 300):", afterLoginText.substring(0, 300));
+
+          if (afterLoginUrl.includes("mycustomerdata") || afterLoginText.toLowerCase().includes("customer") || afterLoginText.toLowerCase().includes("profile") || afterLoginText.toLowerCase().includes("my account")) {
+            console.log("[Playwright] Successfully logged in to tickets portal!");
+            onStatusUpdate("verified");
+          } else {
+            console.log("[Playwright] Login may have issues, but registration was successful");
+          }
+        }
+      } else {
+        console.log("[Playwright] Already logged in or redirected to profile");
+      }
+    } catch (loginErr: any) {
+      console.log("[Playwright] Tickets portal login attempt error (non-fatal):", loginErr.message);
+    }
+
+    await context.close();
     return { success: true, pageContent: finalText.substring(0, 500) };
   } catch (err: any) {
     console.error("[Playwright] Error:", err.message);
