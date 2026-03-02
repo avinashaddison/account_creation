@@ -2,6 +2,9 @@ import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
+import { db } from "./db";
+import { users } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
 import { fullRegistrationFlow } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
@@ -242,7 +245,7 @@ export async function registerRoutes(
       }
       req.session.userId = user.id;
       req.session.role = user.role;
-      res.json({ id: user.id, username: user.username, email: user.email, role: user.role });
+      res.json({ id: user.id, username: user.username, email: user.email, role: user.role, walletBalance: user.walletBalance, panelName: user.panelName || "Addison Panel" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -267,7 +270,23 @@ export async function registerRoutes(
       role: user.role,
       freeAccountsUsed: user.freeAccountsUsed,
       walletBalance: user.walletBalance,
+      panelName: user.panelName || "Addison Panel",
     });
+  });
+
+  app.put("/api/auth/panel-name", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const { panelName } = req.body;
+      if (!panelName || typeof panelName !== "string" || panelName.trim().length === 0) {
+        return res.status(400).json({ error: "Panel name is required" });
+      }
+      const trimmed = panelName.trim().slice(0, 50);
+      await db.update(users).set({ panelName: trimmed }).where(eq(users.id, userId));
+      res.json({ panelName: trimmed });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/admin/users", requireAuth, requireSuperAdmin, async (_req, res) => {
@@ -289,7 +308,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/users", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
-      const { username, email, password, role = "admin" } = req.body;
+      const { username, email, password, role = "admin", panelName } = req.body;
       if (!username || !email || !password) {
         return res.status(400).json({ error: "Username, email, and password are required" });
       }
@@ -306,6 +325,9 @@ export async function registerRoutes(
         password: hashPassword(password),
         role,
       });
+      if (panelName && typeof panelName === "string" && panelName.trim()) {
+        await db.update(users).set({ panelName: panelName.trim().slice(0, 50) }).where(eq(users.id, user.id));
+      }
       res.json({ id: user.id, username: user.username, email: user.email, role: user.role });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

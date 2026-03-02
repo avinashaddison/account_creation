@@ -25,11 +25,12 @@ export type AuthUser = {
   role: string;
   freeAccountsUsed?: number;
   walletBalance?: string;
+  panelName?: string;
 };
 
-function AdminRoutes({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; onLogout: () => void; onPanelNameChange: (name: string) => void }) {
   return (
-    <Layout user={user} onLogout={onLogout}>
+    <Layout user={user} onLogout={onLogout} onPanelNameChange={onPanelNameChange}>
       <Switch>
         <Route path="/admin" component={Dashboard} />
         <Route path="/admin/accounts" component={AccountStock} />
@@ -78,6 +79,10 @@ function App() {
     setUser(u);
   }
 
+  function handlePanelNameChange(name: string) {
+    setUser((prev) => prev ? { ...prev, panelName: name } : prev);
+  }
+
   if (checking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-900">
@@ -96,10 +101,10 @@ function App() {
               <Redirect to="/admin" />
             </Route>
             <Route path="/admin/:rest*">
-              <AdminRoutes user={user} onLogout={handleLogout} />
+              <AdminRoutes user={user} onLogout={handleLogout} onPanelNameChange={handlePanelNameChange} />
             </Route>
             <Route path="/admin">
-              <AdminRoutes user={user} onLogout={handleLogout} />
+              <AdminRoutes user={user} onLogout={handleLogout} onPanelNameChange={handlePanelNameChange} />
             </Route>
             <Route path="/login">
               <Redirect to="/admin" />

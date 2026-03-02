@@ -15,6 +15,7 @@ export const users = pgTable("users", {
   role: roleEnum("role").notNull().default("admin"),
   freeAccountsUsed: integer("free_accounts_used").notNull().default(0),
   walletBalance: numeric("wallet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  panelName: text("panel_name").notNull().default("Addison Panel"),
   createdBy: varchar("created_by"),
 });
 

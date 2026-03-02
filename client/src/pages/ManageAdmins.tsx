@@ -40,6 +40,7 @@ export default function ManageAdmins() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [panelName, setPanelName] = useState("");
   const [fundUserId, setFundUserId] = useState("");
   const [fundAmount, setFundAmount] = useState("");
   const [addingFunds, setAddingFunds] = useState(false);
@@ -75,7 +76,7 @@ export default function ManageAdmins() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password, role: "admin" }),
+        body: JSON.stringify({ username, email, password, role: "admin", panelName: panelName || undefined }),
         credentials: "include",
       });
       const data = await res.json();
@@ -84,7 +85,7 @@ export default function ManageAdmins() {
         return;
       }
       toast({ title: "Admin Created", description: `${data.email} has been added` });
-      setUsername(""); setEmail(""); setPassword("");
+      setUsername(""); setEmail(""); setPassword(""); setPanelName("");
       setShowForm(false);
       fetchAdmins();
     } catch {
@@ -179,7 +180,7 @@ export default function ManageAdmins() {
             <CardTitle className="text-lg">Create New Admin</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={createAdmin} className="grid gap-4 md:grid-cols-4">
+            <form onSubmit={createAdmin} className="grid gap-4 md:grid-cols-5">
               <div className="space-y-1.5">
                 <Label>Username</Label>
                 <Input value={username} onChange={(e) => setUsername(e.target.value)} required data-testid="input-admin-username" />
@@ -191,6 +192,10 @@ export default function ManageAdmins() {
               <div className="space-y-1.5">
                 <Label>Password</Label>
                 <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required data-testid="input-admin-password" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Panel Name</Label>
+                <Input value={panelName} onChange={(e) => setPanelName(e.target.value)} placeholder="e.g. Addison Panel" maxLength={50} data-testid="input-admin-panel-name" />
               </div>
               <div className="flex items-end">
                 <Button type="submit" disabled={creating} className="w-full" data-testid="button-create-admin">
