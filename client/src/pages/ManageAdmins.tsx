@@ -240,7 +240,7 @@ export default function ManageAdmins() {
                         <TableHead>Username</TableHead>
                         <TableHead>Email</TableHead>
                         <TableHead>Role</TableHead>
-                        <TableHead>Accounts Used</TableHead>
+                        <TableHead>Accounts Created</TableHead>
                         <TableHead>Wallet Balance</TableHead>
                         <TableHead className="w-10"></TableHead>
                       </TableRow>
@@ -260,7 +260,7 @@ export default function ManageAdmins() {
                             {admin.role === "superadmin" ? (
                               <span className="text-xs text-muted-foreground">Unlimited</span>
                             ) : (
-                              <span className="text-sm">{admin.freeAccountsUsed} / 30</span>
+                              <span className="text-sm">{admin.freeAccountsUsed}</span>
                             )}
                           </TableCell>
                           <TableCell>
