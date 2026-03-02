@@ -51,7 +51,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
   return (
     <div className="min-h-screen flex bg-[#0a0a0f]">
-      <aside className="w-64 bg-[#111118] border-r border-white/5 text-white flex flex-col shrink-0" data-testid="sidebar">
+      <aside className="w-64 bg-[#111118] border-r border-white/5 text-white flex flex-col shrink-0 h-screen sticky top-0" data-testid="sidebar">
         <div className="p-5 m-3 mb-0 rounded-xl bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-indigo-600/10 border border-white/[0.06]">
           {isEditing ? (
             <div className="space-y-2">
