@@ -428,27 +428,20 @@ export async function registerRoutes(
       const { count = 1, country = "United States", language = "English" } = req.body;
       const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
 
-      if (user.role !== "superadmin") {
-        const freeRemaining = Math.max(0, FREE_ACCOUNT_LIMIT - user.freeAccountsUsed);
-        if (numAccounts > freeRemaining) {
-          const paidAccounts = numAccounts - freeRemaining;
-          const walletBalance = parseFloat(user.walletBalance || "0");
-          const requiredBalance = paidAccounts * COST_PER_ACCOUNT;
-          if (walletBalance < requiredBalance) {
-            return res.status(403).json({
-              error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${paidAccounts} paid accounts. Your wallet balance is $${walletBalance.toFixed(2)}. Free accounts remaining: ${freeRemaining}.`,
-              walletBalance,
-              freeRemaining,
-              required: requiredBalance,
-            });
-          }
-          const debited = await storage.debitWallet(userId, requiredBalance);
-          if (!debited) {
-            return res.status(403).json({
-              error: "Failed to debit wallet. Insufficient balance.",
-            });
-          }
-        }
+      const walletBalance = parseFloat(user.walletBalance || "0");
+      const requiredBalance = numAccounts * COST_PER_ACCOUNT;
+      if (walletBalance < requiredBalance) {
+        return res.status(403).json({
+          error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${numAccounts} accounts. Your wallet balance is $${walletBalance.toFixed(2)}.`,
+          walletBalance,
+          required: requiredBalance,
+        });
+      }
+      const debited = await storage.debitWallet(userId, requiredBalance);
+      if (!debited) {
+        return res.status(403).json({
+          error: "Failed to debit wallet. Insufficient balance.",
+        });
       }
 
       const batchId = randomUUID();
@@ -505,20 +498,15 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      if (user.role !== "superadmin") {
-        const freeRemaining = Math.max(0, FREE_ACCOUNT_LIMIT - user.freeAccountsUsed);
-        if (freeRemaining <= 0) {
-          const walletBalance = parseFloat(user.walletBalance || "0");
-          if (walletBalance < COST_PER_ACCOUNT) {
-            return res.status(403).json({
-              error: `Insufficient balance. Add funds to your wallet to continue. Balance: $${walletBalance.toFixed(2)}`,
-            });
-          }
-          const debited = await storage.debitWallet(userId, COST_PER_ACCOUNT);
-          if (!debited) {
-            return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
-          }
-        }
+      const walletBalance = parseFloat(user.walletBalance || "0");
+      if (walletBalance < COST_PER_ACCOUNT) {
+        return res.status(403).json({
+          error: `Insufficient balance. Add funds to your wallet to continue. Balance: $${walletBalance.toFixed(2)}`,
+        });
+      }
+      const debited = await storage.debitWallet(userId, COST_PER_ACCOUNT);
+      if (!debited) {
+        return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
       }
 
       const { firstName, lastName, password, country = "United States", language = "English" } = req.body;
