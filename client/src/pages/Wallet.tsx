@@ -133,7 +133,7 @@ export default function Wallet() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Accounts Available</CardTitle>
-            <div className="p-2 rounded-lg text-blue-400 bg-blue-500/10">
+            <div className="p-2 rounded-lg text-red-400 bg-red-500/10">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -146,7 +146,7 @@ export default function Wallet() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Cost per Account</CardTitle>
-            <div className="p-2 rounded-lg text-purple-400 bg-purple-500/10">
+            <div className="p-2 rounded-lg text-rose-400 bg-rose-500/10">
               <WalletIcon className="w-4 h-4" />
             </div>
           </CardHeader>
@@ -175,11 +175,11 @@ export default function Wallet() {
               </div>
             </div>
 
-            <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
-              <p className="text-sm font-medium text-blue-300 mb-2">Step 2: Submit payment details for approval</p>
+            <div className="p-4 rounded-lg bg-red-500/5 border border-red-500/15">
+              <p className="text-sm font-medium text-red-300 mb-2">Step 2: Submit payment details for approval</p>
               <form onSubmit={submitPaymentRequest} className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-blue-300">Amount (USDT)</Label>
+                  <Label className="text-red-300">Amount (USDT)</Label>
                   <Input
                     type="number"
                     step="0.01"
@@ -192,7 +192,7 @@ export default function Wallet() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-blue-300">Transaction Hash (optional)</Label>
+                  <Label className="text-red-300">Transaction Hash (optional)</Label>
                   <Input
                     value={txHash}
                     onChange={(e) => setTxHash(e.target.value)}

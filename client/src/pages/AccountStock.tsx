@@ -97,7 +97,7 @@ export default function AccountStock() {
       case "verified": return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
       case "failed": return <XCircle className="w-4 h-4 text-red-400" />;
       case "pending": return <Clock className="w-4 h-4 text-amber-400" />;
-      default: return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />;
+      default: return <Loader2 className="w-4 h-4 text-red-400 animate-spin" />;
     }
   }
 

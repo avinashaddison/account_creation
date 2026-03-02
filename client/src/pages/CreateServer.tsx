@@ -8,7 +8,7 @@ const platforms = [
     name: "LA28 Accounts",
     description: "Create verified LA28 Olympic ID accounts with automated email verification",
     href: "/admin/la28-create",
-    gradient: "from-blue-600 via-indigo-600 to-purple-700",
+    gradient: "from-red-600 via-rose-600 to-red-800",
     badge: "Active",
     badgeColor: "bg-emerald-400/20 text-emerald-300",
     stats: [

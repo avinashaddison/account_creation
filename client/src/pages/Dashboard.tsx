@@ -88,7 +88,7 @@ export default function Dashboard() {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: "Total Accounts", value: total, color: "blue", icon: Users, sub: `$${(data?.billingTotal || 0).toFixed(2)} total invested`, subIcon: TrendingUp },
+          { label: "Total Accounts", value: total, color: "red", icon: Users, sub: `$${(data?.billingTotal || 0).toFixed(2)} total invested`, subIcon: TrendingUp },
           { label: "Verified", value: verified, color: "emerald", icon: CheckCircle2, sub: `${successRate}% success rate`, subIcon: Activity },
           { label: "Failed", value: failed, color: "red", icon: XCircle, sub: `${total > 0 ? Math.round((failed / total) * 100) : 0}% failure rate`, subIcon: null },
           { label: "In Progress", value: pending, color: "amber", icon: Clock, sub: pending > 0 ? "Processing..." : "All clear", subIcon: null },
@@ -190,24 +190,24 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="lg:col-span-2 rounded-xl bg-[#111118] border border-white/5 p-6 relative overflow-hidden">
-            <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-gradient-to-br from-purple-500/5 to-indigo-500/5 rounded-full" />
+            <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-gradient-to-br from-red-500/5 to-rose-500/5 rounded-full" />
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-4 flex items-center gap-2">
               <Zap className="w-4 h-4" /> Quick Stats
             </h3>
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 rounded-xl bg-purple-500/5 border border-purple-500/10">
+              <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/10">
                 <div className="flex items-center gap-2 mb-2">
-                  <DollarSign className="w-4 h-4 text-purple-400" />
-                  <span className="text-xs font-medium text-purple-400">Total Revenue</span>
+                  <DollarSign className="w-4 h-4 text-red-400" />
+                  <span className="text-xs font-medium text-red-400">Total Revenue</span>
                 </div>
-                <div className="text-2xl font-black text-purple-300">${(data?.billingTotal || 0).toFixed(2)}</div>
+                <div className="text-2xl font-black text-red-300">${(data?.billingTotal || 0).toFixed(2)}</div>
               </div>
-              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10">
+              <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-500/10">
                 <div className="flex items-center gap-2 mb-2">
-                  <Users className="w-4 h-4 text-blue-400" />
-                  <span className="text-xs font-medium text-blue-400">Accounts Created</span>
+                  <Users className="w-4 h-4 text-rose-400" />
+                  <span className="text-xs font-medium text-rose-400">Accounts Created</span>
                 </div>
-                <div className="text-2xl font-black text-blue-300">{total}</div>
+                <div className="text-2xl font-black text-rose-300">{total}</div>
               </div>
               <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/10">
                 <div className="flex items-center gap-2 mb-2">
@@ -279,7 +279,7 @@ export default function Dashboard() {
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider flex items-center gap-2">
               <Clock className="w-4 h-4" /> Recent Accounts
             </h3>
-            <a href="/admin/accounts" className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors" data-testid="link-view-all-accounts">
+            <a href="/admin/accounts" className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors" data-testid="link-view-all-accounts">
               View all <ArrowUpRight className="w-3 h-3" />
             </a>
           </div>

@@ -141,7 +141,7 @@ export default function EmailServer() {
                     <div
                       key={em.id}
                       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedEmail?.id === em.id ? "border-blue-500/40 bg-blue-500/10" : "hover:bg-white/5"
+                        selectedEmail?.id === em.id ? "border-red-500/40 bg-red-500/10" : "hover:bg-white/5"
                       }`}
                       onClick={() => fetchInbox(em)}
                       data-testid={`email-account-${em.id}`}

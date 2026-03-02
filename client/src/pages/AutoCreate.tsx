@@ -186,7 +186,7 @@ export default function AutoCreate() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-auto-create-title">LA28 Account Creator</h1>
-            <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/15 text-[10px]">Olympic ID</Badge>
+            <Badge className="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/15 text-[10px]">Olympic ID</Badge>
           </div>
           <p className="text-zinc-500 text-sm mt-0.5">Automated LA28 registration with email verification</p>
         </div>
@@ -196,7 +196,7 @@ export default function AutoCreate() {
         <div className="lg:col-span-2 space-y-4">
           <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
             <div className="flex items-center gap-2 mb-5">
-              <div className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+              <div className="p-1.5 rounded-lg bg-gradient-to-br from-red-500 to-rose-600 text-white">
                 <Rocket className="w-3.5 h-3.5" />
               </div>
               <span className="text-sm font-semibold text-zinc-200">Configuration</span>
@@ -215,7 +215,7 @@ export default function AutoCreate() {
                       disabled={isRunning}
                       className={`flex-1 h-9 text-sm font-semibold rounded-lg border transition-all ${
                         count === n
-                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 border-blue-500/30 text-white shadow-lg shadow-blue-500/20"
+                          ? "bg-gradient-to-r from-red-600 to-rose-600 border-red-500/30 text-white shadow-lg shadow-red-500/20"
                           : "bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5 hover:text-zinc-300"
                       } disabled:opacity-50`}
                       data-testid={`button-count-${n}`}
@@ -275,7 +275,7 @@ export default function AutoCreate() {
               )}
 
               <Button
-                className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/20 border-0"
+                className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 shadow-lg shadow-red-500/20 border-0"
                 onClick={() => startBatch(count)}
                 disabled={isRunning}
                 data-testid="button-start-batch"
@@ -323,7 +323,7 @@ export default function AutoCreate() {
                       ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
                       : acc.status === "failed"
                       ? "bg-red-500/10 border-red-500/20 text-red-400"
-                      : "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                      : "bg-red-500/10 border-red-500/20 text-red-400"
                   }`}
                   data-testid={`badge-batch-account-${acc.id}`}
                 >
@@ -345,7 +345,7 @@ export default function AutoCreate() {
               <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-sm gap-2">
                 {isRunning ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+                    <Loader2 className="w-5 h-5 animate-spin text-red-400" />
                     <span className="text-zinc-500">Waiting for logs...</span>
                   </>
                 ) : (
@@ -370,7 +370,7 @@ export default function AutoCreate() {
                         : log.message.includes("code") || log.message.includes("Code")
                         ? "text-amber-400"
                         : log.message.includes("Status:")
-                        ? "text-blue-400"
+                        ? "text-red-400"
                         : "text-zinc-400"
                     }>
                       {log.message}

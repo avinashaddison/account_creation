@@ -52,7 +52,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
   return (
     <div className="min-h-screen flex bg-[#0a0a0f]">
       <aside className="w-64 bg-[#111118] border-r border-white/5 text-white flex flex-col shrink-0 h-screen sticky top-0" data-testid="sidebar">
-        <div className="p-5 m-3 mb-0 rounded-2xl bg-gradient-to-br from-blue-600/15 via-purple-600/10 to-indigo-600/15 border border-purple-500/20 shadow-lg shadow-purple-900/10">
+        <div className="p-5 m-3 mb-0 rounded-2xl bg-gradient-to-br from-red-600/15 via-rose-600/10 to-orange-600/10 border border-red-500/25 shadow-lg shadow-red-900/20">
           {isEditing ? (
             <div className="space-y-2">
               <Input
@@ -76,7 +76,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
           ) : (
             <div className="group">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-black tracking-tight bg-gradient-to-r from-blue-400 via-purple-400 to-indigo-400 bg-clip-text text-transparent" data-testid="text-brand">
+                <h2 className="text-lg font-black tracking-tight bg-gradient-to-r from-red-400 via-rose-400 to-orange-400 bg-clip-text text-transparent" data-testid="text-brand">
                   {panelName}
                 </h2>
                 <button
@@ -100,12 +100,12 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                 <div
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-all duration-200 ${
                     isActive
-                      ? "bg-gradient-to-r from-blue-600/20 to-purple-600/20 text-white border border-blue-500/20"
+                      ? "bg-gradient-to-r from-red-600/20 to-rose-600/15 text-white border border-red-500/25"
                       : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
                   }`}
                   data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
                 >
-                  <item.icon className={`w-4 h-4 ${isActive ? "text-blue-400" : ""}`} />
+                  <item.icon className={`w-4 h-4 ${isActive ? "text-red-400" : ""}`} />
                   {item.label}
                 </div>
               </Link>
@@ -115,7 +115,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
         <div className="p-4 border-t border-white/5 space-y-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500/20 to-rose-500/20 border border-red-500/15 flex items-center justify-center">
               <User className="w-4 h-4 text-zinc-400" />
             </div>
             <div className="flex-1 min-w-0">
