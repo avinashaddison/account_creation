@@ -47,4 +47,4 @@ mockupState = "FULLSTACK"
 [userenv]
 
 [userenv.shared]
-TM_PROXY_URL = "http://okdpvmze:iy0zkuc7dt2s@31.59.20.176:6754/"
+TM_PROXY_URL = "http://okdpvmze-1:iy0zkuc7dt2s@p.webshare.io:80/"

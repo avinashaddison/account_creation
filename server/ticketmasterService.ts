@@ -1,8 +1,27 @@
 import { chromium, type Browser, type Page } from "playwright";
+import * as net from "net";
+import * as dns from "dns";
+import { SocksClient } from "socks";
 
 let browserInstance: Browser | null = null;
 let launching = false;
 let currentProxyUrl: string | undefined = undefined;
+let localProxyServer: net.Server | null = null;
+let localProxyPort: number = 0;
+
+function parseWebshareProxy(proxyUrl: string): { host: string; port: number; username: string; password: string } | null {
+  try {
+    const url = new URL(proxyUrl);
+    return {
+      host: url.hostname,
+      port: 1080,
+      username: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+    };
+  } catch {
+    return null;
+  }
+}
 
 function parseProxyUrl(proxyUrl: string): { server: string; username?: string; password?: string } {
   try {
@@ -15,6 +34,104 @@ function parseProxyUrl(proxyUrl: string): { server: string; username?: string; p
   } catch {
     return { server: proxyUrl };
   }
+}
+
+function resolveDns(hostname: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    dns.resolve4(hostname, (err, addresses) => {
+      if (err) reject(err);
+      else resolve(addresses[0]);
+    });
+  });
+}
+
+async function startLocalSocksRelay(upstream: { host: string; port: number; username: string; password: string }): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (localProxyServer) {
+      localProxyServer.close();
+      localProxyServer = null;
+    }
+
+    const server = net.createServer((clientSocket) => {
+      clientSocket.once("data", async (data) => {
+        const str = data.toString();
+        const connectMatch = str.match(/^CONNECT\s+([^:\s]+):(\d+)/i);
+        if (connectMatch) {
+          const destHost = connectMatch[1];
+          const destPort = parseInt(connectMatch[2]);
+
+          try {
+            const destIp = await resolveDns(destHost);
+            const { socket: proxySocket } = await SocksClient.createConnection({
+              proxy: {
+                host: upstream.host,
+                port: upstream.port,
+                type: 5,
+                userId: upstream.username,
+                password: upstream.password,
+              },
+              command: "connect",
+              destination: { host: destIp, port: destPort },
+              timeout: 30000,
+            });
+            clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+            clientSocket.pipe(proxySocket);
+            proxySocket.pipe(clientSocket);
+            proxySocket.on("error", () => clientSocket.destroy());
+            clientSocket.on("error", () => proxySocket.destroy());
+          } catch (err: any) {
+            console.error("[LocalProxy] SOCKS5 connect failed:", err.message);
+            clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+            clientSocket.destroy();
+          }
+        } else {
+          const hostMatch = str.match(/Host:\s*([^\r\n:]+)(?::(\d+))?/i);
+          if (hostMatch) {
+            const destHost = hostMatch[1];
+            const destPort = parseInt(hostMatch[2] || "80");
+
+            try {
+              const destIp = await resolveDns(destHost);
+              const { socket: proxySocket } = await SocksClient.createConnection({
+                proxy: {
+                  host: upstream.host,
+                  port: upstream.port,
+                  type: 5,
+                  userId: upstream.username,
+                  password: upstream.password,
+                },
+                command: "connect",
+                destination: { host: destIp, port: destPort },
+                timeout: 30000,
+              });
+              proxySocket.write(data);
+              clientSocket.pipe(proxySocket);
+              proxySocket.pipe(clientSocket);
+              proxySocket.on("error", () => clientSocket.destroy());
+              clientSocket.on("error", () => proxySocket.destroy());
+            } catch (err: any) {
+              console.error("[LocalProxy] SOCKS5 connect failed:", err.message);
+              clientSocket.destroy();
+            }
+          } else {
+            clientSocket.destroy();
+          }
+        }
+      });
+
+      clientSocket.on("error", () => {});
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address() as net.AddressInfo;
+      localProxyServer = server;
+      localProxyPort = addr.port;
+      console.log(`[LocalProxy] SOCKS5 relay listening on 127.0.0.1:${addr.port}`);
+      resolve(addr.port);
+    });
+
+    server.on("error", reject);
+  });
 }
 
 async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
@@ -56,9 +173,20 @@ async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
     };
 
     if (proxyUrl) {
-      const proxyConfig = parseProxyUrl(proxyUrl);
-      launchOptions.proxy = proxyConfig;
-      console.log("[TM-Playwright] Using proxy:", proxyConfig.server, proxyConfig.username ? `(auth: ${proxyConfig.username})` : "(no auth)");
+      const isWebshare = proxyUrl.includes("webshare.io") || proxyUrl.includes("p.webshare");
+      if (isWebshare) {
+        const wsProxy = parseWebshareProxy(proxyUrl);
+        if (wsProxy) {
+          console.log("[TM-Playwright] Webshare detected, starting local SOCKS5 relay...");
+          const port = await startLocalSocksRelay(wsProxy);
+          launchOptions.proxy = { server: `http://127.0.0.1:${port}` };
+          console.log(`[TM-Playwright] Local proxy relay ready at http://127.0.0.1:${port}`);
+        }
+      } else {
+        const proxyConfig = parseProxyUrl(proxyUrl);
+        launchOptions.proxy = proxyConfig;
+        console.log("[TM-Playwright] Using proxy:", proxyConfig.server, proxyConfig.username ? `(auth: ${proxyConfig.username})` : "(no auth)");
+      }
     }
 
     browserInstance = await chromium.launch(launchOptions);
