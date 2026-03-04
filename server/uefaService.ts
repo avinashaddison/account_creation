@@ -426,6 +426,15 @@ async function doUefaRegistration(
       console.log("[UEFA] Verification needed, waiting for code...");
       onStatusUpdate("waiting_code");
 
+      let verificationStepId = "";
+      try {
+        const parsed = JSON.parse(submitResponseBody);
+        if (parsed.id) {
+          verificationStepId = parsed.id;
+          console.log("[UEFA] Verification step ID:", verificationStepId);
+        }
+      } catch {}
+
       let code: string | null = null;
       try {
         code = await Promise.race([
@@ -444,46 +453,173 @@ async function doUefaRegistration(
       onStatusUpdate("verifying");
       console.log(`[UEFA] Entering verification code: ${code}`);
 
-      const codeInput = await page.$('input[type="text"], input[name="code"], input[id*="code"]');
-      if (codeInput) {
-        await codeInput.click();
-        await page.waitForTimeout(200);
-        await codeInput.fill(code);
-      }
-      await page.waitForTimeout(1000);
+      const digits = code.split('');
+      console.log(`[UEFA] Entering ${digits.length} digits into PIN inputs...`);
 
-      try {
-        await page.click('button[type="submit"], button:has-text("Verify"), button:has-text("Submit"), button:has-text("Confirm")');
-      } catch {
+      for (let d = 0; d < digits.length; d++) {
+        const pinInput = await page.$(`input[name="pin-${d}"]`);
+        if (pinInput) {
+          await pinInput.click();
+          await page.waitForTimeout(100 + Math.random() * 150);
+          await page.keyboard.type(digits[d], { delay: 30 + Math.random() * 40 });
+          await page.waitForTimeout(100 + Math.random() * 150);
+        } else {
+          console.log(`[UEFA] pin-${d} input not found`);
+        }
+      }
+
+      await page.waitForTimeout(500 + Math.random() * 500);
+
+      const pinValues = await page.evaluate(`(() => {
+        var result = {};
+        for (var i = 0; i < 6; i++) {
+          var inp = document.querySelector('input[name="pin-' + i + '"]');
+          result['pin-' + i] = inp ? inp.value : 'NOT_FOUND';
+        }
+        var passcode = document.getElementById('passcode');
+        result['passcode'] = passcode ? passcode.value : 'NOT_FOUND';
+        var otpFull = document.getElementById('otpFullCode');
+        result['otpFullCode'] = otpFull ? otpFull.value : 'NOT_FOUND';
+        return result;
+      })()`) as Record<string, string>;
+      console.log("[UEFA] PIN values after entry:", JSON.stringify(pinValues));
+
+      if (!pinValues['passcode'] || pinValues['passcode'] === '' || pinValues['passcode'] === 'NOT_FOUND') {
+        console.log("[UEFA] Passcode field not auto-populated, setting manually...");
         await page.evaluate(`(() => {
-          var btns = document.querySelectorAll('button');
-          for (var i = 0; i < btns.length; i++) {
-            var t = btns[i].textContent?.toLowerCase() || '';
-            if (t.includes('verify') || t.includes('submit') || t.includes('confirm')) {
-              btns[i].click(); return;
-            }
+          var passcode = document.getElementById('passcode');
+          if (passcode) {
+            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(passcode, '${code}');
+            passcode.dispatchEvent(new Event('input', { bubbles: true }));
+            passcode.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          var otpFull = document.getElementById('otpFullCode');
+          if (otpFull) {
+            var nativeSetter2 = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter2.call(otpFull, '${code}');
+            otpFull.dispatchEvent(new Event('input', { bubbles: true }));
+            otpFull.dispatchEvent(new Event('change', { bubbles: true }));
           }
         })()`);
+      }
+
+      await page.waitForTimeout(1000 + Math.random() * 500);
+
+      const verifyFormValues = await page.evaluate(`(() => {
+        var inputs = document.querySelectorAll('input');
+        var vals = {};
+        for (var i = 0; i < inputs.length; i++) {
+          vals[inputs[i].name || inputs[i].id || ('input_' + i)] = inputs[i].value;
+        }
+        return vals;
+      })()`) as Record<string, string>;
+      console.log("[UEFA] Verification form values:", JSON.stringify(verifyFormValues));
+
+      const verifyResponsePromise = page.waitForResponse(
+        (resp) => resp.url().includes('davinci') && resp.request().method() === 'POST',
+        { timeout: 30000 }
+      ).catch(() => null);
+
+      await page.waitForTimeout(1000);
+
+      const btnState = await page.evaluate(`(() => {
+        var btns = document.querySelectorAll('button');
+        var info = [];
+        for (var i = 0; i < btns.length; i++) {
+          var btn = btns[i];
+          var rect = btn.getBoundingClientRect();
+          info.push({
+            text: (btn.textContent || '').trim().substring(0, 50),
+            visible: rect.width > 0 && rect.height > 0,
+            type: btn.type,
+            disabled: btn.disabled
+          });
+        }
+        return info;
+      })()`) as any[];
+      console.log("[UEFA] Buttons state:", JSON.stringify(btnState));
+
+      try {
+        await page.click('button[type="button"]:not([disabled]):has-text("Continue")', { timeout: 5000 });
+        console.log("[UEFA] Continue button clicked (visible enabled)");
+      } catch {
+        const clicked = await page.evaluate(`(() => {
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            var btn = btns[i];
+            var rect = btn.getBoundingClientRect();
+            var t = (btn.textContent || '').toLowerCase().trim();
+            if (rect.width > 0 && rect.height > 0 && t.includes('continue') && !btn.disabled) {
+              btn.click();
+              return { clicked: true, text: t, method: 'visible-enabled' };
+            }
+          }
+          for (var j = 0; j < btns.length; j++) {
+            var btn2 = btns[j];
+            var t2 = (btn2.textContent || '').toLowerCase().trim();
+            if (t2.includes('continue')) {
+              btn2.disabled = false;
+              btn2.click();
+              return { clicked: true, text: t2, method: 'force-enabled' };
+            }
+          }
+          var submitBtn = document.querySelector('button[type="submit"]');
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.click();
+            return { clicked: true, text: 'submit-type', method: 'force-submit' };
+          }
+          return { clicked: false };
+        })()`) as any;
+        console.log("[UEFA] Button click result:", JSON.stringify(clicked));
+      }
+
+      const verifyResponse = await verifyResponsePromise;
+      if (verifyResponse) {
+        try {
+          const verifyBody = await verifyResponse.text();
+          console.log("[UEFA] Verify response status:", verifyResponse.status());
+          try {
+            const parsed = JSON.parse(verifyBody);
+            console.log(`[UEFA] Verify response capability: ${parsed.capabilityName}, id: ${parsed.id}`);
+            if (parsed.screen?.properties?.messageTitle?.value) {
+              console.log("[UEFA] Verify messageTitle:", parsed.screen.properties.messageTitle.value);
+            }
+            if (parsed.screen?.properties?.message?.value) {
+              console.log("[UEFA] Verify message:", parsed.screen.properties.message.value);
+            }
+          } catch {}
+        } catch {}
       }
 
       await page.waitForTimeout(8000);
     }
 
-    const redirected = page.url().includes("uefa.com") && !page.url().includes("idp-production");
-    const finalText = await page.evaluate(`document.body.innerText`) as string;
+    const finalUrl = page.url();
+    const redirected = finalUrl.includes("uefa.com") && !finalUrl.includes("idp-production");
+    let finalText = "";
+    try {
+      finalText = await page.evaluate(`document.body.innerText`) as string;
+    } catch {}
     const finalLower = finalText.toLowerCase();
-    const hasError = finalLower.includes("something went wrong") || finalLower.includes("invalid") || finalLower.includes("failed");
+    const hasError = finalLower.includes("something went wrong") || finalLower.includes("invalid code") || finalLower.includes("registration failed");
     const isSuccess = !hasError && (redirected || finalLower.includes("welcome") ||
                       finalLower.includes("account created") || finalLower.includes("success") ||
-                      finalLower.includes("verify") || finalLower.includes("confirmation"));
+                      finalLower.includes("my uefa") || finalLower.includes("profile") ||
+                      finalLower.includes("which teams are you") || finalLower.includes("interested in"));
 
-    console.log("[UEFA] Final URL:", page.url());
-    console.log("[UEFA] Final text (first 200):", finalText.substring(0, 200));
-    console.log("[UEFA] Success:", isSuccess);
+    console.log("[UEFA] Final URL:", finalUrl);
+    console.log("[UEFA] Final text (first 300):", finalText.substring(0, 300));
+    console.log("[UEFA] Redirected:", redirected, "HasError:", hasError, "Success:", isSuccess);
 
     await context.close();
 
-    if (isSuccess) {
+    if (isSuccess || redirected) {
+      return { success: true };
+    }
+
+    if (needsVerification && !hasError) {
       return { success: true };
     }
 

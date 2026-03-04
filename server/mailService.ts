@@ -51,7 +51,20 @@ export async function fetchMessageContent(token: string, messageId: string): Pro
   });
   if (!res.ok) throw new Error(`Failed to fetch message: ${res.status}`);
   const data = await res.json();
-  return data.text || data.html || "";
+  let content: string = "";
+  if (typeof data.text === 'string' && data.text.length > 0) {
+    content = data.text;
+  } else if (data.html) {
+    if (Array.isArray(data.html)) {
+      content = data.html.join("\n");
+    } else if (typeof data.html === 'string') {
+      content = data.html;
+    } else {
+      content = JSON.stringify(data.html);
+    }
+  }
+  console.log(`[Mail] Content length: ${content.length}, preview: ${content.substring(0, 200)}`);
+  return content;
 }
 
 export async function pollForVerificationCode(token: string, maxAttempts: number = 30, intervalMs: number = 3000): Promise<string | null> {
