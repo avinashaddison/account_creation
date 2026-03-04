@@ -2,10 +2,29 @@ import { chromium, type Browser, type Page } from "playwright";
 
 let browserInstance: Browser | null = null;
 let launching = false;
+let currentProxyUrl: string | undefined = undefined;
+
+function parseProxyUrl(proxyUrl: string): { server: string; username?: string; password?: string } {
+  try {
+    const url = new URL(proxyUrl);
+    const server = `${url.protocol}//${url.hostname}:${url.port}`;
+    const result: any = { server };
+    if (url.username) result.username = decodeURIComponent(url.username);
+    if (url.password) result.password = decodeURIComponent(url.password);
+    return result;
+  } catch {
+    return { server: proxyUrl };
+  }
+}
 
 async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
-  if (browserInstance && browserInstance.isConnected()) {
+  if (browserInstance && browserInstance.isConnected() && currentProxyUrl === proxyUrl) {
     return browserInstance;
+  }
+
+  if (browserInstance && browserInstance.isConnected() && currentProxyUrl !== proxyUrl) {
+    await browserInstance.close().catch(() => {});
+    browserInstance = null;
   }
 
   if (launching) {
@@ -37,13 +56,16 @@ async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
     };
 
     if (proxyUrl) {
-      launchOptions.proxy = { server: proxyUrl };
-      console.log("[TM-Playwright] Using proxy:", proxyUrl);
+      const proxyConfig = parseProxyUrl(proxyUrl);
+      launchOptions.proxy = proxyConfig;
+      console.log("[TM-Playwright] Using proxy:", proxyConfig.server, proxyConfig.username ? `(auth: ${proxyConfig.username})` : "(no auth)");
     }
 
     browserInstance = await chromium.launch(launchOptions);
+    currentProxyUrl = proxyUrl;
     browserInstance.on("disconnected", () => {
       browserInstance = null;
+      currentProxyUrl = undefined;
     });
     return browserInstance;
   } finally {
