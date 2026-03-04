@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { handleUnauthorized } from "@/lib/auth";
 import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
-  Terminal, Trophy, ShieldCheck
+  Terminal, Trophy
 } from "lucide-react";
 
 const QUICK_AMOUNTS = [1, 3, 5, 10];
@@ -105,16 +105,6 @@ export default function UEFACreate() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4 flex items-start gap-3">
-        <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-        <div>
-          <p className="text-sm font-medium text-emerald-300">No Proxy Required</p>
-          <p className="text-xs text-emerald-400/70 mt-1">
-            UEFA registration has no aggressive bot detection. Accounts are created directly
-            without needing a residential proxy.
-          </p>
-        </div>
-      </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2 space-y-4">
