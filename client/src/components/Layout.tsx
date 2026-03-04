@@ -41,7 +41,6 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
   const nav = [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/admin/home", label: "LA28 Registration", icon: Home },
     { href: "/admin/accounts", label: "Account Stock", icon: Archive },
     { href: "/admin/email-server", label: "Email Server", icon: Mail },
     { href: "/admin/billing", label: "Billing", icon: Receipt },
