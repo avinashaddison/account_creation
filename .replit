@@ -43,3 +43,8 @@ waitForPort = 5000
 [agent]
 stack = "MOCKUP_JS"
 mockupState = "FULLSTACK"
+
+[userenv]
+
+[userenv.shared]
+TM_PROXY_URL = "http://okdpvmze:iy0zkuc7dt2s@31.59.20.176:6754/"
