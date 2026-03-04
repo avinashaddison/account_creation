@@ -1,7 +1,10 @@
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as net from "net";
 import * as dns from "dns";
 import { SocksClient } from "socks";
+
+chromium.use(StealthPlugin());
 
 let browserInstance: Browser | null = null;
 let launching = false;
@@ -52,6 +55,36 @@ async function startLocalSocksRelay(upstream: { host: string; port: number; user
       localProxyServer = null;
     }
 
+    async function socksConnectWithRetry(destHost: string, destPort: number, maxRetries: number = 5): Promise<net.Socket> {
+      const destIp = await resolveDns(destHost);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const { socket } = await SocksClient.createConnection({
+            proxy: {
+              host: upstream.host,
+              port: upstream.port,
+              type: 5,
+              userId: upstream.username,
+              password: upstream.password,
+            },
+            command: "connect",
+            destination: { host: destIp, port: destPort },
+            timeout: 30000,
+          });
+          return socket;
+        } catch (err: any) {
+          const isRetryable = err.message.includes("HostUnreachable") || err.message.includes("ConnectionRefused") || err.message.includes("NetworkUnreachable") || err.message.includes("TTLExpired");
+          if (isRetryable && attempt < maxRetries) {
+            console.log(`[LocalProxy] Retry ${attempt}/${maxRetries} for ${destHost}:${destPort} (${err.message})`);
+            await new Promise(r => setTimeout(r, 1000 * attempt));
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw new Error("Max retries exceeded");
+    }
+
     const server = net.createServer((clientSocket) => {
       clientSocket.once("data", async (data) => {
         const str = data.toString();
@@ -61,26 +94,14 @@ async function startLocalSocksRelay(upstream: { host: string; port: number; user
           const destPort = parseInt(connectMatch[2]);
 
           try {
-            const destIp = await resolveDns(destHost);
-            const { socket: proxySocket } = await SocksClient.createConnection({
-              proxy: {
-                host: upstream.host,
-                port: upstream.port,
-                type: 5,
-                userId: upstream.username,
-                password: upstream.password,
-              },
-              command: "connect",
-              destination: { host: destIp, port: destPort },
-              timeout: 30000,
-            });
+            const proxySocket = await socksConnectWithRetry(destHost, destPort);
             clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
             clientSocket.pipe(proxySocket);
             proxySocket.pipe(clientSocket);
             proxySocket.on("error", () => clientSocket.destroy());
             clientSocket.on("error", () => proxySocket.destroy());
           } catch (err: any) {
-            console.error("[LocalProxy] SOCKS5 connect failed:", err.message);
+            console.error("[LocalProxy] SOCKS5 connect failed after retries:", err.message);
             clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
             clientSocket.destroy();
           }
@@ -91,26 +112,14 @@ async function startLocalSocksRelay(upstream: { host: string; port: number; user
             const destPort = parseInt(hostMatch[2] || "80");
 
             try {
-              const destIp = await resolveDns(destHost);
-              const { socket: proxySocket } = await SocksClient.createConnection({
-                proxy: {
-                  host: upstream.host,
-                  port: upstream.port,
-                  type: 5,
-                  userId: upstream.username,
-                  password: upstream.password,
-                },
-                command: "connect",
-                destination: { host: destIp, port: destPort },
-                timeout: 30000,
-              });
+              const proxySocket = await socksConnectWithRetry(destHost, destPort);
               proxySocket.write(data);
               clientSocket.pipe(proxySocket);
               proxySocket.pipe(clientSocket);
               proxySocket.on("error", () => clientSocket.destroy());
               clientSocket.on("error", () => proxySocket.destroy());
             } catch (err: any) {
-              console.error("[LocalProxy] SOCKS5 connect failed:", err.message);
+              console.error("[LocalProxy] SOCKS5 connect failed after retries:", err.message);
               clientSocket.destroy();
             }
           } else {
@@ -356,28 +365,61 @@ async function doTMRegistration(
   await page.addInitScript(`
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-    window.chrome = { runtime: {} };
+    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
     delete navigator.__proto__.webdriver;
+    var origQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = function(parameters) {
+      if (parameters.name === 'notifications') {
+        return Promise.resolve({ state: Notification.permission });
+      }
+      return origQuery.call(this, parameters);
+    };
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [
+        { name: 'Chrome PDF Plugin', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
+        { name: 'Chrome PDF Viewer', description: '', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+        { name: 'Native Client', description: '', filename: 'internal-nacl-plugin' }
+      ]
+    });
+    var getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+      if (parameter === 37445) return 'Intel Inc.';
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+      return getParameter.call(this, parameter);
+    };
   `);
 
   try {
     onStatusUpdate("registering");
     console.log("[TM-Playwright] Navigating to Ticketmaster sign-up...");
 
-    await page.goto("https://identity.ticketmaster.com/sign-up", { waitUntil: "domcontentloaded", timeout: 60000 });
+    const signupUrl = "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf2fc29c040a10a21be&response_type=code&scope=openid+profile+phone+email&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placeholderType=tm&hideLeftPanel=false&integratorId=prd1741.iccp&intSiteToken=tm-us&TMUO=%23signupDesktop";
+    await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     try {
-      await page.waitForLoadState("networkidle", { timeout: 20000 });
+      await page.waitForLoadState("networkidle", { timeout: 30000 });
     } catch {
       console.log("[TM-Playwright] Network idle timeout, continuing...");
     }
 
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(8000);
     await removeOverlays(page);
 
     let pageText = await getPageText(page);
-    const pageLower = pageText.toLowerCase();
+    let pageLower = pageText.toLowerCase();
     console.log("[TM-Playwright] Page text (first 500):", pageText.substring(0, 500));
+    console.log("[TM-Playwright] Current URL:", page.url());
+
+    if (pageLower.includes("one moment") || pageLower.includes("please wait") || pageLower.includes("loading")) {
+      console.log("[TM-Playwright] JS challenge detected, waiting longer...");
+      await page.waitForTimeout(15000);
+      pageText = await getPageText(page);
+      pageLower = pageText.toLowerCase();
+      console.log("[TM-Playwright] Page text after wait (first 500):", pageText.substring(0, 500));
+    }
 
     if (pageLower.includes("browsing activity") || pageLower.includes("has been paused") || pageLower.includes("unusual behavior")) {
       await context.close();
@@ -388,7 +430,7 @@ async function doTMRegistration(
       };
     }
 
-    if (pageLower.includes("403") || pageLower.includes("access denied") || pageLower.includes("blocked")) {
+    if (pageLower.includes("access denied") || (pageLower.includes("blocked") && !pageLower.includes("sign"))) {
       await context.close();
       return {
         success: false,
@@ -399,14 +441,18 @@ async function doTMRegistration(
 
     console.log("[TM-Playwright] Waiting for sign-up form...");
     let formFound = false;
-    for (let w = 0; w < 15; w++) {
+    for (let w = 0; w < 25; w++) {
       const hasForm = await page.evaluate(`(() => {
         var inputs = document.querySelectorAll('input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="mail"]');
         return inputs.length > 0;
       })()`);
       if (hasForm) { formFound = true; break; }
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
       await removeOverlays(page);
+      if (w % 5 === 4) {
+        var snapshot = await getPageText(page);
+        console.log("[TM-Playwright] Still waiting, page text:", snapshot.substring(0, 200));
+      }
     }
 
     if (!formFound) {
