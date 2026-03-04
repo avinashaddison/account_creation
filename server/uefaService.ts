@@ -42,12 +42,25 @@ async function getBrowser(): Promise<Browser> {
   launching = true;
   try {
     await ensureBrowserInstalled();
-    browserInstance = await chromium.launch({
+
+    let launchFn = chromium.launch.bind(chromium);
+    try {
+      const { chromium: stealthChromium } = await import("playwright-extra");
+      const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+      stealthChromium.use(StealthPlugin());
+      launchFn = stealthChromium.launch.bind(stealthChromium);
+      console.log("[UEFA] Using stealth plugin");
+    } catch (e: any) {
+      console.log("[UEFA] Stealth plugin not available, using standard chromium:", e.message);
+    }
+
+    browserInstance = await launchFn({
       headless: true,
       args: [
         "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
         "--disable-gpu", "--disable-software-rasterizer", "--no-zygote",
         "--js-flags=--max-old-space-size=256",
+        "--disable-blink-features=AutomationControlled",
       ],
     });
     browserInstance.on("disconnected", () => { browserInstance = null; });
@@ -101,29 +114,57 @@ async function doUefaRegistration(
   }
 
   const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
     viewport: { width: 1920, height: 1080 },
     locale: "en-US",
+    timezoneId: "Europe/London",
+    permissions: ["geolocation"],
+    geolocation: { longitude: -0.1276, latitude: 51.5074 },
   });
+
+  await context.addInitScript(`(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
+    Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
+    Object.defineProperty(navigator, 'plugins', { get: function() { return [1, 2, 3, 4, 5]; } });
+    if (window.chrome === undefined) {
+      window.chrome = { runtime: {}, loadTimes: function() { return {}; }, csi: function() { return {}; } };
+    }
+    const origToString = Function.prototype.toString;
+    Function.prototype.toString = function() {
+      if (this === Function.prototype.toString) return 'function toString() { [native code] }';
+      return origToString.call(this);
+    };
+  })()`);
 
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
 
-  await page.route("**/*", (route) => {
-    const resourceType = route.request().resourceType();
-    if (["image", "media", "font"].includes(resourceType)) return route.abort();
-    return route.continue();
-  });
-
-  let lastDavinciResponse = "";
+  const dob = generateDOB();
+  let registrationStepId = "";
+  let interceptedSubmit = false;
+  let submitResponseBody = "";
 
   page.on('response', async (response) => {
     if (response.request().method() === 'POST' && response.url().includes('davinci')) {
       try {
         const body = await response.text().catch(() => '');
         if (body) {
-          lastDavinciResponse = body;
-          console.log(`[UEFA-RES] ${response.status()}: ${body.substring(0, 400)}`);
+          console.log(`[UEFA-RES] ${response.status()}: ${body.substring(0, 300)}`);
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed.id && parsed.capabilityName === 'customHTMLTemplate') {
+              const screenProps = parsed.screen?.properties;
+              if (screenProps?.formFieldsList) {
+                const fields = screenProps.formFieldsList.value || [];
+                const hasEmail = fields.some((f: any) => f.propertyName === 'email' || f.propertyName === 'properties.email');
+                const hasPassword = fields.some((f: any) => f.propertyName === 'password' || f.propertyName === 'properties.password');
+                if (hasEmail && hasPassword) {
+                  registrationStepId = parsed.id;
+                  console.log(`[UEFA] Detected registration step ID: ${registrationStepId}`);
+                }
+              }
+            }
+          } catch {}
         }
       } catch {}
     }
@@ -133,7 +174,19 @@ async function doUefaRegistration(
     if (request.method() === 'POST' && request.url().includes('davinci')) {
       const postData = request.postData();
       if (postData) {
-        console.log(`[UEFA-REQ] POST: ${postData.substring(0, 600)}`);
+        try {
+          const body = JSON.parse(postData);
+          const paramKeys = body.parameters ? Object.keys(body.parameters) : [];
+          const logParams: Record<string, any> = {};
+          for (const key of paramKeys) {
+            if (key === 'riskSDK') logParams[key] = '(payload)';
+            else if (key === 'password') logParams[key] = '***';
+            else logParams[key] = body.parameters[key];
+          }
+          console.log(`[UEFA-REQ] POST id=${body.id} params=${JSON.stringify(logParams)}`);
+        } catch {
+          console.log(`[UEFA-REQ] POST: ${postData.substring(0, 300)}`);
+        }
       }
     }
   });
@@ -175,6 +228,8 @@ async function doUefaRegistration(
     await page.waitForTimeout(8000);
     console.log("[UEFA] Auth page URL:", page.url());
 
+    await page.waitForTimeout(3000);
+
     console.log("[UEFA] Looking for 'Create your UEFA account' button...");
     let createClicked = false;
     for (const selector of ['button:has-text("Create your UEFA account")', 'button:has-text("Create")']) {
@@ -198,82 +253,35 @@ async function doUefaRegistration(
 
     console.log("[UEFA] Registration form loaded.");
 
-    const dob = generateDOB();
+    if (!registrationStepId) {
+      registrationStepId = "1k5y98i1v1";
+      console.log("[UEFA] Using fallback registration step ID:", registrationStepId);
+    }
 
-    console.log("[UEFA] Installing fetch interceptor to inject form data...");
+    await page.waitForTimeout(3000);
 
-    const escapedEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const escapedPassword = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const escapedFirstName = firstName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const escapedLastName = lastName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    console.log("[UEFA] Filling form fields with realistic delays...");
 
-    await page.evaluate(`(() => {
-      var origFetch = window.fetch;
-      window.__uefaIntercepted = false;
-      window.__uefaResponseData = null;
-      window.fetch = function(url, opts) {
-        if (typeof url === 'string' && url.indexOf('davinci') !== -1 && opts && opts.method === 'POST' && opts.body) {
-          try {
-            var body = JSON.parse(opts.body);
-            if (body.parameters && body.parameters.riskSDK && !body.parameters.email) {
-              body.parameters.email = "${escapedEmail}";
-              body.parameters.password = "${escapedPassword}";
-              body.parameters.givenName = "${escapedFirstName}";
-              body.parameters.familyName = "${escapedLastName}";
-              body.parameters["profile.birthDay"] = "${dob.day}";
-              body.parameters["profile.birthMonth"] = "${dob.month}";
-              body.parameters["profile.birthYear"] = "${dob.year}";
-              body.parameters.tandc = "true";
-              body.parameters["profile.dob"] = "${dob.year}-${dob.month.padStart(2, '0')}-${dob.day.padStart(2, '0')}";
-              opts.body = JSON.stringify(body);
-              window.__uefaIntercepted = true;
-              console.log('[UEFA-INTERCEPT] Injected form data into DaVinci payload');
-            }
-          } catch(e) {
-            console.log('[UEFA-INTERCEPT] Error:', e.message);
-          }
-        }
-        return origFetch.call(this, url, opts).then(function(resp) {
-          if (typeof url === 'string' && url.indexOf('davinci') !== -1 && window.__uefaIntercepted) {
-            var cloned = resp.clone();
-            cloned.text().then(function(text) {
-              window.__uefaResponseData = text;
-            });
-          }
-          return resp;
-        });
-      };
-    })()`);
-
-    console.log("[UEFA] Filling form fields...");
-
+    await page.waitForTimeout(500 + Math.random() * 1000);
     await page.click('#email');
-    await page.waitForTimeout(100);
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type(email, { delay: 20 });
-    await page.keyboard.press('Tab');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200 + Math.random() * 300);
+    await page.keyboard.type(email, { delay: 30 + Math.random() * 50 });
+    await page.waitForTimeout(300 + Math.random() * 500);
 
     await page.click('#password');
-    await page.waitForTimeout(100);
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type(password, { delay: 20 });
-    await page.keyboard.press('Tab');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200 + Math.random() * 300);
+    await page.keyboard.type(password, { delay: 30 + Math.random() * 50 });
+    await page.waitForTimeout(300 + Math.random() * 500);
 
     await page.click('#givenName');
-    await page.waitForTimeout(100);
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type(firstName, { delay: 20 });
-    await page.keyboard.press('Tab');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200 + Math.random() * 300);
+    await page.keyboard.type(firstName, { delay: 30 + Math.random() * 50 });
+    await page.waitForTimeout(300 + Math.random() * 500);
 
     await page.click('#familyName');
-    await page.waitForTimeout(100);
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type(lastName, { delay: 20 });
-    await page.keyboard.press('Tab');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200 + Math.random() * 300);
+    await page.keyboard.type(lastName, { delay: 30 + Math.random() * 50 });
+    await page.waitForTimeout(300 + Math.random() * 500);
 
     for (const { id, val } of [
       { id: 'profile.birthDay', val: dob.day },
@@ -282,11 +290,10 @@ async function doUefaRegistration(
     ]) {
       try {
         await page.click(`[id="${id}"]`);
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(150 + Math.random() * 200);
         await page.keyboard.press('Control+a');
-        await page.keyboard.type(val, { delay: 20 });
-        await page.keyboard.press('Tab');
-        await page.waitForTimeout(200);
+        await page.keyboard.type(val, { delay: 40 + Math.random() * 60 });
+        await page.waitForTimeout(200 + Math.random() * 300);
       } catch (e) {
         console.log(`[UEFA] Failed to type DOB ${id}:`, (e as Error).message.substring(0, 80));
       }
@@ -294,8 +301,10 @@ async function doUefaRegistration(
 
     console.log(`[UEFA] DOB typed: ${dob.day}/${dob.month}/${dob.year}`);
 
+    await page.waitForTimeout(300 + Math.random() * 500);
+
     try {
-      await page.click('label[for="tandc"]', { force: true });
+      await page.click('label[for="tandc"]');
       console.log("[UEFA] Terms clicked via label");
     } catch {
       await page.evaluate(`(() => {
@@ -305,7 +314,7 @@ async function doUefaRegistration(
       console.log("[UEFA] Terms checked via evaluate");
     }
 
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000 + Math.random() * 1000);
 
     const formValues = await page.evaluate(`(() => {
       var result = {};
@@ -325,7 +334,12 @@ async function doUefaRegistration(
     })()`) as Record<string, any>;
     console.log("[UEFA] Form values before submit:", JSON.stringify(formValues));
 
-    console.log("[UEFA] Clicking submit button (fetch interceptor active)...");
+    console.log("[UEFA] Clicking submit button...");
+
+    const submitResponsePromise = page.waitForResponse(
+      (resp) => resp.url().includes('davinci') && resp.request().method() === 'POST',
+      { timeout: 30000 }
+    ).catch(() => null);
 
     try {
       await page.click('button:has-text("Create account")', { timeout: 5000 });
@@ -349,19 +363,39 @@ async function doUefaRegistration(
       }
     }
 
-    console.log("[UEFA] Waiting for response...");
-    await page.waitForTimeout(12000);
-
-    const interceptStatus = await page.evaluate(`(() => {
-      return {
-        intercepted: window.__uefaIntercepted || false,
-        responseData: window.__uefaResponseData ? window.__uefaResponseData.substring(0, 800) : null
-      };
-    })()`) as { intercepted: boolean; responseData: string | null };
-    console.log(`[UEFA] Fetch intercepted: ${interceptStatus.intercepted}`);
-    if (interceptStatus.responseData) {
-      console.log(`[UEFA] Intercepted response: ${interceptStatus.responseData}`);
+    console.log("[UEFA] Waiting for DaVinci response...");
+    const submitResponse = await submitResponsePromise;
+    if (submitResponse) {
+      try {
+        submitResponseBody = await submitResponse.text();
+        console.log(`[UEFA] Submit response status: ${submitResponse.status()}`);
+        try {
+          const parsed = JSON.parse(submitResponseBody);
+          console.log(`[UEFA] Response capability: ${parsed.capabilityName}, id: ${parsed.id}`);
+          if (parsed.screen?.properties?.messageTitle?.value) {
+            console.log("[UEFA] messageTitle:", parsed.screen.properties.messageTitle.value);
+          }
+          if (parsed.screen?.properties?.message?.value) {
+            console.log("[UEFA] message:", parsed.screen.properties.message.value);
+          }
+          if (parsed.screen?.properties?.customHTML?.value) {
+            console.log("[UEFA] customHTML (first 500):", parsed.screen.properties.customHTML.value.substring(0, 500));
+          }
+          if (parsed.screen?.properties?.formFieldsList?.value) {
+            const fieldNames = parsed.screen.properties.formFieldsList.value.map((f: any) => f.propertyName || f.displayName);
+            console.log("[UEFA] Next form fields:", JSON.stringify(fieldNames));
+          }
+          const errorKeys = Object.keys(parsed).filter(k => k.toLowerCase().includes('error'));
+          if (errorKeys.length > 0) {
+            for (const k of errorKeys) {
+              console.log(`[UEFA] ${k}:`, JSON.stringify(parsed[k]).substring(0, 300));
+            }
+          }
+        } catch {}
+      } catch {}
     }
+
+    await page.waitForTimeout(5000);
 
     let pageText = "";
     try {
@@ -380,24 +414,13 @@ async function doUefaRegistration(
     }
 
     if (pageText.toLowerCase().includes("something went wrong")) {
-      if (interceptStatus.responseData) {
-        try {
-          const parsed = JSON.parse(interceptStatus.responseData);
-          if (parsed.error) {
-            console.log("[UEFA] DaVinci error:", JSON.stringify(parsed.error));
-          }
-          if (parsed.details) {
-            console.log("[UEFA] DaVinci details:", JSON.stringify(parsed.details));
-          }
-        } catch {}
-      }
       await context.close();
-      return { success: false, error: `UEFA returned 'Something went wrong'. Fetch intercepted: ${interceptStatus.intercepted}` };
+      return { success: false, error: "UEFA returned 'Something went wrong' - PingOne risk signal may be blocking headless browser" };
     }
 
     const lowerText = pageText.toLowerCase();
     const needsVerification = lowerText.includes("verification") || lowerText.includes("verify") ||
-                               lowerText.includes("code") || lowerText.includes("confirm");
+                               lowerText.includes("code") || lowerText.includes("confirm your email");
 
     if (needsVerification) {
       console.log("[UEFA] Verification needed, waiting for code...");
