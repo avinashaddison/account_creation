@@ -573,6 +573,97 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/register", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const walletBalance = parseFloat(user.walletBalance || "0");
+      if (walletBalance < COST_PER_ACCOUNT) {
+        return res.status(403).json({
+          error: `Insufficient balance. Add funds to your wallet to continue. Balance: $${walletBalance.toFixed(2)}`,
+        });
+      }
+      const { firstName, lastName, password, country = "United States", language = "English" } = req.body;
+      if (!firstName || typeof firstName !== "string" || firstName.trim().length < 1 || firstName.trim().length > 50) {
+        return res.status(400).json({ error: "firstName is required (1-50 characters)" });
+      }
+      if (!lastName || typeof lastName !== "string" || lastName.trim().length < 1 || lastName.trim().length > 50) {
+        return res.status(400).json({ error: "lastName is required (1-50 characters)" });
+      }
+      if (!password || typeof password !== "string" || password.trim().length < 8 || password.trim().length > 64) {
+        return res.status(400).json({ error: "password is required (8-64 characters)" });
+      }
+
+      const cleanFirstName = firstName.trim().replace(/[^a-zA-Z\s'-]/g, "").slice(0, 50);
+      const cleanLastName = lastName.trim().replace(/[^a-zA-Z\s'-]/g, "").slice(0, 50);
+      const cleanPassword = password.trim();
+      const cleanCountry = (typeof country === "string" ? country.trim() : "United States").slice(0, 50);
+      const cleanLanguage = (typeof language === "string" ? language.trim() : "English").slice(0, 30);
+
+      const debited = await storage.debitWallet(userId, COST_PER_ACCOUNT);
+      if (!debited) {
+        return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
+      }
+
+      const domain = await getAvailableDomain();
+      const username = generateRandomUsername();
+      const addisonEmail = `${username}@${domain}`;
+      const addisonEmailPassword = "TempPass123!";
+      const batchId = randomUUID();
+
+      const account = await storage.createAccount({
+        email: addisonEmail,
+        emailPassword: addisonEmailPassword,
+        firstName: cleanFirstName,
+        lastName: cleanLastName,
+        la28Password: cleanPassword,
+        country: cleanCountry,
+        language: cleanLanguage,
+        status: "pending",
+        batchId,
+        ownerId: userId,
+        verificationCode: null,
+        errorMessage: null,
+      });
+
+      res.json({ batchId, account: { id: account.id, email: account.email, firstName: account.firstName, lastName: account.lastName, status: account.status } });
+
+      (async () => {
+        await processAccount(
+          account.id, batchId, cleanFirstName, cleanLastName, cleanPassword,
+          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId
+        );
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/registrations", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const all = role === "superadmin"
+      ? await storage.getAllAccounts()
+      : await storage.getAccountsByOwner(userId);
+    const safe = all.map(a => ({
+      id: a.id,
+      email: a.email,
+      firstName: a.firstName,
+      lastName: a.lastName,
+      la28Password: a.la28Password,
+      country: a.country,
+      language: a.language,
+      status: a.status,
+      verificationCode: a.verificationCode,
+      errorMessage: a.errorMessage,
+      createdAt: a.createdAt,
+    }));
+    res.json(safe);
+  });
+
   app.get("/api/accounts", requireAuth, async (req, res) => {
     const userId = req.session.userId!;
     const role = req.session.role;

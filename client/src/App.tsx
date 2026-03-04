@@ -16,6 +16,7 @@ import CreateServer from "@/pages/CreateServer";
 import EmailServer from "@/pages/EmailServer";
 import ManageAdmins from "@/pages/ManageAdmins";
 import WalletPage from "@/pages/Wallet";
+import Home from "@/pages/Home";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -35,6 +36,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
     <Layout user={user} onLogout={onLogout} onPanelNameChange={onPanelNameChange}>
       <Switch>
         <Route path="/admin" component={Dashboard} />
+        <Route path="/admin/home" component={Home} />
         <Route path="/admin/accounts" component={AccountStock} />
         <Route path="/admin/billing" component={Billing} />
         <Route path="/admin/create-server" component={CreateServer} />

@@ -5,27 +5,6 @@ let browserInstance: Browser | null = null;
 let launching = false;
 let browserInstalled = false;
 
-const UEFA_AUTH_BASE = "https://idp-production.uefa.com/as/authorize";
-const UEFA_CLIENT_ID = "998b963a-5d91-4956-a062-33d809aaf15b";
-const UEFA_REDIRECT = "https://www.uefa.com/";
-
-function buildUefaAuthUrl(): string {
-  const params = new URLSearchParams({
-    client_id: UEFA_CLIENT_ID,
-    redirect_uri: UEFA_REDIRECT,
-    response_type: "code",
-    scope: "openid address email offline_access idp_profile idp_favourites p1:update:user:apps",
-    state: Math.random().toString(36).substring(2, 15),
-    code_challenge: "0qIkmbOYIfO8OkyTl4v59SVmq_mm7RWghHjTt71x3KQ",
-    code_challenge_method: "S256",
-    ui_locales: "en",
-    screen: "login",
-    regPlatform: "Desktop",
-    regURL: UEFA_REDIRECT,
-  });
-  return `${UEFA_AUTH_BASE}?${params.toString()}`;
-}
-
 function generateDOB(): { day: string; month: string; year: string } {
   const year = 1980 + Math.floor(Math.random() * 20);
   const month = 1 + Math.floor(Math.random() * 12);
@@ -76,34 +55,6 @@ async function getBrowser(): Promise<Browser> {
   } finally {
     launching = false;
   }
-}
-
-async function fillInput(page: Page, selector: string, value: string): Promise<boolean> {
-  return page.evaluate(`((sel, val) => {
-    var el = document.querySelector(sel);
-    if (!el) return false;
-    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-    if (setter && setter.set) setter.set.call(el, val);
-    else el.value = val;
-    el.dispatchEvent(new Event('focus', { bubbles: true }));
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
-    return true;
-  })("${selector}", "${value.replace(/"/g, '\\"')}")`) as Promise<boolean>;
-}
-
-async function checkCheckbox(page: Page, selector: string): Promise<boolean> {
-  return page.evaluate(`((sel) => {
-    var el = document.querySelector(sel);
-    if (!el) return false;
-    if (!el.checked) {
-      el.checked = true;
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('click', { bubbles: true }));
-    }
-    return true;
-  })("${selector}")`) as Promise<boolean>;
 }
 
 export async function uefaFullRegistrationFlow(
@@ -164,6 +115,29 @@ async function doUefaRegistration(
     return route.continue();
   });
 
+  let lastDavinciResponse = "";
+
+  page.on('response', async (response) => {
+    if (response.request().method() === 'POST' && response.url().includes('davinci')) {
+      try {
+        const body = await response.text().catch(() => '');
+        if (body) {
+          lastDavinciResponse = body;
+          console.log(`[UEFA-RES] ${response.status()}: ${body.substring(0, 400)}`);
+        }
+      } catch {}
+    }
+  });
+
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('davinci')) {
+      const postData = request.postData();
+      if (postData) {
+        console.log(`[UEFA-REQ] POST: ${postData.substring(0, 600)}`);
+      }
+    }
+  });
+
   try {
     onStatusUpdate("registering");
     console.log("[UEFA] Navigating to UEFA main page...");
@@ -175,7 +149,7 @@ async function doUefaRegistration(
         const btns = await frame.$$('button, a');
         for (const btn of btns) {
           const text = (await btn.textContent() || '').trim().toLowerCase();
-          if (text.includes('accept') || text.includes('i accept')) {
+          if (text.includes('accept') || text.includes('i accept') || text.includes('agree')) {
             await btn.click();
             await page.waitForTimeout(2000);
             break;
@@ -185,32 +159,36 @@ async function doUefaRegistration(
     }
 
     console.log("[UEFA] Looking for 'Log in' button...");
-    const loginBtn = await page.$('pk-button:has-text("Log in"), button:has-text("Log in")');
-    if (!loginBtn) {
-      const loginFallback = await page.$('text=Log in');
-      if (loginFallback) {
-        await loginFallback.click();
-      } else {
-        await context.close();
-        return { success: false, error: "Could not find Log in button on UEFA.com" };
-      }
-    } else {
-      await loginBtn.click();
+    let loginClicked = false;
+    for (const selector of ['pk-button:has-text("Log in")', 'text=Log in', 'button:has-text("Log in")']) {
+      try {
+        await page.click(selector);
+        loginClicked = true;
+        break;
+      } catch {}
+    }
+    if (!loginClicked) {
+      await context.close();
+      return { success: false, error: "Could not find Log in button on UEFA.com" };
     }
 
     await page.waitForTimeout(8000);
     console.log("[UEFA] Auth page URL:", page.url());
 
     console.log("[UEFA] Looking for 'Create your UEFA account' button...");
-    const createBtn = await page.$('button:has-text("Create your UEFA account"), button:has-text("Create")');
-    if (!createBtn) {
+    let createClicked = false;
+    for (const selector of ['button:has-text("Create your UEFA account")', 'button:has-text("Create")']) {
+      try {
+        await page.click(selector);
+        createClicked = true;
+        break;
+      } catch {}
+    }
+    if (!createClicked) {
       await context.close();
       return { success: false, error: "Could not find 'Create your UEFA account' button" };
     }
-    await createBtn.click();
     await page.waitForTimeout(5000);
-
-    console.log("[UEFA] Registration form should be visible...");
 
     const emailField = await page.$('#email');
     if (!emailField) {
@@ -218,124 +196,172 @@ async function doUefaRegistration(
       return { success: false, error: "Registration form did not load (no email field)" };
     }
 
-    console.log("[UEFA] Filling registration form...");
-    const emailFilled = await fillInput(page, '#email', email);
-    console.log(`[UEFA] Email filled: ${emailFilled}`);
-
-    const pwFilled = await fillInput(page, '#password', password);
-    console.log(`[UEFA] Password filled: ${pwFilled}`);
-
-    const fnFilled = await fillInput(page, '#givenName', firstName);
-    console.log(`[UEFA] First name filled: ${fnFilled}`);
-
-    const lnFilled = await fillInput(page, '#familyName', lastName);
-    console.log(`[UEFA] Last name filled: ${lnFilled}`);
+    console.log("[UEFA] Registration form loaded.");
 
     const dob = generateDOB();
-    const dayFilled = await page.evaluate(`((val) => {
-      var el = document.getElementById('profile.birthDay');
-      if (!el) return false;
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) setter.set.call(el, val);
-      else el.value = val;
-      el.dispatchEvent(new Event('focus', { bubbles: true }));
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-      return true;
-    })("${dob.day}")`) as boolean;
-    const monthFilled = await page.evaluate(`((val) => {
-      var el = document.getElementById('profile.birthMonth');
-      if (!el) return false;
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) setter.set.call(el, val);
-      else el.value = val;
-      el.dispatchEvent(new Event('focus', { bubbles: true }));
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-      return true;
-    })("${dob.month}")`) as boolean;
-    const yearFilled = await page.evaluate(`((val) => {
-      var el = document.getElementById('profile.birthYear');
-      if (!el) return false;
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) setter.set.call(el, val);
-      else el.value = val;
-      el.dispatchEvent(new Event('focus', { bubbles: true }));
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-      return true;
-    })("${dob.year}")`) as boolean;
-    console.log(`[UEFA] DOB filled: ${dayFilled}/${monthFilled}/${yearFilled} (${dob.day}/${dob.month}/${dob.year})`);
 
-    const tandcChecked = await checkCheckbox(page, '#tandc');
-    console.log(`[UEFA] Terms checked: ${tandcChecked}`);
+    console.log("[UEFA] Installing fetch interceptor to inject form data...");
 
-    if (!emailFilled || !pwFilled) {
-      await context.close();
-      return { success: false, error: `Critical form fill failed - email:${emailFilled} pw:${pwFilled}` };
-    }
+    const escapedEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedPassword = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedFirstName = firstName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedLastName = lastName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
-    await page.waitForTimeout(1000);
-
-    let apiResponse: { status: number; body: string } | null = null;
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes('/as/') || url.includes('/api/') || url.includes('register') || url.includes('signup') || url.includes('account')) {
-        try {
-          const status = response.status();
-          const body = await response.text().catch(() => '');
-          if (body.length > 0 && body.length < 5000) {
-            console.log(`[UEFA] Response ${status} from ${url.substring(0, 80)}: ${body.substring(0, 200)}`);
-            if (url.includes('register') || url.includes('signup') || url.includes('account')) {
-              apiResponse = { status, body: body.substring(0, 1000) };
+    await page.evaluate(`(() => {
+      var origFetch = window.fetch;
+      window.__uefaIntercepted = false;
+      window.__uefaResponseData = null;
+      window.fetch = function(url, opts) {
+        if (typeof url === 'string' && url.indexOf('davinci') !== -1 && opts && opts.method === 'POST' && opts.body) {
+          try {
+            var body = JSON.parse(opts.body);
+            if (body.parameters && body.parameters.riskSDK && !body.parameters.email) {
+              body.parameters.email = "${escapedEmail}";
+              body.parameters.password = "${escapedPassword}";
+              body.parameters.givenName = "${escapedFirstName}";
+              body.parameters.familyName = "${escapedLastName}";
+              body.parameters["profile.birthDay"] = "${dob.day}";
+              body.parameters["profile.birthMonth"] = "${dob.month}";
+              body.parameters["profile.birthYear"] = "${dob.year}";
+              body.parameters.tandc = "true";
+              body.parameters["profile.dob"] = "${dob.year}-${dob.month.padStart(2, '0')}-${dob.day.padStart(2, '0')}";
+              opts.body = JSON.stringify(body);
+              window.__uefaIntercepted = true;
+              console.log('[UEFA-INTERCEPT] Injected form data into DaVinci payload');
             }
+          } catch(e) {
+            console.log('[UEFA-INTERCEPT] Error:', e.message);
           }
-        } catch {}
-      }
-    });
-
-    console.log("[UEFA] Submitting form...");
-    const submitClicked = await page.evaluate(`(() => {
-      var btn = null;
-      var allBtns = document.querySelectorAll('button');
-      for (var i = 0; i < allBtns.length; i++) {
-        var text = (allBtns[i].textContent || '').trim().toLowerCase();
-        if (text.includes('create account')) {
-          btn = allBtns[i];
-          break;
         }
-      }
-      if (!btn) {
-        var submits = document.querySelectorAll('button[type="submit"], input[type="submit"]');
-        for (var j = 0; j < submits.length; j++) {
-          var rect = submits[j].getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) { btn = submits[j]; break; }
-        }
-      }
-      if (btn) { btn.click(); return true; }
-      return false;
+        return origFetch.call(this, url, opts).then(function(resp) {
+          if (typeof url === 'string' && url.indexOf('davinci') !== -1 && window.__uefaIntercepted) {
+            var cloned = resp.clone();
+            cloned.text().then(function(text) {
+              window.__uefaResponseData = text;
+            });
+          }
+          return resp;
+        });
+      };
     })()`);
 
-    console.log(`[UEFA] Submit clicked: ${submitClicked}`);
+    console.log("[UEFA] Filling form fields...");
 
-    if (!submitClicked) {
+    await page.click('#email');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+a');
+    await page.keyboard.type(email, { delay: 20 });
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(200);
+
+    await page.click('#password');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+a');
+    await page.keyboard.type(password, { delay: 20 });
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(200);
+
+    await page.click('#givenName');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+a');
+    await page.keyboard.type(firstName, { delay: 20 });
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(200);
+
+    await page.click('#familyName');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('Control+a');
+    await page.keyboard.type(lastName, { delay: 20 });
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(200);
+
+    for (const { id, val } of [
+      { id: 'profile.birthDay', val: dob.day },
+      { id: 'profile.birthMonth', val: dob.month },
+      { id: 'profile.birthYear', val: dob.year },
+    ]) {
       try {
-        await page.click('button:has-text("Create account")');
+        await page.click(`[id="${id}"]`);
+        await page.waitForTimeout(100);
+        await page.keyboard.press('Control+a');
+        await page.keyboard.type(val, { delay: 20 });
+        await page.keyboard.press('Tab');
+        await page.waitForTimeout(200);
+      } catch (e) {
+        console.log(`[UEFA] Failed to type DOB ${id}:`, (e as Error).message.substring(0, 80));
+      }
+    }
+
+    console.log(`[UEFA] DOB typed: ${dob.day}/${dob.month}/${dob.year}`);
+
+    try {
+      await page.click('label[for="tandc"]', { force: true });
+      console.log("[UEFA] Terms clicked via label");
+    } catch {
+      await page.evaluate(`(() => {
+        var el = document.getElementById('tandc');
+        if (el) { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); }
+      })()`);
+      console.log("[UEFA] Terms checked via evaluate");
+    }
+
+    await page.waitForTimeout(500);
+
+    const formValues = await page.evaluate(`(() => {
+      var result = {};
+      var fields = ['email', 'password', 'givenName', 'familyName'];
+      for (var i = 0; i < fields.length; i++) {
+        var el = document.getElementById(fields[i]);
+        result[fields[i]] = el ? el.value : 'NOT_FOUND';
+      }
+      var dobFields = ['profile.birthDay', 'profile.birthMonth', 'profile.birthYear'];
+      for (var j = 0; j < dobFields.length; j++) {
+        var el2 = document.getElementById(dobFields[j]);
+        result[dobFields[j]] = el2 ? el2.value : 'NOT_FOUND';
+      }
+      var tandc = document.getElementById('tandc');
+      result['tandc'] = tandc ? tandc.checked : 'NOT_FOUND';
+      return result;
+    })()`) as Record<string, any>;
+    console.log("[UEFA] Form values before submit:", JSON.stringify(formValues));
+
+    console.log("[UEFA] Clicking submit button (fetch interceptor active)...");
+
+    try {
+      await page.click('button:has-text("Create account")', { timeout: 5000 });
+      console.log("[UEFA] Submit clicked");
+    } catch {
+      try {
+        await page.click('button[type="submit"]', { timeout: 5000 });
+        console.log("[UEFA] Submit clicked via type=submit");
       } catch {
-        try {
-          await page.click('button[type="submit"]');
-        } catch {
-          await context.close();
-          return { success: false, error: "Could not find submit button" };
-        }
+        await page.evaluate(`(() => {
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            if ((btns[i].textContent || '').toLowerCase().includes('create account')) {
+              btns[i].click();
+              return true;
+            }
+          }
+          return false;
+        })()`);
+        console.log("[UEFA] Submit clicked via evaluate");
       }
     }
 
     console.log("[UEFA] Waiting for response...");
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(12000);
+
+    const interceptStatus = await page.evaluate(`(() => {
+      return {
+        intercepted: window.__uefaIntercepted || false,
+        responseData: window.__uefaResponseData ? window.__uefaResponseData.substring(0, 800) : null
+      };
+    })()`) as { intercepted: boolean; responseData: string | null };
+    console.log(`[UEFA] Fetch intercepted: ${interceptStatus.intercepted}`);
+    if (interceptStatus.responseData) {
+      console.log(`[UEFA] Intercepted response: ${interceptStatus.responseData}`);
+    }
 
     let pageText = "";
     try {
@@ -354,26 +380,19 @@ async function doUefaRegistration(
     }
 
     if (pageText.toLowerCase().includes("something went wrong")) {
-      await context.close();
-      return { success: false, error: "UEFA returned 'Something went wrong'. The registration form may have validation errors." };
-    }
-
-    const errorMessages = await page.evaluate(`(() => {
-      var errors = [];
-      var errorEls = document.querySelectorAll('.error-message, .field-error, [class*="error"], [role="alert"], .form-error, .validation-error');
-      for (var i = 0; i < errorEls.length; i++) {
-        var text = errorEls[i].textContent?.trim();
-        if (text && text.length > 0 && text.length < 200) {
-          errors.push(text);
-        }
+      if (interceptStatus.responseData) {
+        try {
+          const parsed = JSON.parse(interceptStatus.responseData);
+          if (parsed.error) {
+            console.log("[UEFA] DaVinci error:", JSON.stringify(parsed.error));
+          }
+          if (parsed.details) {
+            console.log("[UEFA] DaVinci details:", JSON.stringify(parsed.details));
+          }
+        } catch {}
       }
-      return errors;
-    })()`) as string[];
-
-    if (errorMessages.length > 0) {
-      console.log("[UEFA] Form errors:", errorMessages);
       await context.close();
-      return { success: false, error: `Form errors: ${errorMessages.join("; ")}` };
+      return { success: false, error: `UEFA returned 'Something went wrong'. Fetch intercepted: ${interceptStatus.intercepted}` };
     }
 
     const lowerText = pageText.toLowerCase();
@@ -404,7 +423,9 @@ async function doUefaRegistration(
 
       const codeInput = await page.$('input[type="text"], input[name="code"], input[id*="code"]');
       if (codeInput) {
-        await fillInput(page, 'input[type="text"]', code);
+        await codeInput.click();
+        await page.waitForTimeout(200);
+        await codeInput.fill(code);
       }
       await page.waitForTimeout(1000);
 
@@ -428,8 +449,7 @@ async function doUefaRegistration(
     const redirected = page.url().includes("uefa.com") && !page.url().includes("idp-production");
     const finalText = await page.evaluate(`document.body.innerText`) as string;
     const finalLower = finalText.toLowerCase();
-    const hasError = finalLower.includes("something went wrong") || finalLower.includes("error") ||
-                     finalLower.includes("invalid") || finalLower.includes("failed");
+    const hasError = finalLower.includes("something went wrong") || finalLower.includes("invalid") || finalLower.includes("failed");
     const isSuccess = !hasError && (redirected || finalLower.includes("welcome") ||
                       finalLower.includes("account created") || finalLower.includes("success") ||
                       finalLower.includes("verify") || finalLower.includes("confirmation"));

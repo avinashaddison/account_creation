@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -41,6 +41,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
   const nav = [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/home", label: "LA28 Registration", icon: Home },
     { href: "/admin/accounts", label: "Account Stock", icon: Archive },
     { href: "/admin/email-server", label: "Email Server", icon: Mail },
     { href: "/admin/billing", label: "Billing", icon: Receipt },
