@@ -94,7 +94,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
         <nav className="flex-1 p-3 space-y-0.5">
           {nav.map((item) => {
-            const isActive = location === item.href || (item.href === "/admin/create-server" && location === "/admin/la28-create");
+            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create"));
             return (
               <Link key={item.href} href={item.href}>
                 <div
