@@ -723,6 +723,70 @@ export async function registerRoutes(
     });
   });
 
+  app.get("/api/earnings", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") {
+      return res.status(403).json({ error: "Super admin only" });
+    }
+    const allUsers = await storage.getAllUsers();
+    const allBilling = await storage.getAllBillingRecords();
+    const allAccounts = await storage.getAllAccounts();
+    const totalRevenue = await storage.getBillingTotal();
+    const totalStats = await storage.getAccountStats();
+
+    const adminBreakdown = await Promise.all(
+      allUsers
+        .filter(u => u.role === "admin")
+        .map(async (admin) => {
+          const adminBilling = await storage.getBillingTotal(admin.id);
+          const adminStats = await storage.getAccountStats(admin.id);
+          return {
+            id: admin.id,
+            username: admin.username,
+            email: admin.email,
+            walletBalance: admin.walletBalance,
+            totalSpent: adminBilling,
+            accounts: adminStats,
+          };
+        })
+    );
+
+    const platformMap: Record<string, { count: number; revenue: number }> = {};
+    for (const record of allBilling) {
+      const desc = record.description.toLowerCase();
+      let platform = "Other";
+      if (desc.includes("la28")) platform = "LA28";
+      else if (desc.includes("uefa")) platform = "UEFA";
+      else if (desc.includes("ticketmaster") || desc.includes("tm")) platform = "Ticketmaster";
+      if (!platformMap[platform]) platformMap[platform] = { count: 0, revenue: 0 };
+      platformMap[platform].count++;
+      platformMap[platform].revenue += parseFloat(String(record.amount));
+    }
+
+    const recentTransactions = allBilling.slice(0, 20).map(b => {
+      const user = allUsers.find(u => u.id === b.ownerId);
+      return {
+        id: b.id,
+        description: b.description,
+        amount: b.amount,
+        adminName: user?.username || "Unknown",
+        adminEmail: user?.email || "",
+        createdAt: b.createdAt,
+      };
+    });
+
+    res.json({
+      totalRevenue,
+      totalStats,
+      totalAdmins: allUsers.filter(u => u.role === "admin").length,
+      adminBreakdown,
+      platformBreakdown: Object.entries(platformMap).map(([name, data]) => ({
+        name,
+        ...data,
+      })),
+      recentTransactions,
+    });
+  });
+
   app.get("/api/emails", requireAuth, async (req, res) => {
     const userId = req.session.userId!;
     const role = req.session.role;

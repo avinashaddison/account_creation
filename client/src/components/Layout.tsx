@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, Home } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, Home, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -45,8 +45,11 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin/email-server", label: "Email Server", icon: Mail },
     { href: "/admin/billing", label: "Billing", icon: Receipt },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet },
-    { href: "/admin/create-server", label: "Account Create Server", icon: Server },
-    ...(user.role === "superadmin" ? [{ href: "/admin/manage-admins", label: "Manage Admins", icon: Users }] : []),
+    ...(user.role !== "superadmin" ? [{ href: "/admin/create-server", label: "Account Create Server", icon: Server }] : []),
+    ...(user.role === "superadmin" ? [
+      { href: "/admin/earnings", label: "Earnings", icon: TrendingUp },
+      { href: "/admin/manage-admins", label: "Manage Admins", icon: Users },
+    ] : []),
   ];
 
   return (

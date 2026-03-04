@@ -15,6 +15,7 @@ import UEFACreate from "@/pages/UEFACreate";
 import CreateServer from "@/pages/CreateServer";
 import EmailServer from "@/pages/EmailServer";
 import ManageAdmins from "@/pages/ManageAdmins";
+import Earnings from "@/pages/Earnings";
 import WalletPage from "@/pages/Wallet";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
@@ -47,7 +48,10 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/email-server" component={EmailServer} />
         <Route path="/admin/wallet" component={WalletPage} />
         {user.role === "superadmin" && (
-          <Route path="/admin/manage-admins" component={ManageAdmins} />
+          <>
+            <Route path="/admin/earnings" component={Earnings} />
+            <Route path="/admin/manage-admins" component={ManageAdmins} />
+          </>
         )}
         <Route component={NotFound} />
       </Switch>
