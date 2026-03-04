@@ -70,6 +70,7 @@
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.66.0",
     "react-resizable-panels": "^2.1.9",
+    "rebrowser-patches": "^1.0.19",
     "recharts": "^2.15.4",
     "socks": "^2.8.7",
     "sonner": "^2.0.7",
