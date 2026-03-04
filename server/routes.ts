@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
 import { fullRegistrationFlow } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
+import { uefaFullRegistrationFlow } from "./uefaService";
 import { randomUUID, createHash } from "crypto";
 
 function hashPassword(password: string): string {
@@ -831,6 +832,144 @@ export async function registerRoutes(
           await processTMAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
             acc.email, acc.emailPassword, userId, proxyUrl
+          );
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  async function processUEFAAccount(
+    accountId: string,
+    batchId: string,
+    firstName: string,
+    lastName: string,
+    password: string,
+    addisonEmail: string,
+    addisonEmailPassword: string,
+    ownerId: string
+  ) {
+    try {
+      broadcastLog(batchId, accountId, `Creating temp email: ${addisonEmail}`, ownerId);
+      await createTempEmail(addisonEmail, addisonEmailPassword);
+      const token = await getAuthToken(addisonEmail, addisonEmailPassword);
+      broadcastLog(batchId, accountId, `Email ready, starting UEFA registration...`, ownerId);
+
+      const result = await uefaFullRegistrationFlow(
+        addisonEmail,
+        firstName,
+        lastName,
+        password,
+        async (status) => {
+          const updated = await storage.updateAccount(accountId, { status: status as any });
+          if (updated) broadcastAccountUpdate(updated, ownerId);
+          broadcastLog(batchId, accountId, `Status: ${status}`, ownerId);
+        },
+        async () => {
+          broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
+          const code = await pollForVerificationCode(token, 40, 3000);
+          if (code) {
+            await storage.updateAccount(accountId, { verificationCode: code });
+            broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
+          } else {
+            broadcastLog(batchId, accountId, `Timed out waiting for code`, ownerId);
+          }
+          return code;
+        }
+      );
+
+      if (result.success) {
+        const updated = await storage.updateAccount(accountId, { status: "verified" });
+        if (updated) broadcastAccountUpdate(updated, ownerId);
+        broadcastLog(batchId, accountId, `UEFA account verified successfully!`, ownerId);
+
+        await storage.createBillingRecord({
+          accountId,
+          amount: COST_PER_ACCOUNT.toFixed(2),
+          description: `UEFA Account: ${firstName} ${lastName} (${addisonEmail})`,
+          ownerId,
+        });
+
+        const user = await storage.getUser(ownerId);
+        if (user) {
+          await storage.updateUserFreeAccountsUsed(ownerId, user.freeAccountsUsed + 1);
+        }
+      } else {
+        const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: result.error || "Failed" });
+        if (updated) broadcastAccountUpdate(updated, ownerId);
+        broadcastLog(batchId, accountId, `Failed: ${result.error}`, ownerId);
+      }
+    } catch (err: any) {
+      const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: err.message });
+      if (updated) broadcastAccountUpdate(updated, ownerId);
+      broadcastLog(batchId, accountId, `Error: ${err.message}`, ownerId);
+    }
+  }
+
+  app.post("/api/uefa-create-batch", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const { count = 1 } = req.body;
+      const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
+
+      const walletBalance = parseFloat(user.walletBalance || "0");
+      const requiredBalance = numAccounts * COST_PER_ACCOUNT;
+      if (walletBalance < requiredBalance) {
+        return res.status(403).json({
+          error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${numAccounts} accounts. Balance: $${walletBalance.toFixed(2)}.`,
+          walletBalance,
+          required: requiredBalance,
+        });
+      }
+      const debited = await storage.debitWallet(userId, requiredBalance);
+      if (!debited) {
+        return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
+      }
+
+      const batchId = randomUUID();
+      const domain = await getAvailableDomain();
+
+      const created: any[] = [];
+      for (let i = 0; i < numAccounts; i++) {
+        const fn = randomFrom(FIRST_NAMES);
+        const ln = randomFrom(LAST_NAMES);
+        const pw = generatePassword();
+        const username = generateRandomUsername();
+        const addisonEmail = `${username}@${domain}`;
+        const addisonEmailPassword = "TempPass123!";
+
+        const account = await storage.createAccount({
+          email: addisonEmail,
+          emailPassword: addisonEmailPassword,
+          firstName: fn,
+          lastName: ln,
+          la28Password: pw,
+          country: "Europe",
+          language: "English",
+          status: "pending",
+          batchId,
+          ownerId: userId,
+          verificationCode: null,
+          errorMessage: null,
+        });
+
+        created.push(account);
+      }
+
+      batchOwners.set(batchId, userId);
+      res.json({ batchId, accounts: created, count: numAccounts });
+
+      (async () => {
+        for (const acc of created) {
+          broadcastLog(batchId, acc.id, `Starting UEFA registration for ${acc.firstName} ${acc.lastName}...`, userId);
+          await processUEFAAccount(
+            acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
+            acc.email, acc.emailPassword, userId
           );
         }
         broadcastBatchComplete(batchId, userId);
