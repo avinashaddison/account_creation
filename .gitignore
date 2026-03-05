@@ -4,3 +4,26 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Environment
+.env
+.env.*
+
+# Replit specific
+.replit
+replit.nix
+.local/
+.cache/
+.config/
+.upm/
+
+# Logs
+*.log
+/tmp/
+
+# Playwright
+/test-results/
+/playwright-report/
+
+# Migrations (generated)
+migrations/
