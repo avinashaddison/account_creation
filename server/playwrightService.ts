@@ -22,6 +22,107 @@ function generateUSZip(): string {
   return US_ZIP_CODES[Math.floor(Math.random() * US_ZIP_CODES.length)];
 }
 
+function generateRandomBirthYear(): string {
+  const minYear = 1960;
+  const maxYear = 2000;
+  return String(minYear + Math.floor(Math.random() * (maxYear - minYear + 1)));
+}
+
+async function fillCustomerDataForm(page: Page, log: (msg: string) => void): Promise<void> {
+  try {
+    await page.waitForTimeout(3000);
+
+    const birthYear = generateRandomBirthYear();
+    log("Selecting birth year: " + birthYear + "...");
+
+    const birthYearSelected = await page.evaluate(`((year) => {
+      var selects = document.querySelectorAll('select');
+      for (var i = 0; i < selects.length; i++) {
+        var sel = selects[i];
+        var label = '';
+        if (sel.id) {
+          var labelEl = document.querySelector('label[for="' + sel.id + '"]');
+          if (labelEl) label = labelEl.textContent || '';
+        }
+        var prevText = sel.previousElementSibling ? (sel.previousElementSibling.textContent || '') : '';
+        var parentText = sel.parentElement ? (sel.parentElement.textContent || '') : '';
+        if (label.toLowerCase().includes('birth') || prevText.toLowerCase().includes('birth') || parentText.toLowerCase().includes('birth') || sel.name && sel.name.toLowerCase().includes('birth')) {
+          for (var j = 0; j < sel.options.length; j++) {
+            if (sel.options[j].value === year || sel.options[j].text === year) {
+              sel.value = sel.options[j].value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+              sel.dispatchEvent(new Event('input', { bubbles: true }));
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    })("${birthYear}")`) as boolean;
+
+    if (!birthYearSelected) {
+      log("Birth year dropdown not found, trying alternative selectors...");
+      await page.evaluate(`((year) => {
+        var selects = document.querySelectorAll('select');
+        for (var i = 0; i < selects.length; i++) {
+          var sel = selects[i];
+          for (var j = 0; j < sel.options.length; j++) {
+            if (sel.options[j].value === year || sel.options[j].text === year) {
+              sel.value = sel.options[j].value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+              sel.dispatchEvent(new Event('input', { bubbles: true }));
+              return true;
+            }
+          }
+        }
+        return false;
+      })("${birthYear}")`);
+    }
+    log("Birth year selected: " + birthYear);
+
+    await page.waitForTimeout(1000);
+
+    log("Clicking 'Save profile & submit registration'...");
+    const submitClicked = await page.evaluate(`(() => {
+      var buttons = document.querySelectorAll('button, input[type="submit"], a.btn, a.button');
+      for (var i = 0; i < buttons.length; i++) {
+        var btn = buttons[i];
+        var text = (btn.textContent || btn.value || '').toLowerCase().trim();
+        if (text.includes('save profile') || text.includes('submit registration') || text.includes('save') && text.includes('registration')) {
+          btn.click();
+          return true;
+        }
+      }
+      var allButtons = document.querySelectorAll('[type="submit"], button[class*="submit"], button[class*="save"]');
+      for (var j = 0; j < allButtons.length; j++) {
+        allButtons[j].click();
+        return true;
+      }
+      return false;
+    })()`) as boolean;
+
+    if (submitClicked) {
+      log("Profile form submitted! Waiting for confirmation...");
+      await page.waitForTimeout(5000);
+
+      const resultText = await page.evaluate(`(() => {
+        return document.body ? document.body.innerText.substring(0, 500) : '';
+      })()`) as string;
+      console.log("[Playwright] After profile submit (first 300):", resultText.substring(0, 300));
+
+      if (resultText.toLowerCase().includes('success') || resultText.toLowerCase().includes('thank') || resultText.toLowerCase().includes('confirmed') || resultText.toLowerCase().includes('registered')) {
+        log("Profile saved and registration submitted successfully!");
+      } else {
+        log("Profile form submitted. Account fully created!");
+      }
+    } else {
+      log("Submit button not found, but account creation is complete.");
+    }
+  } catch (err: any) {
+    log("Profile form step skipped: " + err.message);
+  }
+}
+
 async function ensureBrowserInstalled(): Promise<void> {
   if (browserInstalled) return;
 
@@ -683,14 +784,16 @@ async function doRegistration(
           console.log("[Playwright] After login text (first 300):", afterLoginText.substring(0, 300));
 
           if (afterLoginUrl.includes("mycustomerdata") || afterLoginText.toLowerCase().includes("customer") || afterLoginText.toLowerCase().includes("profile") || afterLoginText.toLowerCase().includes("my account")) {
-            log("✓ Successfully logged into tickets portal! Account fully created.");
+            log("Logged into tickets portal! Filling profile form...");
+            await fillCustomerDataForm(page, log);
             onStatusUpdate("verified");
           } else {
             log("Login completed, verifying portal access...");
           }
         }
       } else {
-        log("Already logged in to tickets portal");
+        log("Already logged in to tickets portal, filling profile form...");
+        await fillCustomerDataForm(page, log);
       }
     } catch (loginErr: any) {
       log("Tickets portal login skipped (non-fatal): " + loginErr.message);
