@@ -702,127 +702,40 @@ async function doRegistration(
     }
 
     onStatusUpdate("verifying");
-    log("Registration verified! Logging into LA28 tickets portal...");
+    log("Registration verified! Completing profile via Gigya API...");
 
     try {
-      log("Navigating to tickets.la28.org/mycustomerdata...");
+      const birthYear = generateRandomBirthYear();
+      log("Setting birth year: " + birthYear + " via Gigya API...");
 
-      let ticketsLoaded = false;
-      for (let navAttempt = 0; navAttempt < 3 && !ticketsLoaded; navAttempt++) {
-        try {
-          if (navAttempt > 0) {
-            log("Retrying tickets portal navigation (attempt " + (navAttempt + 1) + ")...");
-            await page.waitForTimeout(3000);
+      const profileResult = await page.evaluate(`((birthYr) => {
+        return new Promise(function(resolve) {
+          if (typeof gigya === 'undefined') {
+            resolve({ success: false, error: 'Gigya not loaded' });
+            return;
           }
-          await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
-            waitUntil: "commit",
-            timeout: 30000,
+          gigya.accounts.setAccountInfo({
+            profile: { birthYear: parseInt(birthYr) },
+            callback: function(resp) {
+              if (resp.errorCode === 0) {
+                resolve({ success: true });
+              } else {
+                resolve({ success: false, error: resp.errorMessage || 'Unknown error' });
+              }
+            }
           });
-          ticketsLoaded = true;
-        } catch (navErr: any) {
-          console.log("[Playwright] Tickets nav attempt " + (navAttempt + 1) + " failed:", navErr.message);
-          if (navAttempt === 2) throw navErr;
-        }
-      }
+          setTimeout(function() { resolve({ success: false, error: 'Gigya API timeout' }); }, 15000);
+        });
+      })("${birthYear}")`) as { success: boolean; error?: string };
 
-      try {
-        await page.waitForLoadState("domcontentloaded", { timeout: 15000 });
-      } catch {}
-      try {
-        await page.waitForLoadState("networkidle", { timeout: 15000 });
-      } catch {
-        console.log("[Playwright] Tickets portal network idle timeout, continuing...");
-      }
-      await page.waitForTimeout(5000);
-      await forceRemoveOverlays(page);
-
-      const ticketsPageText = await getPageText(page);
-      const ticketsLower = ticketsPageText.toLowerCase();
-      console.log("[Playwright] Tickets portal text (first 300):", ticketsPageText.substring(0, 300));
-
-      const needsLogin = ticketsLower.includes("sign in") || ticketsLower.includes("log in") || ticketsLower.includes("login") || ticketsLower.includes("email") && ticketsLower.includes("password");
-
-      if (needsLogin) {
-        log("Login form detected on tickets portal, filling credentials...");
-        await forceRemoveOverlays(page);
-        await page.waitForTimeout(2000);
-
-        const loginFormReady = await page.evaluate(`(() => {
-          var inputs = document.querySelectorAll('input[type="email"], input[name="email"], input[data-gigya-name="loginID"], input[data-gigya-name="email"], input[placeholder*="mail"]');
-          return inputs.length > 0;
-        })()`);
-
-        if (loginFormReady) {
-          log("Filling login email...");
-          const loginEmailFilled = await page.evaluate(`((emailVal) => {
-            var selectors = ['input[data-gigya-name="loginID"]', 'input[type="email"]', 'input[name="email"]', 'input[data-gigya-name="email"]', 'input[placeholder*="mail"]'];
-            for (var s = 0; s < selectors.length; s++) {
-              var inputs = document.querySelectorAll(selectors[s]);
-              for (var i = 0; i < inputs.length; i++) {
-                var el = inputs[i];
-                if (el.type === 'hidden') continue;
-                var rect = el.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                  var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-                  if (setter && setter.set) setter.set.call(el, emailVal);
-                  else el.value = emailVal;
-                  el.dispatchEvent(new Event('focus', { bubbles: true }));
-                  el.dispatchEvent(new Event('input', { bubbles: true }));
-                  el.dispatchEvent(new Event('change', { bubbles: true }));
-                  el.dispatchEvent(new Event('blur', { bubbles: true }));
-                  return true;
-                }
-              }
-            }
-            return false;
-          })("${email.replace(/"/g, '\\"')}")`) as boolean;
-
-          log("Filling login password...");
-          const loginPwFilled = await page.evaluate(`((pwVal) => {
-            var inputs = document.querySelectorAll('input[type="password"], input[data-gigya-name="password"]');
-            for (var i = 0; i < inputs.length; i++) {
-              var el = inputs[i];
-              if (el.type === 'hidden') continue;
-              var rect = el.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-                if (setter && setter.set) setter.set.call(el, pwVal);
-                else el.value = pwVal;
-                el.dispatchEvent(new Event('focus', { bubbles: true }));
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                el.dispatchEvent(new Event('blur', { bubbles: true }));
-                return true;
-              }
-            }
-            return false;
-          })("${password.replace(/"/g, '\\"')}")`) as boolean;
-
-          await page.waitForTimeout(500);
-          log("Submitting login to tickets portal...");
-          await clickSubmitViaJS(page);
-
-          await page.waitForTimeout(8000);
-
-          const afterLoginText = await getPageText(page);
-          const afterLoginUrl = page.url();
-          console.log("[Playwright] After login URL:", afterLoginUrl);
-          console.log("[Playwright] After login text (first 300):", afterLoginText.substring(0, 300));
-
-          if (afterLoginUrl.includes("mycustomerdata") || afterLoginText.toLowerCase().includes("customer") || afterLoginText.toLowerCase().includes("profile") || afterLoginText.toLowerCase().includes("my account")) {
-            log("Logged into tickets portal! Filling profile form...");
-            await fillCustomerDataForm(page, log);
-            onStatusUpdate("verified");
-          } else {
-            log("Login completed, verifying portal access...");
-          }
-        }
+      if (profileResult.success) {
+        log("Birth year set successfully! Profile completed.");
       } else {
-        log("Already logged in to tickets portal, filling profile form...");
-        await fillCustomerDataForm(page, log);
+        console.log("[Playwright] Gigya setAccountInfo error:", profileResult.error);
+        log("Profile update via Gigya: " + (profileResult.error || "skipped"));
       }
-    } catch (loginErr: any) {
-      log("Tickets portal login skipped (non-fatal): " + loginErr.message);
+    } catch (profileErr: any) {
+      log("Profile update skipped (non-fatal): " + profileErr.message);
     }
 
     await context.close();
