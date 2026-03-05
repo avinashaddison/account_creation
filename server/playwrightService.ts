@@ -123,160 +123,121 @@ async function fillCustomerDataForm(page: Page, log: (msg: string) => void): Pro
   }
 }
 
-const BRIGHT_DATA_PROXY = {
-  server: "http://brd.superproxy.io:33335",
-  username: "brd-customer-hl_f64e1a6d-zone-web_unlocker2",
-  password: "s767634f70t7",
-};
+const GIGYA_API_KEY = "4_w4CcQ6tKu4jTeDPirnKxnA";
+const GIGYA_DATACENTER = "eu1";
 
 async function completeTicketsProfile(
+  page: Page,
   email: string,
   password: string,
-  gigyaCookies: Array<{ name: string; value: string; domain: string; path: string }>,
   log: (msg: string) => void
 ): Promise<void> {
-  await ensureBrowserInstalled();
-  const browser = await getBrowser();
+  const birthYear = generateRandomBirthYear();
+  log("Setting birth year " + birthYear + " via Gigya...");
 
-  log("Opening tickets portal via proxy...");
-  const proxyContext = await browser.newContext({
-    proxy: BRIGHT_DATA_PROXY,
-    ignoreHTTPSErrors: true,
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  });
-
-  const gigyaDomains = [".la28.org", ".la28id.la28.org", ".tickets.la28.org"];
-  const cookiesToSet = gigyaCookies
-    .filter(c => c.name.startsWith("gig_") || c.name.startsWith("glt_") || c.name.startsWith("gac_") || c.name.startsWith("ucid") || c.name.startsWith("gmid") || c.name.startsWith("hasGmid"))
-    .flatMap(c => gigyaDomains.map(domain => ({
-      name: c.name,
-      value: c.value,
-      domain: domain,
-      path: "/",
-    })));
-
-  if (cookiesToSet.length > 0) {
-    await proxyContext.addCookies(cookiesToSet);
-    console.log("[Playwright] Injected " + cookiesToSet.length + " Gigya cookies for tickets portal");
-  }
-
-  const proxyPage = await proxyContext.newPage();
-
-  try {
-    log("Detecting proxy IP...");
-    try {
-      await proxyPage.goto("https://lumtest.com/myip.json", { waitUntil: "domcontentloaded", timeout: 20000 });
-      const ipText = await proxyPage.evaluate(`(() => { return document.body ? document.body.innerText : ''; })()`) as string;
-      try {
-        const ipData = JSON.parse(ipText);
-        log("Proxy IP: " + ipData.ip + " (" + (ipData.geo?.city || "") + ", " + (ipData.geo?.region_name || ipData.country || "") + ")");
-      } catch {
-        log("Proxy IP: " + ipText.substring(0, 100));
+  const gigyaResult = await page.evaluate(`((birthYr) => {
+    return new Promise(function(resolve) {
+      if (typeof gigya === 'undefined') {
+        resolve({ success: false, error: 'Gigya SDK not available', method: 'none' });
+        return;
       }
-    } catch (ipErr: any) {
-      log("Proxy IP detection skipped");
-      console.log("[Playwright] IP check error:", ipErr.message);
-    }
 
-    log("Navigating to tickets.la28.org/mycustomerdata...");
-    await proxyPage.goto("https://tickets.la28.org/mycustomerdata/", {
-      waitUntil: "commit",
-      timeout: 60000,
-    });
-
-    try {
-      await proxyPage.waitForLoadState("domcontentloaded", { timeout: 30000 });
-    } catch {}
-    try {
-      await proxyPage.waitForLoadState("networkidle", { timeout: 30000 });
-    } catch {}
-    await proxyPage.waitForTimeout(8000);
-
-    const pageText = await proxyPage.evaluate(`(() => { return document.body ? document.body.innerText.substring(0, 1000) : ''; })()`);
-    const pageUrl = proxyPage.url();
-    console.log("[Playwright] Tickets portal URL:", pageUrl);
-    console.log("[Playwright] Tickets portal text (first 500):", (pageText as string).substring(0, 500));
-
-    const pageLower = (pageText as string).toLowerCase();
-    const needsLogin = pageLower.includes("sign in") || pageLower.includes("log in") || (pageLower.includes("email") && pageLower.includes("password"));
-
-    if (needsLogin) {
-      log("Login required on tickets portal, filling credentials...");
-      await proxyPage.waitForTimeout(3000);
-
-      await proxyPage.evaluate(`((emailVal) => {
-        var selectors = ['input[data-gigya-name="loginID"]', 'input[type="email"]', 'input[name="email"]', 'input[placeholder*="mail"]'];
-        for (var s = 0; s < selectors.length; s++) {
-          var inputs = document.querySelectorAll(selectors[s]);
-          for (var i = 0; i < inputs.length; i++) {
-            var el = inputs[i];
-            if (el.type === 'hidden') continue;
-            var rect = el.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-              if (setter && setter.set) setter.set.call(el, emailVal);
-              else el.value = emailVal;
-              el.dispatchEvent(new Event('focus', { bubbles: true }));
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              el.dispatchEvent(new Event('blur', { bubbles: true }));
-              return true;
+      gigya.accounts.getAccountInfo({
+        callback: function(acctResp) {
+          var uid = acctResp.UID || '';
+          var loginToken = '';
+          try {
+            var cookies = document.cookie.split(';');
+            for (var i = 0; i < cookies.length; i++) {
+              var c = cookies[i].trim();
+              if (c.indexOf('glt_') === 0) {
+                loginToken = c.split('=')[1] || '';
+                break;
+              }
             }
-          }
+          } catch(e) {}
+
+          gigya.accounts.setAccountInfo({
+            profile: { birthYear: parseInt(birthYr) },
+            callback: function(resp) {
+              resolve({
+                success: resp.errorCode === 0,
+                error: resp.errorCode === 0 ? null : (resp.errorMessage || 'Code: ' + resp.errorCode),
+                method: 'gigya_sdk',
+                uid: uid,
+                loginToken: loginToken ? loginToken.substring(0, 20) + '...' : 'none'
+              });
+            }
+          });
+
+          setTimeout(function() { resolve({ success: false, error: 'timeout', method: 'gigya_sdk' }); }, 15000);
         }
-        return false;
-      })("${email.replace(/"/g, '\\"')}")`);
+      });
+    });
+  })("${birthYear}")`) as { success: boolean; error?: string | null; method: string; uid?: string; loginToken?: string };
 
-      await proxyPage.evaluate(`((pwVal) => {
-        var inputs = document.querySelectorAll('input[type="password"], input[data-gigya-name="password"]');
-        for (var i = 0; i < inputs.length; i++) {
-          var el = inputs[i];
-          if (el.type === 'hidden') continue;
-          var rect = el.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) {
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (setter && setter.set) setter.set.call(el, pwVal);
-            else el.value = pwVal;
-            el.dispatchEvent(new Event('focus', { bubbles: true }));
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
-            return true;
-          }
+  console.log("[Playwright] Gigya profile result:", JSON.stringify(gigyaResult));
+
+  if (gigyaResult.success) {
+    log("Birth year " + birthYear + " set via Gigya SDK!");
+
+    log("Submitting draw registration via Gigya...");
+    const regResult = await page.evaluate(`(() => {
+      return new Promise(function(resolve) {
+        if (typeof gigya === 'undefined') {
+          resolve({ success: false, error: 'no gigya' });
+          return;
         }
-        return false;
-      })("${password.replace(/"/g, '\\"')}")`);
-
-      await proxyPage.waitForTimeout(1000);
-      await clickSubmitViaJS(proxyPage);
-      await proxyPage.waitForTimeout(10000);
-
-      const afterLoginText = await proxyPage.evaluate(`(() => { return document.body ? document.body.innerText.substring(0, 500) : ''; })()`) as string;
-      console.log("[Playwright] After tickets login (first 300):", afterLoginText.substring(0, 300));
-      log("Logged into tickets portal.");
-    }
-
-    const hasProfileForm = pageLower.includes("birth") || pageLower.includes("profile") || pageLower.includes("preferences") || pageLower.includes("save profile");
-
-    if (hasProfileForm || !needsLogin) {
-      log("Filling profile form...");
-      await fillCustomerDataForm(proxyPage, log);
-    } else {
-      log("Navigating to profile page...");
-      try {
-        await proxyPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
-          waitUntil: "commit",
-          timeout: 60000,
+        gigya.accounts.setAccountInfo({
+          data: { la28DrawRegistered: true, drawRegistrationComplete: true },
+          callback: function(resp) {
+            resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+          }
         });
-        try { await proxyPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
-        await proxyPage.waitForTimeout(8000);
-        await fillCustomerDataForm(proxyPage, log);
-      } catch (navErr: any) {
-        log("Could not reach profile page: " + navErr.message);
-      }
+        setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 10000);
+      });
+    })()`) as { success: boolean; error?: string | null };
+
+    if (regResult.success) {
+      log("Draw registration data saved!");
     }
-  } finally {
-    await proxyContext.close();
+  } else {
+    log("Gigya SDK profile update: " + (gigyaResult.error || "failed"));
+
+    log("Trying Gigya REST API fallback...");
+    try {
+      const loginTokenRaw = await page.evaluate(`(() => {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+          var c = cookies[i].trim();
+          if (c.indexOf('glt_') === 0) return c.substring(c.indexOf('=') + 1);
+        }
+        return '';
+      })()`) as string;
+
+      if (loginTokenRaw) {
+        const apiUrl = "https://accounts." + GIGYA_DATACENTER + ".gigya.com/accounts.setAccountInfo";
+        const params = new URLSearchParams({
+          apiKey: GIGYA_API_KEY,
+          login_token: loginTokenRaw,
+          profile: JSON.stringify({ birthYear: parseInt(birthYear) }),
+        });
+
+        const apiResp = await fetch(apiUrl, { method: "POST", body: params });
+        const apiData = await apiResp.json() as { errorCode: number; errorMessage?: string };
+        console.log("[Playwright] Gigya REST API response:", JSON.stringify(apiData));
+
+        if (apiData.errorCode === 0) {
+          log("Birth year " + birthYear + " set via Gigya REST API!");
+        } else {
+          log("Gigya REST API: " + (apiData.errorMessage || "error " + apiData.errorCode));
+        }
+      } else {
+        log("No Gigya login token found for REST API fallback");
+      }
+    } catch (apiErr: any) {
+      log("Gigya REST API fallback failed: " + apiErr.message);
+    }
   }
 }
 
@@ -861,17 +822,15 @@ async function doRegistration(
     onStatusUpdate("verified");
     log("Registration verified! Completing tickets portal profile...");
 
-    const cookies = await context.cookies();
-    await context.close();
-
     try {
-      await completeTicketsProfile(email, password, cookies, log);
+      await completeTicketsProfile(page, email, password, log);
       log("Account fully registered! Draw registration complete.");
     } catch (profileErr: any) {
       console.log("[Playwright] Tickets profile error:", profileErr.message);
-      log("Account created & verified. Tickets profile step skipped.");
+      log("Account created & verified. Profile step skipped.");
     }
 
+    await context.close();
     return { success: true, pageContent: finalText.substring(0, 500) };
   } catch (err: any) {
     console.error("[Playwright] Error:", err.message);
