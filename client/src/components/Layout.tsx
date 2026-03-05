@@ -45,7 +45,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin/email-server", label: "Email Server", icon: Mail },
     { href: "/admin/billing", label: "Billing", icon: Receipt },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet },
-    ...(user.role !== "superadmin" ? [{ href: "/admin/create-server", label: "Account Create Server", icon: Server }] : []),
+    { href: "/admin/create-server", label: "Account Create Server", icon: Server },
     ...(user.role === "superadmin" ? [
       { href: "/admin/earnings", label: "Earnings", icon: TrendingUp },
       { href: "/admin/manage-admins", label: "Manage Admins", icon: Users },
