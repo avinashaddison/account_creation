@@ -23,10 +23,20 @@ async function main() {
 
   const context = await browser.newContext();
   const page = await context.newPage();
-  page.setDefaultTimeout(30000);
+  page.setDefaultTimeout(60000);
 
   const email = "wildhawk7117@dollicons.com";
   const password = "9q5arNZN@wwjs#";
+
+  const urlHistory: string[] = [];
+
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) {
+      const url = frame.url();
+      urlHistory.push(url);
+      console.log(`[NAV] Navigated to: ${url}`);
+    }
+  });
 
   try {
     console.log("Step 1: Navigating to la28id.la28.org/login/ ...");
@@ -38,7 +48,7 @@ async function main() {
 
     await page.waitForTimeout(5000);
 
-    console.log("Step 2: Removing overlays...");
+    console.log("\nStep 2: Removing overlays...");
     await page.evaluate(`(() => {
       var selectors = [
         '[id*="onetrust"]', '[class*="onetrust"]',
@@ -65,7 +75,7 @@ async function main() {
 
     await page.waitForTimeout(2000);
 
-    console.log("Step 3: Attempting login via Gigya accounts.login API...");
+    console.log("\nStep 3: Logging in via Gigya API...");
     const loginResult = await page.evaluate(`
       new Promise((resolve) => {
         if (typeof gigya !== 'undefined' && gigya.accounts) {
@@ -75,11 +85,9 @@ async function main() {
             callback: function(response) {
               resolve({
                 status: response.status,
-                statusMessage: response.statusMessage,
                 errorCode: response.errorCode,
                 errorMessage: response.errorMessage,
-                UID: response.UID || null,
-                profile: response.profile || null
+                UID: response.UID || null
               });
             }
           });
@@ -88,15 +96,57 @@ async function main() {
         }
       })
     `);
+    console.log("Login response:", JSON.stringify(loginResult));
 
-    console.log("Gigya login response:", JSON.stringify(loginResult, null, 2));
+    console.log("\nStep 4: Tracking redirects for 30 seconds...");
+    for (let i = 0; i < 6; i++) {
+      await page.waitForTimeout(5000);
+      const currentUrl = page.url();
+      console.log(`  [${(i + 1) * 5}s] Current URL: ${currentUrl}`);
+      console.log(`  [${(i + 1) * 5}s] Title: ${await page.title()}`);
+    }
 
-    await page.waitForTimeout(5000);
-    const finalUrl = page.url();
-    console.log(`\nFinal URL after login: ${finalUrl}`);
+    console.log("\nStep 5: Checking if consent page needs action...");
+    const currentUrl = page.url();
+    if (currentUrl.includes("consent")) {
+      console.log("On consent page. Looking for accept/agree buttons...");
+      
+      const buttons = await page.$$eval("button, input[type='submit'], a.btn, [role='button']", (els: any[]) =>
+        els.map((e: any) => ({
+          text: e.textContent?.trim()?.substring(0, 100),
+          tag: e.tagName,
+          type: e.type,
+          visible: e.offsetWidth > 0 && e.offsetHeight > 0,
+        }))
+      );
+      console.log("Buttons found:", JSON.stringify(buttons, null, 2));
 
-    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 1500) || "");
-    console.log("\nPage text:");
+      const acceptBtn = await page.$('button:has-text("Accept"), button:has-text("Agree"), button:has-text("Continue"), input[type="submit"]');
+      if (acceptBtn) {
+        console.log("Clicking accept/continue button...");
+        await acceptBtn.click();
+        await page.waitForTimeout(10000);
+        console.log(`After consent click URL: ${page.url()}`);
+      } else {
+        const gigyaSubmit = await page.$('.gigya-input-submit, input.gigya-input-submit');
+        if (gigyaSubmit) {
+          console.log("Found Gigya submit on consent page, clicking...");
+          await gigyaSubmit.click();
+          await page.waitForTimeout(10000);
+          console.log(`After Gigya submit URL: ${page.url()}`);
+        }
+      }
+    }
+
+    console.log("\n\n========== FULL NAVIGATION HISTORY ==========");
+    urlHistory.forEach((url, i) => {
+      console.log(`  ${i + 1}. ${url}`);
+    });
+    console.log(`\nFINAL URL: ${page.url()}`);
+    console.log(`FINAL TITLE: ${await page.title()}`);
+
+    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 2000) || "");
+    console.log("\nPage text at final URL:");
     console.log(pageText);
 
   } catch (err: any) {
