@@ -29,125 +29,89 @@ async function main() {
   const password = "9q5arNZN@wwjs#";
 
   const urlHistory: string[] = [];
-
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) {
-      const url = frame.url();
-      urlHistory.push(url);
-      console.log(`[NAV] Navigated to: ${url}`);
+      urlHistory.push(frame.url());
+      console.log(`[NAV] ${frame.url()}`);
     }
   });
 
   try {
-    console.log("Step 1: Navigating to la28id.la28.org/login/ ...");
+    console.log("=== Step 1: Login ===");
     await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 30000 });
-    } catch {}
-
+    try { await page.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
     await page.waitForTimeout(5000);
 
-    console.log("\nStep 2: Removing overlays...");
     await page.evaluate(`(() => {
-      var selectors = [
-        '[id*="onetrust"]', '[class*="onetrust"]',
-        '[id*="cookie"]', '[class*="cookie-banner"]',
-        '[class*="cookie-consent"]', '[class*="consent-banner"]',
-        '[id*="consent"]', '[class*="gdpr"]', '[id*="gdpr"]',
-        '.modal-overlay', '.overlay', '[role="dialog"]'
-      ];
-      for (var i = 0; i < selectors.length; i++) {
-        var els = document.querySelectorAll(selectors[i]);
-        for (var j = 0; j < els.length; j++) {
-          els[j].style.display = 'none';
-          els[j].remove();
-        }
-      }
-      var divs = document.querySelectorAll('div');
-      for (var k = 0; k < divs.length; k++) {
-        var style = window.getComputedStyle(divs[k]);
-        if (style.position === 'fixed' && style.zIndex && parseInt(style.zIndex) > 999 && divs[k].offsetHeight > 100) {
-          divs[k].remove();
-        }
-      }
+      var selectors = ['[id*="onetrust"]','[class*="onetrust"]','[id*="cookie"]','[class*="cookie-banner"]','.modal-overlay','.overlay'];
+      for (var i = 0; i < selectors.length; i++) { var els = document.querySelectorAll(selectors[i]); for (var j = 0; j < els.length; j++) { els[j].remove(); } }
     })()`);
-
     await page.waitForTimeout(2000);
 
-    console.log("\nStep 3: Logging in via Gigya API...");
-    const loginResult = await page.evaluate(`
+    const loginResult: any = await page.evaluate(`
       new Promise((resolve) => {
-        if (typeof gigya !== 'undefined' && gigya.accounts) {
-          gigya.accounts.login({
-            loginID: "${email}",
-            password: "${password.replace(/"/g, '\\"')}",
-            callback: function(response) {
-              resolve({
-                status: response.status,
-                errorCode: response.errorCode,
-                errorMessage: response.errorMessage,
-                UID: response.UID || null
-              });
-            }
-          });
-        } else {
-          resolve({ error: "Gigya SDK not available" });
-        }
+        gigya.accounts.login({
+          loginID: "${email}",
+          password: "${password.replace(/"/g, '\\"')}",
+          callback: function(response) {
+            resolve({ status: response.status, errorCode: response.errorCode, UID: response.UID || null });
+          }
+        });
       })
     `);
-    console.log("Login response:", JSON.stringify(loginResult));
+    console.log("Login:", JSON.stringify(loginResult));
+    await page.waitForTimeout(3000);
 
-    console.log("\nStep 4: Tracking redirects for 30 seconds...");
-    for (let i = 0; i < 6; i++) {
-      await page.waitForTimeout(5000);
-      const currentUrl = page.url();
-      console.log(`  [${(i + 1) * 5}s] Current URL: ${currentUrl}`);
-      console.log(`  [${(i + 1) * 5}s] Title: ${await page.title()}`);
-    }
+    console.log("\n=== Step 2: Get JWT and session info ===");
+    const jwtResult = await page.evaluate(`
+      new Promise((resolve) => {
+        gigya.accounts.getJWT({
+          callback: function(resp) {
+            resolve({ errorCode: resp.errorCode, id_token: resp.id_token?.substring(0, 50) + '...' });
+          }
+        });
+      })
+    `);
+    console.log("JWT:", JSON.stringify(jwtResult));
 
-    console.log("\nStep 5: Checking if consent page needs action...");
-    const currentUrl = page.url();
-    if (currentUrl.includes("consent")) {
-      console.log("On consent page. Looking for accept/agree buttons...");
-      
-      const buttons = await page.$$eval("button, input[type='submit'], a.btn, [role='button']", (els: any[]) =>
-        els.map((e: any) => ({
-          text: e.textContent?.trim()?.substring(0, 100),
-          tag: e.tagName,
-          type: e.type,
-          visible: e.offsetWidth > 0 && e.offsetHeight > 0,
-        }))
-      );
-      console.log("Buttons found:", JSON.stringify(buttons, null, 2));
+    console.log("\n=== Step 3: Intercept consent redirect and go to profile instead ===");
+    await page.waitForTimeout(5000);
 
-      const acceptBtn = await page.$('button:has-text("Accept"), button:has-text("Agree"), button:has-text("Continue"), input[type="submit"]');
-      if (acceptBtn) {
-        console.log("Clicking accept/continue button...");
-        await acceptBtn.click();
-        await page.waitForTimeout(10000);
-        console.log(`After consent click URL: ${page.url()}`);
-      } else {
-        const gigyaSubmit = await page.$('.gigya-input-submit, input.gigya-input-submit');
-        if (gigyaSubmit) {
-          console.log("Found Gigya submit on consent page, clicking...");
-          await gigyaSubmit.click();
-          await page.waitForTimeout(10000);
-          console.log(`After Gigya submit URL: ${page.url()}`);
+    const destinations = [
+      "https://la28id.la28.org/profile/",
+      "https://la28id.la28.org/en/profile.html",
+      "https://la28.org/en/profile.html",
+      "https://la28.org/en.html",
+      "https://tickets.la28.org/en/dashboard",
+    ];
+
+    for (const dest of destinations) {
+      console.log(`\nTrying: ${dest}`);
+      try {
+        await page.goto(dest, { waitUntil: "domcontentloaded", timeout: 15000 });
+        await page.waitForTimeout(3000);
+        const title = await page.title();
+        const currentUrl = page.url();
+        console.log(`  Result URL: ${currentUrl}`);
+        console.log(`  Title: ${title}`);
+        
+        if (!currentUrl.includes("login") && !currentUrl.includes("consent")) {
+          const text = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
+          console.log(`  Page text: ${text}`);
+          console.log("  SUCCESS - landed on authenticated page!");
+          break;
+        } else {
+          console.log("  Redirected back to login/consent.");
         }
+      } catch (e: any) {
+        console.log(`  Error: ${e.message.substring(0, 100)}`);
       }
     }
 
     console.log("\n\n========== FULL NAVIGATION HISTORY ==========");
-    urlHistory.forEach((url, i) => {
-      console.log(`  ${i + 1}. ${url}`);
-    });
+    urlHistory.forEach((url, i) => console.log(`  ${i + 1}. ${url}`));
     console.log(`\nFINAL URL: ${page.url()}`);
     console.log(`FINAL TITLE: ${await page.title()}`);
-
-    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 2000) || "");
-    console.log("\nPage text at final URL:");
-    console.log(pageText);
 
   } catch (err: any) {
     console.error("Error:", err.message);
