@@ -126,6 +126,30 @@ async function fillCustomerDataForm(page: Page, log: (msg: string) => void): Pro
 const GIGYA_API_KEY = "4_w4CcQ6tKu4jTeDPirnKxnA";
 const GIGYA_DATACENTER = "eu1";
 
+const OLYMPIC_SPORTS = [
+  "AQU", "ARC", "ATH", "BDM", "BKB", "BVB", "BOX", "CSP", "CYC",
+  "EQU", "FEN", "FBL", "GLF", "GYM", "HBL", "HOC", "JUD", "MPN",
+  "ROW", "RUG", "SAL", "SHO", "SKB", "CLB", "SRF", "SWM", "TTE",
+  "TKW", "TEN", "TRI", "VOL", "WPO", "WLF", "WRE",
+];
+
+const PARALYMPIC_SPORTS = [
+  "ARC", "ATH", "BDM", "BKW", "BOC", "CSP", "CYC", "EQU",
+  "FBL5", "GBL", "JUD", "PFN", "PWL", "ROW", "SHO", "SIT",
+  "SWM", "TTE", "TKW", "TRI", "WRU",
+];
+
+const TEAM_NOCS = [
+  "USA", "GBR", "FRA", "GER", "AUS", "CAN", "JPN", "BRA",
+  "ITA", "ESP", "NED", "KOR", "CHN", "NZL", "SWE", "MEX",
+  "ARG", "JAM", "KEN", "ETH", "NOR", "DEN", "COL", "IND",
+];
+
+function pickRandom<T>(arr: T[], count: number): T[] {
+  const shuffled = [...arr].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
 async function completeTicketsProfile(
   page: Page,
   email: string,
@@ -133,111 +157,209 @@ async function completeTicketsProfile(
   log: (msg: string) => void
 ): Promise<void> {
   const birthYear = generateRandomBirthYear();
-  log("Setting birth year " + birthYear + " via Gigya...");
 
-  const gigyaResult = await page.evaluate(`((birthYr) => {
+  const favOlympicSports = pickRandom(OLYMPIC_SPORTS, 3 + Math.floor(Math.random() * 4));
+  const favParalympicSports = pickRandom(PARALYMPIC_SPORTS, 2 + Math.floor(Math.random() * 3));
+  const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
+
+  log("Setting profile: birth year " + birthYear + ", " + favOlympicSports.length + " Olympic sports, " + favParalympicSports.length + " Paralympic sports, " + favTeams.length + " teams...");
+
+  const profileResult = await page.evaluate(`((birthYr) => {
     return new Promise(function(resolve) {
       if (typeof gigya === 'undefined') {
-        resolve({ success: false, error: 'Gigya SDK not available', method: 'none' });
+        resolve({ success: false, error: 'Gigya SDK not available', step: 'check' });
         return;
       }
-
-      gigya.accounts.getAccountInfo({
-        callback: function(acctResp) {
-          var uid = acctResp.UID || '';
-          var loginToken = '';
-          try {
-            var cookies = document.cookie.split(';');
-            for (var i = 0; i < cookies.length; i++) {
-              var c = cookies[i].trim();
-              if (c.indexOf('glt_') === 0) {
-                loginToken = c.split('=')[1] || '';
-                break;
-              }
-            }
-          } catch(e) {}
-
-          gigya.accounts.setAccountInfo({
-            profile: { birthYear: parseInt(birthYr) },
-            callback: function(resp) {
-              resolve({
-                success: resp.errorCode === 0,
-                error: resp.errorCode === 0 ? null : (resp.errorMessage || 'Code: ' + resp.errorCode),
-                method: 'gigya_sdk',
-                uid: uid,
-                loginToken: loginToken ? loginToken.substring(0, 20) + '...' : 'none'
-              });
-            }
+      gigya.accounts.setAccountInfo({
+        profile: { birthYear: parseInt(birthYr) },
+        callback: function(resp) {
+          resolve({
+            success: resp.errorCode === 0,
+            error: resp.errorCode === 0 ? null : (resp.errorMessage || 'Code: ' + resp.errorCode),
+            step: 'profile'
           });
-
-          setTimeout(function() { resolve({ success: false, error: 'timeout', method: 'gigya_sdk' }); }, 15000);
         }
       });
+      setTimeout(function() { resolve({ success: false, error: 'timeout', step: 'profile' }); }, 15000);
     });
-  })("${birthYear}")`) as { success: boolean; error?: string | null; method: string; uid?: string; loginToken?: string };
+  })("${birthYear}")`) as { success: boolean; error?: string | null; step: string };
 
-  console.log("[Playwright] Gigya profile result:", JSON.stringify(gigyaResult));
+  console.log("[Playwright] Profile result:", JSON.stringify(profileResult));
 
-  if (gigyaResult.success) {
-    log("Birth year " + birthYear + " set via Gigya SDK!");
+  if (!profileResult.success) {
+    log("Profile update failed: " + (profileResult.error || "unknown"));
+    await tryRestApiFallback(page, birthYear, favOlympicSports, favParalympicSports, favTeams, log);
+    return;
+  }
 
-    log("Submitting draw registration via Gigya...");
-    const regResult = await page.evaluate(`(() => {
-      return new Promise(function(resolve) {
-        if (typeof gigya === 'undefined') {
-          resolve({ success: false, error: 'no gigya' });
-          return;
+  log("Birth year " + birthYear + " set!");
+
+  const olympicSportsJSON = JSON.stringify(favOlympicSports.map(function(code: string) { return { ocsCode: code }; }));
+  const paralympicSportsJSON = JSON.stringify(favParalympicSports.map(function(code: string) { return { ocsCode: code, GameType: "PG" }; }));
+  const allSportsJSON = JSON.stringify([
+    ...favOlympicSports.map(function(code: string) { return { ocsCode: code, odfCode: code, GameType: "OG" }; }),
+    ...favParalympicSports.map(function(code: string) { return { ocsCode: code, odfCode: code, GameType: "PG" }; }),
+  ]);
+  const teamsJSON = JSON.stringify(favTeams.map(function(code: string) { return { ocsCode: code, nocCode: code, gameType: "OG" }; }));
+
+  log("Setting favorite sports and teams...");
+
+  const dataResult = await page.evaluate(`((sportsStr, teamsStr) => {
+    return new Promise(function(resolve) {
+      var sports = JSON.parse(sportsStr);
+      var teams = JSON.parse(teamsStr);
+      gigya.accounts.setAccountInfo({
+        data: {
+          personalization: {
+            favoritesDisciplines: sports,
+            favoritesCountries: teams,
+            siteLanguage: 'en'
+          },
+          entryCampaignandSegregation: {
+            l2028_ticketing: 'true',
+            l2028_fan28: 'true'
+          }
+        },
+        callback: function(resp) {
+          resolve({
+            success: resp.errorCode === 0,
+            error: resp.errorCode === 0 ? null : (resp.errorMessage || 'Code: ' + resp.errorCode),
+            step: 'data'
+          });
         }
+      });
+      setTimeout(function() { resolve({ success: false, error: 'timeout', step: 'data' }); }, 15000);
+    });
+  })('${allSportsJSON.replace(/'/g, "\\'")}', '${teamsJSON.replace(/'/g, "\\'")}')`) as { success: boolean; error?: string | null; step: string };
+
+  console.log("[Playwright] Data result:", JSON.stringify(dataResult));
+
+  if (dataResult.success) {
+    log("Favorites saved! " + favOlympicSports.length + " Olympic + " + favParalympicSports.length + " Paralympic sports, " + favTeams.length + " teams");
+  } else {
+    log("Favorites save issue: " + (dataResult.error || "unknown") + " - trying individual fields...");
+
+    const fallbackResult = await page.evaluate(`((sportsStr, teamsStr) => {
+      return new Promise(function(resolve) {
+        var sports = JSON.parse(sportsStr);
+        var teams = JSON.parse(teamsStr);
         gigya.accounts.setAccountInfo({
-          data: { la28DrawRegistered: true, drawRegistrationComplete: true },
-          callback: function(resp) {
-            resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+          data: {
+            personalization: { favoritesDisciplines: sports },
+          },
+          callback: function(r1) {
+            if (r1.errorCode !== 0) {
+              resolve({ success: false, error: 'sports: ' + r1.errorMessage, step: 'sports' });
+              return;
+            }
+            gigya.accounts.setAccountInfo({
+              data: {
+                personalization: { favoritesCountries: teams },
+              },
+              callback: function(r2) {
+                if (r2.errorCode !== 0) {
+                  resolve({ success: false, error: 'teams: ' + r2.errorMessage, step: 'teams' });
+                  return;
+                }
+                gigya.accounts.setAccountInfo({
+                  data: {
+                    entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
+                  },
+                  callback: function(r3) {
+                    resolve({ success: r3.errorCode === 0, error: r3.errorCode === 0 ? null : r3.errorMessage, step: 'flags' });
+                  }
+                });
+              }
+            });
           }
         });
-        setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 10000);
+        setTimeout(function() { resolve({ success: false, error: 'timeout', step: 'fallback' }); }, 20000);
       });
-    })()`) as { success: boolean; error?: string | null };
+    })('${allSportsJSON.replace(/'/g, "\\'")}', '${teamsJSON.replace(/'/g, "\\'")}')`) as { success: boolean; error?: string | null; step: string };
 
-    if (regResult.success) {
-      log("Draw registration data saved!");
+    console.log("[Playwright] Fallback data result:", JSON.stringify(fallbackResult));
+    if (fallbackResult.success) {
+      log("Favorites saved via individual updates!");
+    } else {
+      log("Favorites fallback: " + (fallbackResult.error || "failed"));
     }
-  } else {
-    log("Gigya SDK profile update: " + (gigyaResult.error || "failed"));
+  }
+}
 
-    log("Trying Gigya REST API fallback...");
-    try {
-      const loginTokenRaw = await page.evaluate(`(() => {
-        var cookies = document.cookie.split(';');
-        for (var i = 0; i < cookies.length; i++) {
-          var c = cookies[i].trim();
-          if (c.indexOf('glt_') === 0) return c.substring(c.indexOf('=') + 1);
-        }
-        return '';
-      })()`) as string;
-
-      if (loginTokenRaw) {
-        const apiUrl = "https://accounts." + GIGYA_DATACENTER + ".gigya.com/accounts.setAccountInfo";
-        const params = new URLSearchParams({
-          apiKey: GIGYA_API_KEY,
-          login_token: loginTokenRaw,
-          profile: JSON.stringify({ birthYear: parseInt(birthYear) }),
-        });
-
-        const apiResp = await fetch(apiUrl, { method: "POST", body: params });
-        const apiData = await apiResp.json() as { errorCode: number; errorMessage?: string };
-        console.log("[Playwright] Gigya REST API response:", JSON.stringify(apiData));
-
-        if (apiData.errorCode === 0) {
-          log("Birth year " + birthYear + " set via Gigya REST API!");
-        } else {
-          log("Gigya REST API: " + (apiData.errorMessage || "error " + apiData.errorCode));
-        }
-      } else {
-        log("No Gigya login token found for REST API fallback");
+async function tryRestApiFallback(
+  page: Page,
+  birthYear: string,
+  olympicSports: string[],
+  paralympicSports: string[],
+  teams: string[],
+  log: (msg: string) => void
+): Promise<void> {
+  log("Trying Gigya REST API fallback...");
+  try {
+    const loginTokenRaw = await page.evaluate(`(() => {
+      var cookies = document.cookie.split(';');
+      for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i].trim();
+        if (c.indexOf('glt_') === 0) return c.substring(c.indexOf('=') + 1);
       }
-    } catch (apiErr: any) {
-      log("Gigya REST API fallback failed: " + apiErr.message);
+      return '';
+    })()`) as string;
+
+    if (!loginTokenRaw) {
+      log("No Gigya login token found for REST API fallback");
+      return;
     }
+
+    const apiUrl = "https://accounts." + GIGYA_DATACENTER + ".gigya.com/accounts.setAccountInfo";
+
+    const allSports = [
+      ...olympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+      ...paralympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+    ];
+
+    const teamObjs = teams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
+
+    const profileParams = new URLSearchParams({
+      apiKey: GIGYA_API_KEY,
+      login_token: loginTokenRaw,
+      profile: JSON.stringify({ birthYear: parseInt(birthYear) }),
+    });
+    const profileResp = await fetch(apiUrl, { method: "POST", body: profileParams });
+    const profileData = await profileResp.json() as { errorCode: number; errorMessage?: string };
+    console.log("[Playwright] REST profile:", JSON.stringify(profileData));
+
+    if (profileData.errorCode === 0) {
+      log("Birth year " + birthYear + " set via REST API!");
+    } else {
+      log("REST profile error: " + (profileData.errorMessage || "code " + profileData.errorCode));
+    }
+
+    const dataParams = new URLSearchParams({
+      apiKey: GIGYA_API_KEY,
+      login_token: loginTokenRaw,
+      data: JSON.stringify({
+        personalization: {
+          favoritesDisciplines: allSports,
+          favoritesCountries: teamObjs,
+          siteLanguage: "en",
+        },
+        entryCampaignandSegregation: {
+          l2028_ticketing: "true",
+          l2028_fan28: "true",
+        },
+      }),
+    });
+    const dataResp = await fetch(apiUrl, { method: "POST", body: dataParams });
+    const dataData = await dataResp.json() as { errorCode: number; errorMessage?: string };
+    console.log("[Playwright] REST data:", JSON.stringify(dataData));
+
+    if (dataData.errorCode === 0) {
+      log("Favorites + registration set via REST API!");
+    } else {
+      log("REST data error: " + (dataData.errorMessage || "code " + dataData.errorCode));
+    }
+  } catch (apiErr: any) {
+    log("REST API fallback failed: " + apiErr.message);
   }
 }
 
