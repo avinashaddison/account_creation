@@ -450,7 +450,7 @@ export async function registerRoutes(
       if (!user) return res.status(401).json({ error: "User not found" });
 
       const { count = 1, country = "United States", language = "English" } = req.body;
-      const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
+      const numAccounts = Math.max(1, parseInt(count));
 
       const walletBalance = parseFloat(user.walletBalance || "0");
       const requiredBalance = numAccounts * COST_PER_ACCOUNT;
@@ -945,7 +945,7 @@ export async function registerRoutes(
       if (!user) return res.status(401).json({ error: "User not found" });
 
       const { count = 1 } = req.body;
-      const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
+      const numAccounts = Math.max(1, parseInt(count));
       const proxyUrl = process.env.TM_PROXY_URL || req.body.proxyUrl || "";
 
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -1085,7 +1085,7 @@ export async function registerRoutes(
       if (!user) return res.status(401).json({ error: "User not found" });
 
       const { count = 1 } = req.body;
-      const numAccounts = Math.min(Math.max(1, parseInt(count)), 30);
+      const numAccounts = Math.max(1, parseInt(count));
 
       const walletBalance = parseFloat(user.walletBalance || "0");
       const requiredBalance = numAccounts * COST_PER_ACCOUNT;

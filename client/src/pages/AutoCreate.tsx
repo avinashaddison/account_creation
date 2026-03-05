@@ -25,7 +25,7 @@ type BatchAccount = {
   status: string;
 };
 
-const QUICK_AMOUNTS = [1, 5, 10, 20, 30];
+const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 export default function AutoCreate() {
   const [count, setCount] = useState(1);
@@ -227,9 +227,9 @@ export default function AutoCreate() {
                 <Input
                   type="number"
                   value={count}
-                  onChange={(e) => setCount(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                  onChange={(e) => setCount(Math.max(1, parseInt(e.target.value) || 1))}
                   min={1}
-                  max={30}
+                  placeholder="Enter any number"
                   disabled={isRunning}
                   className="h-9 text-sm bg-white/[0.02] border-white/5 text-zinc-300 placeholder:text-zinc-600"
                   data-testid="input-custom-count"

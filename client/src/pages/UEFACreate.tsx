@@ -12,7 +12,7 @@ import {
   Terminal, Trophy
 } from "lucide-react";
 
-const QUICK_AMOUNTS = [1, 3, 5, 10];
+const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 type LogEntry = { accountId: string; message: string; timestamp: string };
 type BatchAccount = { id: string; firstName: string; lastName: string; status: string };
@@ -141,9 +141,9 @@ export default function UEFACreate() {
                 <Input
                   type="number"
                   value={count}
-                  onChange={(e) => setCount(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                  onChange={(e) => setCount(Math.max(1, parseInt(e.target.value) || 1))}
                   min={1}
-                  max={30}
+                  placeholder="Enter any number"
                   disabled={isRunning}
                   className="h-9 text-sm bg-white/[0.02] border-white/5 text-zinc-300"
                   data-testid="input-uefa-custom-count"
