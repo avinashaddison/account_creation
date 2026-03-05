@@ -4,7 +4,7 @@ import fs from "fs";
 async function main() {
   const execPath = chromium.executablePath();
   if (!fs.existsSync(execPath)) {
-    console.error("Chromium not found. Run: npx playwright install chromium");
+    console.error("Chromium not found.");
     return;
   }
 
@@ -15,7 +15,6 @@ async function main() {
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--disable-software-rasterizer",
       "--no-zygote",
       "--js-flags=--max-old-space-size=256",
       "--disable-http2",
@@ -32,13 +31,10 @@ async function main() {
   try {
     console.log("Step 1: Navigating to la28id.la28.org/login/ ...");
     await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-    console.log("Page loaded. URL:", page.url());
 
     try {
       await page.waitForLoadState("networkidle", { timeout: 30000 });
-    } catch {
-      console.log("Network idle timeout, continuing...");
-    }
+    } catch {}
 
     await page.waitForTimeout(5000);
 
@@ -66,121 +62,41 @@ async function main() {
         }
       }
     })()`);
-    console.log("Overlays removed.");
 
     await page.waitForTimeout(2000);
 
-    console.log("Step 3: Filling credentials via JS...");
-    const emailFilled = await page.evaluate(`((name, val) => {
-      var inputs = document.querySelectorAll('input[data-gigya-name="' + name + '"]');
-      var visible = null;
-      var lastNonHidden = null;
-      for (var i = 0; i < inputs.length; i++) {
-        var el = inputs[i];
-        if (el.type === 'hidden') continue;
-        lastNonHidden = el;
-        var rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          visible = el;
+    console.log("Step 3: Attempting login via Gigya accounts.login API...");
+    const loginResult = await page.evaluate(`
+      new Promise((resolve) => {
+        if (typeof gigya !== 'undefined' && gigya.accounts) {
+          gigya.accounts.login({
+            loginID: "${email}",
+            password: "${password.replace(/"/g, '\\"')}",
+            callback: function(response) {
+              resolve({
+                status: response.status,
+                statusMessage: response.statusMessage,
+                errorCode: response.errorCode,
+                errorMessage: response.errorMessage,
+                UID: response.UID || null,
+                profile: response.profile || null
+              });
+            }
+          });
+        } else {
+          resolve({ error: "Gigya SDK not available" });
         }
-      }
-      var target = visible || lastNonHidden;
-      if (!target) return false;
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) {
-        setter.set.call(target, val);
-      } else {
-        target.value = val;
-      }
-      target.dispatchEvent(new Event('focus', { bubbles: true }));
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-      target.dispatchEvent(new Event('blur', { bubbles: true }));
-      return true;
-    })("loginID", "${email}")`);
-    console.log("Email filled:", emailFilled);
+      })
+    `);
 
-    const pwdFilled = await page.evaluate(`((name, val) => {
-      var inputs = document.querySelectorAll('input[data-gigya-name="' + name + '"]');
-      var visible = null;
-      var lastNonHidden = null;
-      for (var i = 0; i < inputs.length; i++) {
-        var el = inputs[i];
-        if (el.type === 'hidden') continue;
-        lastNonHidden = el;
-        var rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          visible = el;
-        }
-      }
-      var target = visible || lastNonHidden;
-      if (!target) return false;
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) {
-        setter.set.call(target, val);
-      } else {
-        target.value = val;
-      }
-      target.dispatchEvent(new Event('focus', { bubbles: true }));
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-      target.dispatchEvent(new Event('blur', { bubbles: true }));
-      return true;
-    })("password", "${password.replace(/"/g, '\\"')}")`);
-    console.log("Password filled:", pwdFilled);
+    console.log("Gigya login response:", JSON.stringify(loginResult, null, 2));
 
-    if (!emailFilled || !pwdFilled) {
-      console.log("Failed to fill one or both fields. Dumping all inputs:");
-      const allInputs = await page.$$eval("input", (els: any[]) =>
-        els.map((e: any) => ({
-          type: e.type,
-          name: e.name,
-          gigyaName: e.getAttribute("data-gigya-name"),
-          visible: e.offsetWidth > 0 && e.offsetHeight > 0,
-        }))
-      );
-      console.log(JSON.stringify(allInputs, null, 2));
-      await browser.close();
-      return;
-    }
-
-    console.log("Step 4: Clicking submit...");
-    const submitClicked = await page.evaluate(`(() => {
-      var btn = document.querySelector('input.gigya-input-submit[type="submit"]') ||
-                document.querySelector('.gigya-input-submit') ||
-                document.querySelector('button[type="submit"]') ||
-                document.querySelector('input[type="submit"]');
-      if (btn) {
-        btn.click();
-        return true;
-      }
-      return false;
-    })()`);
-    console.log("Submit clicked:", submitClicked);
-
-    if (!submitClicked) {
-      console.log("No submit button found.");
-      await browser.close();
-      return;
-    }
-
-    console.log("Step 5: Waiting for response...");
-    await page.waitForTimeout(15000);
-
+    await page.waitForTimeout(5000);
     const finalUrl = page.url();
-    console.log(`\n=== RESULT ===`);
-    console.log(`Final URL: ${finalUrl}`);
-
-    const errorElements = await page.$$('.gigya-error-msg, .gigya-error-msg-active, [class*="error"], [role="alert"]');
-    for (const el of errorElements) {
-      const text = await el.textContent();
-      if (text && text.trim()) {
-        console.log("Error message:", text.trim());
-      }
-    }
+    console.log(`\nFinal URL after login: ${finalUrl}`);
 
     const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 1500) || "");
-    console.log("\nPage text after login attempt:");
+    console.log("\nPage text:");
     console.log(pageText);
 
   } catch (err: any) {
