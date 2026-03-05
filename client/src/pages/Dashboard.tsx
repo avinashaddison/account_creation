@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { sounds } from "@/lib/sounds";
 
 type DashboardData = {
   stats: { total: number; verified: number; failed: number; pending: number };
@@ -301,7 +302,7 @@ export default function Dashboard() {
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-zinc-500 font-mono">{acc.email}</span>
                       <button
-                        onClick={() => copyEmail(acc.email)}
+                        onClick={() => { sounds.click(); copyEmail(acc.email); }}
                         className="text-zinc-600 hover:text-zinc-400 transition-colors"
                         data-testid={`button-copy-recent-${acc.id}`}
                       >

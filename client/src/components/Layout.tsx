@@ -3,6 +3,7 @@ import { useLocation, Link } from "wouter";
 import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, Home, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { sounds } from "@/lib/sounds";
 
 type LayoutProps = {
   children: React.ReactNode;
@@ -101,6 +102,8 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
             return (
               <Link key={item.href} href={item.href}>
                 <div
+                  onClick={() => sounds.navigate()}
+                  onMouseEnter={() => sounds.hover()}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-all duration-200 ${
                     isActive
                       ? "bg-gradient-to-r from-red-600/20 to-rose-600/15 text-white border border-red-500/25"
@@ -130,7 +133,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
             variant="ghost"
             size="sm"
             className="w-full justify-start text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
-            onClick={onLogout}
+            onClick={() => { sounds.logout(); onLogout(); }}
             data-testid="button-logout"
           >
             <LogOut className="w-4 h-4 mr-2" />

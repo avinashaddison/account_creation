@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Lock } from "lucide-react";
+import { sounds } from "@/lib/sounds";
 
 type LoginProps = {
   onLogin: (user: { id: string; username: string; email: string; role: string }) => void;
@@ -29,12 +30,15 @@ export default function Login({ onLogin }: LoginProps) {
       const data = await res.json();
 
       if (!res.ok) {
+        sounds.error();
         setError(data.error || "Login failed");
         return;
       }
 
+      sounds.success();
       onLogin(data);
     } catch {
+      sounds.error();
       setError("Connection error. Please try again.");
     } finally {
       setLoading(false);

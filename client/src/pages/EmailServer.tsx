@@ -8,6 +8,7 @@ import { Copy, Mail, RefreshCw, Inbox, Loader2, CheckCircle2 } from "lucide-reac
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { subscribe } from "@/lib/ws";
+import { sounds } from "@/lib/sounds";
 
 type EmailAccount = {
   id: string;
@@ -159,7 +160,7 @@ export default function EmailServer() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={(e) => { e.stopPropagation(); copyText(em.email, em.id); }}
+                          onClick={(e) => { e.stopPropagation(); sounds.click(); copyText(em.email, em.id); }}
                           data-testid={`button-copy-email-${em.id}`}
                         >
                           {copiedId === em.id ? (

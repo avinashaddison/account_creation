@@ -8,6 +8,7 @@ import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download, Check
 import { subscribe } from "@/lib/ws";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { sounds } from "@/lib/sounds";
 
 type Account = {
   id: string;
@@ -209,7 +210,7 @@ export default function AccountStock() {
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2 text-xs"
-                          onClick={() => toggleUsed(acc.id)}
+                          onClick={() => { sounds.toggle(); toggleUsed(acc.id); }}
                           disabled={toggling === acc.id}
                           data-testid={`button-toggle-${acc.id}`}
                         >
@@ -226,7 +227,7 @@ export default function AccountStock() {
                           variant="ghost"
                           size="sm"
                           className="h-7 px-2"
-                          onClick={() => copyToClipboard(`${acc.email}\t${acc.la28Password}`)}
+                          onClick={() => { sounds.click(); copyToClipboard(`${acc.email}\t${acc.la28Password}`); }}
                           data-testid={`button-copy-${acc.id}`}
                         >
                           <Copy className="w-3.5 h-3.5" />

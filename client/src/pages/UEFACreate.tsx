@@ -11,6 +11,7 @@ import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
   Terminal, Trophy
 } from "lucide-react";
+import { sounds } from "@/lib/sounds";
 
 const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
@@ -40,8 +41,11 @@ export default function UEFACreate() {
       if (data.type === "log") {
         setLogs((prev) => [...prev, { accountId: data.accountId, message: data.message, timestamp: data.timestamp }]);
       } else if (data.type === "account_update") {
+        if (data.account.status === "verified") sounds.notification();
+        else if (data.account.status === "failed") sounds.warning();
         setAccounts((prev) => prev.map((a) => a.id === data.account.id ? { ...a, status: data.account.status } : a));
       } else if (data.type === "batch_complete") {
+        sounds.complete();
         setIsRunning(false);
         toast({ title: "Batch Complete", description: "All UEFA accounts have been processed" });
       }
@@ -125,7 +129,7 @@ export default function UEFACreate() {
                   {QUICK_AMOUNTS.map((n) => (
                     <button
                       key={n}
-                      onClick={() => setCount(n)}
+                      onClick={() => { sounds.click(); setCount(n); }}
                       disabled={isRunning}
                       className={`flex-1 h-9 text-sm font-semibold rounded-lg border transition-all ${
                         count === n
@@ -175,7 +179,7 @@ export default function UEFACreate() {
 
               <Button
                 className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-lg shadow-emerald-500/20 border-0"
-                onClick={() => startBatch(count)}
+                onClick={() => { sounds.start(); startBatch(count); }}
                 disabled={isRunning}
                 data-testid="button-uefa-start-batch"
               >

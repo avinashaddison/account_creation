@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { Link } from "wouter";
+import { sounds } from "@/lib/sounds";
 
 type LogEntry = {
   accountId: string;
@@ -57,11 +58,14 @@ export default function AutoCreate() {
         setLogs((prev) => [...prev, { accountId: msg.accountId, message: msg.message, timestamp: msg.timestamp }]);
       }
       if (msg.type === "account_update" && batchAccountsRef.current.some((a) => a.id === msg.account.id)) {
+        if (msg.account.status === "verified") sounds.notification();
+        else if (msg.account.status === "failed") sounds.warning();
         setBatchAccounts((prev) =>
           prev.map((a) => (a.id === msg.account.id ? { ...a, status: msg.account.status } : a))
         );
       }
       if (msg.type === "batch_complete" && msg.batchId === batchIdRef.current) {
+        sounds.complete();
         setIsRunning(false);
       }
     });
@@ -211,7 +215,7 @@ export default function AutoCreate() {
                   {QUICK_AMOUNTS.map((n) => (
                     <button
                       key={n}
-                      onClick={() => setCount(n)}
+                      onClick={() => { sounds.click(); setCount(n); }}
                       disabled={isRunning}
                       className={`flex-1 h-9 text-sm font-semibold rounded-lg border transition-all ${
                         count === n
@@ -276,7 +280,7 @@ export default function AutoCreate() {
 
               <Button
                 className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 shadow-lg shadow-red-500/20 border-0"
-                onClick={() => startBatch(count)}
+                onClick={() => { sounds.start(); startBatch(count); }}
                 disabled={isRunning}
                 data-testid="button-start-batch"
               >

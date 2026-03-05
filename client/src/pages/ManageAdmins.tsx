@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
+import { sounds } from "@/lib/sounds";
 import { useToast } from "@/hooks/use-toast";
 
 type AdminUser = {
@@ -282,7 +283,7 @@ export default function ManageAdmins() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => deleteAdmin(admin.id, admin.email)}
+                                onClick={() => { sounds.warning(); deleteAdmin(admin.id, admin.email); }}
                                 className="text-red-500 hover:text-red-700"
                                 data-testid={`button-delete-admin-${admin.id}`}
                               >
@@ -416,7 +417,7 @@ export default function ManageAdmins() {
                                   size="sm"
                                   variant="outline"
                                   className="text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10"
-                                  onClick={() => handlePaymentAction(p.id, "approve")}
+                                  onClick={() => { sounds.success(); handlePaymentAction(p.id, "approve"); }}
                                   data-testid={`button-approve-${p.id}`}
                                 >
                                   <CheckCircle2 className="w-3 h-3 mr-1" /> Approve
@@ -425,7 +426,7 @@ export default function ManageAdmins() {
                                   size="sm"
                                   variant="outline"
                                   className="text-red-400 border-red-500/20 hover:bg-red-500/10"
-                                  onClick={() => handlePaymentAction(p.id, "reject")}
+                                  onClick={() => { sounds.error(); handlePaymentAction(p.id, "reject"); }}
                                   data-testid={`button-reject-${p.id}`}
                                 >
                                   <XCircle className="w-3 h-3 mr-1" /> Reject

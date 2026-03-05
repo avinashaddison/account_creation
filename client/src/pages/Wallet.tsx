@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Wallet as WalletIcon, Copy, CheckCircle2, Clock, XCircle, Loader2, Send, MessageCircle } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { sounds } from "@/lib/sounds";
 
 type PaymentRequest = {
   id: string;
@@ -83,15 +84,18 @@ export default function Wallet() {
       if (res.status === 401) { handleUnauthorized(); return; }
       const result = await res.json();
       if (res.ok) {
+        sounds.deposit();
         toast({ title: "Request Submitted", description: "Your payment request has been sent for approval" });
         setAmount("");
         setTxHash("");
         fetchWallet();
         openWhatsApp(submittedAmount, submittedHash);
       } else {
+        sounds.error();
         toast({ title: "Error", description: result.error, variant: "destructive" });
       }
     } catch {
+      sounds.error();
       toast({ title: "Error", description: "Failed to submit request", variant: "destructive" });
     } finally {
       setSubmitting(false);
@@ -169,7 +173,7 @@ export default function Wallet() {
                 <code className="flex-1 text-xs bg-white/5 text-zinc-300 px-3 py-2 rounded border border-white/10 font-mono break-all" data-testid="text-trc20-address">
                   {data?.trc20Address}
                 </code>
-                <Button variant="outline" size="sm" onClick={copyAddress} data-testid="button-copy-trc20">
+                <Button variant="outline" size="sm" onClick={() => { sounds.click(); copyAddress(); }} data-testid="button-copy-trc20">
                   {copied ? <CheckCircle2 className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                 </Button>
               </div>
