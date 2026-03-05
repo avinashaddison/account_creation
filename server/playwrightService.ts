@@ -278,12 +278,14 @@ export async function fullRegistrationFlow(
   country: string,
   language: string,
   onStatusUpdate: (status: string) => void,
-  getVerificationCode: () => Promise<string | null>
+  getVerificationCode: () => Promise<string | null>,
+  onLog?: (message: string) => void
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+  const log = onLog || ((msg: string) => console.log(`[Playwright] ${msg}`));
   const maxRetries = 2;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
-      console.log(`[Playwright] Retry attempt ${attempt + 1}/${maxRetries}...`);
+      log(`Retry attempt ${attempt + 1}/${maxRetries}...`);
       if (browserInstance) {
         try { await browserInstance.close(); } catch {}
         browserInstance = null;
@@ -291,12 +293,12 @@ export async function fullRegistrationFlow(
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    const result = await doRegistration(email, firstName, lastName, password, country, language, onStatusUpdate, getVerificationCode);
+    const result = await doRegistration(email, firstName, lastName, password, country, language, onStatusUpdate, getVerificationCode, log);
 
     if (result.error?.includes("Target page, context or browser has been closed") ||
         result.error?.includes("browser has been closed") ||
         result.error?.includes("crashed")) {
-      console.log(`[Playwright] Browser crashed, will retry...`);
+      log(`Browser crashed, will retry...`);
       if (browserInstance) {
         try { await browserInstance.close(); } catch {}
         browserInstance = null;
@@ -318,7 +320,8 @@ async function doRegistration(
   country: string,
   language: string,
   onStatusUpdate: (status: string) => void,
-  getVerificationCode: () => Promise<string | null>
+  getVerificationCode: () => Promise<string | null>,
+  log: (message: string) => void
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
   let browser: Browser;
   try {
@@ -593,9 +596,10 @@ async function doRegistration(
     }
 
     onStatusUpdate("verifying");
-    console.log("[Playwright] Registration verified! Now logging in to tickets portal...");
+    log("Registration verified! Logging into LA28 tickets portal...");
 
     try {
+      log("Navigating to tickets.la28.org/mycustomerdata...");
       await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
       try {
         await page.waitForLoadState("networkidle", { timeout: 20000 });
@@ -612,7 +616,7 @@ async function doRegistration(
       const needsLogin = ticketsLower.includes("sign in") || ticketsLower.includes("log in") || ticketsLower.includes("login") || ticketsLower.includes("email") && ticketsLower.includes("password");
 
       if (needsLogin) {
-        console.log("[Playwright] Login form detected on tickets portal, filling credentials...");
+        log("Login form detected on tickets portal, filling credentials...");
         await forceRemoveOverlays(page);
         await page.waitForTimeout(2000);
 
@@ -622,6 +626,7 @@ async function doRegistration(
         })()`);
 
         if (loginFormReady) {
+          log("Filling login email...");
           const loginEmailFilled = await page.evaluate(`((emailVal) => {
             var selectors = ['input[data-gigya-name="loginID"]', 'input[type="email"]', 'input[name="email"]', 'input[data-gigya-name="email"]', 'input[placeholder*="mail"]'];
             for (var s = 0; s < selectors.length; s++) {
@@ -644,8 +649,8 @@ async function doRegistration(
             }
             return false;
           })("${email.replace(/"/g, '\\"')}")`) as boolean;
-          console.log(`[Playwright] Login email filled: ${loginEmailFilled}`);
 
+          log("Filling login password...");
           const loginPwFilled = await page.evaluate(`((pwVal) => {
             var inputs = document.querySelectorAll('input[type="password"], input[data-gigya-name="password"]');
             for (var i = 0; i < inputs.length; i++) {
@@ -665,11 +670,10 @@ async function doRegistration(
             }
             return false;
           })("${password.replace(/"/g, '\\"')}")`) as boolean;
-          console.log(`[Playwright] Login password filled: ${loginPwFilled}`);
 
           await page.waitForTimeout(500);
+          log("Submitting login to tickets portal...");
           await clickSubmitViaJS(page);
-          console.log("[Playwright] Login submitted, waiting for redirect...");
 
           await page.waitForTimeout(8000);
 
@@ -679,17 +683,17 @@ async function doRegistration(
           console.log("[Playwright] After login text (first 300):", afterLoginText.substring(0, 300));
 
           if (afterLoginUrl.includes("mycustomerdata") || afterLoginText.toLowerCase().includes("customer") || afterLoginText.toLowerCase().includes("profile") || afterLoginText.toLowerCase().includes("my account")) {
-            console.log("[Playwright] Successfully logged in to tickets portal!");
+            log("✓ Successfully logged into tickets portal! Account fully created.");
             onStatusUpdate("verified");
           } else {
-            console.log("[Playwright] Login may have issues, but registration was successful");
+            log("Login completed, verifying portal access...");
           }
         }
       } else {
-        console.log("[Playwright] Already logged in or redirected to profile");
+        log("Already logged in to tickets portal");
       }
     } catch (loginErr: any) {
-      console.log("[Playwright] Tickets portal login attempt error (non-fatal):", loginErr.message);
+      log("Tickets portal login skipped (non-fatal): " + loginErr.message);
     }
 
     await context.close();

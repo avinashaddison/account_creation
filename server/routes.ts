@@ -154,13 +154,16 @@ async function processAccount(
           broadcastLog(batchId, accountId, `Timed out waiting for code`, ownerId);
         }
         return code;
+      },
+      (message) => {
+        broadcastLog(batchId, accountId, message, ownerId);
       }
     );
 
     if (result.success) {
       const updated = await storage.updateAccount(accountId, { status: "verified" });
       if (updated) broadcastAccountUpdate(updated, ownerId);
-      broadcastLog(batchId, accountId, `Account verified successfully!`, ownerId);
+      broadcastLog(batchId, accountId, `✅ Account created successfully! Email: ${addisonEmail}`, ownerId);
 
       await storage.createBillingRecord({
         accountId,
