@@ -123,6 +123,148 @@ async function fillCustomerDataForm(page: Page, log: (msg: string) => void): Pro
   }
 }
 
+const BRIGHT_DATA_PROXY = {
+  server: "http://brd.superproxy.io:33335",
+  username: "brd-customer-hl_f64e1a6d-zone-web_unlocker2",
+  password: "s767634f70t7",
+};
+
+async function completeTicketsProfile(
+  email: string,
+  password: string,
+  gigyaCookies: Array<{ name: string; value: string; domain: string; path: string }>,
+  log: (msg: string) => void
+): Promise<void> {
+  await ensureBrowserInstalled();
+  const browser = await getBrowser();
+
+  log("Opening tickets portal via proxy...");
+  const proxyContext = await browser.newContext({
+    proxy: BRIGHT_DATA_PROXY,
+    ignoreHTTPSErrors: true,
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  });
+
+  const gigyaDomains = [".la28.org", ".la28id.la28.org", ".tickets.la28.org"];
+  const cookiesToSet = gigyaCookies
+    .filter(c => c.name.startsWith("gig_") || c.name.startsWith("glt_") || c.name.startsWith("gac_") || c.name.startsWith("ucid") || c.name.startsWith("gmid") || c.name.startsWith("hasGmid"))
+    .flatMap(c => gigyaDomains.map(domain => ({
+      name: c.name,
+      value: c.value,
+      domain: domain,
+      path: "/",
+    })));
+
+  if (cookiesToSet.length > 0) {
+    await proxyContext.addCookies(cookiesToSet);
+    console.log("[Playwright] Injected " + cookiesToSet.length + " Gigya cookies for tickets portal");
+  }
+
+  const proxyPage = await proxyContext.newPage();
+
+  try {
+    log("Navigating to tickets.la28.org/mycustomerdata...");
+    await proxyPage.goto("https://tickets.la28.org/mycustomerdata/", {
+      waitUntil: "commit",
+      timeout: 60000,
+    });
+
+    try {
+      await proxyPage.waitForLoadState("domcontentloaded", { timeout: 30000 });
+    } catch {}
+    try {
+      await proxyPage.waitForLoadState("networkidle", { timeout: 30000 });
+    } catch {}
+    await proxyPage.waitForTimeout(8000);
+
+    const pageText = await proxyPage.evaluate(`(() => { return document.body ? document.body.innerText.substring(0, 1000) : ''; })()`);
+    const pageUrl = proxyPage.url();
+    console.log("[Playwright] Tickets portal URL:", pageUrl);
+    console.log("[Playwright] Tickets portal text (first 500):", (pageText as string).substring(0, 500));
+
+    const pageLower = (pageText as string).toLowerCase();
+    const needsLogin = pageLower.includes("sign in") || pageLower.includes("log in") || (pageLower.includes("email") && pageLower.includes("password"));
+
+    if (needsLogin) {
+      log("Login required on tickets portal, filling credentials...");
+      await proxyPage.waitForTimeout(3000);
+
+      await proxyPage.evaluate(`((emailVal) => {
+        var selectors = ['input[data-gigya-name="loginID"]', 'input[type="email"]', 'input[name="email"]', 'input[placeholder*="mail"]'];
+        for (var s = 0; s < selectors.length; s++) {
+          var inputs = document.querySelectorAll(selectors[s]);
+          for (var i = 0; i < inputs.length; i++) {
+            var el = inputs[i];
+            if (el.type === 'hidden') continue;
+            var rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+              if (setter && setter.set) setter.set.call(el, emailVal);
+              else el.value = emailVal;
+              el.dispatchEvent(new Event('focus', { bubbles: true }));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+              return true;
+            }
+          }
+        }
+        return false;
+      })("${email.replace(/"/g, '\\"')}")`);
+
+      await proxyPage.evaluate(`((pwVal) => {
+        var inputs = document.querySelectorAll('input[type="password"], input[data-gigya-name="password"]');
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          if (el.type === 'hidden') continue;
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+            if (setter && setter.set) setter.set.call(el, pwVal);
+            else el.value = pwVal;
+            el.dispatchEvent(new Event('focus', { bubbles: true }));
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            return true;
+          }
+        }
+        return false;
+      })("${password.replace(/"/g, '\\"')}")`);
+
+      await proxyPage.waitForTimeout(1000);
+      await clickSubmitViaJS(proxyPage);
+      await proxyPage.waitForTimeout(10000);
+
+      const afterLoginText = await proxyPage.evaluate(`(() => { return document.body ? document.body.innerText.substring(0, 500) : ''; })()`) as string;
+      console.log("[Playwright] After tickets login (first 300):", afterLoginText.substring(0, 300));
+      log("Logged into tickets portal.");
+    }
+
+    const hasProfileForm = pageLower.includes("birth") || pageLower.includes("profile") || pageLower.includes("preferences") || pageLower.includes("save profile");
+
+    if (hasProfileForm || !needsLogin) {
+      log("Filling profile form...");
+      await fillCustomerDataForm(proxyPage, log);
+    } else {
+      log("Navigating to profile page...");
+      try {
+        await proxyPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
+          waitUntil: "commit",
+          timeout: 60000,
+        });
+        try { await proxyPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
+        await proxyPage.waitForTimeout(8000);
+        await fillCustomerDataForm(proxyPage, log);
+      } catch (navErr: any) {
+        log("Could not reach profile page: " + navErr.message);
+      }
+    }
+  } finally {
+    await proxyContext.close();
+  }
+}
+
 async function ensureBrowserInstalled(): Promise<void> {
   if (browserInstalled) return;
 
@@ -702,44 +844,19 @@ async function doRegistration(
     }
 
     onStatusUpdate("verified");
-    log("Registration verified! Setting profile birth year...");
+    log("Registration verified! Completing tickets portal profile...");
+
+    const cookies = await context.cookies();
+    await context.close();
 
     try {
-      const birthYear = generateRandomBirthYear();
-
-      const profileResult = await page.evaluate(`((birthYr) => {
-        return new Promise(function(resolve) {
-          if (typeof gigya === 'undefined') {
-            resolve({ success: false, error: 'Gigya SDK not available' });
-            return;
-          }
-          gigya.accounts.setAccountInfo({
-            profile: { birthYear: parseInt(birthYr) },
-            data: { birthYear: parseInt(birthYr) },
-            callback: function(resp) {
-              if (resp.errorCode === 0) {
-                resolve({ success: true });
-              } else {
-                resolve({ success: false, error: resp.errorMessage || 'Error code: ' + resp.errorCode });
-              }
-            }
-          });
-          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-        });
-      })("${birthYear}")`) as { success: boolean; error?: string };
-
-      if (profileResult.success) {
-        log("Profile birth year set to " + birthYear + ".");
-      } else {
-        console.log("[Playwright] Gigya setAccountInfo:", profileResult.error);
-      }
+      await completeTicketsProfile(email, password, cookies, log);
+      log("Account fully registered! Draw registration complete.");
     } catch (profileErr: any) {
-      console.log("[Playwright] Profile update error:", profileErr.message);
+      console.log("[Playwright] Tickets profile error:", profileErr.message);
+      log("Account created & verified. Tickets profile step skipped.");
     }
 
-    log("Account created & verified! Login at tickets.la28.org to complete draw registration.");
-
-    await context.close();
     return { success: true, pageContent: finalText.substring(0, 500) };
   } catch (err: any) {
     console.error("[Playwright] Error:", err.message);
