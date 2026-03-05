@@ -701,42 +701,43 @@ async function doRegistration(
       return { success: false, error: "Verification failed", pageContent: finalText.substring(0, 500) };
     }
 
-    onStatusUpdate("verifying");
-    log("Registration verified! Completing profile via Gigya API...");
+    onStatusUpdate("verified");
+    log("Registration verified! Setting profile birth year...");
 
     try {
       const birthYear = generateRandomBirthYear();
-      log("Setting birth year: " + birthYear + " via Gigya API...");
 
       const profileResult = await page.evaluate(`((birthYr) => {
         return new Promise(function(resolve) {
           if (typeof gigya === 'undefined') {
-            resolve({ success: false, error: 'Gigya not loaded' });
+            resolve({ success: false, error: 'Gigya SDK not available' });
             return;
           }
           gigya.accounts.setAccountInfo({
             profile: { birthYear: parseInt(birthYr) },
+            data: { birthYear: parseInt(birthYr) },
             callback: function(resp) {
               if (resp.errorCode === 0) {
                 resolve({ success: true });
               } else {
-                resolve({ success: false, error: resp.errorMessage || 'Unknown error' });
+                resolve({ success: false, error: resp.errorMessage || 'Error code: ' + resp.errorCode });
               }
             }
           });
-          setTimeout(function() { resolve({ success: false, error: 'Gigya API timeout' }); }, 15000);
+          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
         });
       })("${birthYear}")`) as { success: boolean; error?: string };
 
       if (profileResult.success) {
-        log("Birth year set successfully! Profile completed.");
+        log("Profile birth year set to " + birthYear + ".");
       } else {
-        console.log("[Playwright] Gigya setAccountInfo error:", profileResult.error);
-        log("Profile update via Gigya: " + (profileResult.error || "skipped"));
+        console.log("[Playwright] Gigya setAccountInfo:", profileResult.error);
       }
     } catch (profileErr: any) {
-      log("Profile update skipped (non-fatal): " + profileErr.message);
+      console.log("[Playwright] Profile update error:", profileErr.message);
     }
+
+    log("Account created & verified! Login at tickets.la28.org to complete draw registration.");
 
     await context.close();
     return { success: true, pageContent: finalText.substring(0, 500) };
