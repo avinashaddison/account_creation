@@ -681,9 +681,20 @@ async function doRegistration(
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
 
+  await page.route("**/consent.html*", async (route) => {
+    log("[Playwright] Intercepted consent.html redirect — bypassing to tickets portal");
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: `<html><head><title>Redirecting</title></head><body>
+        <script>window.location.href = "https://tickets.la28.org/mycustomerdata/?#/myCustomerData";</script>
+      </body></html>`
+    });
+  });
+
   await page.route("**/*", (route) => {
     const url = route.request().url();
-    if (url.includes("tickets.la28.org")) {
+    if (url.includes("tickets.la28.org") || url.includes("consent.html")) {
       return route.continue();
     }
     const resourceType = route.request().resourceType();
