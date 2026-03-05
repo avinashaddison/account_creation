@@ -163,6 +163,21 @@ async function completeTicketsProfile(
   const proxyPage = await proxyContext.newPage();
 
   try {
+    log("Detecting proxy IP...");
+    try {
+      await proxyPage.goto("https://lumtest.com/myip.json", { waitUntil: "domcontentloaded", timeout: 20000 });
+      const ipText = await proxyPage.evaluate(`(() => { return document.body ? document.body.innerText : ''; })()`) as string;
+      try {
+        const ipData = JSON.parse(ipText);
+        log("Proxy IP: " + ipData.ip + " (" + (ipData.geo?.city || "") + ", " + (ipData.geo?.region_name || ipData.country || "") + ")");
+      } catch {
+        log("Proxy IP: " + ipText.substring(0, 100));
+      }
+    } catch (ipErr: any) {
+      log("Proxy IP detection skipped");
+      console.log("[Playwright] IP check error:", ipErr.message);
+    }
+
     log("Navigating to tickets.la28.org/mycustomerdata...");
     await proxyPage.goto("https://tickets.la28.org/mycustomerdata/", {
       waitUntil: "commit",
