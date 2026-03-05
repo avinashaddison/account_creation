@@ -701,14 +701,39 @@ async function doRegistration(
 
     try {
       log("Navigating to tickets.la28.org/mycustomerdata...");
-      await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+
+      const ticketsPage = await context.newPage();
+      ticketsPage.setDefaultTimeout(30000);
+
+      let ticketsLoaded = false;
+      for (let navAttempt = 0; navAttempt < 3 && !ticketsLoaded; navAttempt++) {
+        try {
+          if (navAttempt > 0) {
+            log("Retrying tickets portal navigation (attempt " + (navAttempt + 1) + ")...");
+            await ticketsPage.waitForTimeout(3000);
+          }
+          await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
+            waitUntil: "commit",
+            timeout: 30000,
+          });
+          ticketsLoaded = true;
+        } catch (navErr: any) {
+          console.log("[Playwright] Tickets nav attempt " + (navAttempt + 1) + " failed:", navErr.message);
+          if (navAttempt === 2) throw navErr;
+        }
+      }
+
       try {
-        await page.waitForLoadState("networkidle", { timeout: 20000 });
+        await ticketsPage.waitForLoadState("domcontentloaded", { timeout: 15000 });
+      } catch {}
+      try {
+        await ticketsPage.waitForLoadState("networkidle", { timeout: 15000 });
       } catch {
         console.log("[Playwright] Tickets portal network idle timeout, continuing...");
       }
-      await page.waitForTimeout(5000);
-      await forceRemoveOverlays(page);
+      await ticketsPage.waitForTimeout(5000);
+      await forceRemoveOverlays(ticketsPage);
+      const page = ticketsPage;
 
       const ticketsPageText = await getPageText(page);
       const ticketsLower = ticketsPageText.toLowerCase();
