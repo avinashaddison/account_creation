@@ -180,6 +180,7 @@ async function getBrowser(): Promise<Browser> {
         "--no-first-run",
         "--no-zygote",
         "--js-flags=--max-old-space-size=256",
+        "--disable-http2",
       ],
     });
     browserInstance.on("disconnected", () => {
@@ -441,8 +442,12 @@ async function doRegistration(
   page.setDefaultTimeout(30000);
 
   await page.route("**/*", (route) => {
+    const url = route.request().url();
+    if (url.includes("tickets.la28.org")) {
+      return route.continue();
+    }
     const resourceType = route.request().resourceType();
-    if (["image", "media", "font", "stylesheet"].includes(resourceType)) {
+    if (["image", "media", "font"].includes(resourceType)) {
       return route.abort();
     }
     return route.continue();
@@ -702,17 +707,14 @@ async function doRegistration(
     try {
       log("Navigating to tickets.la28.org/mycustomerdata...");
 
-      const ticketsPage = await context.newPage();
-      ticketsPage.setDefaultTimeout(30000);
-
       let ticketsLoaded = false;
       for (let navAttempt = 0; navAttempt < 3 && !ticketsLoaded; navAttempt++) {
         try {
           if (navAttempt > 0) {
             log("Retrying tickets portal navigation (attempt " + (navAttempt + 1) + ")...");
-            await ticketsPage.waitForTimeout(3000);
+            await page.waitForTimeout(3000);
           }
-          await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
+          await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
             waitUntil: "commit",
             timeout: 30000,
           });
@@ -724,16 +726,15 @@ async function doRegistration(
       }
 
       try {
-        await ticketsPage.waitForLoadState("domcontentloaded", { timeout: 15000 });
+        await page.waitForLoadState("domcontentloaded", { timeout: 15000 });
       } catch {}
       try {
-        await ticketsPage.waitForLoadState("networkidle", { timeout: 15000 });
+        await page.waitForLoadState("networkidle", { timeout: 15000 });
       } catch {
         console.log("[Playwright] Tickets portal network idle timeout, continuing...");
       }
-      await ticketsPage.waitForTimeout(5000);
-      await forceRemoveOverlays(ticketsPage);
-      const page = ticketsPage;
+      await page.waitForTimeout(5000);
+      await forceRemoveOverlays(page);
 
       const ticketsPageText = await getPageText(page);
       const ticketsLower = ticketsPageText.toLowerCase();
