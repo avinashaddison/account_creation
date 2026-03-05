@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download, Check, RotateCcw } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -18,6 +19,8 @@ type Account = {
   status: string;
   verificationCode: string | null;
   errorMessage: string | null;
+  platform: string;
+  isUsed: boolean;
   createdAt: string;
 };
 
@@ -30,9 +33,17 @@ const statusBadge: Record<string, { label: string; variant: "default" | "seconda
   failed: { label: "Failed", variant: "destructive" },
 };
 
+const platformLabel: Record<string, { name: string; color: string }> = {
+  la28: { name: "LA28", color: "bg-red-500/10 text-red-400 border-red-500/20" },
+  ticketmaster: { name: "Ticketmaster", color: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
+  uefa: { name: "UEFA", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+};
+
 export default function AccountStock() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
   const { toast } = useToast();
 
   function fetchAccounts() {
@@ -69,17 +80,36 @@ export default function AccountStock() {
     toast({ title: "Copied", description: "Copied to clipboard" });
   }
 
+  async function toggleUsed(accountId: string) {
+    setToggling(accountId);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/toggle-used`, {
+        method: "PUT",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setAccounts((prev) => prev.map((a) => a.id === accountId ? updated : a));
+        toast({ title: updated.isUsed ? "Marked as used" : "Marked as available" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to update", variant: "destructive" });
+    } finally {
+      setToggling(null);
+    }
+  }
+
   function exportVerified() {
     const verified = accounts.filter((a) => a.status === "verified");
     if (verified.length === 0) {
       toast({ title: "No data", description: "No verified accounts to export" });
       return;
     }
-    const csv = ["Email,Password,Name,Country,Code,Created"]
+    const csv = ["Platform,Email,Password,Name,Country,Code,Status,Created"]
       .concat(
         verified.map(
           (a) =>
-            `${a.email},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.verificationCode || ""},${new Date(a.createdAt).toISOString()}`
+            `${(platformLabel[a.platform]?.name || a.platform)},${a.email},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.verificationCode || ""},${a.isUsed ? "Used" : "Available"},${new Date(a.createdAt).toISOString()}`
         )
       )
       .join("\n");
@@ -105,103 +135,231 @@ export default function AccountStock() {
   const inProgress = accounts.filter((a) => !["verified", "failed"].includes(a.status));
   const failed = accounts.filter((a) => a.status === "failed");
 
+  const filteredAccounts = platformFilter === "all"
+    ? accounts
+    : accounts.filter((a) => a.platform === platformFilter);
+
+  const availableAccounts = filteredAccounts.filter((a) => !a.isUsed && a.status === "verified");
+  const usedAccounts = filteredAccounts.filter((a) => a.isUsed && a.status === "verified");
+  const otherAccounts = filteredAccounts.filter((a) => a.status !== "verified");
+
+  const platforms = [...new Set(accounts.map((a) => a.platform))];
+
+  function renderTable(items: Account[], showToggle: boolean, toggleLabel: string, toggleIcon: React.ReactNode) {
+    if (items.length === 0) {
+      return (
+        <p className="text-center text-zinc-500 py-8" data-testid="text-no-accounts">No accounts in this category</p>
+      );
+    }
+    return (
+      <div className="rounded-md border border-white/5 overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-white/5 hover:bg-transparent">
+              <TableHead className="w-8 text-zinc-500">#</TableHead>
+              <TableHead className="text-zinc-500">Status</TableHead>
+              <TableHead className="text-zinc-500">Platform</TableHead>
+              <TableHead className="text-zinc-500">Name</TableHead>
+              <TableHead className="text-zinc-500">Email</TableHead>
+              <TableHead className="text-zinc-500">Password</TableHead>
+              <TableHead className="text-zinc-500">Code</TableHead>
+              <TableHead className="text-zinc-500">Created</TableHead>
+              <TableHead className="w-24 text-zinc-500">Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((acc, i) => {
+              const badge = statusBadge[acc.status] || statusBadge.pending;
+              const plat = platformLabel[acc.platform] || { name: acc.platform, color: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20" };
+              return (
+                <TableRow key={acc.id} className="border-white/5 hover:bg-white/[0.02]" data-testid={`row-account-${acc.id}`}>
+                  <TableCell className="text-zinc-600 text-xs">{i + 1}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {getStatusIcon(acc.status)}
+                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={`text-[10px] ${plat.color} hover:opacity-80`} data-testid={`badge-platform-${acc.id}`}>
+                      {plat.name}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-medium text-zinc-200">{acc.firstName} {acc.lastName}</TableCell>
+                  <TableCell>
+                    <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300">{acc.email}</code>
+                  </TableCell>
+                  <TableCell>
+                    <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300">{acc.la28Password}</code>
+                  </TableCell>
+                  <TableCell>
+                    {acc.verificationCode ? (
+                      <code className="text-xs font-bold text-emerald-400">{acc.verificationCode}</code>
+                    ) : (
+                      <span className="text-xs text-zinc-600">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs text-zinc-500">
+                    {new Date(acc.createdAt).toLocaleString()}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      {acc.status === "verified" && showToggle && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => toggleUsed(acc.id)}
+                          disabled={toggling === acc.id}
+                          data-testid={`button-toggle-${acc.id}`}
+                        >
+                          {toggling === acc.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            toggleIcon
+                          )}
+                          <span className="ml-1">{toggleLabel}</span>
+                        </Button>
+                      )}
+                      {acc.status === "verified" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => copyToClipboard(`${acc.email}\t${acc.la28Password}`)}
+                          data-testid={`button-copy-${acc.id}`}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight" data-testid="text-account-stock-title">Account Stock</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-3xl font-bold tracking-tight text-white" data-testid="text-account-stock-title">Account Stock</h1>
+          <p className="text-zinc-500 mt-1 text-sm">
             {verified.length} verified, {inProgress.length} in progress, {failed.length} failed
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportVerified} data-testid="button-export-accounts">
+          <Button variant="outline" onClick={exportVerified} className="border-white/10 text-zinc-300 hover:bg-white/5" data-testid="button-export-accounts">
             <Download className="w-4 h-4 mr-2" />
             Export CSV
           </Button>
-          <Button variant="outline" onClick={fetchAccounts} data-testid="button-refresh-accounts">
+          <Button variant="outline" onClick={fetchAccounts} className="border-white/10 text-zinc-300 hover:bg-white/5" data-testid="button-refresh-accounts">
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">All Accounts</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : accounts.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8" data-testid="text-no-accounts">No accounts yet</p>
-          ) : (
-            <div className="rounded-md border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8">#</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Password</TableHead>
-                    <TableHead>Code</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="w-10"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accounts.map((acc, i) => {
-                    const badge = statusBadge[acc.status] || statusBadge.pending;
-                    return (
-                      <TableRow key={acc.id} data-testid={`row-account-${acc.id}`}>
-                        <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {getStatusIcon(acc.status)}
-                            <Badge variant={badge.variant}>{badge.label}</Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-medium">{acc.firstName} {acc.lastName}</TableCell>
-                        <TableCell>
-                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{acc.email}</code>
-                        </TableCell>
-                        <TableCell>
-                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{acc.la28Password}</code>
-                        </TableCell>
-                        <TableCell>
-                          {acc.verificationCode ? (
-                            <code className="text-xs font-bold text-emerald-400">{acc.verificationCode}</code>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {new Date(acc.createdAt).toLocaleString()}
-                        </TableCell>
-                        <TableCell>
-                          {acc.status === "verified" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => copyToClipboard(`${acc.email}\t${acc.la28Password}`)}
-                              data-testid={`button-copy-${acc.id}`}
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-zinc-500 uppercase tracking-wider mr-1">Filter:</span>
+        <Button
+          variant={platformFilter === "all" ? "default" : "outline"}
+          size="sm"
+          className={`h-7 text-xs ${platformFilter === "all" ? "bg-red-600 hover:bg-red-700" : "border-white/10 text-zinc-400 hover:bg-white/5"}`}
+          onClick={() => setPlatformFilter("all")}
+          data-testid="filter-all"
+        >
+          All ({accounts.length})
+        </Button>
+        {platforms.map((p) => {
+          const plat = platformLabel[p] || { name: p, color: "" };
+          const cnt = accounts.filter((a) => a.platform === p).length;
+          return (
+            <Button
+              key={p}
+              variant={platformFilter === p ? "default" : "outline"}
+              size="sm"
+              className={`h-7 text-xs ${platformFilter === p ? "bg-red-600 hover:bg-red-700" : "border-white/10 text-zinc-400 hover:bg-white/5"}`}
+              onClick={() => setPlatformFilter(p)}
+              data-testid={`filter-${p}`}
+            >
+              {plat.name} ({cnt})
+            </Button>
+          );
+        })}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-zinc-600" />
+        </div>
+      ) : (
+        <Tabs defaultValue="available" className="space-y-4">
+          <TabsList className="bg-[#111118] border border-white/5">
+            <TabsTrigger value="available" className="data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-400" data-testid="tab-available">
+              Available ({availableAccounts.length})
+            </TabsTrigger>
+            <TabsTrigger value="used" className="data-[state=active]:bg-amber-600/20 data-[state=active]:text-amber-400" data-testid="tab-used">
+              Used ({usedAccounts.length})
+            </TabsTrigger>
+            <TabsTrigger value="other" className="data-[state=active]:bg-zinc-600/20 data-[state=active]:text-zinc-300" data-testid="tab-other">
+              Other ({otherAccounts.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="available">
+            <Card className="bg-[#111118] border-white/5">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm text-zinc-400">Available Accounts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {renderTable(
+                  availableAccounts,
+                  true,
+                  "Use",
+                  <Check className="w-3.5 h-3.5 text-amber-400" />
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="used">
+            <Card className="bg-[#111118] border-white/5">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm text-zinc-400">Used Accounts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {renderTable(
+                  usedAccounts,
+                  true,
+                  "Undo",
+                  <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="other">
+            <Card className="bg-[#111118] border-white/5">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm text-zinc-400">Pending, In Progress & Failed</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {renderTable(
+                  otherAccounts,
+                  false,
+                  "",
+                  null
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

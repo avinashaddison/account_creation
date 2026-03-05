@@ -20,6 +20,7 @@ export interface IStorage {
   getAccountsByOwner(ownerId: string): Promise<Account[]>;
   getAccountsByBatch(batchId: string): Promise<Account[]>;
   getAccountStats(ownerId?: string): Promise<{ total: number; verified: number; failed: number; pending: number }>;
+  updateAccountUsed(id: string, isUsed: boolean): Promise<void>;
   createBillingRecord(data: InsertBilling): Promise<BillingRecord>;
   getAllBillingRecords(ownerId?: string): Promise<BillingRecord[]>;
   getBillingTotal(ownerId?: string): Promise<number>;
@@ -105,6 +106,10 @@ export class DatabaseStorage implements IStorage {
     const verified = verifiedResult?.count || 0;
     const failed = failedResult?.count || 0;
     return { total, verified, failed, pending: total - verified - failed };
+  }
+
+  async updateAccountUsed(id: string, isUsed: boolean): Promise<void> {
+    await db.update(accounts).set({ isUsed }).where(eq(accounts.id, id));
   }
 
   async createBillingRecord(data: InsertBilling): Promise<BillingRecord> {

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, numeric, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, numeric, integer, pgEnum, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -33,6 +33,8 @@ export const accounts = pgTable("accounts", {
   errorMessage: text("error_message"),
   batchId: text("batch_id"),
   ownerId: varchar("owner_id"),
+  platform: text("platform").notNull().default("la28"),
+  isUsed: boolean("is_used").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

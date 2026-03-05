@@ -491,6 +491,7 @@ export async function registerRoutes(
           status: "pending",
           batchId,
           ownerId: userId,
+          platform: "la28",
           verificationCode: null,
           errorMessage: null,
         });
@@ -555,6 +556,7 @@ export async function registerRoutes(
         status: "pending",
         batchId,
         ownerId: userId,
+        platform: "la28",
         verificationCode: null,
         errorMessage: null,
       });
@@ -624,6 +626,7 @@ export async function registerRoutes(
         status: "pending",
         batchId,
         ownerId: userId,
+        platform: "la28",
         verificationCode: null,
         errorMessage: null,
       });
@@ -689,6 +692,17 @@ export async function registerRoutes(
       return res.status(403).json({ error: "Access denied" });
     }
     res.json(account);
+  });
+
+  app.put("/api/accounts/:id/toggle-used", requireAuth, async (req, res) => {
+    const account = await storage.getAccount(req.params.id);
+    if (!account) return res.status(404).json({ error: "Not found" });
+    if (req.session.role !== "superadmin" && account.ownerId !== req.session.userId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    await storage.updateAccountUsed(req.params.id, !account.isUsed);
+    const updated = await storage.getAccount(req.params.id);
+    res.json(updated);
   });
 
   app.get("/api/billing", requireAuth, async (req, res) => {
@@ -971,6 +985,7 @@ export async function registerRoutes(
           status: "pending",
           batchId,
           ownerId: userId,
+          platform: "ticketmaster",
           verificationCode: null,
           errorMessage: null,
         });
@@ -1109,6 +1124,7 @@ export async function registerRoutes(
           status: "pending",
           batchId,
           ownerId: userId,
+          platform: "uefa",
           verificationCode: null,
           errorMessage: null,
         });
