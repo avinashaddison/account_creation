@@ -868,7 +868,25 @@ async function doRegistration(
 
   if (proxyUrl) {
     try {
-      const parsed = new URL(proxyUrl);
+      let normalizedUrl = proxyUrl.trim();
+
+      const rawMatch = normalizedUrl.match(/^(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+):(\d+)@([^:]+):(.+)$/);
+      if (rawMatch) {
+        const [, host, port, login, pass] = rawMatch;
+        normalizedUrl = `http://${encodeURIComponent(login)}:${encodeURIComponent(pass)}@${host}:${port}`;
+      }
+
+      const authHostMatch = normalizedUrl.match(/^([^:]+):([^@]+)@(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+):(\d+)$/);
+      if (authHostMatch && !normalizedUrl.startsWith("http")) {
+        const [, login, pass, host, port] = authHostMatch;
+        normalizedUrl = `http://${encodeURIComponent(login)}:${encodeURIComponent(pass)}@${host}:${port}`;
+      }
+
+      if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://") && !normalizedUrl.startsWith("socks5://")) {
+        normalizedUrl = `http://${normalizedUrl}`;
+      }
+
+      const parsed = new URL(normalizedUrl);
       contextOptions.proxy = {
         server: `${parsed.protocol}//${parsed.hostname}:${parsed.port || '80'}`,
       };

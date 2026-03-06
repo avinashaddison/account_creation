@@ -216,11 +216,11 @@ export default function AutoCreate() {
                   value={proxyUrl}
                   onChange={(e) => setProxyUrl(e.target.value)}
                   disabled={isRunning}
-                  placeholder="http://user:pass@host:port"
+                  placeholder="ip:port@login:password or http://user:pass@host:port"
                   className="h-9 text-sm bg-white/[0.02] border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono"
                   data-testid="input-la28-proxy"
                 />
-                <p className="text-[10px] text-zinc-600">Optional. Helps bypass Akamai WAF on tickets portal.</p>
+                <p className="text-[10px] text-zinc-600">Optional. Accepts: ip:port@login:pass, login:pass@ip:port, or http://user:pass@host:port</p>
               </div>
 
               <div className="space-y-2.5">
