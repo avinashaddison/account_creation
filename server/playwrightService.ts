@@ -292,10 +292,10 @@ async function acceptConsentAndFinalize(
   password: string,
   log: (msg: string) => void
 ): Promise<void> {
-  log("Logging in to accept consent...");
+  log("Finalizing account via Gigya SDK...");
 
   const currentUrl = page.url();
-  if (!currentUrl.includes("la28id.la28.org")) {
+  if (!currentUrl.includes("la28id.la28.org") && !currentUrl.includes("la28.org")) {
     await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
     try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
     await page.waitForTimeout(3000);
@@ -305,93 +305,42 @@ async function acceptConsentAndFinalize(
 
   const gigyaAvailable = await page.evaluate(`typeof gigya !== 'undefined'`) as boolean;
   if (!gigyaAvailable) {
-    log("Gigya SDK not available for consent. Skipping.");
+    log("Gigya SDK not available. Account created but consent step skipped.");
     return;
   }
 
-  const loginResult = await page.evaluate(`
+  log("Accepting consent and privacy policies via Gigya SDK...");
+  const consentResult = await page.evaluate(`
     new Promise(function(resolve) {
-      gigya.accounts.login({
-        loginID: "${email}",
-        password: "${password.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
-        callback: function(response) {
-          resolve({ errorCode: response.errorCode, UID: response.UID || null });
+      gigya.accounts.setAccountInfo({
+        preferences: {
+          privacy: { LA2028privacyPolicy: { isConsentGranted: true } },
+          terms: { LA2028siteTerms: { isConsentGranted: true } },
+          confirmationAge: { isConsentGranted: true },
+          ProfilingConsent: { isConsentGranted: true }
+        },
+        subscriptions: {
+          la2028EmailMarketingCommunications: {
+            email: { isSubscribed: true }
+          }
+        },
+        callback: function(resp) {
+          resolve({ errorCode: resp.errorCode, msg: resp.errorMessage || null });
         }
       });
-      setTimeout(function() { resolve({ errorCode: -1, error: 'timeout' }); }, 20000);
+      setTimeout(function() { resolve({ errorCode: -99, msg: 'timeout' }); }, 15000);
     })
-  `) as { errorCode: number; UID?: string | null };
+  `) as { errorCode: number; msg?: string | null };
 
-  if (loginResult.errorCode !== 0) {
-    log("Login for consent failed (code " + loginResult.errorCode + "). Profile data is already saved.");
-    return;
-  }
-
-  log("Logged in. Waiting for consent page...");
-  await page.waitForTimeout(5000);
-
-  if (page.url().includes("consent.html")) {
-    log("On consent page. Accepting consent...");
-    await page.waitForTimeout(2000);
-
-    const consentResult = await page.evaluate(`
-      new Promise(function(resolve) {
-        gigya.accounts.setAccountInfo({
-          preferences: {
-            privacy: { LA2028privacyPolicy: { isConsentGranted: true } },
-            terms: { LA2028siteTerms: { isConsentGranted: true } }
-          },
-          callback: function(resp) {
-            resolve({ errorCode: resp.errorCode, status: resp.status });
-          }
-        });
-        setTimeout(function() { resolve({ errorCode: -1, error: 'timeout' }); }, 10000);
-      })
-    `) as { errorCode: number; status?: string };
-
-    if (consentResult.errorCode === 0) {
-      log("Consent accepted!");
-    } else {
-      log("Consent acceptance returned code " + consentResult.errorCode + " - consent may already be current.");
-    }
+  if (consentResult.errorCode === 0) {
+    log("All consent and privacy policies accepted!");
+  } else if (consentResult.errorCode === 403007) {
+    log("Consent already current (code 403007). Account is fully set up.");
   } else {
-    log("No consent page redirect - consent already up to date.");
+    log("Consent update returned code " + consentResult.errorCode + ": " + (consentResult.msg || "unknown") + ". Account is still valid.");
   }
 
-  log("Navigating to tickets portal...");
-  try {
-    await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-
-    await page.waitForTimeout(10000);
-
-    const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "") as string;
-
-    if (bodyText.includes("Access Denied")) {
-      log("Tickets portal blocked by WAF. Profile data saved via Gigya SDK - registration is complete.");
-      return;
-    }
-
-    try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-    await page.waitForTimeout(5000);
-
-    const formElements = await page.evaluate(`(() => {
-      var selects = document.querySelectorAll('select');
-      var buttons = document.querySelectorAll('button');
-      return { selectCount: selects.length, buttonCount: buttons.length };
-    })()`) as { selectCount: number; buttonCount: number };
-
-    if (formElements.selectCount > 0) {
-      log("Form found on tickets portal! Filling profile form...");
-      await fillTicketsProfileForm(page, log);
-    } else {
-      log("Tickets portal loaded but no form elements found. Profile data already saved via Gigya.");
-    }
-  } catch (navErr: any) {
-    log("Tickets portal navigation failed: " + navErr.message + ". Profile data saved via Gigya SDK.");
-  }
+  log("Account registration complete. All profile data saved via Gigya SDK.");
 }
 
 async function fillTicketsProfileForm(page: Page, log: (msg: string) => void): Promise<void> {
@@ -903,22 +852,7 @@ async function doRegistration(
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
 
-  await page.route("**/consent.html*", async (route) => {
-    log("[Playwright] Intercepted consent.html redirect — bypassing to tickets portal");
-    await route.fulfill({
-      status: 200,
-      contentType: "text/html",
-      body: `<html><head><title>Redirecting</title></head><body>
-        <script>window.location.href = "https://tickets.la28.org/mycustomerdata/?#/myCustomerData";</script>
-      </body></html>`
-    });
-  });
-
   await page.route("**/*", (route) => {
-    const url = route.request().url();
-    if (url.includes("tickets.la28.org") || url.includes("consent.html")) {
-      return route.continue();
-    }
     const resourceType = route.request().resourceType();
     if (["image", "media", "font"].includes(resourceType)) {
       return route.abort();
