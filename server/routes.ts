@@ -454,7 +454,7 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      const { count = 1, country = "United States", language = "English", proxyUrl } = req.body;
+      const { count = 1, country = "United States", language = "English", proxyList } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
 
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -507,14 +507,18 @@ export async function registerRoutes(
       batchOwners.set(batchId, userId);
       res.json({ batchId, accounts: created, count: numAccounts });
 
-      const resolvedProxy = process.env.LA28_PROXY_URL || proxyUrl || "";
+      const proxies: string[] = Array.isArray(proxyList) && proxyList.length > 0
+        ? proxyList
+        : process.env.LA28_PROXY_URL ? [process.env.LA28_PROXY_URL] : [];
 
       (async () => {
-        for (const acc of created) {
+        for (let i = 0; i < created.length; i++) {
+          const acc = created[i];
+          const proxy = proxies.length > 0 ? proxies[i % proxies.length] : "";
           broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.country, acc.language, acc.email, acc.emailPassword, userId, resolvedProxy
+            acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy
           );
         }
         broadcastBatchComplete(batchId, userId);
@@ -541,12 +545,15 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
       }
 
-      const { firstName, lastName, password, country = "United States", language = "English", proxyUrl } = req.body;
+      const { firstName, lastName, password, country = "United States", language = "English", proxyList } = req.body;
       if (!firstName || !lastName || !password) {
         return res.status(400).json({ error: "firstName, lastName, and password are required" });
       }
 
-      const resolvedProxy = process.env.LA28_PROXY_URL || proxyUrl || "";
+      const proxies: string[] = Array.isArray(proxyList) && proxyList.length > 0
+        ? proxyList
+        : process.env.LA28_PROXY_URL ? [process.env.LA28_PROXY_URL] : [];
+      const resolvedProxy = proxies.length > 0 ? proxies[Math.floor(Math.random() * proxies.length)] : "";
 
       const domain = await getAvailableDomain();
       const username = generateRandomUsername();
