@@ -819,6 +819,12 @@ async function doRegistration(
     try {
       let normalizedUrl = proxyUrl.trim();
 
+      const colonParts = normalizedUrl.split(":");
+      if (colonParts.length === 4 && !normalizedUrl.includes("@") && !normalizedUrl.startsWith("http")) {
+        const [host, port, login, pass] = colonParts;
+        normalizedUrl = `http://${encodeURIComponent(login)}:${encodeURIComponent(pass)}@${host}:${port}`;
+      }
+
       const rawMatch = normalizedUrl.match(/^(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+):(\d+)@([^:]+):(.+)$/);
       if (rawMatch) {
         const [, host, port, login, pass] = rawMatch;
@@ -1109,7 +1115,26 @@ async function doRegistration(
     }
 
     onStatusUpdate("verified");
-    log("Registration verified! Completing tickets portal profile...");
+    log("Registration verified! Waiting for post-verification page to settle...");
+
+    try {
+      await page.waitForLoadState("domcontentloaded", { timeout: 15000 });
+    } catch { /* ignore */ }
+    await page.waitForTimeout(3000);
+
+    try {
+      await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+      log("Gigya SDK ready. Completing profile...");
+    } catch {
+      log("Gigya SDK not available on post-verification page. Navigating to LA28 homepage...");
+      try {
+        await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+        log("Gigya SDK loaded on homepage.");
+      } catch {
+        log("Could not load Gigya SDK. Skipping profile completion.");
+      }
+    }
 
     try {
       await completeTicketsProfile(page, email, password, log);
