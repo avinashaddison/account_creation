@@ -124,7 +124,8 @@ async function processAccount(
   language: string,
   addisonEmail: string,
   addisonEmailPassword: string,
-  ownerId: string
+  ownerId: string,
+  proxyUrl: string = ""
 ) {
   try {
     broadcastLog(batchId, accountId, `Creating Addison email: ${addisonEmail}`, ownerId);
@@ -157,7 +158,8 @@ async function processAccount(
       },
       (message) => {
         broadcastLog(batchId, accountId, message, ownerId);
-      }
+      },
+      proxyUrl
     );
 
     if (result.success) {
@@ -452,7 +454,7 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      const { count = 1, country = "United States", language = "English" } = req.body;
+      const { count = 1, country = "United States", language = "English", proxyUrl } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
 
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -505,12 +507,14 @@ export async function registerRoutes(
       batchOwners.set(batchId, userId);
       res.json({ batchId, accounts: created, count: numAccounts });
 
+      const resolvedProxy = process.env.LA28_PROXY_URL || proxyUrl || "";
+
       (async () => {
         for (const acc of created) {
           broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.country, acc.language, acc.email, acc.emailPassword, userId
+            acc.country, acc.language, acc.email, acc.emailPassword, userId, resolvedProxy
           );
         }
         broadcastBatchComplete(batchId, userId);
@@ -537,10 +541,12 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
       }
 
-      const { firstName, lastName, password, country = "United States", language = "English" } = req.body;
+      const { firstName, lastName, password, country = "United States", language = "English", proxyUrl } = req.body;
       if (!firstName || !lastName || !password) {
         return res.status(400).json({ error: "firstName, lastName, and password are required" });
       }
+
+      const resolvedProxy = process.env.LA28_PROXY_URL || proxyUrl || "";
 
       const domain = await getAvailableDomain();
       const username = generateRandomUsername();
@@ -569,7 +575,7 @@ export async function registerRoutes(
       (async () => {
         await processAccount(
           account.id, batchId, firstName, lastName, password,
-          country, language, addisonEmail, addisonEmailPassword, userId
+          country, language, addisonEmail, addisonEmailPassword, userId, resolvedProxy
         );
         broadcastBatchComplete(batchId, userId);
       })();

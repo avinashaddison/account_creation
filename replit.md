@@ -8,7 +8,7 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - **Backend**: Express.js (TypeScript) with WebSocket for real-time logs
 - **Database**: PostgreSQL with Drizzle ORM
 - **Sessions**: PostgreSQL-backed via connect-pg-simple (`user_sessions` table)
-- **Browser Automation**: Playwright (Chromium headless)
+- **Browser Automation**: Playwright (Chromium headless, residential proxy support)
 - **Email**: mail.tm API (branded as "Addison Mail")
 - **Auth**: Session-based with SHA-256 password hashing, role-based (superadmin/admin)
 
@@ -40,7 +40,7 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - `server/index.ts` - Express app, session middleware, startup
 - `server/routes.ts` - API endpoints + WebSocket + auth/role middleware
 - `server/mailService.ts` - mail.tm API integration
-- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration)
+- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, residential proxy support)
 - `server/storage.ts` - Database storage with Drizzle ORM (owner-scoped queries)
 - `server/db.ts` - Database connection pool
 - `shared/schema.ts` - Database schema (accounts, billingRecords, users, paymentRequests tables)
@@ -91,7 +91,7 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - **Target**: VM (required for Playwright + persistent WebSocket connections)
 - **Build**: `npm run build` (Vite client + esbuild server)
 - **Start**: `npm run start` (NODE_ENV=production)
-- **Env vars**: DATABASE_URL (required), SESSION_SECRET (required in production)
+- **Env vars**: DATABASE_URL (required), SESSION_SECRET (required in production), LA28_PROXY_URL (optional, residential proxy for LA28), TM_PROXY_URL (optional, residential proxy for Ticketmaster)
 
 ## System Dependencies
 glib, nss, nspr, atk, cups, dbus, gtk3, pango, cairo, mesa, alsa-lib, libxkbcommon, and X11 libraries (for Playwright/Chromium)

@@ -807,7 +807,8 @@ export async function fullRegistrationFlow(
   language: string,
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
-  onLog?: (message: string) => void
+  onLog?: (message: string) => void,
+  proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
   const log = onLog || ((msg: string) => console.log(`[Playwright] ${msg}`));
   const maxRetries = 2;
@@ -821,7 +822,7 @@ export async function fullRegistrationFlow(
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    const result = await doRegistration(email, firstName, lastName, password, country, language, onStatusUpdate, getVerificationCode, log);
+    const result = await doRegistration(email, firstName, lastName, password, country, language, onStatusUpdate, getVerificationCode, log, proxyUrl);
 
     if (result.error?.includes("Target page, context or browser has been closed") ||
         result.error?.includes("browser has been closed") ||
@@ -849,7 +850,8 @@ async function doRegistration(
   language: string,
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
-  log: (message: string) => void
+  log: (message: string) => void,
+  proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
   let browser: Browser;
   try {
@@ -858,11 +860,27 @@ async function doRegistration(
     return { success: false, error: `Failed to launch browser: ${err.message}` };
   }
 
-  const context = await browser.newContext({
+  const contextOptions: any = {
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     viewport: { width: 1280, height: 720 },
-  });
+  };
+
+  if (proxyUrl) {
+    try {
+      const parsed = new URL(proxyUrl);
+      contextOptions.proxy = {
+        server: `${parsed.protocol}//${parsed.hostname}:${parsed.port || '80'}`,
+      };
+      if (parsed.username) contextOptions.proxy.username = decodeURIComponent(parsed.username);
+      if (parsed.password) contextOptions.proxy.password = decodeURIComponent(parsed.password);
+      log(`Using residential proxy: ${parsed.hostname}:${parsed.port || '80'}`);
+    } catch {
+      log(`Invalid proxy URL format: ${proxyUrl} — proceeding without proxy`);
+    }
+  }
+
+  const context = await browser.newContext(contextOptions);
 
   const page = await context.newPage();
   page.setDefaultTimeout(30000);

@@ -30,6 +30,7 @@ const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 export default function AutoCreate() {
   const [count, setCount] = useState(1);
+  const [proxyUrl, setProxyUrl] = useState("");
   const [country, setCountry] = useState("United States");
   const [language, setLanguage] = useState("English");
   const [isRunning, setIsRunning] = useState(false);
@@ -139,7 +140,7 @@ export default function AutoCreate() {
       const res = await fetch("/api/create-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ count: numAccounts, country, language }),
+        body: JSON.stringify({ count: numAccounts, country, language, proxyUrl: proxyUrl || undefined }),
         credentials: "include",
       });
       if (res.status === 401) { const { handleUnauthorized } = await import("@/lib/auth"); handleUnauthorized(); return; }
@@ -207,6 +208,21 @@ export default function AutoCreate() {
             </div>
 
             <div className="space-y-5">
+              <div className="space-y-2.5">
+                <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Globe className="w-3 h-3" /> Residential Proxy URL
+                </Label>
+                <Input
+                  value={proxyUrl}
+                  onChange={(e) => setProxyUrl(e.target.value)}
+                  disabled={isRunning}
+                  placeholder="http://user:pass@host:port"
+                  className="h-9 text-sm bg-white/[0.02] border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono"
+                  data-testid="input-la28-proxy"
+                />
+                <p className="text-[10px] text-zinc-600">Optional. Helps bypass Akamai WAF on tickets portal.</p>
+              </div>
+
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Hash className="w-3 h-3" /> Number of Accounts
