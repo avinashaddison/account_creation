@@ -292,55 +292,206 @@ async function acceptConsentAndFinalize(
   password: string,
   log: (msg: string) => void
 ): Promise<void> {
-  log("Finalizing account via Gigya SDK...");
+  log("Finalizing account — logging in to complete profile...");
 
-  const currentUrl = page.url();
-  if (!currentUrl.includes("la28id.la28.org") && !currentUrl.includes("la28.org")) {
-    await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-    try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-    await page.waitForTimeout(3000);
+  await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+  try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+  await page.waitForTimeout(5000);
+
+  try {
+    await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+  } catch {
+    log("Gigya SDK not available on login page. Skipping consent step.");
+    return;
   }
 
   await forceRemoveOverlays(page);
 
-  const gigyaAvailable = await page.evaluate(`typeof gigya !== 'undefined'`) as boolean;
-  if (!gigyaAvailable) {
-    log("Gigya SDK not available. Account created but consent step skipped.");
+  const loginFill = await page.evaluate(`((email, pass) => {
+    var emailFields = document.querySelectorAll('input[name="username"], input[data-gigya-name="loginID"]');
+    var passFields = document.querySelectorAll('input[type="password"][data-gigya-name="password"]');
+    var visibleEmail = null, visiblePass = null;
+    for (var i = 0; i < emailFields.length; i++) { if (emailFields[i].getBoundingClientRect().width > 0) { visibleEmail = emailFields[i]; break; } }
+    for (var i = 0; i < passFields.length; i++) { if (passFields[i].getBoundingClientRect().width > 0) { visiblePass = passFields[i]; break; } }
+    if (!visibleEmail || !visiblePass) return false;
+    var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    nativeSet.call(visibleEmail, email);
+    visibleEmail.dispatchEvent(new Event('input', {bubbles: true}));
+    visibleEmail.dispatchEvent(new Event('change', {bubbles: true}));
+    nativeSet.call(visiblePass, pass);
+    visiblePass.dispatchEvent(new Event('input', {bubbles: true}));
+    visiblePass.dispatchEvent(new Event('change', {bubbles: true}));
+    return true;
+  })("${email.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", "${password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}")`) as boolean;
+
+  if (!loginFill) {
+    log("Could not fill login form. Skipping consent step.");
     return;
   }
 
-  log("Accepting consent and privacy policies via Gigya SDK...");
-  const consentResult = await page.evaluate(`
-    new Promise(function(resolve) {
-      gigya.accounts.setAccountInfo({
-        preferences: {
-          privacy: { LA2028privacyPolicy: { isConsentGranted: true } },
-          terms: { LA2028siteTerms: { isConsentGranted: true } },
-          confirmationAge: { isConsentGranted: true },
-          ProfilingConsent: { isConsentGranted: true }
-        },
-        subscriptions: {
-          la2028EmailMarketingCommunications: {
-            email: { isSubscribed: true }
-          }
-        },
-        callback: function(resp) {
-          resolve({ errorCode: resp.errorCode, msg: resp.errorMessage || null });
-        }
-      });
-      setTimeout(function() { resolve({ errorCode: -99, msg: 'timeout' }); }, 15000);
-    })
-  `) as { errorCode: number; msg?: string | null };
+  await page.waitForTimeout(500);
+  await page.evaluate(`(() => {
+    var btns = document.querySelectorAll('input[type="submit"]');
+    for (var i = 0; i < btns.length; i++) { if (btns[i].getBoundingClientRect().width > 0) { btns[i].click(); break; } }
+  })()`);
+  log("Login submitted. Waiting for consent page...");
 
-  if (consentResult.errorCode === 0) {
-    log("All consent and privacy policies accepted!");
-  } else if (consentResult.errorCode === 403007) {
-    log("Consent already current (code 403007). Account is fully set up.");
-  } else {
-    log("Consent update returned code " + consentResult.errorCode + ": " + (consentResult.msg || "unknown") + ". Account is still valid.");
+  try {
+    await page.waitForURL("**/consent.html*", { timeout: 20000 });
+  } catch {
+    const currentUrl = page.url();
+    if (currentUrl.includes("proxy.html")) {
+      await page.waitForTimeout(10000);
+    }
+    if (!page.url().includes("consent.html")) {
+      log("No consent page appeared — account may already be complete. URL: " + page.url().substring(0, 100));
+      return;
+    }
   }
 
-  log("Account registration complete. All profile data saved via Gigya SDK.");
+  log("On consent page. Showing profile completion screen-set...");
+
+  try {
+    await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+  } catch {
+    log("Gigya SDK not available on consent page.");
+  }
+
+  await page.evaluate(`(() => {
+    var div = document.createElement('div');
+    div.id = 'consent-container';
+    div.style.cssText = 'width:600px;margin:20px auto;min-height:400px;';
+    document.body.appendChild(div);
+  })()`);
+
+  const screenShown = await page.evaluate(`
+    new Promise(function(resolve) {
+      gigya.accounts.showScreenSet({
+        screenSet: 'Default-RegistrationLogin',
+        startScreen: 'gigya-complete-registration-screen',
+        containerID: 'consent-container',
+        onAfterScreenLoad: function(e) {
+          resolve({ screen: e.currentScreen, ok: true });
+        },
+        onError: function(e) {
+          resolve({ error: e.errorCode + ': ' + (e.errorMessage || ''), ok: false });
+        }
+      });
+      setTimeout(function() { resolve({ ok: false, error: 'timeout' }); }, 20000);
+    })
+  `) as { ok: boolean; screen?: string; error?: string };
+
+  if (!screenShown.ok) {
+    log("Screen-set failed to load: " + (screenShown.error || "unknown"));
+    log("Falling back to setAccountInfo...");
+    await page.evaluate(`
+      new Promise(function(resolve) {
+        gigya.accounts.setAccountInfo({
+          preferences: {
+            privacy: { LA2028privacyPolicy: { isConsentGranted: true } },
+            terms: { LA2028siteTerms: { isConsentGranted: true } },
+            confirmationAge: { isConsentGranted: true },
+            ProfilingConsent: { isConsentGranted: true }
+          },
+          subscriptions: {
+            la2028EmailMarketingCommunications: { email: { isSubscribed: true } }
+          },
+          callback: function(resp) { resolve(resp.errorCode); }
+        });
+        setTimeout(function() { resolve(-99); }, 15000);
+      })
+    `);
+  } else {
+    log("Screen loaded: " + screenShown.screen);
+    await page.waitForTimeout(2000);
+
+    const birthYear = String(1970 + Math.floor(Math.random() * 30));
+    await page.evaluate(`((year) => {
+      var container = document.getElementById('consent-container');
+      if (!container) return;
+      var selects = container.querySelectorAll('select');
+      for (var i = 0; i < selects.length; i++) {
+        var sel = selects[i];
+        for (var j = 0; j < sel.options.length; j++) {
+          if (sel.options[j].value === year || sel.options[j].text === year) {
+            sel.value = sel.options[j].value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            break;
+          }
+        }
+      }
+      var checkboxes = container.querySelectorAll('input[type="checkbox"]');
+      for (var i = 0; i < checkboxes.length; i++) {
+        if (!checkboxes[i].checked) {
+          checkboxes[i].checked = true;
+          checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    })("${birthYear}")`);
+
+    log("Filled consent form fields. Submitting...");
+    await page.waitForTimeout(1000);
+
+    const submitResult = await page.evaluate(`
+      new Promise(function(resolve) {
+        var container = document.getElementById('consent-container');
+        var submitted = false;
+        
+        window.addEventListener('beforeunload', function() {
+          if (!submitted) { submitted = true; resolve({ redirected: true }); }
+        });
+        
+        var btn = container ? container.querySelector('input[type="submit"]') : null;
+        if (btn) {
+          btn.click();
+          setTimeout(function() {
+            if (!submitted) resolve({ redirected: false, url: window.location.href });
+          }, 12000);
+        } else {
+          resolve({ redirected: false, error: 'no submit button' });
+        }
+      })
+    `) as { redirected: boolean; url?: string; error?: string };
+
+    if (submitResult.redirected) {
+      log("Consent form submitted, page redirecting...");
+      await page.waitForTimeout(5000);
+    } else if (submitResult.error) {
+      log("Consent submit issue: " + submitResult.error);
+    } else {
+      log("After consent submit, URL: " + (submitResult.url || "").substring(0, 80));
+      const errors = await page.evaluate(`(() => {
+        var errs = document.querySelectorAll('.gigya-error-msg-active');
+        var result = [];
+        for (var i = 0; i < errs.length; i++) {
+          var t = errs[i].textContent.trim();
+          if (t) result.push(t);
+        }
+        return result;
+      })()`) as string[];
+      if (errors.length > 0) {
+        log("Consent form errors: " + errors.join(", "));
+      }
+    }
+  }
+
+  const finalUrl = page.url();
+  log("After consent flow, URL: " + finalUrl.substring(0, 100));
+
+  log("Now navigating to tickets portal...");
+  try {
+    await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 30000 });
+    try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+    await page.waitForTimeout(10000);
+
+    const ticketsText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000) || "");
+    console.log("[Playwright] Tickets portal text:", ticketsText.substring(0, 300));
+    log("Tickets portal reached.");
+  } catch (ticketsErr: any) {
+    log("Tickets portal: " + ticketsErr.message.substring(0, 100));
+  }
+
+  log("Account registration complete.");
 }
 
 async function fillTicketsProfileForm(page: Page, log: (msg: string) => void): Promise<void> {
