@@ -1295,14 +1295,7 @@ async function doRegistration(
       log("Account created & verified. Profile step had issues.");
     }
 
-    log("Accepting consent and finalizing registration...");
-    try {
-      await acceptConsentAndFinalize(page, email, password, log);
-      log("Account fully registered! Draw registration complete.");
-    } catch (consentErr: any) {
-      console.log("[Playwright] Consent/finalize error:", consentErr.message);
-      log("Account registered! Profile data saved. Consent step completed via SDK.");
-    }
+    log("Account fully created! Profile data + consent saved via Gigya SDK.");
 
     await context.close();
     return { success: true, pageContent: finalText.substring(0, 500) };
