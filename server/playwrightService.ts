@@ -286,13 +286,13 @@ async function completeTicketsProfile(
   }
 }
 
-async function acceptConsentAndFinalize(
+async function loginAndSubmitTicketRegistration(
   page: Page,
   email: string,
   password: string,
   log: (msg: string) => void
 ): Promise<void> {
-  log("Finalizing account — logging in to complete profile...");
+  log("Logging in to submit ticket draw registration...");
 
   await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
   try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
@@ -301,7 +301,7 @@ async function acceptConsentAndFinalize(
   try {
     await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
   } catch {
-    log("Gigya SDK not available on login page. Skipping consent step.");
+    log("Gigya SDK not available on login page.");
     return;
   }
 
@@ -325,7 +325,7 @@ async function acceptConsentAndFinalize(
   })("${email.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", "${password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}")`) as boolean;
 
   if (!loginFill) {
-    log("Could not fill login form. Skipping consent step.");
+    log("Could not fill login form.");
     return;
   }
 
@@ -334,164 +334,120 @@ async function acceptConsentAndFinalize(
     var btns = document.querySelectorAll('input[type="submit"]');
     for (var i = 0; i < btns.length; i++) { if (btns[i].getBoundingClientRect().width > 0) { btns[i].click(); break; } }
   })()`);
-  log("Login submitted. Waiting for consent page...");
+  log("Login submitted. Waiting for redirect...");
 
-  try {
-    await page.waitForURL("**/consent.html*", { timeout: 20000 });
-  } catch {
-    const currentUrl = page.url();
-    if (currentUrl.includes("proxy.html")) {
-      await page.waitForTimeout(10000);
+  for (let i = 0; i < 30; i++) {
+    await page.waitForTimeout(1000);
+    const url = page.url();
+    if (url.includes("consent.html")) {
+      log("Consent page detected. Auto-submitting...");
+      try {
+        await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 10000 });
+
+        await page.evaluate(`(() => {
+          var div = document.createElement('div');
+          div.id = 'consent-container';
+          div.style.cssText = 'width:600px;margin:20px auto;';
+          document.body.appendChild(div);
+        })()`);
+
+        const shown = await page.evaluate(`
+          new Promise(function(resolve) {
+            gigya.accounts.showScreenSet({
+              screenSet: 'Default-RegistrationLogin',
+              startScreen: 'gigya-complete-registration-screen',
+              containerID: 'consent-container',
+              onAfterScreenLoad: function(e) { resolve(true); },
+              onError: function(e) { resolve(false); }
+            });
+            setTimeout(function() { resolve(false); }, 15000);
+          })
+        `);
+
+        if (shown) {
+          await page.waitForTimeout(2000);
+
+          await page.evaluate(`(() => {
+            var c = document.getElementById('consent-container');
+            if (!c) return;
+            var cbs = c.querySelectorAll('input[type="checkbox"]');
+            for (var i = 0; i < cbs.length; i++) {
+              if (!cbs[i].checked) { cbs[i].checked = true; cbs[i].dispatchEvent(new Event('change', {bubbles:true})); }
+            }
+            var btn = c.querySelector('input[type="submit"]');
+            if (btn) btn.click();
+          })()`);
+          log("Consent form submitted.");
+          await page.waitForTimeout(8000);
+        } else {
+          log("Consent screen-set did not load. Trying direct navigation...");
+        }
+      } catch (e: any) {
+        log("Consent handling error: " + e.message.substring(0, 100));
+      }
+      break;
     }
-    if (!page.url().includes("consent.html")) {
-      log("No consent page appeared — account may already be complete. URL: " + page.url().substring(0, 100));
+    if (url.includes("tickets.la28.org") || url.includes("eventim")) {
+      log("SSO completed — reached tickets portal.");
+      break;
+    }
+  }
+
+  const currentUrl = page.url();
+  log("Current URL after login flow: " + currentUrl.substring(0, 100));
+
+  if (!currentUrl.includes("tickets.la28.org")) {
+    log("Navigating directly to tickets portal...");
+    try {
+      await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 45000 });
+    } catch (e: any) {
+      log("Direct tickets navigation failed: " + e.message.substring(0, 100));
       return;
     }
   }
 
-  log("On consent page. Showing profile completion screen-set...");
+  try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+  await page.waitForTimeout(8000);
 
-  try {
-    await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
-  } catch {
-    log("Gigya SDK not available on consent page.");
-  }
+  const ticketsText = await page.evaluate(() => document.body?.innerText?.substring(0, 2000) || "");
+  log("Tickets portal loaded. Page text: " + ticketsText.substring(0, 200));
 
-  await page.evaluate(`(() => {
-    var div = document.createElement('div');
-    div.id = 'consent-container';
-    div.style.cssText = 'width:600px;margin:20px auto;min-height:400px;';
-    document.body.appendChild(div);
-  })()`);
-
-  const screenShown = await page.evaluate(`
-    new Promise(function(resolve) {
-      gigya.accounts.showScreenSet({
-        screenSet: 'Default-RegistrationLogin',
-        startScreen: 'gigya-complete-registration-screen',
-        containerID: 'consent-container',
-        onAfterScreenLoad: function(e) {
-          resolve({ screen: e.currentScreen, ok: true });
-        },
-        onError: function(e) {
-          resolve({ error: e.errorCode + ': ' + (e.errorMessage || ''), ok: false });
-        }
-      });
-      setTimeout(function() { resolve({ ok: false, error: 'timeout' }); }, 20000);
-    })
-  `) as { ok: boolean; screen?: string; error?: string };
-
-  if (!screenShown.ok) {
-    log("Screen-set failed to load: " + (screenShown.error || "unknown"));
-    log("Falling back to setAccountInfo...");
-    await page.evaluate(`
-      new Promise(function(resolve) {
-        gigya.accounts.setAccountInfo({
-          preferences: {
-            privacy: { LA2028privacyPolicy: { isConsentGranted: true } },
-            terms: { LA2028siteTerms: { isConsentGranted: true } },
-            confirmationAge: { isConsentGranted: true },
-            ProfilingConsent: { isConsentGranted: true }
-          },
-          subscriptions: {
-            la2028EmailMarketingCommunications: { email: { isSubscribed: true } }
-          },
-          callback: function(resp) { resolve(resp.errorCode); }
-        });
-        setTimeout(function() { resolve(-99); }, 15000);
-      })
-    `);
-  } else {
-    log("Screen loaded: " + screenShown.screen);
-    await page.waitForTimeout(2000);
-
-    const birthYear = String(1970 + Math.floor(Math.random() * 30));
-    await page.evaluate(`((year) => {
-      var container = document.getElementById('consent-container');
-      if (!container) return;
-      var selects = container.querySelectorAll('select');
-      for (var i = 0; i < selects.length; i++) {
-        var sel = selects[i];
-        for (var j = 0; j < sel.options.length; j++) {
-          if (sel.options[j].value === year || sel.options[j].text === year) {
-            sel.value = sel.options[j].value;
-            sel.dispatchEvent(new Event('change', { bubbles: true }));
-            break;
-          }
-        }
-      }
-      var checkboxes = container.querySelectorAll('input[type="checkbox"]');
-      for (var i = 0; i < checkboxes.length; i++) {
-        if (!checkboxes[i].checked) {
-          checkboxes[i].checked = true;
-          checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }
-    })("${birthYear}")`);
-
-    log("Filled consent form fields. Submitting...");
-    await page.waitForTimeout(1000);
-
-    const submitResult = await page.evaluate(`
-      new Promise(function(resolve) {
-        var container = document.getElementById('consent-container');
-        var submitted = false;
-        
-        window.addEventListener('beforeunload', function() {
-          if (!submitted) { submitted = true; resolve({ redirected: true }); }
-        });
-        
-        var btn = container ? container.querySelector('input[type="submit"]') : null;
-        if (btn) {
-          btn.click();
-          setTimeout(function() {
-            if (!submitted) resolve({ redirected: false, url: window.location.href });
-          }, 12000);
-        } else {
-          resolve({ redirected: false, error: 'no submit button' });
-        }
-      })
-    `) as { redirected: boolean; url?: string; error?: string };
-
-    if (submitResult.redirected) {
-      log("Consent form submitted, page redirecting...");
-      await page.waitForTimeout(5000);
-    } else if (submitResult.error) {
-      log("Consent submit issue: " + submitResult.error);
-    } else {
-      log("After consent submit, URL: " + (submitResult.url || "").substring(0, 80));
-      const errors = await page.evaluate(`(() => {
-        var errs = document.querySelectorAll('.gigya-error-msg-active');
-        var result = [];
-        for (var i = 0; i < errs.length; i++) {
-          var t = errs[i].textContent.trim();
-          if (t) result.push(t);
-        }
-        return result;
-      })()`) as string[];
-      if (errors.length > 0) {
-        log("Consent form errors: " + errors.join(", "));
+  const btnClicked = await page.evaluate(`(() => {
+    var buttons = document.querySelectorAll('button, a, input[type="submit"], input[type="button"]');
+    for (var i = 0; i < buttons.length; i++) {
+      var text = (buttons[i].textContent || buttons[i].value || '').toLowerCase().trim();
+      if (text.includes('save profile') && text.includes('submit registration')) {
+        buttons[i].click();
+        return 'clicked';
       }
     }
+    var allElements = document.querySelectorAll('*');
+    for (var i = 0; i < allElements.length; i++) {
+      var el = allElements[i];
+      var text = (el.textContent || '').toLowerCase().trim();
+      var isClickable = el.tagName === 'BUTTON' || el.tagName === 'A' || 
+                        el.getAttribute('role') === 'button' ||
+                        el.style.cursor === 'pointer' ||
+                        el.onclick !== null;
+      if (isClickable && text === 'save profile & submit registration') {
+        el.click();
+        return 'clicked-alt';
+      }
+    }
+    return 'not-found';
+  })()`) as string;
+
+  if (btnClicked.startsWith('clicked')) {
+    log("'Save profile & submit registration' button clicked!");
+    await page.waitForTimeout(5000);
+    const afterText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
+    log("After submit: " + afterText.substring(0, 200));
+  } else {
+    log("'Save profile & submit registration' button not found on page.");
+    log("Page content: " + ticketsText.substring(0, 400));
   }
 
-  const finalUrl = page.url();
-  log("After consent flow, URL: " + finalUrl.substring(0, 100));
-
-  log("Now navigating to tickets portal...");
-  try {
-    await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 30000 });
-    try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-    await page.waitForTimeout(10000);
-
-    const ticketsText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000) || "");
-    console.log("[Playwright] Tickets portal text:", ticketsText.substring(0, 300));
-    log("Tickets portal reached.");
-  } catch (ticketsErr: any) {
-    log("Tickets portal: " + ticketsErr.message.substring(0, 100));
-  }
-
-  log("Account registration complete.");
+  log("Ticket draw registration complete.");
 }
 
 async function fillTicketsProfileForm(page: Page, log: (msg: string) => void): Promise<void> {
@@ -1295,7 +1251,13 @@ async function doRegistration(
       log("Account created & verified. Profile step had issues.");
     }
 
-    log("Account fully created! Profile data + consent saved via Gigya SDK.");
+    log("Profile data saved via Gigya SDK. Now submitting ticket registration...");
+    try {
+      await loginAndSubmitTicketRegistration(page, email, password, log);
+    } catch (ticketErr: any) {
+      console.log("[Playwright] Ticket registration error:", ticketErr.message);
+      log("Account created & verified. Ticket registration step had issues but profile data is saved.");
+    }
 
     await context.close();
     return { success: true, pageContent: finalText.substring(0, 500) };
