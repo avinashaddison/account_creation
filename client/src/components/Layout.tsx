@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, Home, TrendingUp } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -55,8 +55,8 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
   return (
     <div className="min-h-screen flex bg-[#0a0a0f]">
-      <aside className="w-64 bg-[#111118] border-r border-white/5 text-white flex flex-col shrink-0 h-screen sticky top-0" data-testid="sidebar">
-        <div className="p-5 m-3 mb-0 rounded-2xl bg-gradient-to-br from-red-600/15 via-rose-600/10 to-orange-600/10 border border-red-500/25 shadow-lg shadow-red-900/20">
+      <aside className="w-[260px] bg-[#111118] border-r border-white/5 text-white flex flex-col shrink-0 h-screen sticky top-0" data-testid="sidebar">
+        <div className="p-5 mx-3 mt-3 rounded-2xl bg-gradient-to-br from-red-600/15 via-rose-600/10 to-orange-600/10 border border-red-500/25 shadow-lg shadow-red-900/20">
           {isEditing ? (
             <div className="space-y-2">
               <Input
@@ -91,12 +91,14 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                   <Pencil className="w-3 h-3 text-zinc-500" />
                 </button>
               </div>
-              <p className="text-[11px] text-zinc-600 mt-1">Account Management</p>
+              <p className="text-[11px] text-zinc-500 mt-1 font-medium tracking-wide">Account Management</p>
             </div>
           )}
         </div>
 
-        <nav className="flex-1 p-3 space-y-0.5">
+        <div className="mx-3 my-4 border-t border-white/5" />
+
+        <nav className="flex-1 px-3 space-y-1">
           {nav.map((item) => {
             const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create"));
             return (
@@ -104,24 +106,24 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                 <div
                   onClick={() => sounds.navigate()}
                   onMouseEnter={() => sounds.hover()}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-all duration-200 ${
+                  className={`flex items-center gap-3.5 px-4 py-3 rounded-xl text-[13px] font-medium cursor-pointer transition-all duration-200 ${
                     isActive
-                      ? "bg-gradient-to-r from-red-600/20 to-rose-600/15 text-white border border-red-500/25"
-                      : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
+                      ? "bg-gradient-to-r from-red-600/20 to-rose-600/15 text-white border border-red-500/25 shadow-sm shadow-red-900/10"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]"
                   }`}
                   data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
                 >
-                  <item.icon className={`w-4 h-4 ${isActive ? "text-red-400" : ""}`} />
-                  {item.label}
+                  <item.icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? "text-red-400" : "text-zinc-600"}`} />
+                  <span>{item.label}</span>
                 </div>
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-white/5 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500/20 to-rose-500/20 border border-red-500/15 flex items-center justify-center">
+        <div className="p-4 mx-1 border-t border-white/5 space-y-3">
+          <div className="flex items-center gap-3 px-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-500/20 to-rose-500/20 border border-red-500/15 flex items-center justify-center shrink-0">
               <User className="w-4 h-4 text-zinc-400" />
             </div>
             <div className="flex-1 min-w-0">
@@ -132,7 +134,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
+            className="w-full justify-start text-zinc-500 hover:text-zinc-300 hover:bg-white/5 px-4"
             onClick={() => { sounds.logout(); onLogout(); }}
             data-testid="button-logout"
           >
