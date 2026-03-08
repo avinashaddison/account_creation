@@ -530,12 +530,16 @@ async function loginAndSubmitTicketRegistration(
           }
           log("Logged in. UID: " + loginResult.uid + ". Waiting for OIDC redirect...");
 
-          for (let rw = 0; rw < 20; rw++) {
-            await ticketsPage.waitForTimeout(3000);
+          let postStableUrl = "";
+          let postStableCount = 0;
+          for (let rw = 0; rw < 30; rw++) {
+            await ticketsPage.waitForTimeout(2000);
             try {
               const postUrl = ticketsPage.url();
-              log(`  [${rw * 3}s] ${postUrl.substring(0, 100)}`);
-              if (postUrl.includes("tickets.la28.org") && !postUrl.includes("la28id")) break;
+              if (postUrl === postStableUrl) postStableCount++;
+              else { postStableCount = 0; postStableUrl = postUrl; }
+              if (rw % 3 === 0) log(`  [${rw * 2}s] ${postUrl.substring(0, 100)}`);
+              if (postStableCount >= 3 && postUrl.includes("tickets.la28.org") && !postUrl.includes("la28id")) break;
               if (postUrl.includes("consent.html")) break;
             } catch { /* navigating */ }
           }
@@ -612,39 +616,84 @@ async function loginAndSubmitTicketRegistration(
         log("Ensuring customer data page is loaded...");
         const curUrl = ticketsPage.url();
         if (!curUrl.includes("mycustomerdata")) {
-          await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
+          try {
+            await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
+          } catch { /* may be interrupted by redirect */ }
         }
-        for (let w = 0; w < 10; w++) {
+        for (let w = 0; w < 15; w++) {
           await ticketsPage.waitForTimeout(3000);
-          const loading = await ticketsPage.evaluate(() => (document.body?.innerText || "").includes("Loading"));
-          if (!loading) { log("Profile loaded after ~" + ((w + 1) * 3) + "s"); break; }
-          if (w === 9) log("Profile still loading after 30s, proceeding anyway...");
+          try {
+            const pUrl = ticketsPage.url();
+            if (pUrl.includes("mycustomerdata")) {
+              const bodyText = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 300));
+              if (bodyText.includes("PROFILE") && !bodyText.includes("Loading")) {
+                log("Profile loaded after ~" + ((w + 1) * 3) + "s");
+                break;
+              }
+            }
+          } catch { /* page still navigating */ }
+          if (w === 14) log("Profile still loading after 45s, proceeding anyway...");
         }
+        await ticketsPage.waitForTimeout(3000);
       }
 
-      log("Customer data page loaded. Looking for submit button...");
+      log("Customer data page loaded. Filling profile form...");
 
-      const btnClicked = await ticketsPage.evaluate(`(() => {
-        var all = document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]');
-        for (var i = 0; i < all.length; i++) {
-          var text = (all[i].textContent || all[i].value || '').toLowerCase().trim();
-          if (text.includes('save profile') && text.includes('submit registration')) {
-            all[i].click(); return 'clicked';
+      const fillResult = await ticketsPage.evaluate(`(() => {
+        var results = [];
+        var selects = document.querySelectorAll('select');
+        for (var i = 0; i < selects.length; i++) {
+          var s = selects[i];
+          var id = s.id || s.name || '';
+          var validOpts = [];
+          for (var j = 0; j < s.options.length; j++) {
+            if (s.options[j].value && s.options[j].value !== '0: null' && s.options[j].text !== 'Please select') {
+              validOpts.push(s.options[j]);
+            }
+          }
+          if (validOpts.length === 0) continue;
+          if (id.indexOf('additionalCustomerAttributes') >= 0) {
+            var yearIdx = 10 + Math.floor(Math.random() * 20);
+            if (yearIdx >= validOpts.length) yearIdx = Math.floor(validOpts.length / 2);
+            s.value = validOpts[yearIdx].value;
+            s.dispatchEvent(new Event('change', { bubbles: true }));
+            results.push('BirthYear: ' + validOpts[yearIdx].text);
+          } else if (id.indexOf('categoryFavorites288') >= 0 || id.indexOf('categoryFavorites289') >= 0 || id.indexOf('artistFavorites') >= 0) {
+            var pick = validOpts[Math.floor(Math.random() * validOpts.length)];
+            s.value = pick.value;
+            s.dispatchEvent(new Event('change', { bubbles: true }));
+            var label = id.indexOf('288') >= 0 ? 'OlySport' : id.indexOf('289') >= 0 ? 'ParaSport' : 'Team';
+            results.push(label + ': ' + pick.text);
           }
         }
-        var els = document.querySelectorAll('*');
-        for (var i = 0; i < els.length; i++) {
-          var t = (els[i].textContent || '').trim().toLowerCase();
-          if (t === 'save profile & submit registration') { els[i].click(); return 'clicked-text'; }
+        return results;
+      })()`) as string[];
+
+      log("Form filled: " + (fillResult || []).join(", "));
+      await ticketsPage.waitForTimeout(2000);
+
+      log("Clicking 'Save profile & submit registration'...");
+      const btnClicked = await ticketsPage.evaluate(`(() => {
+        var buttons = document.querySelectorAll('button[type="submit"], button');
+        for (var i = 0; i < buttons.length; i++) {
+          var t = (buttons[i].textContent || '').toLowerCase().trim();
+          if (t.indexOf('save profile') >= 0 && t.indexOf('submit') >= 0) {
+            buttons[i].click(); return 'clicked: ' + buttons[i].textContent.trim();
+          }
         }
         return 'not-found: ' + (document.body?.innerText || '').substring(0, 200);
       })()`) as string;
 
       if (btnClicked.startsWith('clicked')) {
-        log("'Save profile & submit registration' button clicked!");
-        await ticketsPage.waitForTimeout(8000);
+        log("Submit button clicked! Waiting for result...");
+        await ticketsPage.waitForTimeout(10000);
+        const afterUrl = ticketsPage.url();
         const afterText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
-        log("After submit: " + afterText.substring(0, 200));
+        log("After submit URL: " + afterUrl.substring(0, 100));
+        log("After submit: " + afterText.substring(0, 300));
+        if (afterUrl.includes("mydatasuccess") || afterText.toLowerCase().includes("success")) {
+          log("SUCCESS! Ticket draw registration complete — registered for the draw.");
+        }
       } else {
         log("Button status: " + btnClicked.substring(0, 300));
       }
