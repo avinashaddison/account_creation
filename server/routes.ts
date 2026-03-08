@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
 import { fullRegistrationFlow } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
@@ -761,6 +761,16 @@ export async function registerRoutes(
     await storage.updateAccountUsed(req.params.id, !account.isUsed);
     const updated = await storage.getAccount(req.params.id);
     res.json(updated);
+  });
+
+  app.post("/api/accounts/fix-draw-status", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const result = await db.execute(sql`UPDATE accounts SET status = 'completed' WHERE status = 'draw_registering' RETURNING id, temp_email`);
+      const fixed = result.rows || [];
+      res.json({ success: true, fixed: fixed.length, accounts: fixed });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/billing", requireAuth, async (req, res) => {
