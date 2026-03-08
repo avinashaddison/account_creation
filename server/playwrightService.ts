@@ -642,34 +642,54 @@ async function loginAndSubmitTicketRegistration(
       const fillResult = await ticketsPage.evaluate(`(() => {
         var results = [];
         var selects = document.querySelectorAll('select');
+        var usedOly = {}, usedPara = {}, usedTeam = {};
+        function setVal(s, val) {
+          var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value');
+          if (nativeSet && nativeSet.set) nativeSet.set.call(s, val);
+          else s.value = val;
+          s.dispatchEvent(new Event('input', { bubbles: true }));
+          s.dispatchEvent(new Event('change', { bubbles: true }));
+        }
         for (var i = 0; i < selects.length; i++) {
           var s = selects[i];
-          var id = s.id || s.name || '';
-          var validOpts = [];
+          var id = s.id || '';
+          if (id.indexOf('customerCountry') >= 0) continue;
+          var opts = [];
           for (var j = 0; j < s.options.length; j++) {
-            if (s.options[j].value && s.options[j].value !== '0: null' && s.options[j].text !== 'Please select') {
-              validOpts.push(s.options[j]);
+            if (s.options[j].text !== 'Please select' && s.options[j].value.indexOf('null') < 0) {
+              opts.push(s.options[j]);
             }
           }
-          if (validOpts.length === 0) continue;
+          if (opts.length === 0) continue;
+          var pick = null;
           if (id.indexOf('additionalCustomerAttributes') >= 0) {
-            var yearIdx = 10 + Math.floor(Math.random() * 20);
-            if (yearIdx >= validOpts.length) yearIdx = Math.floor(validOpts.length / 2);
-            s.value = validOpts[yearIdx].value;
-            s.dispatchEvent(new Event('change', { bubbles: true }));
-            results.push('BirthYear: ' + validOpts[yearIdx].text);
-          } else if (id.indexOf('categoryFavorites288') >= 0 || id.indexOf('categoryFavorites289') >= 0 || id.indexOf('artistFavorites') >= 0) {
-            var pick = validOpts[Math.floor(Math.random() * validOpts.length)];
-            s.value = pick.value;
-            s.dispatchEvent(new Event('change', { bubbles: true }));
-            var label = id.indexOf('288') >= 0 ? 'OlySport' : id.indexOf('289') >= 0 ? 'ParaSport' : 'Team';
-            results.push(label + ': ' + pick.text);
+            var yearOpts = opts.filter(function(o) { var y = parseInt(o.text); return y >= 1975 && y <= 2000; });
+            pick = yearOpts.length > 0 ? yearOpts[Math.floor(Math.random() * yearOpts.length)] : opts[Math.floor(opts.length / 2)];
+            if (pick) results.push('BirthYear:' + pick.text);
+          } else if (id.indexOf('categoryFavorites288') >= 0) {
+            var avail = opts.filter(function(o) { return !usedOly[o.value]; });
+            pick = avail.length > 0 ? avail[Math.floor(Math.random() * avail.length)] : opts[0];
+            if (pick) { usedOly[pick.value] = true; results.push('Oly:' + pick.text.substring(0, 20)); }
+          } else if (id.indexOf('categoryFavorites289') >= 0) {
+            var avail2 = opts.filter(function(o) { return !usedPara[o.value]; });
+            pick = avail2.length > 0 ? avail2[Math.floor(Math.random() * avail2.length)] : opts[0];
+            if (pick) { usedPara[pick.value] = true; results.push('Para:' + pick.text.substring(0, 20)); }
+          } else if (id.indexOf('artistFavorites') >= 0) {
+            var avail3 = opts.filter(function(o) { return !usedTeam[o.value]; });
+            pick = avail3.length > 0 ? avail3[Math.floor(Math.random() * avail3.length)] : opts[0];
+            if (pick) { usedTeam[pick.value] = true; results.push('Team:' + pick.text.substring(0, 20)); }
           }
+          if (pick) setVal(s, pick.value);
         }
+        var filled = 0;
+        for (var k = 0; k < selects.length; k++) {
+          if (selects[k].value && selects[k].value.indexOf('null') < 0) filled++;
+        }
+        results.unshift(filled + '/' + selects.length + ' filled');
         return results;
       })()`) as string[];
 
-      log("Form filled: " + (fillResult || []).join(", "));
+      log("Form: " + (fillResult || []).join(", "));
       await ticketsPage.waitForTimeout(2000);
 
       log("Clicking 'Save profile & submit registration'...");
