@@ -327,8 +327,10 @@ async function loginAndSubmitTicketRegistration(
   email: string,
   password: string,
   log: (msg: string) => void,
-  proxyUrl?: string
+  proxyUrl?: string,
+  zipCode?: string
 ): Promise<void> {
+  const usedZipCode = zipCode || generateUSZip();
   log("Logging in to submit ticket draw registration...");
 
   await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -641,55 +643,154 @@ async function loginAndSubmitTicketRegistration(
 
       log("Customer data page loaded. Filling profile form...");
 
-      const fillResult = await ticketsPage.evaluate(`(() => {
+      const pageSnapshot = await ticketsPage.evaluate(`(() => {
+        var selects = document.querySelectorAll('select');
+        var inputs = document.querySelectorAll('input');
+        var selectInfo = [];
+        for (var i = 0; i < selects.length; i++) {
+          var s = selects[i];
+          var label = '';
+          var prev = s.previousElementSibling;
+          if (prev) label = (prev.textContent || '').trim();
+          if (!label) {
+            var parent = s.closest('.form-group, .field-wrapper, div');
+            if (parent) {
+              var lbl = parent.querySelector('label');
+              if (lbl) label = (lbl.textContent || '').trim();
+            }
+          }
+          selectInfo.push({ id: s.id || '', name: s.name || '', label: label, optCount: s.options.length, value: s.value || '' });
+        }
+        var inputInfo = [];
+        for (var j = 0; j < inputs.length; j++) {
+          var inp = inputs[j];
+          var ilabel = '';
+          var iprev = inp.previousElementSibling;
+          if (iprev) ilabel = (iprev.textContent || '').trim();
+          if (!ilabel) {
+            var iparent = inp.closest('.form-group, .field-wrapper, div');
+            if (iparent) {
+              var ilbl = iparent.querySelector('label');
+              if (ilbl) ilabel = (ilbl.textContent || '').trim();
+            }
+          }
+          inputInfo.push({ id: inp.id || '', name: inp.name || '', type: inp.type || '', label: ilabel, value: inp.value || '' });
+        }
+        return { selects: selectInfo, inputs: inputInfo };
+      })()`) as { selects: any[]; inputs: any[] };
+
+      console.log("[Playwright] Page form selects:", JSON.stringify(pageSnapshot.selects));
+      console.log("[Playwright] Page form inputs:", JSON.stringify(pageSnapshot.inputs));
+
+      const fillResult = await ticketsPage.evaluate(`((zipVal) => {
         var results = [];
         var selects = document.querySelectorAll('select');
         var usedOly = {}, usedPara = {}, usedTeam = {};
-        function setVal(s, val) {
+
+        function getLabel(el) {
+          var label = '';
+          var prev = el.previousElementSibling;
+          if (prev) label = (prev.textContent || '').trim().toLowerCase();
+          if (!label) {
+            var parent = el.closest('.form-group, .field-wrapper, div');
+            if (parent) {
+              var lbl = parent.querySelector('label');
+              if (lbl) label = (lbl.textContent || '').trim().toLowerCase();
+            }
+          }
+          return label;
+        }
+
+        function setSelectVal(s, val) {
           var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value');
           if (nativeSet && nativeSet.set) nativeSet.set.call(s, val);
           else s.value = val;
           s.dispatchEvent(new Event('input', { bubbles: true }));
           s.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        for (var i = 0; i < selects.length; i++) {
-          var s = selects[i];
-          var id = s.id || '';
-          if (id.indexOf('customerCountry') >= 0) continue;
+
+        function getValidOpts(s) {
           var opts = [];
           for (var j = 0; j < s.options.length; j++) {
-            if (s.options[j].text !== 'Please select' && s.options[j].value.indexOf('null') < 0) {
-              opts.push(s.options[j]);
+            var o = s.options[j];
+            if (o.text !== 'Please select' && o.value && o.value.indexOf('null') < 0 && o.value !== '') {
+              opts.push(o);
             }
           }
+          return opts;
+        }
+
+        for (var i = 0; i < selects.length; i++) {
+          var s = selects[i];
+          var id = (s.id || '').toLowerCase();
+          var label = getLabel(s);
+          if (id.indexOf('customercountry') >= 0) continue;
+          var opts = getValidOpts(s);
           if (opts.length === 0) continue;
           var pick = null;
-          if (id.indexOf('additionalCustomerAttributes') >= 0) {
+
+          var isBirthYear = id.indexOf('additionalcustomerattributes') >= 0
+            || label.indexOf('birth') >= 0
+            || (s.name || '').toLowerCase().indexOf('birth') >= 0;
+
+          var isOlySport = id.indexOf('categoryfavorites288') >= 0
+            || (label.indexOf('olympic') >= 0 && label.indexOf('paralympic') < 0 && label.indexOf('sport') >= 0);
+
+          var isParaSport = id.indexOf('categoryfavorites289') >= 0
+            || (label.indexOf('paralympic') >= 0 && label.indexOf('sport') >= 0);
+
+          var isTeam = id.indexOf('artistfavorites') >= 0
+            || label.indexOf('team') >= 0;
+
+          if (isBirthYear) {
             var yearOpts = opts.filter(function(o) { var y = parseInt(o.text); return y >= 1975 && y <= 2000; });
             pick = yearOpts.length > 0 ? yearOpts[Math.floor(Math.random() * yearOpts.length)] : opts[Math.floor(opts.length / 2)];
             if (pick) results.push('BirthYear:' + pick.text);
-          } else if (id.indexOf('categoryFavorites288') >= 0) {
+          } else if (isOlySport) {
             var avail = opts.filter(function(o) { return !usedOly[o.value]; });
             pick = avail.length > 0 ? avail[Math.floor(Math.random() * avail.length)] : opts[0];
             if (pick) { usedOly[pick.value] = true; results.push('Oly:' + pick.text.substring(0, 20)); }
-          } else if (id.indexOf('categoryFavorites289') >= 0) {
+          } else if (isParaSport) {
             var avail2 = opts.filter(function(o) { return !usedPara[o.value]; });
             pick = avail2.length > 0 ? avail2[Math.floor(Math.random() * avail2.length)] : opts[0];
             if (pick) { usedPara[pick.value] = true; results.push('Para:' + pick.text.substring(0, 20)); }
-          } else if (id.indexOf('artistFavorites') >= 0) {
+          } else if (isTeam) {
             var avail3 = opts.filter(function(o) { return !usedTeam[o.value]; });
             pick = avail3.length > 0 ? avail3[Math.floor(Math.random() * avail3.length)] : opts[0];
             if (pick) { usedTeam[pick.value] = true; results.push('Team:' + pick.text.substring(0, 20)); }
           }
-          if (pick) setVal(s, pick.value);
+          if (pick) setSelectVal(s, pick.value);
         }
+
+        var postalFilled = false;
+        var inputs = document.querySelectorAll('input');
+        for (var k = 0; k < inputs.length; k++) {
+          var inp = inputs[k];
+          var inpId = (inp.id || '').toLowerCase();
+          var inpName = (inp.name || '').toLowerCase();
+          var inpLabel = getLabel(inp);
+          var isPostal = inpId.indexOf('postal') >= 0 || inpId.indexOf('zip') >= 0
+            || inpName.indexOf('postal') >= 0 || inpName.indexOf('zip') >= 0
+            || inpLabel.indexOf('postal') >= 0 || inpLabel.indexOf('zip') >= 0;
+          if (isPostal && (!inp.value || inp.value.trim() === '')) {
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+            if (setter && setter.set) setter.set.call(inp, zipVal);
+            else inp.value = zipVal;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            inp.dispatchEvent(new Event('blur', { bubbles: true }));
+            postalFilled = true;
+            results.push('Postal:' + zipVal);
+          }
+        }
+
         var filled = 0;
-        for (var k = 0; k < selects.length; k++) {
-          if (selects[k].value && selects[k].value.indexOf('null') < 0) filled++;
+        for (var m = 0; m < selects.length; m++) {
+          if (selects[m].value && selects[m].value.indexOf('null') < 0 && selects[m].value !== '') filled++;
         }
-        results.unshift(filled + '/' + selects.length + ' filled');
+        results.unshift(filled + '/' + selects.length + ' selects filled' + (postalFilled ? ', postal filled' : ''));
         return results;
-      })()`) as string[];
+      })("${usedZipCode}")`) as string[];
 
       log("Form: " + (fillResult || []).join(", "));
       await ticketsPage.waitForTimeout(2000);
@@ -1504,7 +1605,7 @@ async function doRegistration(
     onStatusUpdate("draw_registering");
     log("Profile data saved via Gigya SDK. Now submitting ticket registration...");
     try {
-      await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl);
+      await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, usedZipCode);
       onStatusUpdate("completed");
     } catch (ticketErr: any) {
       console.log("[Playwright] Ticket registration error:", ticketErr.message);
