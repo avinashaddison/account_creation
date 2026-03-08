@@ -453,89 +453,174 @@ async function loginAndSubmitTicketRegistration(
   const afterConsentUrl = page.url();
   log("After consent: " + afterConsentUrl.substring(0, 100));
 
-  log("Opening tickets portal (needs residential proxy for Akamai)...");
-  const browser = page.context().browser()!;
-
-  const proxyConfig = proxyUrl ? parseProxyUrl(proxyUrl) : null;
-  if (!proxyConfig) {
-    log("No proxy available for tickets.la28.org (Akamai requires residential proxy). Skipping ticket submit.");
+  if (!proxyUrl) {
+    log("No Browser API URL provided for tickets.la28.org. Skipping ticket submit.");
     return;
   }
 
-  let proxyUsername = proxyConfig.username;
-  if (proxyConfig.host.includes('brd.superproxy.io') || proxyConfig.host.includes('brightdata')) {
-    if (!proxyUsername.includes('-country-')) {
-      proxyUsername += '-country-us';
-    }
-    log(`Using Bright Data proxy with US targeting: ${proxyUsername.substring(0, 40)}...`);
-  }
+  const isBrowserAPI = proxyUrl.startsWith('wss://');
+  log("Opening tickets portal via " + (isBrowserAPI ? "Bright Data Browser API" : "residential proxy") + "...");
 
-  let ticketsContext;
-  try {
-    ticketsContext = await browser.newContext({
-      proxy: {
-        server: `http://${proxyConfig.host}:${proxyConfig.port}`,
-        username: proxyUsername,
-        password: proxyConfig.password,
-      },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 720 },
-    });
-  } catch (e: any) {
-    log("Failed to create proxy context: " + e.message.substring(0, 80));
-    return;
-  }
+  const safeEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const safePass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
 
-  const ticketsPage = await ticketsContext.newPage();
-  ticketsPage.setDefaultTimeout(30000);
-  await ticketsPage.route("**/*", (route) => {
-    const resourceType = route.request().resourceType();
-    if (["image", "media", "font"].includes(resourceType)) return route.abort();
-    return route.continue();
-  });
+  const MAX_RETRIES = 3;
 
-  try {
-    await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 45000 });
-    try { await ticketsPage.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-    await ticketsPage.waitForTimeout(8000);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let remoteBrowser: Browser | null = null;
+    let ticketsContext: any = null;
+    let ticketsPage: Page;
 
-    const ticketsText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 2000) || "");
-    log("Tickets portal loaded. Looking for submit button...");
+    try {
+      if (isBrowserAPI) {
+        log(`Attempt ${attempt}/${MAX_RETRIES}: Connecting to remote browser...`);
+        remoteBrowser = await chromium.connectOverCDP(proxyUrl, { timeout: 60000 });
+        ticketsPage = await remoteBrowser.newPage();
+        ticketsPage.setDefaultTimeout(60000);
 
-    const btnClicked = await ticketsPage.evaluate(`(() => {
-      var all = document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]');
-      for (var i = 0; i < all.length; i++) {
-        var text = (all[i].textContent || all[i].value || '').toLowerCase().trim();
-        if (text.includes('save profile') && text.includes('submit registration')) {
-          all[i].click();
-          return 'clicked';
+        log("Logging in via Gigya SDK in remote browser...");
+        await ticketsPage.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+        try { await ticketsPage.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        await ticketsPage.waitForTimeout(3000);
+
+        try {
+          await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+        } catch {
+          log("Gigya SDK not loaded. Retrying...");
+          try { await remoteBrowser.close(); } catch {}
+          continue;
         }
-      }
-      var els = document.querySelectorAll('*');
-      for (var i = 0; i < els.length; i++) {
-        var t = (els[i].textContent || '').trim().toLowerCase();
-        if (t === 'save profile & submit registration') {
-          els[i].click();
-          return 'clicked-text';
+
+        const loginResult = await ticketsPage.evaluate(`
+          new Promise(function(resolve) {
+            gigya.accounts.login({
+              loginID: "${safeEmail}",
+              password: "${safePass}",
+              callback: function(r) { resolve({ ok: r.errorCode === 0, uid: r.UID || null, err: r.errorMessage || '' }); }
+            });
+            setTimeout(function() { resolve({ ok: false, err: 'timeout' }); }, 30000);
+          })
+        `) as { ok: boolean; uid: string | null; err: string };
+
+        if (!loginResult.ok) {
+          log("Gigya login failed: " + loginResult.err);
+          try { await remoteBrowser.close(); } catch {}
+          return;
         }
+        log("Logged in via Gigya SDK. UID: " + loginResult.uid);
+
+        await ticketsPage.waitForTimeout(8000);
+        const postLoginUrl = ticketsPage.url();
+        log("Post-login URL: " + postLoginUrl.substring(0, 100));
+
+        if (postLoginUrl.includes("consent.html")) {
+          log("Consent page detected. Handling...");
+          try {
+            await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 10000 });
+            await ticketsPage.waitForTimeout(1000);
+            await ticketsPage.evaluate(`(() => {
+              var div = document.createElement('div'); div.id = 'consent-container';
+              div.style.cssText = 'width:600px;margin:20px auto;'; document.body.appendChild(div);
+            })()`);
+            const shown = await ticketsPage.evaluate(`
+              new Promise(function(resolve) {
+                gigya.accounts.showScreenSet({
+                  screenSet: 'Default-RegistrationLogin', startScreen: 'gigya-complete-registration-screen',
+                  containerID: 'consent-container',
+                  onAfterScreenLoad: function() { resolve(true); }, onError: function() { resolve(false); }
+                });
+                setTimeout(function() { resolve(false); }, 15000);
+              })
+            `);
+            if (shown) {
+              await ticketsPage.waitForTimeout(1000);
+              const birthYear = String(1970 + Math.floor(Math.random() * 30));
+              try { const ei = ticketsPage.locator('#consent-container input[name="email"]'); await ei.click({ clickCount: 3 }); await ticketsPage.keyboard.type(email, { delay: 5 }); } catch {}
+              try { await ticketsPage.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear); } catch {}
+              try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type('9' + String(Math.floor(Math.random() * 9000) + 1000), { delay: 5 }); } catch {}
+              try { const s = ticketsPage.locator('#consent-container input[name="data.subscribe"]'); if (!(await s.isChecked())) await s.check(); } catch {}
+              await ticketsPage.waitForTimeout(500);
+              try { await ticketsPage.locator('#consent-container input[type="submit"]').click(); } catch {}
+              log("Consent submitted.");
+              await ticketsPage.waitForTimeout(5000);
+            }
+          } catch (e: any) {
+            log("Consent error: " + e.message.substring(0, 80));
+          }
+        }
+      } else {
+        const localBrowser = page.context().browser()!;
+        const proxyConfig = parseProxyUrl(proxyUrl);
+        if (!proxyConfig) { log("Invalid proxy URL."); return; }
+        let pu = proxyConfig.username;
+        if (proxyConfig.host.includes('brd.superproxy.io') && !pu.includes('-country-')) pu += '-country-us';
+        ticketsContext = await localBrowser.newContext({
+          proxy: { server: `http://${proxyConfig.host}:${proxyConfig.port}`, username: pu, password: proxyConfig.password },
+          ignoreHTTPSErrors: true,
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          viewport: { width: 1280, height: 720 },
+        });
+        ticketsPage = await ticketsContext.newPage();
+        ticketsPage.setDefaultTimeout(30000);
       }
-      return 'not-found';
-    })()`) as string;
 
-    if (btnClicked.startsWith('clicked')) {
-      log("'Save profile & submit registration' button clicked!");
-      await ticketsPage.waitForTimeout(5000);
-      const afterText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
-      log("After submit: " + afterText.substring(0, 200));
-    } else {
-      log("Button not found. Page content: " + ticketsText.substring(0, 300));
+      log("Navigating to tickets.la28.org...");
+      await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
+      await ticketsPage.waitForTimeout(10000);
+
+      const bodyText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
+      if (bodyText.toLowerCase().includes('access denied')) {
+        log(`Attempt ${attempt}: Access Denied by Akamai (bad IP). ${attempt < MAX_RETRIES ? 'Retrying with new IP...' : 'Max retries reached.'}`);
+        try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
+        continue;
+      }
+
+      log("Tickets page loaded: " + (await ticketsPage.title()));
+
+      log("Navigating to customer data page...");
+      await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
+      try { await ticketsPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
+      await ticketsPage.waitForTimeout(10000);
+
+      log("Customer data page loaded. Looking for submit button...");
+
+      const btnClicked = await ticketsPage.evaluate(`(() => {
+        var all = document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]');
+        for (var i = 0; i < all.length; i++) {
+          var text = (all[i].textContent || all[i].value || '').toLowerCase().trim();
+          if (text.includes('save profile') && text.includes('submit registration')) {
+            all[i].click(); return 'clicked';
+          }
+        }
+        var els = document.querySelectorAll('*');
+        for (var i = 0; i < els.length; i++) {
+          var t = (els[i].textContent || '').trim().toLowerCase();
+          if (t === 'save profile & submit registration') { els[i].click(); return 'clicked-text'; }
+        }
+        return 'not-found: ' + (document.body?.innerText || '').substring(0, 200);
+      })()`) as string;
+
+      if (btnClicked.startsWith('clicked')) {
+        log("'Save profile & submit registration' button clicked!");
+        await ticketsPage.waitForTimeout(8000);
+        const afterText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
+        log("After submit: " + afterText.substring(0, 200));
+      } else {
+        log("Button status: " + btnClicked.substring(0, 300));
+      }
+
+      try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
+      log("Ticket draw registration step complete.");
+      return;
+    } catch (err: any) {
+      log(`Attempt ${attempt} error: ${err.message.substring(0, 150)}`);
+      try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
+      if (attempt >= MAX_RETRIES) {
+        log("Max retries reached for ticket registration.");
+        return;
+      }
     }
-  } catch (ticketsErr: any) {
-    log("Tickets portal error: " + ticketsErr.message.substring(0, 100));
   }
-
-  try { await ticketsContext.close(); } catch {}
-  log("Ticket draw registration complete.");
 }
 
 async function fillTicketsProfileForm(page: Page, log: (msg: string) => void): Promise<void> {

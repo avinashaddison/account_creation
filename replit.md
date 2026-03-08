@@ -8,7 +8,7 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - **Backend**: Express.js (TypeScript) with WebSocket for real-time logs
 - **Database**: PostgreSQL with Drizzle ORM
 - **Sessions**: PostgreSQL-backed via connect-pg-simple (`user_sessions` table)
-- **Browser Automation**: Playwright (Chromium headless, residential proxy support)
+- **Browser Automation**: Playwright (Chromium headless, Bright Data Browser API for tickets.la28.org via `connectOverCDP`, residential proxy fallback)
 - **Email**: mail.tm API (branded as "Addison Mail")
 - **Auth**: Session-based with SHA-256 password hashing, role-based (superadmin/admin)
 
@@ -40,7 +40,7 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - `server/index.ts` - Express app, session middleware, startup
 - `server/routes.ts` - API endpoints + WebSocket + auth/role middleware
 - `server/mailService.ts` - mail.tm API integration
-- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, residential proxy support)
+- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, Bright Data Browser API with retry for tickets.la28.org Akamai bypass, residential proxy fallback)
 - `server/storage.ts` - Database storage with Drizzle ORM (owner-scoped queries)
 - `server/db.ts` - Database connection pool
 - `shared/schema.ts` - Database schema (accounts, billingRecords, users, paymentRequests tables)

@@ -216,13 +216,13 @@ export default function AutoCreate() {
                   value={proxyList}
                   onChange={(e) => setProxyList(e.target.value)}
                   disabled={isRunning}
-                  placeholder={"ip:port@login:password\nOne proxy per line — rotates automatically"}
+                  placeholder={"wss://user:pass@brd.superproxy.io:9222\nor ip:port:user:pass (one per line)"}
                   rows={4}
                   className="w-full rounded-md text-sm bg-white/[0.02] border border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono px-3 py-2 resize-y"
                   data-testid="input-la28-proxy"
                 />
                 <p className="text-[10px] text-zinc-600">
-                  Optional. One proxy per line. Rotates across accounts in batch.
+                  Supports Browser API (wss://) or regular proxy. One per line.
                   {proxyList.trim() ? ` (${proxyList.trim().split('\n').filter(l => l.trim()).length} proxies loaded)` : ''}
                 </p>
               </div>
