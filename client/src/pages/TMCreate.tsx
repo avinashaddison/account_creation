@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { handleUnauthorized } from "@/lib/auth";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
   Terminal, Ticket, AlertTriangle, Globe
@@ -29,7 +30,8 @@ export default function TMCreate() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  const estimatedCost = (count * 0.11).toFixed(2);
+  const accountPrice = useAccountPrice();
+  const estimatedCost = (count * accountPrice).toFixed(2);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -182,7 +184,7 @@ export default function TMCreate() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Cost per account</span>
-                  <span className="font-medium text-zinc-400">$0.11</span>
+                  <span className="font-medium text-zinc-400">${accountPrice.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-white/5 pt-2 mt-1">
                   <span className="font-semibold text-zinc-300 flex items-center gap-1">

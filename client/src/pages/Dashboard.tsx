@@ -7,6 +7,7 @@ import {
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 
 type DashboardData = {
   stats: { total: number; verified: number; failed: number; pending: number };
@@ -32,6 +33,7 @@ export default function Dashboard() {
   const [recentAccounts, setRecentAccounts] = useState<RecentAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const accountPrice = useAccountPrice();
 
   useEffect(() => {
     Promise.all([
@@ -174,14 +176,14 @@ export default function Dashboard() {
               <div className="text-4xl font-black bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${walletBalance.toFixed(2)}</div>
               <p className="text-sm text-zinc-500 mt-1">
                 {walletBalance > 0
-                  ? `Can create ~${Math.floor(walletBalance / 0.11)} accounts at $0.11 each`
+                  ? `Can create ~${Math.floor(walletBalance / accountPrice)} accounts at $${accountPrice.toFixed(2)} each`
                   : "Add funds to your wallet to create accounts"}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="p-4 rounded-lg bg-white/[0.02] border border-white/5">
                 <div className="text-xs text-zinc-600">Cost per Account</div>
-                <div className="text-lg font-bold text-zinc-300 mt-0.5">$0.11</div>
+                <div className="text-lg font-bold text-zinc-300 mt-0.5">${accountPrice.toFixed(2)}</div>
               </div>
               <div className="p-4 rounded-lg bg-white/[0.02] border border-white/5">
                 <div className="text-xs text-zinc-600">Total Spent</div>
@@ -222,7 +224,7 @@ export default function Dashboard() {
                   <DollarSign className="w-4 h-4 text-amber-400" />
                   <span className="text-xs font-medium text-amber-400">Per Account</span>
                 </div>
-                <div className="text-2xl font-black text-amber-300">$0.11</div>
+                <div className="text-2xl font-black text-amber-300">${accountPrice.toFixed(2)}</div>
               </div>
             </div>
           </div>

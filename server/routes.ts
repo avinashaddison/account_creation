@@ -80,7 +80,12 @@ function generatePassword(): string {
   return arr.join("");
 }
 
-const COST_PER_ACCOUNT = 0.11;
+const DEFAULT_COST_PER_ACCOUNT = 0.11;
+
+async function getCostPerAccount(): Promise<number> {
+  const val = await storage.getSetting("account_price");
+  return val ? parseFloat(val) : DEFAULT_COST_PER_ACCOUNT;
+}
 
 let wsClients: Map<WebSocket, string> = new Map();
 
@@ -181,9 +186,10 @@ async function processAccount(
         : `✅ Account created successfully! Email: ${addisonEmail}`;
       broadcastLog(batchId, accountId, successMsg, ownerId);
 
+      const billingPrice = await getCostPerAccount();
       await storage.createBillingRecord({
         accountId,
-        amount: COST_PER_ACCOUNT.toFixed(2),
+        amount: billingPrice.toFixed(2),
         description: `Account creation: ${firstName} ${lastName} (${addisonEmail})`,
         ownerId,
       });
@@ -387,6 +393,29 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/account-price", requireAuth, async (_req, res) => {
+    try {
+      const price = await getCostPerAccount();
+      res.json({ price });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/account-price", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { price } = req.body;
+      const numPrice = parseFloat(price);
+      if (isNaN(numPrice) || numPrice < 0.01 || numPrice > 100) {
+        return res.status(400).json({ error: "Price must be between $0.01 and $100.00" });
+      }
+      await storage.setSetting("account_price", numPrice.toFixed(2));
+      res.json({ success: true, price: numPrice.toFixed(2) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/payment-requests", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const requests = await storage.getAllPaymentRequests();
@@ -471,8 +500,9 @@ export async function registerRoutes(
       const { count = 1, country = "United States", language = "English", proxyList } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
 
+      const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
-      const requiredBalance = numAccounts * COST_PER_ACCOUNT;
+      const requiredBalance = numAccounts * costPerAccount;
       if (walletBalance < requiredBalance) {
         return res.status(403).json({
           error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${numAccounts} accounts. Your wallet balance is $${walletBalance.toFixed(2)}.`,
@@ -546,13 +576,14 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
+      const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
-      if (walletBalance < COST_PER_ACCOUNT) {
+      if (walletBalance < costPerAccount) {
         return res.status(403).json({
           error: `Insufficient balance. Add funds to your wallet to continue. Balance: $${walletBalance.toFixed(2)}`,
         });
       }
-      const debited = await storage.debitWallet(userId, COST_PER_ACCOUNT);
+      const debited = await storage.debitWallet(userId, costPerAccount);
       if (!debited) {
         return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
       }
@@ -607,8 +638,9 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
+      const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
-      if (walletBalance < COST_PER_ACCOUNT) {
+      if (walletBalance < costPerAccount) {
         return res.status(403).json({
           error: `Insufficient balance. Add funds to your wallet to continue. Balance: $${walletBalance.toFixed(2)}`,
         });
@@ -630,7 +662,7 @@ export async function registerRoutes(
       const cleanCountry = (typeof country === "string" ? country.trim() : "United States").slice(0, 50);
       const cleanLanguage = (typeof language === "string" ? language.trim() : "English").slice(0, 30);
 
-      const debited = await storage.debitWallet(userId, COST_PER_ACCOUNT);
+      const debited = await storage.debitWallet(userId, costPerAccount);
       if (!debited) {
         return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
       }
@@ -941,9 +973,10 @@ export async function registerRoutes(
         if (updated) broadcastAccountUpdate(updated, ownerId);
         broadcastLog(batchId, accountId, `TM account verified successfully!`, ownerId);
 
+        const tmBillingPrice = await getCostPerAccount();
         await storage.createBillingRecord({
           accountId,
-          amount: COST_PER_ACCOUNT.toFixed(2),
+          amount: tmBillingPrice.toFixed(2),
           description: `TM Account: ${firstName} ${lastName} (${addisonEmail})`,
           ownerId,
         });
@@ -974,8 +1007,9 @@ export async function registerRoutes(
       const numAccounts = Math.max(1, parseInt(count));
       const proxyUrl = req.body.proxyUrl || DEFAULT_BROWSER_API_URL;
 
+      const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
-      const requiredBalance = numAccounts * COST_PER_ACCOUNT;
+      const requiredBalance = numAccounts * costPerAccount;
       if (walletBalance < requiredBalance) {
         return res.status(403).json({
           error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${numAccounts} accounts. Balance: $${walletBalance.toFixed(2)}.`,
@@ -1081,9 +1115,10 @@ export async function registerRoutes(
         if (updated) broadcastAccountUpdate(updated, ownerId);
         broadcastLog(batchId, accountId, `UEFA account verified successfully!`, ownerId);
 
+        const uefaBillingPrice = await getCostPerAccount();
         await storage.createBillingRecord({
           accountId,
-          amount: COST_PER_ACCOUNT.toFixed(2),
+          amount: uefaBillingPrice.toFixed(2),
           description: `UEFA Account: ${firstName} ${lastName} (${addisonEmail})`,
           ownerId,
         });
@@ -1113,8 +1148,9 @@ export async function registerRoutes(
       const { count = 1 } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
 
+      const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
-      const requiredBalance = numAccounts * COST_PER_ACCOUNT;
+      const requiredBalance = numAccounts * costPerAccount;
       if (walletBalance < requiredBalance) {
         return res.status(403).json({
           error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${numAccounts} accounts. Balance: $${walletBalance.toFixed(2)}.`,

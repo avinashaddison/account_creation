@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DollarSign, Receipt, TrendingUp, Loader2 } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 
 type BillingRecord = {
   id: string;
@@ -20,6 +21,7 @@ type BillingData = {
 export default function Billing() {
   const [data, setData] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
+  const accountPrice = useAccountPrice();
 
   useEffect(() => {
     fetch("/api/billing", { credentials: "include" })
@@ -47,7 +49,7 @@ export default function Billing() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight" data-testid="text-billing-title">Billing</h1>
-        <p className="text-muted-foreground mt-1">Track costs for account creation ($0.11 per account)</p>
+        <p className="text-muted-foreground mt-1">Track costs for account creation (${accountPrice.toFixed(2)} per account)</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -83,7 +85,7 @@ export default function Billing() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">$0.11</div>
+            <div className="text-3xl font-bold">${accountPrice.toFixed(2)}</div>
           </CardContent>
         </Card>
       </div>

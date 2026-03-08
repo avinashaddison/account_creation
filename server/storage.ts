@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings } from "@shared/schema";
 import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
@@ -31,6 +31,8 @@ export interface IStorage {
   updatePaymentRequest(id: string, updates: Partial<PaymentRequest>): Promise<PaymentRequest | undefined>;
   debitWallet(userId: string, amount: number): Promise<boolean>;
   approvePaymentAtomic(requestId: string): Promise<{ success: boolean; newBalance?: string; error?: string }>;
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -212,6 +214,14 @@ export class DatabaseStorage implements IStorage {
       client.release();
       pool.end();
     }
+  }
+  async getSetting(key: string): Promise<string | undefined> {
+    const [row] = await db.select().from(settings).where(eq(settings.key, key));
+    return row?.value;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    await db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
   }
 }
 

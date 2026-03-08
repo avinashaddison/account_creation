@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign } from "lucide-react";
+import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { sounds } from "@/lib/sounds";
 import { useToast } from "@/hooks/use-toast";
@@ -45,7 +45,47 @@ export default function ManageAdmins() {
   const [fundUserId, setFundUserId] = useState("");
   const [fundAmount, setFundAmount] = useState("");
   const [addingFunds, setAddingFunds] = useState(false);
+  const [accountPrice, setAccountPrice] = useState("0.11");
+  const [newPrice, setNewPrice] = useState("0.11");
+  const [savingPrice, setSavingPrice] = useState(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    fetch("/api/settings/account-price", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => {
+        const p = parseFloat(d.price).toFixed(2);
+        setAccountPrice(p);
+        setNewPrice(p);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function updatePrice(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingPrice(true);
+    try {
+      const res = await fetch("/api/admin/account-price", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ price: newPrice }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        sounds.notification();
+        toast({ title: "Price Updated", description: `Account creation price set to $${data.price}` });
+        setAccountPrice(data.price);
+        setNewPrice(data.price);
+      } else {
+        toast({ title: "Error", description: data.error, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to update price", variant: "destructive" });
+    } finally {
+      setSavingPrice(false);
+    }
+  }
 
   function fetchAdmins() {
     setLoading(true);
@@ -173,6 +213,43 @@ export default function ManageAdmins() {
           <UserPlus className="w-4 h-4 mr-2" />
           {showForm ? "Cancel" : "Create Admin"}
         </Button>
+      </div>
+
+      <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-1.5 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white">
+            <Settings className="w-3.5 h-3.5" />
+          </div>
+          <span className="text-sm font-semibold text-zinc-200">Pricing Settings</span>
+        </div>
+        <form onSubmit={updatePrice} className="flex items-end gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current Price</Label>
+            <div className="text-2xl font-black bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent" data-testid="text-current-price">${accountPrice}</div>
+          </div>
+          <div className="space-y-1.5 flex-1 max-w-[200px]">
+            <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">New Price ($)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min="0.01"
+              max="100"
+              value={newPrice}
+              onChange={(e) => setNewPrice(e.target.value)}
+              className="h-9 text-sm bg-white/[0.02] border-white/5 text-zinc-300"
+              data-testid="input-account-price"
+            />
+          </div>
+          <Button
+            type="submit"
+            disabled={savingPrice || newPrice === accountPrice}
+            className="h-9 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 border-0"
+            data-testid="button-update-price"
+          >
+            {savingPrice ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update Price"}
+          </Button>
+        </form>
+        <p className="text-[11px] text-zinc-600 mt-2">This price is charged per account creation across all platforms (LA28, Ticketmaster, UEFA).</p>
       </div>
 
       {showForm && (

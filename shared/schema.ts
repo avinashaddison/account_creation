@@ -80,6 +80,13 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests).om
   createdAt: true,
 });
 
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
+export type Setting = typeof settings.$inferSelect;
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;

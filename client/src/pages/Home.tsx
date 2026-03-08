@@ -10,6 +10,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { subscribe } from "@/lib/ws";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 
 type LogEntry = {
   accountId: string;
@@ -46,6 +47,7 @@ export default function Home() {
   const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [country, setCountry] = useState("India");
+  const accountPrice = useAccountPrice();
   const [language, setLanguage] = useState("English");
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -322,7 +324,7 @@ export default function Home() {
               <div className="rounded-xl bg-white/[0.02] border border-white/5 p-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500 flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" /> Cost</span>
-                  <span className="font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">$0.11</span>
+                  <span className="font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${accountPrice.toFixed(2)}</span>
                 </div>
               </div>
 

@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle, ArrowUpRight, BarChart3
 } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type AdminBreakdown = {
@@ -43,6 +44,7 @@ type EarningsData = {
 export default function Earnings() {
   const [data, setData] = useState<EarningsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const accountPrice = useAccountPrice();
 
   useEffect(() => {
     fetch("/api/earnings", { credentials: "include" })
@@ -135,7 +137,7 @@ export default function Earnings() {
               <BarChart3 className="w-4 h-4 text-rose-400" />
             </div>
           </div>
-          <div className="text-3xl font-black text-rose-400">$0.11</div>
+          <div className="text-3xl font-black text-rose-400">${accountPrice.toFixed(2)}</div>
           <div className="flex items-center gap-1 mt-2">
             <span className="text-xs text-zinc-600">Fixed rate</span>
           </div>

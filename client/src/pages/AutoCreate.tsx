@@ -11,6 +11,7 @@ import {
 import { subscribe } from "@/lib/ws";
 import { Link } from "wouter";
 import { sounds } from "@/lib/sounds";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 
 type LogEntry = {
   accountId: string;
@@ -179,7 +180,8 @@ export default function AutoCreate() {
   const failedCount = batchAccounts.filter((a) => a.status === "failed").length;
   const totalCount = batchAccounts.length;
   const doneCount = completedCount + failedCount;
-  const estimatedCost = (count * 0.11).toFixed(2);
+  const accountPrice = useAccountPrice();
+  const estimatedCost = (count * accountPrice).toFixed(2);
 
   return (
     <div className="space-y-6">
@@ -283,7 +285,7 @@ export default function AutoCreate() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Cost per account</span>
-                  <span className="font-medium text-zinc-400">$0.11</span>
+                  <span className="font-medium text-zinc-400">${accountPrice.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-white/5 pt-2 mt-1">
                   <span className="font-semibold text-zinc-300 flex items-center gap-1">

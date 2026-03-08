@@ -26,10 +26,11 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 
 ## Roles
 - **superadmin** - Can see all data, manage admins, add funds, approve/reject payments, unlimited accounts (avinashaddison@gmail.com / @AJAYkn8085123)
-- **admin** - Can only see own data, every account costs $0.11 from wallet balance (no free accounts)
+- **admin** - Can only see own data, account cost charged from wallet balance (no free accounts)
 
 ## Wallet System
-- Every account costs $0.11 — charged from admin's wallet balance at creation time (no free tier)
+- Account creation cost is configurable by superadmin (default $0.11) — charged from admin's wallet balance at creation time (no free tier)
+- Superadmin can update the per-account price from the Manage Admins page (stored in `settings` table)
 - Admins can submit TRC20 (USDT) payment requests via Binance to address `TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB`
 - Admin submits TX hash + amount, superadmin approves/rejects the request
 - On approval, the amount is added to the admin's wallet balance
@@ -91,12 +92,15 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - `GET /api/admin/payment-requests` - List all payment requests
 - `POST /api/admin/payment-requests/:id/approve` - Approve payment (adds to wallet)
 - `POST /api/admin/payment-requests/:id/reject` - Reject payment
+- `PUT /api/admin/account-price` - Update per-account creation price
+- `GET /api/settings/account-price` - Get current account creation price (all authenticated users)
 
 ## Database Tables
 - `users` - Users with email, hashed password, role, freeAccountsUsed, walletBalance, createdBy
 - `accounts` - LA28 accounts with Addison email, credentials, status, ownerId for data isolation
-- `billing_records` - Cost records at $0.11 per verified account, ownerId
+- `billing_records` - Cost records per verified account (dynamic price), ownerId
 - `payment_requests` - TRC20 payment requests with userId, amount, txHash, status (pending/approved/rejected), adminNote
+- `settings` - Key-value settings store (e.g., `account_price` for per-account cost)
 - `user_sessions` - PostgreSQL session store (auto-created by connect-pg-simple)
 
 ## Ticketmaster Account Creation

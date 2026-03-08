@@ -9,6 +9,7 @@ import { Wallet as WalletIcon, Copy, CheckCircle2, Clock, XCircle, Loader2, Send
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
+import { useAccountPrice } from "@/lib/useAccountPrice";
 
 type PaymentRequest = {
   id: string;
@@ -33,6 +34,7 @@ export default function Wallet() {
   const [loading, setLoading] = useState(true);
   const [amount, setAmount] = useState("");
   const [txHash, setTxHash] = useState("");
+  const accountPrice = useAccountPrice();
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
@@ -103,7 +105,7 @@ export default function Wallet() {
   }
 
   const balance = parseFloat(data?.balance || "0");
-  const accountsCanCreate = Math.floor(balance / 0.11);
+  const accountsCanCreate = Math.floor(balance / accountPrice);
 
   if (loading) {
     return (
@@ -155,7 +157,7 @@ export default function Wallet() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">$0.11</div>
+            <div className="text-3xl font-bold">${accountPrice.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground mt-1">Per account created</p>
           </CardContent>
         </Card>
