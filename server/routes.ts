@@ -9,6 +9,7 @@ import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationC
 import { fullRegistrationFlow, retryDrawRegistration } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
+import { brunoMarsSignupFlow } from "./brunoMarsService";
 import { randomUUID, createHash } from "crypto";
 
 const DEFAULT_BROWSER_API_URL = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
@@ -1263,6 +1264,113 @@ export async function registerRoutes(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
             acc.email, acc.emailPassword, userId
           );
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/brunomars-create-batch", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const { count = 1 } = req.body;
+      const parsed = parseInt(count);
+      if (isNaN(parsed) || parsed < 1 || parsed > 100) {
+        return res.status(400).json({ error: "Count must be between 1 and 100" });
+      }
+      const numAccounts = parsed;
+      const proxyUrl = req.body.proxyUrl || DEFAULT_BROWSER_API_URL;
+
+      const costPerAccount = await getCostPerAccount();
+      const walletBalance = parseFloat(user.walletBalance || "0");
+      const requiredBalance = numAccounts * costPerAccount;
+      if (walletBalance < requiredBalance) {
+        return res.status(403).json({
+          error: `Insufficient balance. You need $${requiredBalance.toFixed(2)} for ${numAccounts} accounts. Balance: $${walletBalance.toFixed(2)}.`,
+          walletBalance,
+          required: requiredBalance,
+        });
+      }
+      const debited = await storage.debitWallet(userId, requiredBalance);
+      if (!debited) {
+        return res.status(403).json({ error: "Failed to debit wallet. Insufficient balance." });
+      }
+
+      const batchId = randomUUID();
+      const domain = await getAvailableDomain();
+
+      const created: any[] = [];
+      for (let i = 0; i < numAccounts; i++) {
+        const fn = randomFrom(FIRST_NAMES);
+        const ln = randomFrom(LAST_NAMES);
+        const username = generateRandomUsername();
+        const addisonEmail = `${username}@${domain}`;
+
+        const account = await storage.createAccount({
+          email: addisonEmail,
+          emailPassword: "TempPass123!",
+          firstName: fn,
+          lastName: ln,
+          la28Password: "N/A",
+          country: "United States",
+          language: "English",
+          status: "pending",
+          batchId,
+          ownerId: userId,
+          platform: "brunomars",
+          verificationCode: null,
+          errorMessage: null,
+        });
+
+        created.push(account);
+      }
+
+      batchOwners.set(batchId, userId);
+      res.json({ batchId, accounts: created, count: numAccounts });
+
+      (async () => {
+        for (const acc of created) {
+          broadcastLog(batchId, acc.id, `Starting Bruno Mars signup for ${acc.firstName} ${acc.lastName}...`, userId);
+          try {
+            const result = await brunoMarsSignupFlow(
+              acc.firstName,
+              acc.lastName,
+              acc.email,
+              proxyUrl,
+              (msg) => broadcastLog(batchId, acc.id, msg, userId),
+              async (status) => {
+                await storage.updateAccount(acc.id, { status });
+                broadcastAccountUpdate({ ...acc, status }, userId);
+              }
+            );
+            if (result.success) {
+              await storage.updateAccount(acc.id, { status: "completed" });
+              broadcastAccountUpdate({ ...acc, status: "completed" }, userId);
+              broadcastLog(batchId, acc.id, "Bruno Mars presale signup completed!", userId);
+              await storage.createBillingRecord({
+                userId,
+                type: "account_creation",
+                amount: String(costPerAccount),
+                description: `Bruno Mars signup: ${acc.email}`,
+                accountId: acc.id,
+              });
+            } else {
+              await storage.updateAccount(acc.id, { status: "failed", errorMessage: result.error || "Unknown error" });
+              broadcastAccountUpdate({ ...acc, status: "failed" }, userId);
+              broadcastLog(batchId, acc.id, `Failed: ${result.error}`, userId);
+              await storage.creditWallet(userId, costPerAccount);
+            }
+          } catch (err: any) {
+            await storage.updateAccount(acc.id, { status: "failed", errorMessage: err.message });
+            broadcastAccountUpdate({ ...acc, status: "failed" }, userId);
+            broadcastLog(batchId, acc.id, `Error: ${err.message.substring(0, 200)}`, userId);
+            await storage.creditWallet(userId, costPerAccount);
+          }
         }
         broadcastBatchComplete(batchId, userId);
       })();

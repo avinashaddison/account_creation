@@ -42,6 +42,7 @@ const platformLabel: Record<string, { name: string; color: string }> = {
   la28: { name: "LA28", color: "bg-red-500/10 text-red-400 border-red-500/20" },
   ticketmaster: { name: "Ticketmaster", color: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
   uefa: { name: "UEFA", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+  brunomars: { name: "Bruno Mars", color: "bg-purple-500/10 text-purple-400 border-purple-500/20" },
 };
 
 export default function AccountStock() {

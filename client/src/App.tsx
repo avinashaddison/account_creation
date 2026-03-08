@@ -12,6 +12,7 @@ import Billing from "@/pages/Billing";
 import AutoCreate from "@/pages/AutoCreate";
 import TMCreate from "@/pages/TMCreate";
 import UEFACreate from "@/pages/UEFACreate";
+import BrunoMarsCreate from "@/pages/BrunoMarsCreate";
 import CreateServer from "@/pages/CreateServer";
 import EmailServer from "@/pages/EmailServer";
 import ManageAdmins from "@/pages/ManageAdmins";
@@ -44,6 +45,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/la28-create" component={AutoCreate} />
         <Route path="/admin/tm-create" component={TMCreate} />
         <Route path="/admin/uefa-create" component={UEFACreate} />
+        <Route path="/admin/brunomars-create" component={BrunoMarsCreate} />
         <Route path="/admin/auto-create"><Redirect to="/admin/create-server" /></Route>
         <Route path="/admin/email-server" component={EmailServer} />
         <Route path="/admin/wallet" component={WalletPage} />

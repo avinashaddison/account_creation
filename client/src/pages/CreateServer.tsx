@@ -64,6 +64,21 @@ const platforms: Platform[] = [
       { label: "EU Region", icon: Globe },
     ],
   },
+  {
+    id: "brunomars",
+    name: "TM - Bruno Mars",
+    description: "Automated presale signup for Bruno Mars tour on signup.ticketmaster.ca/brunomars",
+    href: "/admin/brunomars-create",
+    gradient: "from-purple-600 via-fuchsia-700 to-pink-800",
+    badge: "Active",
+    badgeColor: "bg-emerald-400/20 text-emerald-300",
+    comingSoon: false,
+    stats: [
+      { label: "Auto Signup", icon: Shield },
+      { label: "Bulk Create", icon: Zap },
+      { label: "Presale", icon: Ticket },
+    ],
+  },
 ];
 
 export default function CreateServer() {
@@ -112,6 +127,10 @@ export default function CreateServer() {
                   ) : platform.id === "ticketmaster" ? (
                     <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden">
                       <img src={ticketmasterLogo} alt="Ticketmaster" className="w-full h-full object-cover" />
+                    </div>
+                  ) : platform.id === "brunomars" ? (
+                    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden">
+                      <span className="text-3xl font-black text-white">BM</span>
                     </div>
                   ) : (
                     <div className="w-20 h-20 rounded-2xl bg-white flex items-center justify-center shadow-2xl shadow-black/30 overflow-hidden p-2">
