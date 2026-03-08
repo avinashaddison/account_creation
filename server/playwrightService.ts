@@ -428,7 +428,7 @@ async function loginAndSubmitTicketRegistration(
         try {
           const zipInput = page.locator('#consent-container input[name="profile.zip"]');
           await zipInput.click({ clickCount: 3 });
-          await page.keyboard.type(generateUSZip(), { delay: 5 });
+          await page.keyboard.type(usedZipCode, { delay: 5 });
         } catch {}
 
         try {
@@ -570,7 +570,7 @@ async function loginAndSubmitTicketRegistration(
                 const birthYear = String(1970 + Math.floor(Math.random() * 30));
                 try { const ei = ticketsPage.locator('#consent-container input[name="email"]'); await ei.click({ clickCount: 3 }); await ticketsPage.keyboard.type(email, { delay: 5 }); } catch {}
                 try { await ticketsPage.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear); } catch {}
-                try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type(generateUSZip(), { delay: 5 }); } catch {}
+                try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type(usedZipCode, { delay: 5 }); } catch {}
                 try { const s = ticketsPage.locator('#consent-container input[name="data.subscribe"]'); if (!(await s.isChecked())) await s.check(); } catch {}
                 await ticketsPage.waitForTimeout(500);
                 try { await ticketsPage.locator('#consent-container input[type="submit"]').click(); } catch {}
@@ -1206,6 +1206,8 @@ async function doRegistration(
     viewport: { width: 1280, height: 720 },
   };
 
+  const usedZipCode = generateUSZip();
+  log(`Using LA zip code ${usedZipCode} for all steps.`);
   log("Registration/consent on la28id.la28.org (no proxy needed). Proxy reserved for tickets.la28.org step.");
 
   const context = await browser.newContext(contextOptions);
@@ -1338,7 +1340,6 @@ async function doRegistration(
 
     await page.waitForTimeout(500);
 
-    const usedZipCode = generateUSZip();
     const zipFilled = await fillViaJS(page, "profile.zip", usedZipCode);
     if (!zipFilled) {
       await page.evaluate(`((val) => {
