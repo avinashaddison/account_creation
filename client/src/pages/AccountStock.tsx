@@ -17,6 +17,7 @@ type Account = {
   lastName: string;
   la28Password: string;
   country: string;
+  zipCode: string | null;
   status: string;
   verificationCode: string | null;
   errorMessage: string | null;
@@ -109,11 +110,11 @@ export default function AccountStock() {
       toast({ title: "No data", description: "No verified accounts to export" });
       return;
     }
-    const csv = ["Platform,Email,Password,Name,Country,Code,Status,Created"]
+    const csv = ["Platform,Email,Password,Name,Country,PostalCode,Code,Status,Created"]
       .concat(
         verified.map(
           (a) =>
-            `${(platformLabel[a.platform]?.name || a.platform)},${a.email},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.verificationCode || ""},${a.isUsed ? "Used" : "Available"},${new Date(a.createdAt).toISOString()}`
+            `${(platformLabel[a.platform]?.name || a.platform)},${a.email},${a.la28Password},${a.firstName} ${a.lastName},${a.country},${a.zipCode || ""},${a.verificationCode || ""},${a.isUsed ? "Used" : "Available"},${new Date(a.createdAt).toISOString()}`
         )
       )
       .join("\n");
@@ -168,6 +169,7 @@ export default function AccountStock() {
               <TableHead className="text-zinc-500">Platform</TableHead>
               <TableHead className="text-zinc-500">Name</TableHead>
               <TableHead className="text-zinc-500">Email</TableHead>
+              <TableHead className="text-zinc-500">Postal Code</TableHead>
               <TableHead className="text-zinc-500">Password</TableHead>
               <TableHead className="text-zinc-500">Code</TableHead>
               <TableHead className="text-zinc-500">Created</TableHead>
@@ -195,6 +197,13 @@ export default function AccountStock() {
                   <TableCell className="font-medium text-zinc-200">{acc.firstName} {acc.lastName}</TableCell>
                   <TableCell>
                     <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300">{acc.email}</code>
+                  </TableCell>
+                  <TableCell>
+                    {acc.zipCode ? (
+                      <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300" data-testid={`text-zip-${acc.id}`}>{acc.zipCode}</code>
+                    ) : (
+                      <span className="text-xs text-zinc-600">-</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300">{acc.la28Password}</code>

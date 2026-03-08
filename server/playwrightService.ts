@@ -1147,7 +1147,7 @@ export async function fullRegistrationFlow(
   getVerificationCode: () => Promise<string | null>,
   onLog?: (message: string) => void,
   proxyUrl?: string
-): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+): Promise<{ success: boolean; error?: string; pageContent?: string; zipCode?: string }> {
   const log = onLog || ((msg: string) => console.log(`[Playwright] ${msg}`));
   const maxRetries = 2;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -1190,7 +1190,7 @@ async function doRegistration(
   getVerificationCode: () => Promise<string | null>,
   log: (message: string) => void,
   proxyUrl?: string
-): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+): Promise<{ success: boolean; error?: string; pageContent?: string; zipCode?: string }> {
   let browser: Browser;
   try {
     browser = await getBrowser();
@@ -1336,8 +1336,8 @@ async function doRegistration(
 
     await page.waitForTimeout(500);
 
-    const zipCode = generateUSZip();
-    const zipFilled = await fillViaJS(page, "profile.zip", zipCode);
+    const usedZipCode = generateUSZip();
+    const zipFilled = await fillViaJS(page, "profile.zip", usedZipCode);
     if (!zipFilled) {
       await page.evaluate(`((val) => {
         var inputs = document.querySelectorAll('input[name="profile.zip"], input[name="zip"], input[data-gigya-name="profile.zip"], input[placeholder*="ip"], input[placeholder*="ostal"]');
@@ -1350,9 +1350,9 @@ async function doRegistration(
           el.dispatchEvent(new Event('change', { bubbles: true }));
           el.dispatchEvent(new Event('blur', { bubbles: true }));
         }
-      })("${zipCode}")`);
+      })("${usedZipCode}")`);
     }
-    console.log(`[Playwright] ZIP filled: ${zipFilled} (${zipCode})`);
+    console.log(`[Playwright] ZIP filled: ${zipFilled} (${usedZipCode})`);
 
     const cbCount = await checkAllCheckboxesViaJS(page);
     console.log(`[Playwright] Checked ${cbCount} checkboxes`);
@@ -1509,7 +1509,7 @@ async function doRegistration(
     }
 
     await context.close();
-    return { success: true, pageContent: finalText.substring(0, 500) };
+    return { success: true, pageContent: finalText.substring(0, 500), zipCode: usedZipCode };
   } catch (err: any) {
     console.error("[Playwright] Error:", err.message);
     try { await context.close(); } catch {}

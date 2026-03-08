@@ -33,6 +33,7 @@ export const accounts = pgTable("accounts", {
   errorMessage: text("error_message"),
   batchId: text("batch_id"),
   ownerId: varchar("owner_id"),
+  zipCode: text("zip_code"),
   platform: text("platform").notNull().default("la28"),
   isUsed: boolean("is_used").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
