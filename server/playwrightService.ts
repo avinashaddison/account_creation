@@ -462,12 +462,20 @@ async function loginAndSubmitTicketRegistration(
     return;
   }
 
+  let proxyUsername = proxyConfig.username;
+  if (proxyConfig.host.includes('brd.superproxy.io') || proxyConfig.host.includes('brightdata')) {
+    if (!proxyUsername.includes('-country-')) {
+      proxyUsername += '-country-us';
+    }
+    log(`Using Bright Data proxy with US targeting: ${proxyUsername.substring(0, 40)}...`);
+  }
+
   let ticketsContext;
   try {
     ticketsContext = await browser.newContext({
       proxy: {
         server: `http://${proxyConfig.host}:${proxyConfig.port}`,
-        username: proxyConfig.username,
+        username: proxyUsername,
         password: proxyConfig.password,
       },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1002,43 +1010,7 @@ async function doRegistration(
     viewport: { width: 1280, height: 720 },
   };
 
-  if (proxyUrl) {
-    try {
-      let normalizedUrl = proxyUrl.trim();
-
-      const colonParts = normalizedUrl.split(":");
-      if (colonParts.length === 4 && !normalizedUrl.includes("@") && !normalizedUrl.startsWith("http")) {
-        const [host, port, login, pass] = colonParts;
-        normalizedUrl = `http://${encodeURIComponent(login)}:${encodeURIComponent(pass)}@${host}:${port}`;
-      }
-
-      const rawMatch = normalizedUrl.match(/^(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+):(\d+)@([^:]+):(.+)$/);
-      if (rawMatch) {
-        const [, host, port, login, pass] = rawMatch;
-        normalizedUrl = `http://${encodeURIComponent(login)}:${encodeURIComponent(pass)}@${host}:${port}`;
-      }
-
-      const authHostMatch = normalizedUrl.match(/^([^:]+):([^@]+)@(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+):(\d+)$/);
-      if (authHostMatch && !normalizedUrl.startsWith("http")) {
-        const [, login, pass, host, port] = authHostMatch;
-        normalizedUrl = `http://${encodeURIComponent(login)}:${encodeURIComponent(pass)}@${host}:${port}`;
-      }
-
-      if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://") && !normalizedUrl.startsWith("socks5://")) {
-        normalizedUrl = `http://${normalizedUrl}`;
-      }
-
-      const parsed = new URL(normalizedUrl);
-      contextOptions.proxy = {
-        server: `${parsed.protocol}//${parsed.hostname}:${parsed.port || '80'}`,
-      };
-      if (parsed.username) contextOptions.proxy.username = decodeURIComponent(parsed.username);
-      if (parsed.password) contextOptions.proxy.password = decodeURIComponent(parsed.password);
-      log(`Using residential proxy: ${parsed.hostname}:${parsed.port || '80'}`);
-    } catch {
-      log(`Invalid proxy URL format: ${proxyUrl} — proceeding without proxy`);
-    }
-  }
+  log("Registration/consent on la28id.la28.org (no proxy needed). Proxy reserved for tickets.la28.org step.");
 
   const context = await browser.newContext(contextOptions);
 
