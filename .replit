@@ -47,5 +47,4 @@ mockupState = "FULLSTACK"
 [userenv]
 
 [userenv.shared]
-TM_PROXY_URL = "http://okdpvmze-1:iy0zkuc7dt2s@p.webshare.io:80/"
 LA28_PROXY_URL = "wss://brd-customer-hl_f64e1a6d-zone-residential_proxy1:nih0rhblz1f8@brd.superproxy.io:9222"

@@ -145,7 +145,7 @@ export async function tmFullRegistrationFlow(
   getVerificationCode: () => Promise<string | null>,
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
-  const maxRetries = 2;
+  const maxRetries = 4;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
       console.log(`[TM-Playwright] Retry attempt ${attempt + 1}/${maxRetries}...`);
@@ -153,7 +153,7 @@ export async function tmFullRegistrationFlow(
         try { await browserInstance.close(); } catch {}
         browserInstance = null;
       }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     }
 
     const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, proxyUrl);
@@ -167,10 +167,15 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
+    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load")) {
+      console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 80)}`);
+      continue;
+    }
+
     return result;
   }
 
-  return { success: false, error: "Browser crashed after multiple retries" };
+  return { success: false, error: "Failed after multiple retries (bot detection or crashes)" };
 }
 
 async function doTMRegistration(
@@ -182,7 +187,9 @@ async function doTMRegistration(
   getVerificationCode: () => Promise<string | null>,
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+  console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
   const isBrowserAPI = proxyUrl && proxyUrl.startsWith('wss://');
+  console.log(`[TM-Playwright] isBrowserAPI: ${isBrowserAPI}`);
   let remoteBrowser: Browser | null = null;
   let page: Page;
   let context: any;
@@ -273,6 +280,23 @@ async function doTMRegistration(
       pageText = await getPageText(page);
       pageLower = pageText.toLowerCase();
       console.log("[TM-Playwright] Page text after wait (first 500):", pageText.substring(0, 500));
+    }
+
+    if (pageLower.includes("unexpected error") || pageLower.includes("we're sorry")) {
+      console.log("[TM-Playwright] TM server error, reloading page...");
+      for (let reload = 0; reload < 3; reload++) {
+        await page.waitForTimeout(3000);
+        await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+        await page.waitForTimeout(5000);
+        pageText = await getPageText(page);
+        pageLower = pageText.toLowerCase();
+        console.log(`[TM-Playwright] Reload ${reload + 1} text:`, pageText.substring(0, 200));
+        if (!pageLower.includes("unexpected error") && !pageLower.includes("we're sorry")) break;
+      }
+      if (pageLower.includes("unexpected error") || pageLower.includes("we're sorry")) {
+        return { success: false, error: "TM server error - unexpected error page persists", pageContent: pageText.substring(0, 500) };
+      }
     }
 
     if (pageLower.includes("browsing activity") || pageLower.includes("has been paused") || pageLower.includes("unusual behavior")) {
