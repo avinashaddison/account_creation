@@ -11,6 +11,13 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { randomUUID, createHash } from "crypto";
 
+const DEFAULT_BROWSER_API_URL = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_f64e1a6d-zone-residential_proxy1:nih0rhblz1f8@brd.superproxy.io:9222";
+
+function getDefaultProxies(proxyList?: string[]): string[] {
+  if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;
+  return [DEFAULT_BROWSER_API_URL];
+}
+
 function hashPassword(password: string): string {
   return createHash("sha256").update(password).digest("hex");
 }
@@ -514,14 +521,12 @@ export async function registerRoutes(
       batchOwners.set(batchId, userId);
       res.json({ batchId, accounts: created, count: numAccounts });
 
-      const proxies: string[] = Array.isArray(proxyList) && proxyList.length > 0
-        ? proxyList
-        : process.env.LA28_PROXY_URL ? [process.env.LA28_PROXY_URL] : [];
+      const proxies = getDefaultProxies(proxyList);
 
       (async () => {
         for (let i = 0; i < created.length; i++) {
           const acc = created[i];
-          const proxy = proxies.length > 0 ? proxies[i % proxies.length] : "";
+          const proxy = proxies[i % proxies.length];
           broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
@@ -557,10 +562,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "firstName, lastName, and password are required" });
       }
 
-      const proxies: string[] = Array.isArray(proxyList) && proxyList.length > 0
-        ? proxyList
-        : process.env.LA28_PROXY_URL ? [process.env.LA28_PROXY_URL] : [];
-      const resolvedProxy = proxies.length > 0 ? proxies[Math.floor(Math.random() * proxies.length)] : "";
+      const proxies = getDefaultProxies(proxyList);
+      const resolvedProxy = proxies[Math.floor(Math.random() * proxies.length)];
 
       const domain = await getAvailableDomain();
       const username = generateRandomUsername();
@@ -659,7 +662,7 @@ export async function registerRoutes(
       (async () => {
         await processAccount(
           account.id, batchId, cleanFirstName, cleanLastName, cleanPassword,
-          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId
+          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId, DEFAULT_BROWSER_API_URL
         );
         broadcastBatchComplete(batchId, userId);
       })();
