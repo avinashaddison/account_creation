@@ -258,7 +258,7 @@ async function doTMRegistration(
     console.log("[TM-Playwright] Navigating to Ticketmaster sign-up...");
 
     const signupUrl = "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf2fc29c040a10a21be&response_type=code&scope=openid+profile+phone+email&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placeholderType=tm&hideLeftPanel=false&integratorId=prd1741.iccp&intSiteToken=tm-us&TMUO=%23signupDesktop";
-    await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
 
     try {
       await page.waitForLoadState("networkidle", { timeout: 30000 });
@@ -266,40 +266,73 @@ async function doTMRegistration(
       console.log("[TM-Playwright] Network idle timeout, continuing...");
     }
 
-    await page.waitForTimeout(8000);
-    await removeOverlays(page);
+    await page.waitForTimeout(5000);
 
     let pageText = await getPageText(page);
     let pageLower = pageText.toLowerCase();
-    console.log("[TM-Playwright] Page text (first 500):", pageText.substring(0, 500));
+    console.log("[TM-Playwright] Initial page text:", pageText.substring(0, 300));
     console.log("[TM-Playwright] Current URL:", page.url());
 
-    if (pageLower.includes("one moment") || pageLower.includes("please wait") || pageLower.includes("loading")) {
-      console.log("[TM-Playwright] JS challenge detected, waiting longer...");
-      await page.waitForTimeout(15000);
-      pageText = await getPageText(page);
-      pageLower = pageText.toLowerCase();
-      console.log("[TM-Playwright] Page text after wait (first 500):", pageText.substring(0, 500));
+    const challengePatterns = ["almost there", "don't refresh", "one moment", "please wait", "checking your browser", "verifying"];
+    const errorPatterns = ["unexpected error", "we're sorry"];
+    const blockPatterns = ["browsing activity", "has been paused", "unusual behavior", "access denied"];
+
+    const isChallenge = (text: string) => challengePatterns.some(p => text.includes(p));
+    const isError = (text: string) => errorPatterns.some(p => text.includes(p));
+    const isBlocked = (text: string) => blockPatterns.some(p => text.includes(p));
+
+    if (isChallenge(pageLower)) {
+      console.log("[TM-Playwright] Captcha/challenge detected. Waiting for Browser API captcha solver (up to 120s)...");
+      for (let cw = 0; cw < 40; cw++) {
+        await page.waitForTimeout(3000);
+        try {
+          pageText = await getPageText(page);
+          pageLower = pageText.toLowerCase();
+          const currentUrl = page.url();
+          if (cw % 5 === 0) {
+            console.log(`[TM-Playwright] Challenge wait [${cw * 3}s]: ${pageText.substring(0, 150).replace(/\n/g, ' ')}`);
+            console.log(`[TM-Playwright] URL: ${currentUrl.substring(0, 120)}`);
+          }
+          if (!isChallenge(pageLower)) {
+            console.log("[TM-Playwright] Challenge resolved!");
+            break;
+          }
+        } catch {
+          console.log("[TM-Playwright] Page navigating during challenge solve...");
+        }
+      }
     }
 
-    if (pageLower.includes("unexpected error") || pageLower.includes("we're sorry")) {
-      console.log("[TM-Playwright] TM server error, reloading page...");
+    if (isError(pageLower)) {
+      console.log("[TM-Playwright] TM server error, reloading...");
       for (let reload = 0; reload < 3; reload++) {
         await page.waitForTimeout(3000);
-        await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+        await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
         await page.waitForTimeout(5000);
         pageText = await getPageText(page);
         pageLower = pageText.toLowerCase();
-        console.log(`[TM-Playwright] Reload ${reload + 1} text:`, pageText.substring(0, 200));
-        if (!pageLower.includes("unexpected error") && !pageLower.includes("we're sorry")) break;
+        console.log(`[TM-Playwright] Reload ${reload + 1}:`, pageText.substring(0, 200).replace(/\n/g, ' '));
+        if (isChallenge(pageLower)) {
+          console.log("[TM-Playwright] Challenge on reload, waiting for solver...");
+          for (let cw = 0; cw < 40; cw++) {
+            await page.waitForTimeout(3000);
+            try {
+              pageText = await getPageText(page);
+              pageLower = pageText.toLowerCase();
+              if (cw % 5 === 0) console.log(`[TM-Playwright] Reload challenge [${cw * 3}s]: ${pageText.substring(0, 100).replace(/\n/g, ' ')}`);
+              if (!isChallenge(pageLower)) { console.log("[TM-Playwright] Challenge resolved!"); break; }
+            } catch {}
+          }
+        }
+        if (!isError(pageLower) && !isChallenge(pageLower)) break;
       }
-      if (pageLower.includes("unexpected error") || pageLower.includes("we're sorry")) {
+      if (isError(pageLower)) {
         return { success: false, error: "TM server error - unexpected error page persists", pageContent: pageText.substring(0, 500) };
       }
     }
 
-    if (pageLower.includes("browsing activity") || pageLower.includes("has been paused") || pageLower.includes("unusual behavior")) {
+    if (isBlocked(pageLower)) {
       return {
         success: false,
         error: "Ticketmaster bot detection triggered. The Browser API proxy may need a different zone or retry.",
@@ -307,17 +340,11 @@ async function doTMRegistration(
       };
     }
 
-    if (pageLower.includes("access denied") || (pageLower.includes("blocked") && !pageLower.includes("sign"))) {
-      return {
-        success: false,
-        error: "Access blocked by Ticketmaster. Try again or use a different proxy zone.",
-        pageContent: pageText.substring(0, 500),
-      };
-    }
+    await removeOverlays(page);
 
     console.log("[TM-Playwright] Waiting for sign-up form...");
     let formFound = false;
-    for (let w = 0; w < 25; w++) {
+    for (let w = 0; w < 40; w++) {
       const hasForm = await page.evaluate(`(() => {
         var inputs = document.querySelectorAll('input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="mail"]');
         return inputs.length > 0;
@@ -325,15 +352,23 @@ async function doTMRegistration(
       if (hasForm) { formFound = true; break; }
       await page.waitForTimeout(3000);
       await removeOverlays(page);
+      pageText = await getPageText(page);
+      pageLower = pageText.toLowerCase();
+      if (isChallenge(pageLower)) {
+        if (w % 5 === 0) console.log(`[TM-Playwright] Still in challenge [${w * 3}s], captcha solver working...`);
+        continue;
+      }
+      if (isBlocked(pageLower)) {
+        return { success: false, error: "Ticketmaster bot detection triggered during form wait.", pageContent: pageText.substring(0, 500) };
+      }
       if (w % 5 === 4) {
-        var snapshot = await getPageText(page);
-        console.log("[TM-Playwright] Still waiting, page text:", snapshot.substring(0, 200));
+        console.log("[TM-Playwright] Form wait:", pageText.substring(0, 200).replace(/\n/g, ' '));
       }
     }
 
     if (!formFound) {
       const snapshot = (await getPageText(page)).substring(0, 500);
-      return { success: false, error: "Sign-up form did not load", pageContent: snapshot };
+      return { success: false, error: "Sign-up form did not load after extended wait", pageContent: snapshot };
     }
 
     await removeOverlays(page);
