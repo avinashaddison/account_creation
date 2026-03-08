@@ -167,7 +167,7 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
-    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load")) {
+    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers")) {
       console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 80)}`);
       continue;
     }
@@ -198,7 +198,13 @@ async function doTMRegistration(
     if (isBrowserAPI) {
       console.log("[TM-Playwright] Connecting via Bright Data Browser API...");
       remoteBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
-      page = await remoteBrowser.newPage();
+      const defaultContext = remoteBrowser.contexts()[0];
+      if (defaultContext) {
+        const pages = defaultContext.pages();
+        page = pages.length > 0 ? pages[0] : await defaultContext.newPage();
+      } else {
+        page = await remoteBrowser.newPage();
+      }
       page.setDefaultTimeout(60000);
       console.log("[TM-Playwright] Connected to remote browser.");
     } else {
@@ -306,7 +312,7 @@ async function doTMRegistration(
     if (isError(pageLower)) {
       console.log("[TM-Playwright] TM server error, reloading...");
       for (let reload = 0; reload < 3; reload++) {
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(3000 + Math.random() * 2000);
         await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
         try { await page.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
         await page.waitForTimeout(5000);
@@ -344,12 +350,31 @@ async function doTMRegistration(
 
     console.log("[TM-Playwright] Waiting for sign-up form...");
     let formFound = false;
+    let formPage: Page = page;
     for (let w = 0; w < 40; w++) {
-      const hasForm = await page.evaluate(`(() => {
+      let hasForm = await page.evaluate(`(() => {
         var inputs = document.querySelectorAll('input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="mail"]');
         return inputs.length > 0;
       })()`);
+      if (hasForm) { formFound = true; formPage = page; break; }
+
+      const frames = page.frames();
+      for (const frame of frames) {
+        if (frame === page.mainFrame()) continue;
+        try {
+          const frameHasForm = await frame.evaluate(`(() => {
+            var inputs = document.querySelectorAll('input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="mail"]');
+            return inputs.length > 0;
+          })()`);
+          if (frameHasForm) {
+            console.log("[TM-Playwright] Form found in iframe:", frame.url().substring(0, 80));
+            hasForm = true;
+            break;
+          }
+        } catch {}
+      }
       if (hasForm) { formFound = true; break; }
+
       await page.waitForTimeout(3000);
       await removeOverlays(page);
       pageText = await getPageText(page);
@@ -361,13 +386,18 @@ async function doTMRegistration(
       if (isBlocked(pageLower)) {
         return { success: false, error: "Ticketmaster bot detection triggered during form wait.", pageContent: pageText.substring(0, 500) };
       }
-      if (w % 5 === 4) {
+      if (w % 3 === 2) {
+        const htmlSnippet = await page.evaluate(`document.documentElement.outerHTML.substring(0, 500)`);
+        const iframeCount = await page.evaluate(`document.querySelectorAll('iframe').length`);
         console.log("[TM-Playwright] Form wait:", pageText.substring(0, 200).replace(/\n/g, ' '));
+        console.log(`[TM-Playwright] Iframes: ${iframeCount}, HTML: ${(htmlSnippet as string).substring(0, 300).replace(/\n/g, ' ')}`);
       }
     }
 
     if (!formFound) {
       const snapshot = (await getPageText(page)).substring(0, 500);
+      const htmlSnippet = await page.evaluate(`document.documentElement.outerHTML.substring(0, 1000)`);
+      console.log("[TM-Playwright] Final page HTML:", (htmlSnippet as string).substring(0, 500));
       return { success: false, error: "Sign-up form did not load after extended wait", pageContent: snapshot };
     }
 
