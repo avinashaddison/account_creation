@@ -289,11 +289,14 @@ async function doTMRegistration(
     console.log("[TM-Playwright] Initial page text:", pageText.substring(0, 300));
     console.log("[TM-Playwright] Current URL:", page.url());
 
-    const challengePatterns = ["almost there", "don't refresh", "one moment", "please wait", "checking your browser", "verifying"];
     const errorPatterns = ["unexpected error", "we're sorry"];
     const blockPatterns = ["browsing activity", "has been paused", "unusual behavior", "access denied"];
 
-    const isChallenge = (text: string) => challengePatterns.some(p => text.includes(p));
+    const isChallenge = (text: string) => {
+      if (text.includes("don't refresh") || text.includes("one moment") || text.includes("please wait") || text.includes("checking your browser")) return true;
+      if (text.includes("almost there") && !text.includes("verify your account") && !text.includes("verify my email") && !text.includes("one more step")) return true;
+      return false;
+    };
     const isError = (text: string) => errorPatterns.some(p => text.includes(p));
     const isBlocked = (text: string) => blockPatterns.some(p => text.includes(p));
 
@@ -624,9 +627,29 @@ async function doTMRegistration(
     }
 
     console.log("[TM-Playwright] Waiting for response...");
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(8000);
 
     pageText = await getPageText(page);
+    pageLower = pageText.toLowerCase();
+
+    if (isChallenge(pageLower)) {
+      console.log("[TM-Playwright] Challenge after submit, waiting for solver...");
+      for (let cw = 0; cw < 40; cw++) {
+        await page.waitForTimeout(3000);
+        try {
+          pageText = await getPageText(page);
+          pageLower = pageText.toLowerCase();
+          if (cw % 5 === 0) {
+            console.log(`[TM-Playwright] Submit challenge wait [${cw * 3}s]: ${pageText.substring(0, 150).replace(/\n/g, ' ')}`);
+          }
+          if (!isChallenge(pageLower)) {
+            console.log("[TM-Playwright] Submit challenge resolved!");
+            break;
+          }
+        } catch {}
+      }
+    }
+
     console.log("[TM-Playwright] After submit (first 500):", pageText.substring(0, 500));
     console.log("[TM-Playwright] URL after submit:", page.url().substring(0, 200));
 
@@ -645,12 +668,52 @@ async function doTMRegistration(
       let verifyEmailClicked = await clickButton(page, "verify my email");
       if (!verifyEmailClicked) verifyEmailClicked = await clickButton(page, "verify email");
       if (!verifyEmailClicked) verifyEmailClicked = await clickButton(page, "send code");
-      if (!verifyEmailClicked) verifyEmailClicked = await clickButton(page, "verify");
       console.log(`[TM-Playwright] Verify My Email clicked: ${verifyEmailClicked}`);
 
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(3000);
       pageText = await getPageText(page);
-      console.log("[TM-Playwright] After verify email click (first 300):", pageText.substring(0, 300));
+      pageLower = pageText.toLowerCase();
+
+      if (isChallenge(pageLower)) {
+        console.log("[TM-Playwright] Challenge after Verify My Email click, waiting for solver...");
+        for (let cw = 0; cw < 40; cw++) {
+          await page.waitForTimeout(3000);
+          try {
+            pageText = await getPageText(page);
+            pageLower = pageText.toLowerCase();
+            if (cw % 5 === 0) {
+              console.log(`[TM-Playwright] Verify challenge wait [${cw * 3}s]: ${pageText.substring(0, 150).replace(/\n/g, ' ')}`);
+            }
+            if (!isChallenge(pageLower)) {
+              console.log("[TM-Playwright] Verify challenge resolved!");
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      await page.waitForTimeout(3000);
+      pageText = await getPageText(page);
+      console.log("[TM-Playwright] After verify email click (first 500):", pageText.substring(0, 500));
+
+      const allInputs = await page.evaluate(`(() => {
+        var inputs = document.querySelectorAll('input');
+        var result = [];
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            result.push({
+              tag: el.tagName, type: el.type, name: el.name, id: el.id,
+              placeholder: el.placeholder, maxLength: el.maxLength,
+              ariaLabel: el.getAttribute('aria-label') || '',
+              dataTestId: el.getAttribute('data-testid') || ''
+            });
+          }
+        }
+        return result;
+      })()`);
+      console.log("[TM-Playwright] Visible inputs on verify page:", JSON.stringify(allInputs));
 
       onStatusUpdate("waiting_code");
 
@@ -671,13 +734,54 @@ async function doTMRegistration(
       onStatusUpdate("verifying");
       console.log(`[TM-Playwright] Entering verification code: ${code}`);
 
-      const codeFilled = await fillInput(page, [
-        'input[name="code"]', 'input[id*="code"]', 'input[placeholder*="code"]',
-        'input[data-testid*="code"]', 'input[type="text"]', 'input[inputmode="numeric"]',
-      ], code);
-      console.log(`[TM-Playwright] Code filled: ${codeFilled}`);
+      const codeDigits = code.split('');
+      const codeEntered = await page.evaluate(`((code, digits) => {
+        var inputs = document.querySelectorAll('input[maxlength="1"], input[data-index]');
+        var visibleDigitInputs = [];
+        for (var i = 0; i < inputs.length; i++) {
+          var rect = inputs[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) visibleDigitInputs.push(inputs[i]);
+        }
 
-      await page.waitForTimeout(500);
+        if (visibleDigitInputs.length >= digits.length) {
+          for (var j = 0; j < digits.length; j++) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') ||
+                            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+            if (nativeSet && nativeSet.set) nativeSet.set.call(visibleDigitInputs[j], digits[j]);
+            else visibleDigitInputs[j].value = digits[j];
+            visibleDigitInputs[j].dispatchEvent(new Event('input', { bubbles: true }));
+            visibleDigitInputs[j].dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          return 'individual-digits:' + visibleDigitInputs.length;
+        }
+
+        var singleSelectors = [
+          'input[name="code"]', 'input[id*="code"]', 'input[placeholder*="code"]',
+          'input[data-testid*="code"]', 'input[inputmode="numeric"]',
+          'input[type="text"]:not([name="email"]):not([name="firstName"]):not([name="lastName"]):not([name="postalCode"])',
+          'input[type="number"]', 'input[type="tel"]'
+        ];
+        for (var s = 0; s < singleSelectors.length; s++) {
+          var els = document.querySelectorAll(singleSelectors[s]);
+          for (var k = 0; k < els.length; k++) {
+            var r = els[k].getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+              var nativeSet2 = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') ||
+                               Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+              if (nativeSet2 && nativeSet2.set) nativeSet2.set.call(els[k], code);
+              else els[k].value = code;
+              els[k].dispatchEvent(new Event('input', { bubbles: true }));
+              els[k].dispatchEvent(new Event('change', { bubbles: true }));
+              els[k].dispatchEvent(new Event('blur', { bubbles: true }));
+              return 'single-input:' + singleSelectors[s];
+            }
+          }
+        }
+        return 'no-input-found';
+      })("${code}", ${JSON.stringify(codeDigits)})`);
+      console.log(`[TM-Playwright] Code entry result: ${codeEntered}`);
+
+      await page.waitForTimeout(1000);
 
       let verifyClicked = await clickButton(page, "verify");
       if (!verifyClicked) verifyClicked = await clickButton(page, "confirm");
@@ -686,10 +790,39 @@ async function doTMRegistration(
       if (!verifyClicked) verifyClicked = await clickButton(page);
       console.log(`[TM-Playwright] Verify code clicked: ${verifyClicked}`);
 
-      await page.waitForTimeout(8000);
+      await page.waitForTimeout(5000);
 
       pageText = await getPageText(page);
+      pageLower = pageText.toLowerCase();
+      if (isChallenge(pageLower)) {
+        console.log("[TM-Playwright] Challenge after code verify, waiting...");
+        for (let cw = 0; cw < 40; cw++) {
+          await page.waitForTimeout(3000);
+          try {
+            pageText = await getPageText(page);
+            pageLower = pageText.toLowerCase();
+            if (cw % 5 === 0) {
+              console.log(`[TM-Playwright] Post-code challenge [${cw * 3}s]: ${pageText.substring(0, 150).replace(/\n/g, ' ')}`);
+            }
+            if (!isChallenge(pageLower)) {
+              console.log("[TM-Playwright] Post-code challenge resolved!");
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      await page.waitForTimeout(3000);
+      pageText = await getPageText(page);
       console.log("[TM-Playwright] After verification (first 500):", pageText.substring(0, 500));
+
+      const emailVerified = await page.evaluate(`(() => {
+        var body = document.body ? document.body.innerHTML.toLowerCase() : '';
+        var hasCheckmark = body.includes('email') && (body.includes('✓') || body.includes('check') || body.includes('verified') || body.includes('complete'));
+        var verifyStillShowing = body.includes('verify my email') || body.includes('send code');
+        return { hasCheckmark: hasCheckmark, verifyStillShowing: verifyStillShowing, bodyPreview: (document.body ? document.body.innerText : '').substring(0, 300) };
+      })()`);
+      console.log("[TM-Playwright] Email verification state:", JSON.stringify(emailVerified));
     }
 
     const currentUrl = page.url();
@@ -699,26 +832,34 @@ async function doTMRegistration(
     console.log("[TM-Playwright] Final URL:", currentUrl);
     console.log("[TM-Playwright] Final text (first 300):", finalText.substring(0, 300));
 
-    const isSuccess = currentUrl.includes("ticketmaster.com") &&
-                      !currentUrl.includes("authorization.oauth2") ||
-                      finalLower.includes("account created") ||
+    const redirectedToAccount = currentUrl.includes("ticketmaster.com") && !currentUrl.includes("authorization.oauth2");
+    const textIndicatesSuccess = finalLower.includes("account created") ||
                       finalLower.includes("success") ||
                       finalLower.includes("my account") ||
                       finalLower.includes("you're in") ||
-                      finalLower.includes("profile") ||
-                      finalLower.includes("almost there") ||
-                      finalLower.includes("verify your account") ||
-                      finalLower.includes("verified");
+                      finalLower.includes("welcome back");
+    const verifyPageWithCodeDone = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
+                      !finalLower.includes("verify my email") &&
+                      !finalLower.includes("send code");
+
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageWithCodeDone;
 
     if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500) };
+    }
+
+    if (finalLower.includes("almost there") || finalLower.includes("verify your account")) {
+      const stillNeedsVerify = finalLower.includes("verify my email") || finalLower.includes("send code") || finalLower.includes("add my phone");
+      if (stillNeedsVerify) {
+        return { success: false, error: "Registration submitted but verification incomplete. Page still shows verification requirements.", pageContent: finalText.substring(0, 500) };
+      }
     }
 
     if (finalLower.includes("error") || finalLower.includes("failed") || finalLower.includes("invalid")) {
       return { success: false, error: "Registration failed: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500) };
     }
 
-    return { success: true, pageContent: finalText.substring(0, 500) };
+    return { success: false, error: "Registration status unclear: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500) };
   } catch (err: any) {
     return { success: false, error: err.message };
   } finally {
