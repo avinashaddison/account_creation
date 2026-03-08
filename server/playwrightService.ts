@@ -38,21 +38,24 @@ function parseProxyUrl(proxyUrl: string): { host: string; port: string; username
   }
 }
 
-const US_ZIP_CODES = [
-  "10001", "10019", "10036", "10128", "10010",
-  "90001", "90012", "90024", "90036", "90210",
-  "60601", "60614", "60657", "60611", "60640",
-  "77001", "77002", "77019", "77030", "77056",
-  "85001", "85004", "85016", "85028", "85044",
-  "19101", "19102", "19103", "19106", "19130",
-  "78201", "78205", "78209", "78215", "78230",
-  "92101", "92103", "92109", "92117", "92126",
-  "75201", "75204", "75214", "75225", "75240",
-  "95101", "95112", "95125", "95131", "95148",
+const LA_ZIP_CODES = [
+  "90001", "90002", "90003", "90004", "90005", "90006", "90007", "90008",
+  "90010", "90011", "90012", "90013", "90014", "90015", "90016", "90017",
+  "90018", "90019", "90020", "90021", "90022", "90023", "90024", "90025",
+  "90026", "90027", "90028", "90029", "90031", "90032", "90033", "90034",
+  "90035", "90036", "90037", "90038", "90039", "90041", "90042", "90043",
+  "90044", "90045", "90046", "90047", "90048", "90049", "90056", "90057",
+  "90058", "90059", "90061", "90062", "90063", "90064", "90065", "90066",
+  "90067", "90068", "90069", "90071", "90077", "90089", "90094", "90095",
+  "90210", "90211", "90212", "90230", "90232", "90245", "90247", "90248",
+  "90249", "90250", "90254", "90260", "90266", "90270", "90272", "90274",
+  "90275", "90277", "90278", "90280", "90290", "90291", "90292", "90293",
+  "90301", "90302", "90303", "90304", "90305", "90401", "90402", "90403",
+  "90404", "90405",
 ];
 
 function generateUSZip(): string {
-  return US_ZIP_CODES[Math.floor(Math.random() * US_ZIP_CODES.length)];
+  return LA_ZIP_CODES[Math.floor(Math.random() * LA_ZIP_CODES.length)];
 }
 
 function generateRandomBirthYear(): string {
@@ -425,8 +428,7 @@ async function loginAndSubmitTicketRegistration(
         try {
           const zipInput = page.locator('#consent-container input[name="profile.zip"]');
           await zipInput.click({ clickCount: 3 });
-          const zip = '9' + String(Math.floor(Math.random() * 9000) + 1000);
-          await page.keyboard.type(zip, { delay: 5 });
+          await page.keyboard.type(generateUSZip(), { delay: 5 });
         } catch {}
 
         try {
@@ -568,7 +570,7 @@ async function loginAndSubmitTicketRegistration(
                 const birthYear = String(1970 + Math.floor(Math.random() * 30));
                 try { const ei = ticketsPage.locator('#consent-container input[name="email"]'); await ei.click({ clickCount: 3 }); await ticketsPage.keyboard.type(email, { delay: 5 }); } catch {}
                 try { await ticketsPage.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear); } catch {}
-                try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type('9' + String(Math.floor(Math.random() * 9000) + 1000), { delay: 5 }); } catch {}
+                try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type(generateUSZip(), { delay: 5 }); } catch {}
                 try { const s = ticketsPage.locator('#consent-container input[name="data.subscribe"]'); if (!(await s.isChecked())) await s.check(); } catch {}
                 await ticketsPage.waitForTimeout(500);
                 try { await ticketsPage.locator('#consent-container input[type="submit"]').click(); } catch {}
