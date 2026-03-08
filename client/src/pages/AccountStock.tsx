@@ -48,6 +48,7 @@ export default function AccountStock() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const { toast } = useToast();
 
@@ -101,6 +102,27 @@ export default function AccountStock() {
       toast({ title: "Error", description: "Failed to update", variant: "destructive" });
     } finally {
       setToggling(null);
+    }
+  }
+
+  async function retryDraw(accountId: string) {
+    setRetrying(accountId);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/retry-draw`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: "Draw Retry Started", description: "The draw registration is being retried. Status will update automatically." });
+        setAccounts((prev) => prev.map((a) => a.id === accountId ? { ...a, status: "draw_registering" } : a));
+      } else {
+        toast({ title: "Error", description: data.error || "Failed to retry", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to retry draw", variant: "destructive" });
+    } finally {
+      setRetrying(null);
     }
   }
 
@@ -220,6 +242,23 @@ export default function AccountStock() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      {acc.platform === "la28" && ["verified", "profile_saving", "draw_registering"].includes(acc.status) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-amber-400 hover:text-amber-300"
+                          onClick={() => { sounds.click(); retryDraw(acc.id); }}
+                          disabled={retrying === acc.id}
+                          data-testid={`button-retry-draw-${acc.id}`}
+                        >
+                          {retrying === acc.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          )}
+                          <span className="ml-1">Draw</span>
+                        </Button>
+                      )}
                       {(acc.status === "verified" || acc.status === "completed") && showToggle && (
                         <Button
                           variant="ghost"

@@ -1636,6 +1636,28 @@ async function doRegistration(
   }
 }
 
+export async function retryDrawRegistration(
+  email: string,
+  password: string,
+  proxyUrl: string,
+  zipCode: string | undefined,
+  log: (msg: string) => void
+): Promise<{ submitted: boolean }> {
+  log("Starting retry draw registration for " + email);
+  const browser = await chromium.connectOverCDP(proxyUrl, { timeout: 60000 });
+  try {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(120000);
+    log("Connected to browser.");
+
+    const result = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, zipCode || undefined);
+    try { await page.close(); } catch {}
+    return result;
+  } finally {
+    try { await browser.close(); } catch {}
+  }
+}
+
 export async function closeBrowser(): Promise<void> {
   if (browserInstance) {
     await browserInstance.close();

@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
-import { fullRegistrationFlow } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { randomUUID, createHash } from "crypto";
@@ -770,6 +770,55 @@ export async function registerRoutes(
       res.json({ success: true, fixed: fixed.length, accounts: fixed });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/accounts/:id/retry-draw", requireAuth, async (req, res) => {
+    const account = await storage.getAccount(req.params.id);
+    if (!account) return res.status(404).json({ error: "Account not found" });
+    if (req.session.role !== "superadmin" && account.ownerId !== req.session.userId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    if (account.platform !== "la28") {
+      return res.status(400).json({ error: "Retry draw is only available for LA28 accounts" });
+    }
+    if (!["verified", "profile_saving", "draw_registering"].includes(account.status || "")) {
+      return res.status(400).json({ error: `Account status '${account.status}' is not eligible for draw retry. Must be verified, profile_saving, or draw_registering.` });
+    }
+    if (!account.tempEmail || !account.la28Password) {
+      return res.status(400).json({ error: "Account is missing email or password credentials required for draw retry." });
+    }
+
+    const batchId = account.batchId || account.id;
+    const log = (msg: string) => {
+      broadcastLog(batchId, account.id, msg, account.ownerId || undefined);
+    };
+
+    res.json({ success: true, message: "Draw retry started", accountId: account.id });
+
+    try {
+      await storage.updateAccount(account.id, { status: "draw_registering" });
+      broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
+      log("Retrying draw registration...");
+
+      const drawResult = await retryDrawRegistration(
+        account.tempEmail,
+        account.la28Password,
+        DEFAULT_BROWSER_API_URL,
+        account.zipCode || undefined,
+        log
+      );
+
+      await storage.updateAccount(account.id, { status: "completed" });
+      broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+      log(drawResult.submitted
+        ? "Draw registration completed successfully!"
+        : "Draw registration attempted. Marked as completed.");
+    } catch (err: any) {
+      log("Draw retry error: " + err.message.substring(0, 200));
+      await storage.updateAccount(account.id, { status: "completed" });
+      broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+      log("Marked as completed despite error (profile was already saved).");
     }
   });
 
