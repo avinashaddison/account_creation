@@ -38,7 +38,7 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
 
 const FREE_ACCOUNT_LIMIT = 0;
 const TRC20_ADDRESS = "TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB";
-const WHATSAPP_NUMBER = "919142647797";
+const WHATSAPP_NUMBER = "420604332586";
 
 const FIRST_NAMES = [
   "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda",
