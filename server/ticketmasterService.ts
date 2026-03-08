@@ -168,7 +168,7 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
-    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers")) {
+    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Forbidden action")) {
       console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 80)}`);
       continue;
     }
@@ -267,6 +267,9 @@ async function doTMRegistration(
     try {
       await page.route('**/*contentsquare*', (route: any) => route.abort());
       await page.route('**/*cs-sdk*', (route: any) => route.abort());
+      await page.route('**/t.contentsquare.net/**', (route: any) => route.abort());
+      await page.route('**/*.contentsquare.net/**', (route: any) => route.abort());
+      await page.route('**/*uxa.js*', (route: any) => route.abort());
       console.log("[TM-Playwright] Blocked ContentSquare scripts");
     } catch (e: any) {
       console.log("[TM-Playwright] Could not block ContentSquare:", e.message);
@@ -550,38 +553,90 @@ async function doTMRegistration(
     console.log(`[TM-Playwright] LastName filled: ${lnFilled}`);
 
     let pwFilled = false;
-    const escapedPw = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`');
+    console.log("[TM-Playwright] Attempting password fill with keyboard method...");
+
     try {
-      pwFilled = await page.evaluate(`((pwd) => {
-        var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
-        if (!el) return false;
-        try {
-          var iframe = document.createElement('iframe');
-          iframe.style.display = 'none';
-          document.body.appendChild(iframe);
-          var cleanSetter = Object.getOwnPropertyDescriptor(iframe.contentWindow.HTMLInputElement.prototype, 'value').set;
-          document.body.removeChild(iframe);
-          cleanSetter.call(el, pwd);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          el.dispatchEvent(new Event('blur', { bubbles: true }));
-          return el.value.length > 0;
-        } catch (e1) {
-          try {
-            el.setAttribute('type', 'text');
-            el.value = pwd;
-            el.setAttribute('type', 'password');
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            return el.value.length > 0;
-          } catch (e2) {
-            return false;
+      const pwSelector = '#password-input, input[type="password"], input[name="password"]';
+      const pwEl = page.locator(pwSelector).first();
+      if (await pwEl.isVisible({ timeout: 5000 })) {
+        await pwEl.click({ timeout: 3000 });
+        await page.waitForTimeout(300);
+        await pwEl.pressSequentially(password, { delay: 25 + Math.floor(Math.random() * 40) });
+        await page.waitForTimeout(200);
+        const val = await pwEl.inputValue();
+        if (val && val.length > 0) {
+          pwFilled = true;
+          console.log("[TM-Playwright] Password filled via keyboard pressSequentially");
+        }
+      }
+    } catch (e: any) {
+      console.log(`[TM-Playwright] Keyboard password method failed: ${e.message.substring(0, 100)}`);
+    }
+
+    if (!pwFilled) {
+      console.log("[TM-Playwright] Trying keyboard dispatch method...");
+      try {
+        const focused = await page.evaluate(`(() => {
+          var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+          if (!el) return false;
+          el.focus();
+          el.click();
+          return true;
+        })()`);
+        if (focused) {
+          await page.waitForTimeout(200);
+          await page.keyboard.type(password, { delay: 30 + Math.floor(Math.random() * 40) });
+          await page.waitForTimeout(200);
+          const pwVal = await page.evaluate(`(() => {
+            var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+            return el ? el.value.length : 0;
+          })()`) as number;
+          if (pwVal > 0) {
+            pwFilled = true;
+            console.log("[TM-Playwright] Password filled via keyboard.type");
           }
         }
-      })("${escapedPw}")`) as boolean;
-    } catch (e: any) {
-      console.log(`[TM-Playwright] Password fill failed: ${e.message}`);
+      } catch (e: any) {
+        console.log(`[TM-Playwright] Keyboard dispatch failed: ${e.message.substring(0, 100)}`);
+      }
     }
+
+    if (!pwFilled) {
+      console.log("[TM-Playwright] Trying clean iframe setter method...");
+      const escapedPw = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`');
+      try {
+        pwFilled = await page.evaluate(`((pwd) => {
+          var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+          if (!el) return false;
+          try {
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+            var cleanSetter = Object.getOwnPropertyDescriptor(iframe.contentWindow.HTMLInputElement.prototype, 'value').set;
+            document.body.removeChild(iframe);
+            cleanSetter.call(el, pwd);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            return el.value.length > 0;
+          } catch (e1) {
+            try {
+              el.setAttribute('type', 'text');
+              el.value = pwd;
+              el.setAttribute('type', 'password');
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return el.value.length > 0;
+            } catch (e2) {
+              return false;
+            }
+          }
+        })("${escapedPw}")`) as boolean;
+      } catch (e: any) {
+        console.log(`[TM-Playwright] Iframe setter failed: ${e.message.substring(0, 100)}`);
+      }
+    }
+
     console.log(`[TM-Playwright] Password filled: ${pwFilled}`);
 
     if (!pwFilled) {

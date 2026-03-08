@@ -261,6 +261,38 @@ export async function registerRoutes(
   }
   await ensureDefaultSuperAdmin();
 
+  async function cleanupStaleAccounts() {
+    try {
+      const allAccounts = await storage.getAllAccounts();
+      const now = Date.now();
+      const staleTimeout = 30 * 60 * 1000;
+      let cleaned = 0;
+      for (const acc of allAccounts) {
+        if (
+          (acc.status === "registering" || acc.status === "waiting_code" || acc.status === "filling_form" || acc.status === "selecting_events" || acc.status === "submitting") &&
+          acc.createdAt
+        ) {
+          const age = now - new Date(acc.createdAt).getTime();
+          if (age > staleTimeout) {
+            await storage.updateAccount(acc.id, {
+              status: "failed",
+              errorMessage: acc.errorMessage || "Stale: browser session ended without completing",
+            });
+            cleaned++;
+          }
+        }
+      }
+      if (cleaned > 0) {
+        console.log(`[Cleanup] Marked ${cleaned} stale accounts as failed`);
+      }
+    } catch (err: any) {
+      console.log(`[Cleanup] Error: ${err.message}`);
+    }
+  }
+
+  await cleanupStaleAccounts();
+  setInterval(cleanupStaleAccounts, 10 * 60 * 1000);
+
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { email, password } = req.body;
