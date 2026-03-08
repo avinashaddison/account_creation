@@ -19,7 +19,7 @@ type BatchAccount = { id: string; firstName: string; lastName: string; status: s
 
 export default function TMCreate() {
   const [count, setCount] = useState(1);
-  const [proxyUrl, setProxyUrl] = useState("wss://brd-customer-hl_86b34e68-zone-proxy:tqjg1n8tzz1f@brd.superproxy.io:9222");
+  const [proxyUrl, setProxyUrl] = useState("wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<BatchAccount[]>([]);

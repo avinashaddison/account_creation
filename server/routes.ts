@@ -11,7 +11,7 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { randomUUID, createHash } from "crypto";
 
-const DEFAULT_BROWSER_API_URL = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-proxy:tqjg1n8tzz1f@brd.superproxy.io:9222";
+const DEFAULT_BROWSER_API_URL = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
 
 function getDefaultProxies(proxyList?: string[]): string[] {
   if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;

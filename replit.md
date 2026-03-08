@@ -99,6 +99,13 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - `payment_requests` - TRC20 payment requests with userId, amount, txHash, status (pending/approved/rejected), adminNote
 - `user_sessions` - PostgreSQL session store (auto-created by connect-pg-simple)
 
+## Ticketmaster Account Creation
+- **Flow**: Navigate to `https://www.ticketmaster.com/member/create_account` → redirects to `auth.ticketmaster.com` with `client_id=8bf7204a7e97.web.ticketmaster.us`
+- **Two-step form**: Step 1: email → Continue. Step 2: password, firstName, lastName, countryCode (US), postalCode, privacyPolicyCheckbox → Submit
+- **Password bypass**: ContentSquare analytics overrides `HTMLInputElement.prototype.value` setter and Bright Data blocks CDP `Input.dispatchKeyEvent` on password fields. Solution: create hidden iframe → get clean native setter from `iframe.contentWindow.HTMLInputElement.prototype.value.set` → use it to set password value
+- **Verification**: After registration, page shows "ALMOST THERE" → click "Verify My Email" → poll for email code → enter code → verify
+- **Key file**: `server/ticketmasterService.ts`
+
 ## Deployment
 - **Target**: VM (required for Playwright + persistent WebSocket connections)
 - **Build**: `npm run build` (Vite client + esbuild server)

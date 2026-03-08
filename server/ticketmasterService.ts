@@ -74,33 +74,34 @@ async function removeOverlays(page: Page): Promise<void> {
 }
 
 async function getPageText(page: Page): Promise<string> {
-  return page.evaluate(`document.body.innerText`) as Promise<string>;
+  try {
+    return await page.evaluate(`(document.body ? document.body.innerText : '')`) as string;
+  } catch {
+    return '';
+  }
 }
 
-async function fillInput(page: Page, selectors: string[], value: string): Promise<boolean> {
-  const selectorList = selectors.map(s => `'${s}'`).join(",");
-  return page.evaluate(`((selectorsArr, val) => {
-    var selectors = [${selectorList}];
-    for (var s = 0; s < selectors.length; s++) {
-      var inputs = document.querySelectorAll(selectors[s]);
-      for (var i = 0; i < inputs.length; i++) {
-        var el = inputs[i];
-        if (el.type === 'hidden') continue;
-        var rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-          if (setter && setter.set) setter.set.call(el, val);
-          else el.value = val;
-          el.dispatchEvent(new Event('focus', { bubbles: true }));
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          el.dispatchEvent(new Event('blur', { bubbles: true }));
-          return true;
+async function fillInput(page: Page, selectors: string[], value: string, useType = false): Promise<boolean> {
+  for (const selector of selectors) {
+    try {
+      const el = page.locator(selector).first();
+      if (await el.isVisible({ timeout: 500 })) {
+        await el.click({ timeout: 2000 });
+        await page.waitForTimeout(200);
+        if (useType) {
+          await el.pressSequentially(value, { delay: 30 + Math.random() * 50 });
+        } else {
+          try {
+            await el.fill(value, { timeout: 3000 });
+          } catch {
+            await el.pressSequentially(value, { delay: 30 + Math.random() * 50 });
+          }
         }
+        return true;
       }
-    }
-    return false;
-  })(null, "${value.replace(/"/g, '\\"')}")`) as Promise<boolean>;
+    } catch {}
+  }
+  return false;
 }
 
 async function clickButton(page: Page, textMatch?: string): Promise<boolean> {
@@ -261,10 +262,18 @@ async function doTMRegistration(
 
   try {
     onStatusUpdate("registering");
-    console.log("[TM-Playwright] Navigating to Ticketmaster sign-up...");
+    console.log("[TM-Playwright] Navigating to Ticketmaster...");
 
-    const signupUrl = "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf2fc29c040a10a21be&response_type=code&scope=openid+profile+phone+email&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placeholderType=tm&hideLeftPanel=false&integratorId=prd1741.iccp&intSiteToken=tm-us&TMUO=%23signupDesktop";
-    await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
+    try {
+      await page.route('**/*contentsquare*', (route: any) => route.abort());
+      await page.route('**/*cs-sdk*', (route: any) => route.abort());
+      console.log("[TM-Playwright] Blocked ContentSquare scripts");
+    } catch (e: any) {
+      console.log("[TM-Playwright] Could not block ContentSquare:", e.message);
+    }
+
+    console.log("[TM-Playwright] Navigating to TM create_account...");
+    await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 120000 });
 
     try {
       await page.waitForLoadState("networkidle", { timeout: 30000 });
@@ -273,6 +282,7 @@ async function doTMRegistration(
     }
 
     await page.waitForTimeout(5000);
+    console.log("[TM-Playwright] After navigation URL:", page.url().substring(0, 200));
 
     let pageText = await getPageText(page);
     let pageLower = pageText.toLowerCase();
@@ -309,6 +319,7 @@ async function doTMRegistration(
       }
     }
 
+    const signupUrl = "https://www.ticketmaster.com/member/create_account";
     if (isError(pageLower)) {
       console.log("[TM-Playwright] TM server error, reloading...");
       for (let reload = 0; reload < 3; reload++) {
@@ -426,7 +437,7 @@ async function doTMRegistration(
     })()`);
     console.log("[TM-Playwright] Visible form fields:", JSON.stringify(allFields));
 
-    console.log("[TM-Playwright] Filling form fields...");
+    console.log("[TM-Playwright] Step 1: Filling email...");
 
     const emailFilled = await fillInput(page, [
       'input[type="email"]', 'input[name="email"]', 'input[id*="email"]',
@@ -434,6 +445,92 @@ async function doTMRegistration(
       'input[autocomplete="email"]',
     ], email);
     console.log(`[TM-Playwright] Email filled: ${emailFilled}`);
+
+    if (!emailFilled) {
+      return { success: false, error: "Could not fill email field" };
+    }
+
+    await page.waitForTimeout(1000);
+
+    console.log("[TM-Playwright] Clicking Continue...");
+    let continueClicked = await clickButton(page, "continue");
+    if (!continueClicked) continueClicked = await clickButton(page, "next");
+    if (!continueClicked) continueClicked = await clickButton(page, "submit");
+    if (!continueClicked) {
+      continueClicked = await page.evaluate(`(() => {
+        var btns = document.querySelectorAll('button, input[type="submit"], a[role="button"]');
+        for (var i = 0; i < btns.length; i++) {
+          var el = btns[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      })()`) as boolean;
+    }
+    console.log(`[TM-Playwright] Continue clicked: ${continueClicked}`);
+
+    console.log("[TM-Playwright] Step 2: Waiting for registration form...");
+    await page.waitForTimeout(5000);
+
+    let step2Text = await getPageText(page);
+    console.log("[TM-Playwright] After Continue (first 500):", step2Text.substring(0, 500));
+    console.log("[TM-Playwright] URL after Continue:", page.url().substring(0, 200));
+
+    const step2Fields = await page.evaluate(`(() => {
+      var inputs = document.querySelectorAll('input, select');
+      var result = [];
+      for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          result.push({
+            tag: el.tagName,
+            type: el.type || '',
+            name: el.name || '',
+            id: el.id || '',
+            placeholder: el.placeholder || '',
+            ariaLabel: el.getAttribute('aria-label') || '',
+          });
+        }
+      }
+      return result;
+    })()`);
+    console.log("[TM-Playwright] Step 2 fields:", JSON.stringify(step2Fields));
+
+    let pwVisible = false;
+    for (let wait = 0; wait < 20; wait++) {
+      pwVisible = await page.evaluate(`(() => {
+        var pw = document.querySelector('input[type="password"]');
+        if (pw) { var r = pw.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
+        return false;
+      })()`) as boolean;
+      if (pwVisible) break;
+
+      const hasChallenge = isChallenge((await getPageText(page)).toLowerCase());
+      if (hasChallenge) {
+        if (wait % 5 === 0) console.log(`[TM-Playwright] Challenge during step 2 [${wait * 3}s]...`);
+      }
+      await page.waitForTimeout(3000);
+      if (wait % 5 === 0 && wait > 0) {
+        const curText = await getPageText(page);
+        console.log(`[TM-Playwright] Step 2 wait [${wait * 3}s]:`, curText.substring(0, 200).replace(/\n/g, ' '));
+      }
+    }
+
+    if (!pwVisible) {
+      step2Text = await getPageText(page);
+      console.log("[TM-Playwright] No password field found. Page:", step2Text.substring(0, 500));
+      const step2Lower = step2Text.toLowerCase();
+      if (step2Lower.includes("already") || step2Lower.includes("sign in")) {
+        return { success: false, error: "Email may already have an account (TM shows sign-in instead of sign-up)" };
+      }
+      return { success: false, error: "Registration form did not load after email step", pageContent: step2Text.substring(0, 500) };
+    }
+
+    console.log("[TM-Playwright] Password field visible, filling registration form...");
 
     const fnFilled = await fillInput(page, [
       'input[name="firstName"]', 'input[name="first_name"]', 'input[id*="first"]',
@@ -449,15 +546,53 @@ async function doTMRegistration(
     ], lastName);
     console.log(`[TM-Playwright] LastName filled: ${lnFilled}`);
 
-    const pwFilled = await fillInput(page, [
-      'input[type="password"]', 'input[name="password"]', 'input[id*="password"]',
-      'input[data-testid*="password"]', 'input[autocomplete="new-password"]',
-    ], password);
+    let pwFilled = false;
+    const escapedPw = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`');
+    try {
+      pwFilled = await page.evaluate(`((pwd) => {
+        var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+        if (!el) return false;
+        try {
+          var iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          document.body.appendChild(iframe);
+          var cleanSetter = Object.getOwnPropertyDescriptor(iframe.contentWindow.HTMLInputElement.prototype, 'value').set;
+          document.body.removeChild(iframe);
+          cleanSetter.call(el, pwd);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+          return el.value.length > 0;
+        } catch (e1) {
+          try {
+            el.setAttribute('type', 'text');
+            el.value = pwd;
+            el.setAttribute('type', 'password');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return el.value.length > 0;
+          } catch (e2) {
+            return false;
+          }
+        }
+      })("${escapedPw}")`) as boolean;
+    } catch (e: any) {
+      console.log(`[TM-Playwright] Password fill failed: ${e.message}`);
+    }
     console.log(`[TM-Playwright] Password filled: ${pwFilled}`);
 
-    if (!emailFilled || !pwFilled) {
-      return { success: false, error: `Critical fields not found - email:${emailFilled} pw:${pwFilled}` };
+    if (!pwFilled) {
+      return { success: false, error: "Could not fill password field" };
     }
+
+    const usZips = ["90001","90012","90024","90034","90045","90056","90067","90210","90291","90301","90401","91001","91101","91201","91301","91401","91501","91601","91701","91801","92101","92201"];
+    const randomZip = usZips[Math.floor(Math.random() * usZips.length)];
+    const zipFilled = await fillInput(page, [
+      'input[name="postalCode"]', 'input[id*="postalCode"]', 'input[id*="postal"]',
+      'input[id*="zip"]', 'input[name="zipCode"]', 'input[placeholder*="zip" i]',
+      'input[placeholder*="postal" i]',
+    ], randomZip);
+    console.log(`[TM-Playwright] PostalCode filled: ${zipFilled} (${randomZip})`);
 
     const cbChecked = await page.evaluate(`(() => {
       var checked = 0;
@@ -466,9 +601,7 @@ async function doTMRegistration(
         var el = checkboxes[i];
         var rect = el.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0 && !el.checked) {
-          el.checked = true;
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          el.dispatchEvent(new Event('click', { bubbles: true }));
+          el.click();
           checked++;
         }
       }
@@ -476,12 +609,13 @@ async function doTMRegistration(
     })()`);
     console.log(`[TM-Playwright] Checked ${cbChecked} checkboxes`);
 
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
-    console.log("[TM-Playwright] Submitting form...");
-    let submitted = await clickButton(page, "sign up");
-    if (!submitted) submitted = await clickButton(page, "create account");
+    console.log("[TM-Playwright] Submitting registration...");
+    let submitted = await clickButton(page, "create account");
+    if (!submitted) submitted = await clickButton(page, "sign up");
     if (!submitted) submitted = await clickButton(page, "register");
+    if (!submitted) submitted = await clickButton(page, "continue");
     if (!submitted) submitted = await clickButton(page);
     console.log(`[TM-Playwright] Submit clicked: ${submitted}`);
 
@@ -490,10 +624,11 @@ async function doTMRegistration(
     }
 
     console.log("[TM-Playwright] Waiting for response...");
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(10000);
 
     pageText = await getPageText(page);
     console.log("[TM-Playwright] After submit (first 500):", pageText.substring(0, 500));
+    console.log("[TM-Playwright] URL after submit:", page.url().substring(0, 200));
 
     if (pageText.toLowerCase().includes("already") && pageText.toLowerCase().includes("exist")) {
       return { success: false, error: "Account already exists for this email" };
@@ -505,7 +640,18 @@ async function doTMRegistration(
                       pageText.toLowerCase().includes("check your email");
 
     if (needsCode) {
-      console.log("[TM-Playwright] Verification code needed...");
+      console.log("[TM-Playwright] Verification page detected, clicking 'Verify My Email'...");
+
+      let verifyEmailClicked = await clickButton(page, "verify my email");
+      if (!verifyEmailClicked) verifyEmailClicked = await clickButton(page, "verify email");
+      if (!verifyEmailClicked) verifyEmailClicked = await clickButton(page, "send code");
+      if (!verifyEmailClicked) verifyEmailClicked = await clickButton(page, "verify");
+      console.log(`[TM-Playwright] Verify My Email clicked: ${verifyEmailClicked}`);
+
+      await page.waitForTimeout(5000);
+      pageText = await getPageText(page);
+      console.log("[TM-Playwright] After verify email click (first 300):", pageText.substring(0, 300));
+
       onStatusUpdate("waiting_code");
 
       let code: string | null = null;
@@ -535,9 +681,10 @@ async function doTMRegistration(
 
       let verifyClicked = await clickButton(page, "verify");
       if (!verifyClicked) verifyClicked = await clickButton(page, "confirm");
+      if (!verifyClicked) verifyClicked = await clickButton(page, "submit");
       if (!verifyClicked) verifyClicked = await clickButton(page, "continue");
       if (!verifyClicked) verifyClicked = await clickButton(page);
-      console.log(`[TM-Playwright] Verify clicked: ${verifyClicked}`);
+      console.log(`[TM-Playwright] Verify code clicked: ${verifyClicked}`);
 
       await page.waitForTimeout(8000);
 
@@ -552,13 +699,16 @@ async function doTMRegistration(
     console.log("[TM-Playwright] Final URL:", currentUrl);
     console.log("[TM-Playwright] Final text (first 300):", finalText.substring(0, 300));
 
-    const isSuccess = currentUrl.includes("ticketmaster.com") ||
-                      finalLower.includes("welcome") ||
+    const isSuccess = currentUrl.includes("ticketmaster.com") &&
+                      !currentUrl.includes("authorization.oauth2") ||
                       finalLower.includes("account created") ||
                       finalLower.includes("success") ||
                       finalLower.includes("my account") ||
                       finalLower.includes("you're in") ||
-                      finalLower.includes("profile");
+                      finalLower.includes("profile") ||
+                      finalLower.includes("almost there") ||
+                      finalLower.includes("verify your account") ||
+                      finalLower.includes("verified");
 
     if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500) };
