@@ -1,156 +1,14 @@
 import { chromium, type Browser, type Page } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import * as net from "net";
-import * as dns from "dns";
-import { SocksClient } from "socks";
 
 chromium.use(StealthPlugin());
 
 let browserInstance: Browser | null = null;
 let launching = false;
-let currentProxyUrl: string | undefined = undefined;
-let localProxyServer: net.Server | null = null;
-let localProxyPort: number = 0;
 
-function parseWebshareProxy(proxyUrl: string): { host: string; port: number; username: string; password: string } | null {
-  try {
-    const url = new URL(proxyUrl);
-    return {
-      host: url.hostname,
-      port: 1080,
-      username: decodeURIComponent(url.username),
-      password: decodeURIComponent(url.password),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parseProxyUrl(proxyUrl: string): { server: string; username?: string; password?: string } {
-  try {
-    const url = new URL(proxyUrl);
-    const server = `${url.protocol}//${url.hostname}:${url.port}`;
-    const result: any = { server };
-    if (url.username) result.username = decodeURIComponent(url.username);
-    if (url.password) result.password = decodeURIComponent(url.password);
-    return result;
-  } catch {
-    return { server: proxyUrl };
-  }
-}
-
-function resolveDns(hostname: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    dns.resolve4(hostname, (err, addresses) => {
-      if (err) reject(err);
-      else resolve(addresses[0]);
-    });
-  });
-}
-
-async function startLocalSocksRelay(upstream: { host: string; port: number; username: string; password: string }): Promise<number> {
-  return new Promise((resolve, reject) => {
-    if (localProxyServer) {
-      localProxyServer.close();
-      localProxyServer = null;
-    }
-
-    async function socksConnectWithRetry(destHost: string, destPort: number, maxRetries: number = 5): Promise<net.Socket> {
-      const destIp = await resolveDns(destHost);
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          const { socket } = await SocksClient.createConnection({
-            proxy: {
-              host: upstream.host,
-              port: upstream.port,
-              type: 5,
-              userId: upstream.username,
-              password: upstream.password,
-            },
-            command: "connect",
-            destination: { host: destIp, port: destPort },
-            timeout: 30000,
-          });
-          return socket;
-        } catch (err: any) {
-          const isRetryable = err.message.includes("HostUnreachable") || err.message.includes("ConnectionRefused") || err.message.includes("NetworkUnreachable") || err.message.includes("TTLExpired");
-          if (isRetryable && attempt < maxRetries) {
-            console.log(`[LocalProxy] Retry ${attempt}/${maxRetries} for ${destHost}:${destPort} (${err.message})`);
-            await new Promise(r => setTimeout(r, 1000 * attempt));
-            continue;
-          }
-          throw err;
-        }
-      }
-      throw new Error("Max retries exceeded");
-    }
-
-    const server = net.createServer((clientSocket) => {
-      clientSocket.once("data", async (data) => {
-        const str = data.toString();
-        const connectMatch = str.match(/^CONNECT\s+([^:\s]+):(\d+)/i);
-        if (connectMatch) {
-          const destHost = connectMatch[1];
-          const destPort = parseInt(connectMatch[2]);
-
-          try {
-            const proxySocket = await socksConnectWithRetry(destHost, destPort);
-            clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-            clientSocket.pipe(proxySocket);
-            proxySocket.pipe(clientSocket);
-            proxySocket.on("error", () => clientSocket.destroy());
-            clientSocket.on("error", () => proxySocket.destroy());
-          } catch (err: any) {
-            console.error("[LocalProxy] SOCKS5 connect failed after retries:", err.message);
-            clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
-            clientSocket.destroy();
-          }
-        } else {
-          const hostMatch = str.match(/Host:\s*([^\r\n:]+)(?::(\d+))?/i);
-          if (hostMatch) {
-            const destHost = hostMatch[1];
-            const destPort = parseInt(hostMatch[2] || "80");
-
-            try {
-              const proxySocket = await socksConnectWithRetry(destHost, destPort);
-              proxySocket.write(data);
-              clientSocket.pipe(proxySocket);
-              proxySocket.pipe(clientSocket);
-              proxySocket.on("error", () => clientSocket.destroy());
-              clientSocket.on("error", () => proxySocket.destroy());
-            } catch (err: any) {
-              console.error("[LocalProxy] SOCKS5 connect failed after retries:", err.message);
-              clientSocket.destroy();
-            }
-          } else {
-            clientSocket.destroy();
-          }
-        }
-      });
-
-      clientSocket.on("error", () => {});
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address() as net.AddressInfo;
-      localProxyServer = server;
-      localProxyPort = addr.port;
-      console.log(`[LocalProxy] SOCKS5 relay listening on 127.0.0.1:${addr.port}`);
-      resolve(addr.port);
-    });
-
-    server.on("error", reject);
-  });
-}
-
-async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
-  if (browserInstance && browserInstance.isConnected() && currentProxyUrl === proxyUrl) {
+async function getTMBrowser(): Promise<Browser> {
+  if (browserInstance && browserInstance.isConnected()) {
     return browserInstance;
-  }
-
-  if (browserInstance && browserInstance.isConnected() && currentProxyUrl !== proxyUrl) {
-    await browserInstance.close().catch(() => {});
-    browserInstance = null;
   }
 
   if (launching) {
@@ -162,7 +20,7 @@ async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
 
   launching = true;
   try {
-    const launchOptions: any = {
+    browserInstance = await chromium.launch({
       headless: true,
       args: [
         "--no-sandbox",
@@ -179,30 +37,9 @@ async function getTMBrowser(proxyUrl?: string): Promise<Browser> {
         "--disable-blink-features=AutomationControlled",
         "--js-flags=--max-old-space-size=256",
       ],
-    };
-
-    if (proxyUrl) {
-      const isWebshare = proxyUrl.includes("webshare.io") || proxyUrl.includes("p.webshare");
-      if (isWebshare) {
-        const wsProxy = parseWebshareProxy(proxyUrl);
-        if (wsProxy) {
-          console.log("[TM-Playwright] Webshare detected, starting local SOCKS5 relay...");
-          const port = await startLocalSocksRelay(wsProxy);
-          launchOptions.proxy = { server: `http://127.0.0.1:${port}` };
-          console.log(`[TM-Playwright] Local proxy relay ready at http://127.0.0.1:${port}`);
-        }
-      } else {
-        const proxyConfig = parseProxyUrl(proxyUrl);
-        launchOptions.proxy = proxyConfig;
-        console.log("[TM-Playwright] Using proxy:", proxyConfig.server, proxyConfig.username ? `(auth: ${proxyConfig.username})` : "(no auth)");
-      }
-    }
-
-    browserInstance = await chromium.launch(launchOptions);
-    currentProxyUrl = proxyUrl;
+    });
     browserInstance.on("disconnected", () => {
       browserInstance = null;
-      currentProxyUrl = undefined;
     });
     return browserInstance;
   } finally {
@@ -345,52 +182,69 @@ async function doTMRegistration(
   getVerificationCode: () => Promise<string | null>,
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string }> {
-  let browser: Browser;
+  const isBrowserAPI = proxyUrl && proxyUrl.startsWith('wss://');
+  let remoteBrowser: Browser | null = null;
+  let page: Page;
+  let context: any;
+
   try {
-    browser = await getTMBrowser(proxyUrl);
-  } catch (err: any) {
-    return { success: false, error: `Failed to launch browser: ${err.message}` };
-  }
-
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    viewport: { width: 1280, height: 720 },
-    locale: "en-US",
-    timezoneId: "America/New_York",
-  });
-
-  const page = await context.newPage();
-  page.setDefaultTimeout(30000);
-
-  await page.addInitScript(`
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
-    delete navigator.__proto__.webdriver;
-    var origQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = function(parameters) {
-      if (parameters.name === 'notifications') {
-        return Promise.resolve({ state: Notification.permission });
+    if (isBrowserAPI) {
+      console.log("[TM-Playwright] Connecting via Bright Data Browser API...");
+      remoteBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
+      page = await remoteBrowser.newPage();
+      page.setDefaultTimeout(60000);
+      console.log("[TM-Playwright] Connected to remote browser.");
+    } else {
+      let browser: Browser;
+      try {
+        browser = await getTMBrowser();
+      } catch (err: any) {
+        return { success: false, error: `Failed to launch browser: ${err.message}` };
       }
-      return origQuery.call(this, parameters);
-    };
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [
-        { name: 'Chrome PDF Plugin', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
-        { name: 'Chrome PDF Viewer', description: '', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-        { name: 'Native Client', description: '', filename: 'internal-nacl-plugin' }
-      ]
-    });
-    var getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-      if (parameter === 37445) return 'Intel Inc.';
-      if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-      return getParameter.call(this, parameter);
-    };
-  `);
+
+      context = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1280, height: 720 },
+        locale: "en-US",
+        timezoneId: "America/New_York",
+      });
+
+      page = await context.newPage();
+      page.setDefaultTimeout(30000);
+
+      await page.addInitScript(`
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+        delete navigator.__proto__.webdriver;
+        var origQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = function(parameters) {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: Notification.permission });
+          }
+          return origQuery.call(this, parameters);
+        };
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [
+            { name: 'Chrome PDF Plugin', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', description: '', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', description: '', filename: 'internal-nacl-plugin' }
+          ]
+        });
+        var getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) return 'Intel Inc.';
+          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+          return getParameter.call(this, parameter);
+        };
+      `);
+    }
+  } catch (err: any) {
+    return { success: false, error: `Failed to connect browser: ${err.message}` };
+  }
 
   try {
     onStatusUpdate("registering");
@@ -422,19 +276,17 @@ async function doTMRegistration(
     }
 
     if (pageLower.includes("browsing activity") || pageLower.includes("has been paused") || pageLower.includes("unusual behavior")) {
-      await context.close();
       return {
         success: false,
-        error: "Ticketmaster bot detection triggered. A residential proxy is required. Set the TM_PROXY_URL environment variable (e.g. http://user:pass@proxy:port).",
+        error: "Ticketmaster bot detection triggered. The Browser API proxy may need a different zone or retry.",
         pageContent: pageText.substring(0, 500),
       };
     }
 
     if (pageLower.includes("access denied") || (pageLower.includes("blocked") && !pageLower.includes("sign"))) {
-      await context.close();
       return {
         success: false,
-        error: "Access blocked by Ticketmaster. Use a residential proxy.",
+        error: "Access blocked by Ticketmaster. Try again or use a different proxy zone.",
         pageContent: pageText.substring(0, 500),
       };
     }
@@ -457,7 +309,6 @@ async function doTMRegistration(
 
     if (!formFound) {
       const snapshot = (await getPageText(page)).substring(0, 500);
-      await context.close();
       return { success: false, error: "Sign-up form did not load", pageContent: snapshot };
     }
 
@@ -516,7 +367,6 @@ async function doTMRegistration(
     console.log(`[TM-Playwright] Password filled: ${pwFilled}`);
 
     if (!emailFilled || !pwFilled) {
-      await context.close();
       return { success: false, error: `Critical fields not found - email:${emailFilled} pw:${pwFilled}` };
     }
 
@@ -547,7 +397,6 @@ async function doTMRegistration(
     console.log(`[TM-Playwright] Submit clicked: ${submitted}`);
 
     if (!submitted) {
-      await context.close();
       return { success: false, error: "Could not find submit button" };
     }
 
@@ -558,7 +407,6 @@ async function doTMRegistration(
     console.log("[TM-Playwright] After submit (first 500):", pageText.substring(0, 500));
 
     if (pageText.toLowerCase().includes("already") && pageText.toLowerCase().includes("exist")) {
-      await context.close();
       return { success: false, error: "Account already exists for this email" };
     }
 
@@ -582,7 +430,6 @@ async function doTMRegistration(
       }
 
       if (!code) {
-        await context.close();
         return { success: false, error: "Timed out waiting for verification email" };
       }
 
@@ -599,48 +446,49 @@ async function doTMRegistration(
 
       let verifyClicked = await clickButton(page, "verify");
       if (!verifyClicked) verifyClicked = await clickButton(page, "confirm");
-      if (!verifyClicked) verifyClicked = await clickButton(page, "submit");
+      if (!verifyClicked) verifyClicked = await clickButton(page, "continue");
       if (!verifyClicked) verifyClicked = await clickButton(page);
+      console.log(`[TM-Playwright] Verify clicked: ${verifyClicked}`);
 
       await page.waitForTimeout(8000);
+
+      pageText = await getPageText(page);
+      console.log("[TM-Playwright] After verification (first 500):", pageText.substring(0, 500));
     }
 
+    const currentUrl = page.url();
     const finalText = await getPageText(page);
-    const finalUrl = page.url();
-    console.log("[TM-Playwright] Final URL:", finalUrl);
+    const finalLower = finalText.toLowerCase();
+
+    console.log("[TM-Playwright] Final URL:", currentUrl);
     console.log("[TM-Playwright] Final text (first 300):", finalText.substring(0, 300));
 
-    const hasError = finalText.toLowerCase().includes("invalid code") ||
-                     finalText.toLowerCase().includes("expired") ||
-                     finalText.toLowerCase().includes("try again");
+    const isSuccess = currentUrl.includes("ticketmaster.com") ||
+                      finalLower.includes("welcome") ||
+                      finalLower.includes("account created") ||
+                      finalLower.includes("success") ||
+                      finalLower.includes("my account") ||
+                      finalLower.includes("you're in") ||
+                      finalLower.includes("profile");
 
-    await context.close();
-
-    if (hasError) {
-      return { success: false, error: "Verification failed", pageContent: finalText.substring(0, 500) };
-    }
-
-    const successIndicators = finalUrl.includes("account") || finalUrl.includes("profile") ||
-                               finalText.toLowerCase().includes("welcome") ||
-                               finalText.toLowerCase().includes("success") ||
-                               finalText.toLowerCase().includes("account created") ||
-                               !needsCode;
-
-    if (successIndicators || !hasError) {
+    if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500) };
     }
 
-    return { success: false, error: "Unexpected page state after registration", pageContent: finalText.substring(0, 500) };
-  } catch (err: any) {
-    console.error("[TM-Playwright] Error:", err.message);
-    try { await context.close(); } catch {}
-    return { success: false, error: err.message };
-  }
-}
+    if (finalLower.includes("error") || finalLower.includes("failed") || finalLower.includes("invalid")) {
+      return { success: false, error: "Registration failed: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500) };
+    }
 
-export async function closeTMBrowser(): Promise<void> {
-  if (browserInstance) {
-    await browserInstance.close();
-    browserInstance = null;
+    return { success: true, pageContent: finalText.substring(0, 500) };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  } finally {
+    try {
+      if (remoteBrowser) {
+        await remoteBrowser.close();
+      } else if (context) {
+        await context.close();
+      }
+    } catch {}
   }
 }

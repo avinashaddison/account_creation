@@ -972,7 +972,7 @@ export async function registerRoutes(
 
       const { count = 1 } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
-      const proxyUrl = process.env.TM_PROXY_URL || req.body.proxyUrl || "";
+      const proxyUrl = req.body.proxyUrl || process.env.TM_PROXY_URL || DEFAULT_BROWSER_API_URL;
 
       const walletBalance = parseFloat(user.walletBalance || "0");
       const requiredBalance = numAccounts * COST_PER_ACCOUNT;

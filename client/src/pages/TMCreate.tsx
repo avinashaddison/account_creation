@@ -19,7 +19,7 @@ type BatchAccount = { id: string; firstName: string; lastName: string; status: s
 
 export default function TMCreate() {
   const [count, setCount] = useState(1);
-  const [proxyUrl, setProxyUrl] = useState("");
+  const [proxyUrl, setProxyUrl] = useState("wss://brd-customer-hl_f64e1a6d-zone-residential_proxy1:nih0rhblz1f8@brd.superproxy.io:9222");
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<BatchAccount[]>([]);
@@ -109,11 +109,10 @@ export default function TMCreate() {
       <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 flex items-start gap-3">
         <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-amber-300">Residential Proxy Required</p>
+          <p className="text-sm font-medium text-amber-300">Browser API Proxy Active</p>
           <p className="text-xs text-amber-400/70 mt-1">
-            Ticketmaster has aggressive bot detection. You must provide a residential proxy URL below,
-            or set the <code className="bg-white/5 px-1 rounded">TM_PROXY_URL</code> environment variable.
-            Format: <code className="bg-white/5 px-1 rounded">http://user:pass@host:port</code>
+            Uses Bright Data Browser API to bypass Ticketmaster bot detection.
+            The proxy URL is pre-configured below. You can change it if needed.
           </p>
         </div>
       </div>
@@ -137,7 +136,7 @@ export default function TMCreate() {
                   value={proxyUrl}
                   onChange={(e) => setProxyUrl(e.target.value)}
                   disabled={isRunning}
-                  placeholder="http://user:pass@host:port"
+                  placeholder="wss://... Browser API URL"
                   className="h-9 text-sm bg-white/[0.02] border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono"
                   data-testid="input-tm-proxy"
                 />
