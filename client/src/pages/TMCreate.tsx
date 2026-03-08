@@ -26,8 +26,13 @@ export default function TMCreate() {
   const [accounts, setAccounts] = useState<BatchAccount[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState("");
+  const [userRole, setUserRole] = useState<string>("");
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.role) setUserRole(d.role); }).catch(() => {});
+  }, []);
   const { toast } = useToast();
 
   const accountPrice = useAccountPrice();
@@ -130,6 +135,7 @@ export default function TMCreate() {
             </div>
 
             <div className="space-y-5">
+              {userRole === "superadmin" && (
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Globe className="w-3 h-3" /> Proxy URL
@@ -143,6 +149,7 @@ export default function TMCreate() {
                   data-testid="input-tm-proxy"
                 />
               </div>
+              )}
 
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">

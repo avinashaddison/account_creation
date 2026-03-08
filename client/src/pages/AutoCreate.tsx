@@ -39,10 +39,15 @@ export default function AutoCreate() {
   const [batchAccounts, setBatchAccounts] = useState<BatchAccount[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>("");
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollSinceRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsReceivedRef = useRef(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.role) setUserRole(d.role); }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -211,6 +216,7 @@ export default function AutoCreate() {
             </div>
 
             <div className="space-y-5">
+              {userRole === "superadmin" && (
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Globe className="w-3 h-3" /> Residential Proxy List
@@ -229,6 +235,7 @@ export default function AutoCreate() {
                   {proxyList.trim() ? ` (${proxyList.trim().split('\n').filter(l => l.trim()).length} proxies loaded)` : ''}
                 </p>
               </div>
+              )}
 
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
