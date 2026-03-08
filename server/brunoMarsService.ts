@@ -60,6 +60,101 @@ async function fillInput(page: Page, selector: string, value: string): Promise<b
   }
 }
 
+async function fillFieldByLabel(page: Page, labelTexts: string[], value: string, log: (msg: string) => void): Promise<boolean> {
+  try {
+    const filled = await page.evaluate(`((labelTexts, value) => {
+      function findInput(root) {
+        var inputs = root.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"])');
+        if (inputs.length > 0) return inputs[0];
+        return null;
+      }
+      var allLabels = document.querySelectorAll('label');
+      for (var i = 0; i < allLabels.length; i++) {
+        var labelText = (allLabels[i].textContent || '').toLowerCase().trim();
+        for (var j = 0; j < labelTexts.length; j++) {
+          if (labelText.includes(labelTexts[j])) {
+            var forAttr = allLabels[i].getAttribute('for');
+            var input = null;
+            if (forAttr) {
+              input = document.getElementById(forAttr);
+            }
+            if (!input) {
+              input = findInput(allLabels[i]);
+            }
+            if (!input) {
+              var parent = allLabels[i].parentElement;
+              if (parent) input = findInput(parent);
+            }
+            if (!input) {
+              var next = allLabels[i].nextElementSibling;
+              if (next && next.tagName === 'INPUT') input = next;
+              else if (next) input = findInput(next);
+            }
+            if (input) {
+              input.focus();
+              input.value = '';
+              var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeInputValueSetter.call(input, value);
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              return { found: true, label: labelText.substring(0, 40) };
+            }
+          }
+        }
+      }
+      var allInputs = document.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"])');
+      for (var k = 0; k < allInputs.length; k++) {
+        var ph = (allInputs[k].placeholder || '').toLowerCase();
+        var nm = (allInputs[k].name || '').toLowerCase();
+        var ar = (allInputs[k].getAttribute('aria-label') || '').toLowerCase();
+        for (var m = 0; m < labelTexts.length; m++) {
+          if (ph.includes(labelTexts[m]) || nm.includes(labelTexts[m]) || ar.includes(labelTexts[m])) {
+            allInputs[k].focus();
+            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(allInputs[k], value);
+            allInputs[k].dispatchEvent(new Event('input', { bubbles: true }));
+            allInputs[k].dispatchEvent(new Event('change', { bubbles: true }));
+            return { found: true, label: ph || nm || ar };
+          }
+        }
+      }
+      return { found: false, inputCount: allInputs.length, labelCount: allLabels.length };
+    })(${JSON.stringify(labelTexts)}, ${JSON.stringify(value)})`) as any;
+    return filled?.found === true;
+  } catch {
+    return false;
+  }
+}
+
+async function debugFormStructure(page: Page, log: (msg: string) => void): Promise<void> {
+  try {
+    const structure = await page.evaluate(`(() => {
+      var inputs = document.querySelectorAll('input, select, textarea');
+      var result = [];
+      for (var i = 0; i < inputs.length && i < 20; i++) {
+        var el = inputs[i];
+        var label = el.closest('label');
+        var parentLabel = el.parentElement ? el.parentElement.closest('label') : null;
+        var forLabel = el.id ? document.querySelector('label[for="' + el.id + '"]') : null;
+        var labelText = (label || parentLabel || forLabel || {}).textContent || '';
+        result.push({
+          tag: el.tagName,
+          type: el.type || '',
+          name: el.name || '',
+          id: el.id || '',
+          placeholder: el.placeholder || '',
+          ariaLabel: el.getAttribute('aria-label') || '',
+          labelText: labelText.trim().substring(0, 50)
+        });
+      }
+      return result;
+    })()`) as any[];
+    log("Form structure: " + JSON.stringify(structure, null, 0).substring(0, 800));
+  } catch (e: any) {
+    log("Could not read form structure: " + e.message.substring(0, 100));
+  }
+}
+
 export async function brunoMarsSignupFlow(
   firstName: string,
   lastName: string,
@@ -107,21 +202,72 @@ export async function brunoMarsSignupFlow(
     onStatusUpdate("filling_form");
     log("Filling in registration details...");
 
-    const firstNameFilled = await fillInput(page, 'input[name="firstName"], input[id*="firstName"], input[placeholder*="First"]', firstName);
+    await debugFormStructure(page, log);
+
+    let firstNameFilled = await fillInput(page, 'input[name="firstName"], input[id*="firstName"], input[id*="first-name"], input[id*="first_name"], input[placeholder*="First"], input[aria-label*="First"]', firstName);
+    if (!firstNameFilled) firstNameFilled = await fillFieldByLabel(page, ["first name", "first", "prénom", "nombre"], firstName, log);
     log(firstNameFilled ? `First name: ${firstName}` : "Could not fill first name");
 
-    const lastNameFilled = await fillInput(page, 'input[name="lastName"], input[id*="lastName"], input[placeholder*="Last"]', lastName);
+    let lastNameFilled = await fillInput(page, 'input[name="lastName"], input[id*="lastName"], input[id*="last-name"], input[id*="last_name"], input[placeholder*="Last"], input[aria-label*="Last"]', lastName);
+    if (!lastNameFilled) lastNameFilled = await fillFieldByLabel(page, ["last name", "last", "nom", "apellido", "surname"], lastName, log);
     log(lastNameFilled ? `Last name: ${lastName}` : "Could not fill last name");
 
-    const emailFilled = await fillInput(page, 'input[name="email"], input[type="email"], input[id*="email"], input[placeholder*="Email"]', email);
+    let emailFilled = await fillInput(page, 'input[name="email"], input[type="email"], input[id*="email"], input[placeholder*="Email"], input[placeholder*="email"], input[aria-label*="Email"]', email);
+    if (!emailFilled) emailFilled = await fillFieldByLabel(page, ["email", "e-mail", "correo"], email, log);
     log(emailFilled ? `Email: ${email}` : "Could not fill email");
 
     const phone = generateUSPhone();
-    const phoneFilled = await fillInput(page, 'input[name="phone"], input[type="tel"], input[id*="phone"], input[placeholder*="Phone"]', phone);
+    let phoneFilled = await fillInput(page, 'input[name="phone"], input[type="tel"], input[id*="phone"], input[placeholder*="Phone"], input[placeholder*="phone"], input[aria-label*="Phone"]', phone);
+    if (!phoneFilled) phoneFilled = await fillFieldByLabel(page, ["phone", "mobile", "cell", "teléfono", "tel"], phone, log);
     log(phoneFilled ? `Phone: ${phone}` : "Phone field not found or not filled");
 
-    const zipFilled = await fillInput(page, 'input[name="zipCode"], input[name="postalCode"], input[id*="zip"], input[placeholder*="Zip"], input[placeholder*="Postal"]', "90210");
+    let zipFilled = await fillInput(page, 'input[name="zipCode"], input[name="postalCode"], input[id*="zip"], input[id*="postal"], input[placeholder*="Zip"], input[placeholder*="Postal"], input[aria-label*="Zip"], input[aria-label*="Postal"]', "90210");
+    if (!zipFilled) zipFilled = await fillFieldByLabel(page, ["zip", "postal", "code postal"], "90210", log);
     if (zipFilled) log("Zip: 90210");
+
+    const filledCount = [firstNameFilled, lastNameFilled, emailFilled].filter(Boolean).length;
+    if (filledCount === 0) {
+      log("WARNING: No required fields could be filled. Attempting positional fill...");
+      const positionalResult = await page.evaluate(`((fn, ln, em, ph) => {
+        var inputs = document.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"])');
+        var visible = [];
+        for (var i = 0; i < inputs.length; i++) {
+          var rect = inputs[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) visible.push(inputs[i]);
+        }
+        var filled = [];
+        if (visible.length >= 1) { 
+          var nSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nSet.call(visible[0], fn);
+          visible[0].dispatchEvent(new Event('input', { bubbles: true }));
+          visible[0].dispatchEvent(new Event('change', { bubbles: true }));
+          filled.push('field0=' + fn);
+        }
+        if (visible.length >= 2) {
+          var nSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nSet.call(visible[1], ln);
+          visible[1].dispatchEvent(new Event('input', { bubbles: true }));
+          visible[1].dispatchEvent(new Event('change', { bubbles: true }));
+          filled.push('field1=' + ln);
+        }
+        if (visible.length >= 3) {
+          var nSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nSet.call(visible[2], em);
+          visible[2].dispatchEvent(new Event('input', { bubbles: true }));
+          visible[2].dispatchEvent(new Event('change', { bubbles: true }));
+          filled.push('field2=' + em);
+        }
+        if (visible.length >= 4) {
+          var nSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nSet.call(visible[3], ph);
+          visible[3].dispatchEvent(new Event('input', { bubbles: true }));
+          visible[3].dispatchEvent(new Event('change', { bubbles: true }));
+          filled.push('field3=' + ph);
+        }
+        return { filled: filled, totalVisible: visible.length };
+      })(${JSON.stringify(firstName)}, ${JSON.stringify(lastName)}, ${JSON.stringify(email)}, ${JSON.stringify(phone)})`) as any;
+      log("Positional fill result: " + JSON.stringify(positionalResult));
+    }
 
     await page.waitForTimeout(1000);
 
