@@ -30,7 +30,7 @@ const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 export default function AutoCreate() {
   const [count, setCount] = useState(1);
-  const [proxyList, setProxyList] = useState("wss://brd-customer-hl_86b34e68-zone-proxy:wjlhprnj2hl8@brd.superproxy.io:9222");
+  const [proxyList, setProxyList] = useState("wss://brd-customer-hl_86b34e68-zone-proxy:tqjg1n8tzz1f@brd.superproxy.io:9222");
   const [country, setCountry] = useState("United States");
   const [language, setLanguage] = useState("English");
   const [isRunning, setIsRunning] = useState(false);
