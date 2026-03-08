@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download, Check, RotateCcw } from "lucide-react";
+import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download, Check, RotateCcw, Trophy, UserCheck, Ticket } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -31,6 +31,9 @@ const statusBadge: Record<string, { label: string; variant: "default" | "seconda
   waiting_code: { label: "Waiting Code", variant: "secondary" },
   verifying: { label: "Verifying", variant: "secondary" },
   verified: { label: "Verified", variant: "default" },
+  profile_saving: { label: "Saving Profile", variant: "secondary" },
+  draw_registering: { label: "Draw Registration", variant: "secondary" },
+  completed: { label: "Draw Registered", variant: "default" },
   failed: { label: "Failed", variant: "destructive" },
 };
 
@@ -101,7 +104,7 @@ export default function AccountStock() {
   }
 
   function exportVerified() {
-    const verified = accounts.filter((a) => a.status === "verified");
+    const verified = accounts.filter((a) => a.status === "verified" || a.status === "completed");
     if (verified.length === 0) {
       toast({ title: "No data", description: "No verified accounts to export" });
       return;
@@ -125,24 +128,27 @@ export default function AccountStock() {
 
   function getStatusIcon(status: string) {
     switch (status) {
-      case "verified": return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+      case "completed": return <Trophy className="w-4 h-4 text-emerald-400" />;
+      case "verified": return <CheckCircle2 className="w-4 h-4 text-teal-400" />;
+      case "profile_saving": return <UserCheck className="w-4 h-4 text-blue-400 animate-pulse" />;
+      case "draw_registering": return <Ticket className="w-4 h-4 text-violet-400 animate-pulse" />;
       case "failed": return <XCircle className="w-4 h-4 text-red-400" />;
       case "pending": return <Clock className="w-4 h-4 text-amber-400" />;
       default: return <Loader2 className="w-4 h-4 text-red-400 animate-spin" />;
     }
   }
 
-  const verified = accounts.filter((a) => a.status === "verified");
-  const inProgress = accounts.filter((a) => !["verified", "failed"].includes(a.status));
+  const verified = accounts.filter((a) => a.status === "verified" || a.status === "completed");
+  const inProgress = accounts.filter((a) => !["verified", "completed", "failed"].includes(a.status));
   const failed = accounts.filter((a) => a.status === "failed");
 
   const filteredAccounts = platformFilter === "all"
     ? accounts
     : accounts.filter((a) => a.platform === platformFilter);
 
-  const availableAccounts = filteredAccounts.filter((a) => !a.isUsed && a.status === "verified");
-  const usedAccounts = filteredAccounts.filter((a) => a.isUsed && a.status === "verified");
-  const otherAccounts = filteredAccounts.filter((a) => a.status !== "verified");
+  const availableAccounts = filteredAccounts.filter((a) => !a.isUsed && (a.status === "verified" || a.status === "completed"));
+  const usedAccounts = filteredAccounts.filter((a) => a.isUsed && (a.status === "verified" || a.status === "completed"));
+  const otherAccounts = filteredAccounts.filter((a) => a.status !== "verified" && a.status !== "completed");
 
   const platforms = [...new Set(accounts.map((a) => a.platform))];
 
@@ -205,7 +211,7 @@ export default function AccountStock() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
-                      {acc.status === "verified" && showToggle && (
+                      {(acc.status === "verified" || acc.status === "completed") && showToggle && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -222,7 +228,7 @@ export default function AccountStock() {
                           <span className="ml-1">{toggleLabel}</span>
                         </Button>
                       )}
-                      {acc.status === "verified" && (
+                      {(acc.status === "verified" || acc.status === "completed") && (
                         <Button
                           variant="ghost"
                           size="sm"

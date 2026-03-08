@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2, Wallet,
-  TrendingUp, Activity, Zap, Shield, ArrowUpRight, Copy
+  TrendingUp, Activity, Zap, Shield, ArrowUpRight, Copy, Trophy
 } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -293,8 +293,11 @@ export default function Dashboard() {
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-2 h-2 rounded-full ${
-                    acc.status === "verified" ? "bg-emerald-400" :
+                    acc.status === "completed" ? "bg-emerald-400" :
+                    acc.status === "verified" ? "bg-teal-400" :
                     acc.status === "failed" ? "bg-red-400" :
+                    acc.status === "draw_registering" ? "bg-violet-400 animate-pulse" :
+                    acc.status === "profile_saving" ? "bg-blue-400 animate-pulse" :
                     "bg-amber-400 animate-pulse"
                   }`} />
                   <div>
@@ -313,13 +316,20 @@ export default function Dashboard() {
                 </div>
                 <div className="flex items-center gap-3">
                   <Badge
-                    className={`text-[10px] capitalize ${
-                      acc.status === "verified" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15" :
+                    className={`text-[10px] ${
+                      acc.status === "completed" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15" :
+                      acc.status === "verified" ? "bg-teal-500/10 text-teal-400 border-teal-500/20 hover:bg-teal-500/15" :
                       acc.status === "failed" ? "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/15" :
+                      acc.status === "draw_registering" ? "bg-violet-500/10 text-violet-400 border-violet-500/20 hover:bg-violet-500/15" :
+                      acc.status === "profile_saving" ? "bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/15" :
                       "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/15"
                     }`}
                   >
-                    {acc.status}
+                    {acc.status === "completed" ? "Draw Registered" :
+                     acc.status === "profile_saving" ? "Saving Profile" :
+                     acc.status === "draw_registering" ? "Draw Registration" :
+                     acc.status === "waiting_code" ? "Waiting Code" :
+                     acc.status}
                   </Badge>
                   <span className="text-[10px] text-zinc-600 w-16 text-right">
                     {new Date(acc.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}

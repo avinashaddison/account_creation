@@ -1,7 +1,19 @@
 # Addison Panel - LA28 Account Management
 
 ## Overview
-Full admin panel for automated LA28 Olympic account creation. Creates Addison email addresses via mail.tm, fills the LA28 registration form via Playwright browser automation, captures verification codes, and completes registration automatically. Supports batch creation with real-time logs, multi-admin with data isolation, wallet system with TRC20 payments, and free account limits.
+Full admin panel for automated LA28 Olympic account creation with complete ticket draw registration. Creates Addison email addresses via mail.tm, fills the LA28 registration form via Playwright browser automation, captures verification codes, completes Gigya profile (birth year, sports, teams), and submits ticket draw registration on tickets.la28.org via Bright Data Browser API. Supports batch creation with real-time logs, multi-admin with data isolation, wallet system with TRC20 payments.
+
+## Account Status Flow
+`pending` → `registering` → `waiting_code` → `verifying` → `verified` → `profile_saving` → `draw_registering` → `completed`
+- **pending**: Account record created, waiting to start
+- **registering**: Filling LA28 registration form
+- **waiting_code**: Waiting for email verification code
+- **verifying**: Submitting verification code
+- **verified**: Email verified, LA28 ID created
+- **profile_saving**: Saving Gigya profile (birth year, sports, teams)
+- **draw_registering**: Submitting ticket draw registration on tickets.la28.org via OIDC + Browser API
+- **completed**: Full flow done — draw registered with all 3 checkmarks (registered, profile, favorites)
+- **failed**: Error at any stage
 
 ## Architecture
 - **Frontend**: React + Vite + Tailwind CSS + shadcn/ui components

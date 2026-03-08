@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { users, accounts, billingRecords, paymentRequests } from "@shared/schema";
 import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest } from "@shared/schema";
-import { eq, desc, sql, count, and } from "drizzle-orm";
+import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
 export interface IStorage {
@@ -100,7 +100,7 @@ export class DatabaseStorage implements IStorage {
   async getAccountStats(ownerId?: string): Promise<{ total: number; verified: number; failed: number; pending: number }> {
     const condition = ownerId ? eq(accounts.ownerId, ownerId) : undefined;
     const [totalResult] = await db.select({ count: count() }).from(accounts).where(condition);
-    const [verifiedResult] = await db.select({ count: count() }).from(accounts).where(condition ? and(condition, eq(accounts.status, "verified")) : eq(accounts.status, "verified"));
+    const [verifiedResult] = await db.select({ count: count() }).from(accounts).where(condition ? and(condition, or(eq(accounts.status, "verified"), eq(accounts.status, "completed"))) : or(eq(accounts.status, "verified"), eq(accounts.status, "completed")));
     const [failedResult] = await db.select({ count: count() }).from(accounts).where(condition ? and(condition, eq(accounts.status, "failed")) : eq(accounts.status, "failed"));
     const total = totalResult?.count || 0;
     const verified = verifiedResult?.count || 0;

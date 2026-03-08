@@ -163,9 +163,14 @@ async function processAccount(
     );
 
     if (result.success) {
-      const updated = await storage.updateAccount(accountId, { status: "verified" });
+      const currentAccount = await storage.getAccount(accountId);
+      const finalStatus = currentAccount?.status === "completed" ? "completed" : "verified";
+      const updated = await storage.updateAccount(accountId, { status: finalStatus as any });
       if (updated) broadcastAccountUpdate(updated, ownerId);
-      broadcastLog(batchId, accountId, `✅ Account created successfully! Email: ${addisonEmail}`, ownerId);
+      const successMsg = finalStatus === "completed"
+        ? `✅ Full flow complete! Draw registered: ${addisonEmail}`
+        : `✅ Account created successfully! Email: ${addisonEmail}`;
+      broadcastLog(batchId, accountId, successMsg, ownerId);
 
       await storage.createBillingRecord({
         accountId,

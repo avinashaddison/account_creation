@@ -1489,6 +1489,7 @@ async function doRegistration(
       }
     }
 
+    onStatusUpdate("profile_saving");
     try {
       await completeTicketsProfile(page, email, password, log);
       log("Profile data saved via Gigya SDK!");
@@ -1497,9 +1498,11 @@ async function doRegistration(
       log("Account created & verified. Profile step had issues.");
     }
 
+    onStatusUpdate("draw_registering");
     log("Profile data saved via Gigya SDK. Now submitting ticket registration...");
     try {
       await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl);
+      onStatusUpdate("completed");
     } catch (ticketErr: any) {
       console.log("[Playwright] Ticket registration error:", ticketErr.message);
       log("Account created & verified. Ticket registration step had issues but profile data is saved.");

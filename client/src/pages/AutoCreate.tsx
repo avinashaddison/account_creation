@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2, CheckCircle2, XCircle, Zap, Terminal, ArrowLeft,
-  DollarSign, Globe, Languages, Hash, Rocket
+  DollarSign, Globe, Languages, Hash, Rocket, Trophy
 } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { Link } from "wouter";
@@ -59,7 +59,8 @@ export default function AutoCreate() {
         setLogs((prev) => [...prev, { accountId: msg.accountId, message: msg.message, timestamp: msg.timestamp }]);
       }
       if (msg.type === "account_update" && batchAccountsRef.current.some((a) => a.id === msg.account.id)) {
-        if (msg.account.status === "verified") sounds.notification();
+        if (msg.account.status === "completed") sounds.notification();
+        else if (msg.account.status === "verified") sounds.notification();
         else if (msg.account.status === "failed") sounds.warning();
         setBatchAccounts((prev) =>
           prev.map((a) => (a.id === msg.account.id ? { ...a, status: msg.account.status } : a))
@@ -174,7 +175,7 @@ export default function AutoCreate() {
     }
   }
 
-  const completedCount = batchAccounts.filter((a) => a.status === "verified").length;
+  const completedCount = batchAccounts.filter((a) => a.status === "completed" || a.status === "verified").length;
   const failedCount = batchAccounts.filter((a) => a.status === "failed").length;
   const totalCount = batchAccounts.length;
   const doneCount = completedCount + failedCount;
@@ -193,7 +194,7 @@ export default function AutoCreate() {
             <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-auto-create-title">LA28 Account Creator</h1>
             <Badge className="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/15 text-[10px]">Olympic ID</Badge>
           </div>
-          <p className="text-zinc-500 text-sm mt-0.5">Automated LA28 registration with email verification</p>
+          <p className="text-zinc-500 text-sm mt-0.5">Full flow: Register, Verify, Profile, Draw Registration</p>
         </div>
       </div>
 
@@ -331,7 +332,7 @@ export default function AutoCreate() {
             {totalCount > 0 && (
               <div className="flex items-center gap-2">
                 <Badge className="bg-white/5 text-zinc-400 border-white/10 text-xs">{doneCount}/{totalCount} done</Badge>
-                {completedCount > 0 && <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">{completedCount} verified</Badge>}
+                {completedCount > 0 && <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">{completedCount} done</Badge>}
                 {failedCount > 0 && <Badge className="bg-red-500/10 text-red-400 border-red-500/20 text-xs">{failedCount} failed</Badge>}
               </div>
             )}
@@ -339,28 +340,47 @@ export default function AutoCreate() {
 
           {batchAccounts.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-4">
-              {batchAccounts.map((acc) => (
-                <div
-                  key={acc.id}
-                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium ${
-                    acc.status === "verified"
-                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                      : acc.status === "failed"
-                      ? "bg-red-500/10 border-red-500/20 text-red-400"
-                      : "bg-red-500/10 border-red-500/20 text-red-400"
-                  }`}
-                  data-testid={`badge-batch-account-${acc.id}`}
-                >
-                  {acc.status === "verified" ? (
-                    <CheckCircle2 className="w-3 h-3" />
-                  ) : acc.status === "failed" ? (
-                    <XCircle className="w-3 h-3" />
-                  ) : (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  )}
-                  {acc.firstName} {acc.lastName}
-                </div>
-              ))}
+              {batchAccounts.map((acc) => {
+                const chipStyle = acc.status === "completed"
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                  : acc.status === "verified"
+                  ? "bg-teal-500/10 border-teal-500/20 text-teal-400"
+                  : acc.status === "failed"
+                  ? "bg-red-500/10 border-red-500/20 text-red-400"
+                  : acc.status === "draw_registering"
+                  ? "bg-violet-500/10 border-violet-500/20 text-violet-400"
+                  : acc.status === "profile_saving"
+                  ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                  : "bg-amber-500/10 border-amber-500/20 text-amber-400";
+                const chipLabel = acc.status === "registering" ? "Registering"
+                  : acc.status === "waiting_code" ? "Waiting Code"
+                  : acc.status === "verifying" ? "Verifying"
+                  : acc.status === "verified" ? "Verified"
+                  : acc.status === "profile_saving" ? "Saving Profile"
+                  : acc.status === "draw_registering" ? "Draw Registration"
+                  : acc.status === "completed" ? "Completed"
+                  : acc.status === "failed" ? "Failed"
+                  : "Pending";
+                return (
+                  <div
+                    key={acc.id}
+                    className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium ${chipStyle}`}
+                    data-testid={`badge-batch-account-${acc.id}`}
+                  >
+                    {acc.status === "completed" ? (
+                      <Trophy className="w-3 h-3" />
+                    ) : acc.status === "verified" ? (
+                      <CheckCircle2 className="w-3 h-3" />
+                    ) : acc.status === "failed" ? (
+                      <XCircle className="w-3 h-3" />
+                    ) : (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    )}
+                    {acc.firstName} {acc.lastName}
+                    <span className="text-[10px] opacity-70">({chipLabel})</span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -387,14 +407,20 @@ export default function AutoCreate() {
                       {new Date(log.timestamp).toLocaleTimeString()}
                     </span>
                     <span className={
-                      log.message.includes("verified") || log.message.includes("successfully")
+                      log.message.includes("Full flow complete") || log.message.includes("Draw registered") || log.message.includes("completed")
+                        ? "text-emerald-400 font-semibold"
+                        : log.message.includes("verified") || log.message.includes("successfully") || log.message.includes("SUCCESS")
                         ? "text-emerald-400"
                         : log.message.includes("Failed") || log.message.includes("Error") || log.message.includes("Timed out")
                         ? "text-red-400"
                         : log.message.includes("code") || log.message.includes("Code")
                         ? "text-amber-400"
+                        : log.message.includes("draw_registering") || log.message.includes("ticket") || log.message.includes("Ticket")
+                        ? "text-violet-400"
+                        : log.message.includes("profile_saving") || log.message.includes("Profile")
+                        ? "text-blue-400"
                         : log.message.includes("Status:")
-                        ? "text-red-400"
+                        ? "text-sky-400"
                         : "text-zinc-400"
                     }>
                       {log.message}
