@@ -476,76 +476,104 @@ async function loginAndSubmitTicketRegistration(
         log(`Attempt ${attempt}/${MAX_RETRIES}: Connecting to remote browser...`);
         remoteBrowser = await chromium.connectOverCDP(proxyUrl, { timeout: 60000 });
         ticketsPage = await remoteBrowser.newPage();
-        ticketsPage.setDefaultTimeout(60000);
+        ticketsPage.setDefaultTimeout(120000);
 
-        log("Logging in via Gigya SDK in remote browser...");
-        await ticketsPage.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await ticketsPage.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-        await ticketsPage.waitForTimeout(3000);
+        log("Navigating to tickets.la28.org/mycustomerdata (triggers OIDC login)...");
+        await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 120000 });
 
-        try {
-          await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
-        } catch {
-          log("Gigya SDK not loaded. Retrying...");
+        log("Waiting for redirects to settle...");
+        let settledUrl = "";
+        let akamaiBocked = false;
+        for (let rw = 0; rw < 20; rw++) {
+          await ticketsPage.waitForTimeout(3000);
+          try {
+            settledUrl = ticketsPage.url();
+            log(`  [${rw * 3}s] ${settledUrl.substring(0, 100)}`);
+            if (settledUrl.includes("la28id.la28.org") && !settledUrl.includes("proxy.html")) break;
+            if (settledUrl.includes("mycustomerdata") && settledUrl.includes("tickets.la28.org")) break;
+            const bodyCheck = await ticketsPage.evaluate(() => (document.body?.innerText || "").toLowerCase().substring(0, 100));
+            if (bodyCheck.includes("access denied")) { akamaiBocked = true; break; }
+          } catch { /* still navigating */ }
+        }
+
+        if (akamaiBocked) {
+          log(`Attempt ${attempt}: Akamai blocked. ${attempt < MAX_RETRIES ? "Retrying..." : "Max retries."}`);
           try { await remoteBrowser.close(); } catch {}
           continue;
         }
 
-        const loginResult = await ticketsPage.evaluate(`
-          new Promise(function(resolve) {
-            gigya.accounts.login({
-              loginID: "${safeEmail}",
-              password: "${safePass}",
-              callback: function(r) { resolve({ ok: r.errorCode === 0, uid: r.UID || null, err: r.errorMessage || '' }); }
-            });
-            setTimeout(function() { resolve({ ok: false, err: 'timeout' }); }, 30000);
-          })
-        `) as { ok: boolean; uid: string | null; err: string };
-
-        if (!loginResult.ok) {
-          log("Gigya login failed: " + loginResult.err);
-          try { await remoteBrowser.close(); } catch {}
-          return;
-        }
-        log("Logged in via Gigya SDK. UID: " + loginResult.uid);
-
-        await ticketsPage.waitForTimeout(8000);
-        const postLoginUrl = ticketsPage.url();
-        log("Post-login URL: " + postLoginUrl.substring(0, 100));
-
-        if (postLoginUrl.includes("consent.html")) {
-          log("Consent page detected. Handling...");
+        if (settledUrl.includes("la28id.la28.org")) {
+          log("On LA28 ID login page. Logging in via Gigya SDK...");
           try {
-            await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 10000 });
-            await ticketsPage.waitForTimeout(1000);
-            await ticketsPage.evaluate(`(() => {
-              var div = document.createElement('div'); div.id = 'consent-container';
-              div.style.cssText = 'width:600px;margin:20px auto;'; document.body.appendChild(div);
-            })()`);
-            const shown = await ticketsPage.evaluate(`
-              new Promise(function(resolve) {
-                gigya.accounts.showScreenSet({
-                  screenSet: 'Default-RegistrationLogin', startScreen: 'gigya-complete-registration-screen',
-                  containerID: 'consent-container',
-                  onAfterScreenLoad: function() { resolve(true); }, onError: function() { resolve(false); }
-                });
-                setTimeout(function() { resolve(false); }, 15000);
-              })
-            `);
-            if (shown) {
+            await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
+          } catch {
+            log("Gigya SDK not loaded. Retrying...");
+            try { await remoteBrowser.close(); } catch {}
+            continue;
+          }
+
+          const loginResult = await ticketsPage.evaluate(`
+            new Promise(function(resolve) {
+              gigya.accounts.login({
+                loginID: "${safeEmail}",
+                password: "${safePass}",
+                callback: function(r) { resolve({ ok: r.errorCode === 0, uid: r.UID || null, err: r.errorMessage || '' }); }
+              });
+              setTimeout(function() { resolve({ ok: false, err: 'timeout' }); }, 30000);
+            })
+          `) as { ok: boolean; uid: string | null; err: string };
+
+          if (!loginResult.ok) {
+            log("Gigya login failed: " + loginResult.err);
+            try { await remoteBrowser.close(); } catch {}
+            return;
+          }
+          log("Logged in. UID: " + loginResult.uid + ". Waiting for OIDC redirect...");
+
+          for (let rw = 0; rw < 20; rw++) {
+            await ticketsPage.waitForTimeout(3000);
+            try {
+              const postUrl = ticketsPage.url();
+              log(`  [${rw * 3}s] ${postUrl.substring(0, 100)}`);
+              if (postUrl.includes("tickets.la28.org") && !postUrl.includes("la28id")) break;
+              if (postUrl.includes("consent.html")) break;
+            } catch { /* navigating */ }
+          }
+
+          if (ticketsPage.url().includes("consent.html")) {
+            log("Consent page. Handling...");
+            try {
+              await ticketsPage.waitForFunction("typeof gigya !== 'undefined'", { timeout: 10000 });
               await ticketsPage.waitForTimeout(1000);
-              const birthYear = String(1970 + Math.floor(Math.random() * 30));
-              try { const ei = ticketsPage.locator('#consent-container input[name="email"]'); await ei.click({ clickCount: 3 }); await ticketsPage.keyboard.type(email, { delay: 5 }); } catch {}
-              try { await ticketsPage.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear); } catch {}
-              try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type('9' + String(Math.floor(Math.random() * 9000) + 1000), { delay: 5 }); } catch {}
-              try { const s = ticketsPage.locator('#consent-container input[name="data.subscribe"]'); if (!(await s.isChecked())) await s.check(); } catch {}
-              await ticketsPage.waitForTimeout(500);
-              try { await ticketsPage.locator('#consent-container input[type="submit"]').click(); } catch {}
-              log("Consent submitted.");
-              await ticketsPage.waitForTimeout(5000);
+              await ticketsPage.evaluate(`(() => {
+                var d = document.createElement('div'); d.id = 'consent-container';
+                d.style.cssText = 'width:600px;margin:20px auto;'; document.body.appendChild(d);
+              })()`);
+              const shown = await ticketsPage.evaluate(`
+                new Promise(function(resolve) {
+                  gigya.accounts.showScreenSet({
+                    screenSet: 'Default-RegistrationLogin', startScreen: 'gigya-complete-registration-screen',
+                    containerID: 'consent-container',
+                    onAfterScreenLoad: function() { resolve(true); }, onError: function() { resolve(false); }
+                  });
+                  setTimeout(function() { resolve(false); }, 15000);
+                })
+              `);
+              if (shown) {
+                await ticketsPage.waitForTimeout(1000);
+                const birthYear = String(1970 + Math.floor(Math.random() * 30));
+                try { const ei = ticketsPage.locator('#consent-container input[name="email"]'); await ei.click({ clickCount: 3 }); await ticketsPage.keyboard.type(email, { delay: 5 }); } catch {}
+                try { await ticketsPage.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear); } catch {}
+                try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type('9' + String(Math.floor(Math.random() * 9000) + 1000), { delay: 5 }); } catch {}
+                try { const s = ticketsPage.locator('#consent-container input[name="data.subscribe"]'); if (!(await s.isChecked())) await s.check(); } catch {}
+                await ticketsPage.waitForTimeout(500);
+                try { await ticketsPage.locator('#consent-container input[type="submit"]').click(); } catch {}
+                log("Consent submitted.");
+                await ticketsPage.waitForTimeout(5000);
+              }
+            } catch (e: any) {
+              log("Consent error: " + e.message.substring(0, 80));
             }
-          } catch (e: any) {
-            log("Consent error: " + e.message.substring(0, 80));
           }
         }
       } else {
@@ -564,23 +592,35 @@ async function loginAndSubmitTicketRegistration(
         ticketsPage.setDefaultTimeout(30000);
       }
 
-      log("Navigating to tickets.la28.org...");
-      await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
-      await ticketsPage.waitForTimeout(10000);
+      if (!isBrowserAPI) {
+        log("Navigating to tickets.la28.org...");
+        await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
+        await ticketsPage.waitForTimeout(10000);
 
-      const bodyText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
-      if (bodyText.toLowerCase().includes('access denied')) {
-        log(`Attempt ${attempt}: Access Denied by Akamai (bad IP). ${attempt < MAX_RETRIES ? 'Retrying with new IP...' : 'Max retries reached.'}`);
-        try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
-        continue;
+        const bodyText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
+        if (bodyText.toLowerCase().includes('access denied')) {
+          log(`Attempt ${attempt}: Access Denied by Akamai (bad IP). ${attempt < MAX_RETRIES ? 'Retrying with new IP...' : 'Max retries reached.'}`);
+          try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
+          continue;
+        }
+
+        log("Navigating to customer data page...");
+        await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
+        try { await ticketsPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
+        await ticketsPage.waitForTimeout(10000);
+      } else {
+        log("Ensuring customer data page is loaded...");
+        const curUrl = ticketsPage.url();
+        if (!curUrl.includes("mycustomerdata")) {
+          await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
+        }
+        for (let w = 0; w < 10; w++) {
+          await ticketsPage.waitForTimeout(3000);
+          const loading = await ticketsPage.evaluate(() => (document.body?.innerText || "").includes("Loading"));
+          if (!loading) { log("Profile loaded after ~" + ((w + 1) * 3) + "s"); break; }
+          if (w === 9) log("Profile still loading after 30s, proceeding anyway...");
+        }
       }
-
-      log("Tickets page loaded: " + (await ticketsPage.title()));
-
-      log("Navigating to customer data page...");
-      await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
-      try { await ticketsPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
-      await ticketsPage.waitForTimeout(10000);
 
       log("Customer data page loaded. Looking for submit button...");
 

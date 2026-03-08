@@ -40,7 +40,7 @@ Full admin panel for automated LA28 Olympic account creation. Creates Addison em
 - `server/index.ts` - Express app, session middleware, startup
 - `server/routes.ts` - API endpoints + WebSocket + auth/role middleware
 - `server/mailService.ts` - mail.tm API integration
-- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, Bright Data Browser API with retry for tickets.la28.org Akamai bypass, residential proxy fallback)
+- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, Bright Data Browser API with retry for tickets.la28.org Akamai bypass via OIDC flow: mycustomerdata → la28id login → Gigya SDK → OIDC redirect back → submit registration, residential proxy fallback)
 - `server/storage.ts` - Database storage with Drizzle ORM (owner-scoped queries)
 - `server/db.ts` - Database connection pool
 - `shared/schema.ts` - Database schema (accounts, billingRecords, users, paymentRequests tables)
