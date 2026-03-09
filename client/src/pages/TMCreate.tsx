@@ -36,6 +36,7 @@ function getLogColor(msg: string) {
   if (m.includes("verified") || m.includes("success") || m.includes("phone verification completed")) return "text-emerald-400";
   if (m.includes("sms number ordered") || m.includes("sms cost") || m.includes("$0.36")) return "text-amber-300 font-medium";
   if (m.includes("code") || m.includes("otp") || m.includes("sms")) return "text-amber-400";
+  if (m.includes("phone_retry") || m.includes("retrying") || m.includes("new number")) return "text-orange-400 font-medium";
   if (m.includes("phone") || m.includes("smspool")) return "text-violet-400";
   if (m.includes("email") || m.includes("mail")) return "text-sky-400";
   if (m.includes("password") || m.includes("form") || m.includes("filled") || m.includes("submit")) return "text-blue-400";
@@ -51,6 +52,7 @@ function getStepFromLogs(logs: LogEntry[], accountId: string): { step: string; c
   const last = acctLogs[acctLogs.length - 1].message.toLowerCase();
   if (last.includes("verified") || last.includes("success") || last.includes("phone verification completed")) return { step: "Verified", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
   if (last.includes("failed") || last.includes("error")) return { step: "Failed", color: "text-red-400", icon: <XCircle className="w-3.5 h-3.5" /> };
+  if (last.includes("phone_retry")) return { step: "Phone Retry", color: "text-orange-400", icon: <Phone className="w-3.5 h-3.5" /> };
   if (last.includes("phone") || last.includes("sms")) return { step: "Phone Verify", color: "text-violet-400", icon: <Phone className="w-3.5 h-3.5" /> };
   if (last.includes("code") || last.includes("otp")) return { step: "Email Verify", color: "text-amber-400", icon: <Mail className="w-3.5 h-3.5" /> };
   if (last.includes("password") || last.includes("submit") || last.includes("form")) return { step: "Registering", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };

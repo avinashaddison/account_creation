@@ -223,6 +223,86 @@ async function handlePhoneVerification(
   page: Page,
   onStatusUpdate: (status: string) => void
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
+  const MAX_PHONE_RETRIES = 3;
+  let totalSmsCost = 0;
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= MAX_PHONE_RETRIES; attempt++) {
+    console.log(`[TM-Playwright] Phone verification attempt ${attempt}/${MAX_PHONE_RETRIES}`);
+    const result = await attemptPhoneVerification(page, onStatusUpdate, attempt);
+    totalSmsCost += result.smsCost;
+
+    if (result.success) {
+      return { success: true, smsCost: totalSmsCost };
+    }
+
+    lastError = result.error || "Unknown phone verification error";
+    console.log(`[TM-Playwright] Phone attempt ${attempt}/${MAX_PHONE_RETRIES} failed: ${lastError}`);
+
+    if (attempt < MAX_PHONE_RETRIES) {
+      const isNonRetryable = lastError.includes("Phone input field not found") || lastError.includes("Challenge") || lastError.includes("browser closed");
+      if (isNonRetryable) {
+        console.log("[TM-Playwright] Non-retryable phone error, stopping retries");
+        break;
+      }
+
+      onStatusUpdate(`phone_retry_${attempt + 1}`);
+      console.log("[TM-Playwright] Dismissing phone OTP dialog before retry...");
+      await dismissPhoneDialog(page);
+      await page.waitForTimeout(2000);
+    }
+  }
+
+  return { success: false, error: `Phone verification failed after ${MAX_PHONE_RETRIES} attempts: ${lastError}`, smsCost: totalSmsCost };
+}
+
+async function dismissPhoneDialog(page: Page): Promise<void> {
+  try {
+    const dismissed = await page.evaluate(`(() => {
+      var cancelBtns = document.querySelectorAll('button, a');
+      for (var i = 0; i < cancelBtns.length; i++) {
+        var text = (cancelBtns[i].textContent || '').toLowerCase().trim();
+        var rect = cancelBtns[i].getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && (text === 'cancel' || text === 'close' || text === 'back' || text === 'x')) {
+          cancelBtns[i].click();
+          return 'dismissed:' + text;
+        }
+      }
+      var closeBtn = document.querySelector('[aria-label="close"], [aria-label="Close"], button.close, .modal-close, [data-dismiss]');
+      if (closeBtn) { closeBtn.click(); return 'dismissed:aria-close'; }
+      return 'no-dismiss';
+    })()`);
+    console.log("[TM-Playwright] Phone dialog dismiss result:", dismissed);
+    await page.waitForTimeout(2000);
+
+    const stillHasOTP = await page.evaluate(`(() => {
+      return !!document.querySelector('#otp-input-input, input[maxlength="6"][aria-label*="Code"]');
+    })()`);
+    if (stillHasOTP) {
+      console.log("[TM-Playwright] OTP dialog still present, trying cancel again...");
+      await page.evaluate(`(() => {
+        var btns = document.querySelectorAll('button, a');
+        for (var i = 0; i < btns.length; i++) {
+          var text = (btns[i].textContent || '').toLowerCase().trim();
+          var rect = btns[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0 && (text.includes('cancel') || text.includes('resend') || text.includes('change'))) {
+            btns[i].click();
+            return;
+          }
+        }
+      })()`);
+      await page.waitForTimeout(2000);
+    }
+  } catch (e: any) {
+    console.log("[TM-Playwright] Error dismissing phone dialog:", e.message?.substring(0, 100));
+  }
+}
+
+async function attemptPhoneVerification(
+  page: Page,
+  onStatusUpdate: (status: string) => void,
+  attemptNum: number
+): Promise<{ success: boolean; error?: string; smsCost: number }> {
   let smsOrderId: string | null = null;
   let smsCost = 0;
 
@@ -234,7 +314,7 @@ async function handlePhoneVerification(
 
     smsOrderId = smsOrder.orderId;
     smsCost = 0.36;
-    console.log(`[TM-Playwright] SMS number ordered: $${smsCost} charged from SMSPool`);
+    console.log(`[TM-Playwright] SMS number ordered (attempt ${attemptNum}): $${smsCost} charged from SMSPool`);
     let phoneNumber = String(smsOrder.number);
     if (!phoneNumber.startsWith("+")) {
       phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
@@ -678,7 +758,10 @@ async function handlePhoneVerification(
     if (phoneVerifyState.stillNeedsPhone && smsOrderId) {
       await cancelSMSOrder(smsOrderId);
     }
-    return { success: !phoneVerifyState.stillNeedsPhone, smsCost };
+    if (phoneVerifyState.stillNeedsPhone) {
+      return { success: false, error: "Phone verification not confirmed after OTP submission", smsCost };
+    }
+    return { success: true, smsCost };
   } catch (err: any) {
     console.log("[TM-Playwright] Phone verification error:", err.message);
     if (smsOrderId) {
@@ -1997,9 +2080,9 @@ async function doTMRegistration(
         }
       }
 
-      if (pageLowerNow.includes("confirm your account") && (pageLowerNow.includes("email verified") || pageLowerNow.includes("phone verified"))) {
-        console.log("[TM-Playwright] Still on CONFIRM YOUR ACCOUNT page with verifications done. Returning success.");
-        return { success: true, pageContent: "Account created. Verifications confirmed. Done button may have failed.", smsCost: totalSmsCost };
+      if (pageLowerNow.includes("confirm your account") && pageLowerNow.includes("email verified") && pageLowerNow.includes("phone verified")) {
+        console.log("[TM-Playwright] Still on CONFIRM YOUR ACCOUNT page with both verifications done. Returning success.");
+        return { success: true, pageContent: "Account created. Both verifications confirmed. Done button may have failed.", smsCost: totalSmsCost };
       }
 
       if (!doneClicked) {
@@ -2040,8 +2123,7 @@ async function doTMRegistration(
                       finalLower.includes("you're in") ||
                       finalLower.includes("welcome back") ||
                       finalLower.includes("account settings") ||
-                      finalLower.includes("add a passkey") ||
-                      finalLower.includes("confirm your account");
+                      finalLower.includes("add a passkey");
 
     const domVerifyState = await page.evaluate(`(() => {
       var body = document.body ? document.body.innerHTML : '';
@@ -2076,7 +2158,7 @@ async function doTMRegistration(
     const bothVerified = emailVerifiedOnPage && phoneVerified;
     const verifyPageCompleted = domVerifyState.hasVerifyPage && !domVerifyState.stillNeedsEmail && !domVerifyState.stillNeedsPhone;
 
-    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted || bothVerified || emailVerifiedPhonePending;
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted || bothVerified;
 
     console.log("[TM-Playwright] Success checks - redirected:", redirectedToAccount, "textSuccess:", textIndicatesSuccess, "phoneVerified:", phoneVerified, "emailVerified:", emailVerifiedOnPage, "emailOnlyDone:", emailVerifiedPhonePending, "verifyComplete:", verifyPageCompleted, "result:", isSuccess);
 
