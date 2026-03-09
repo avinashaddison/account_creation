@@ -309,17 +309,12 @@ export default function TMCreate() {
                   <span className="text-zinc-500">Price/account</span>
                   <span className="text-zinc-400">${accountPrice.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-zinc-500">SMS verify/account</span>
-                  <span className="text-amber-400">$0.36</span>
-                </div>
                 <div className="flex justify-between text-xs border-t border-white/5 pt-1.5">
                   <span className="font-semibold text-zinc-300 flex items-center gap-1">
                     <DollarSign className="w-3 h-3" /> Est. Total
                   </span>
-                  <span className="font-bold text-base bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${(count * (accountPrice + 0.36)).toFixed(2)}</span>
+                  <span className="font-bold text-base bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${(count * accountPrice).toFixed(2)}</span>
                 </div>
-                <p className="text-[10px] text-zinc-600 pt-0.5">SMS cost billed on success, refunded on failure</p>
               </div>
 
               {error && (
