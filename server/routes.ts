@@ -249,43 +249,49 @@ export async function registerRoutes(
     ws.on("close", () => wsClients.delete(ws));
   });
 
-  async function ensureDefaultSuperAdmin() {
-    const existing = await storage.getUserByEmail("avinashaddison@gmail.com");
-    if (!existing) {
-      const oldAdmin = await storage.getUserByEmail("admin@la28panel.com");
-      if (oldAdmin) {
-        await storage.deleteUser(oldAdmin.id);
-      }
-      const sa = await storage.createUser({
+  async function ensureDefaultData() {
+    const oldAdmin = await storage.getUserByEmail("admin@la28panel.com");
+    if (oldAdmin) {
+      await storage.deleteUser(oldAdmin.id);
+    }
+
+    let sa = await storage.getUserByEmail("avinashaddison@gmail.com");
+    if (!sa) {
+      sa = await storage.createUser({
         username: "avinash",
         email: "avinashaddison@gmail.com",
         password: hashPassword("@AJAYkn8085123"),
         role: "superadmin",
       });
-      await storage.updateUserWalletBalance(sa.id, "499.45");
-      await storage.updateUserFreeAccountsUsed(sa.id, 5);
-      console.log("[Auth] Super admin created: avinashaddison@gmail.com ($499.45)");
+      console.log("[Auth] Super admin created: avinashaddison@gmail.com");
+    }
 
-      const existingPetr = await storage.getUserByEmail("bobca2004@gmail.com");
-      if (!existingPetr) {
-        const petr = await storage.createUser({
-          username: "Petr",
-          email: "bobca2004@gmail.com",
-          password: hashPassword("petr123"),
-          role: "admin",
-          panelName: "Petr Panel v2",
-        });
-        await storage.updateUserWalletBalance(petr.id, "47.57");
-        await storage.updateUserFreeAccountsUsed(petr.id, 15);
-        console.log("[Auth] Admin created: bobca2004@gmail.com ($47.57)");
-      }
+    const existingPetr = await storage.getUserByEmail("bobca2004@gmail.com");
+    if (!existingPetr) {
+      const petr = await storage.createUser({
+        username: "Petr",
+        email: "bobca2004@gmail.com",
+        password: hashPassword("petr123"),
+        role: "admin",
+        panelName: "Petr Panel v2",
+      });
+      await storage.updateUserWalletBalance(petr.id, "47.57");
+      await storage.updateUserFreeAccountsUsed(petr.id, 15);
+      console.log("[Auth] Admin created: bobca2004@gmail.com ($47.57)");
+    }
 
+    const price = await storage.getSetting("account_price");
+    if (!price) {
       await storage.setSetting("account_price", "0.24");
+      console.log("[Auth] Default account price set: $0.24");
+    }
+    const proxy = await storage.getSetting("browser_proxy_url");
+    if (!proxy) {
       await storage.setSetting("browser_proxy_url", "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
-      console.log("[Auth] Default settings seeded");
+      console.log("[Auth] Default browser proxy URL set");
     }
   }
-  await ensureDefaultSuperAdmin();
+  await ensureDefaultData();
 
   async function cleanupStaleAccounts() {
     try {
