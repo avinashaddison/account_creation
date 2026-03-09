@@ -72,48 +72,39 @@ export async function brunoMarsPresaleStep(
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_events");
-    log("🎵 Selecting Inglewood, CA - SoFi Stadium (Sep 30) event only...");
+    log("🎵 Selecting ALL events...");
 
     const eventResult = await page.evaluate(`(() => {
       var results = [];
       var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      var found = false;
+      var eventCheckboxes = [];
       for (var i = 0; i < checkboxes.length; i++) {
         var container = checkboxes[i].closest('label') || checkboxes[i].closest('[class*="event"]') || checkboxes[i].closest('li') || checkboxes[i].closest('div');
         var text = (container ? container.innerText : '').toUpperCase();
-        if ((text.includes('INGLEWOOD') || text.includes('SOFI')) && (text.includes('SEP') || text.includes('30'))) {
-          if (!checkboxes[i].checked) {
-            checkboxes[i].click();
-            checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
-          }
-          found = true;
-          results.push((container ? container.innerText : '').replace(/\\n/g, ' ').substring(0, 100));
+        var textLower = text.toLowerCase();
+        var isConsent = textLower.includes('consent') || textLower.includes('privacy') || textLower.includes('marketing') || textLower.includes('submitting') || textLower.includes('email address') || textLower.includes('mobile phone') || textLower.includes('fan list');
+        if (!isConsent && text.length > 5) {
+          eventCheckboxes.push({ checkbox: checkboxes[i], text: (container ? container.innerText : '').replace(/\\n/g, ' ').substring(0, 100) });
         }
       }
-      if (!found) {
-        for (var j = 0; j < checkboxes.length; j++) {
-          var c2 = checkboxes[j].closest('label') || checkboxes[j].closest('[class*="event"]') || checkboxes[j].closest('li') || checkboxes[j].closest('div');
-          var t2 = (c2 ? c2.innerText : '').toUpperCase();
-          if (t2.includes('INGLEWOOD') || t2.includes('SOFI')) {
-            if (!checkboxes[j].checked) {
-              checkboxes[j].click();
-              checkboxes[j].dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            found = true;
-            results.push((c2 ? c2.innerText : '').replace(/\\n/g, ' ').substring(0, 100));
-          }
+      for (var k = 0; k < eventCheckboxes.length; k++) {
+        var cb = eventCheckboxes[k].checkbox;
+        if (!cb.checked) {
+          cb.click();
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        results.push(eventCheckboxes[k].text);
       }
-      return { selected: results, found: found, total: checkboxes.length };
+      return { selected: results, total: checkboxes.length };
     })()`) as any;
 
-    if (eventResult.found && eventResult.selected.length > 0) {
-      log(`✅ Selected Inglewood event:`);
+    if (eventResult.selected && eventResult.selected.length > 0) {
+      log("✅ Selected " + eventResult.selected.length + " events:");
       for (const ev of eventResult.selected) {
-        log(`  ☑ ${ev}`);
+        log("  ☑ " + ev);
       }
     } else {
-      log(`⚠️ Inglewood/SoFi event not found (total checkboxes: ${eventResult.total}). Page may have different layout.`);
+      log("⚠️ No event checkboxes found (total checkboxes: " + eventResult.total + "). Page may have different layout.");
     }
 
     await page.waitForTimeout(500);
