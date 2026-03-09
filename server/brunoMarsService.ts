@@ -154,23 +154,52 @@ export async function brunoMarsPresaleStep(
 
     if (submitResult.startsWith("clicked")) {
       log("⏳ Waiting for confirmation...");
-      await page.waitForTimeout(8000);
+      const presaleUrl = page.url();
 
-      const afterText = await page.evaluate(() => (document.body?.innerText || "").substring(0, 800));
-      const afterLower = afterText.toLowerCase();
+      for (let checkRound = 0; checkRound < 5; checkRound++) {
+        await page.waitForTimeout(checkRound === 0 ? 2000 : 2000);
 
-      if (afterLower.includes("your selections") || afterLower.includes("edit selections")) {
-        onStatusUpdate("completed");
-        log("✅ SUCCESS! Bruno Mars presale confirmed - YOUR SELECTIONS page visible!");
-        return { success: true };
-      } else if (afterLower.includes("thank") || afterLower.includes("success") || afterLower.includes("confirmed") || afterLower.includes("registered")) {
-        onStatusUpdate("completed");
-        log("✅ SUCCESS! Bruno Mars presale signup confirmed!");
-        return { success: true };
-      } else {
-        log("⚠️ Form submitted but no clear confirmation found. Response: " + afterText.substring(0, 200).replace(/\n/g, ' '));
-        return { success: false, error: "Form submitted but no confirmation detected: " + afterText.substring(0, 150).replace(/\n/g, ' ') };
+        if (checkRound === 1 || checkRound === 3) {
+          await page.evaluate(`window.scrollTo(0, document.body.scrollHeight)`).catch(() => {});
+          await page.waitForTimeout(1000);
+        }
+
+        const currentUrl = page.url();
+        const fullText = await page.evaluate(() => (document.body?.innerText || "")).catch(() => "");
+        const fullLower = fullText.toLowerCase();
+
+        if (fullLower.includes("your selections") || fullLower.includes("edit selections") || fullLower.includes("you're signed up") || fullLower.includes("you are signed up")) {
+          onStatusUpdate("completed");
+          log("✅ SUCCESS! Bruno Mars presale confirmed - YOUR SELECTIONS / signed up page visible!");
+          return { success: true };
+        }
+
+        if (fullLower.includes("thank") || fullLower.includes("success") || fullLower.includes("confirmed") || fullLower.includes("registered")) {
+          onStatusUpdate("completed");
+          log("✅ SUCCESS! Bruno Mars presale signup confirmed!");
+          return { success: true };
+        }
+
+        const urlChanged = currentUrl !== presaleUrl && !currentUrl.includes("brunomars");
+        const isHomepage = fullLower.includes("welcome back") || fullLower.includes("shop millions") || fullLower.includes("discover can't-miss");
+        if (urlChanged || isHomepage) {
+          onStatusUpdate("completed");
+          log("✅ SUCCESS! Page redirected away from presale form after Sign Up click — signup accepted!");
+          log("📄 Redirected to: " + currentUrl.substring(0, 120));
+          return { success: true };
+        }
+
+        if (fullLower.includes("error") && (fullLower.includes("try again") || fullLower.includes("something went wrong"))) {
+          log("❌ Error detected on page after submit: " + fullText.substring(0, 200).replace(/\n/g, ' '));
+          return { success: false, error: "Presale form returned an error after submission" };
+        }
+
+        log(`⏳ Check ${checkRound + 1}/5 — still waiting for confirmation...`);
       }
+
+      const finalText = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500)).catch(() => "");
+      log("⚠️ No clear confirmation after all checks. Final page: " + finalText.substring(0, 200).replace(/\n/g, ' '));
+      return { success: false, error: "Form submitted but no confirmation detected after 5 checks: " + finalText.substring(0, 150).replace(/\n/g, ' ') };
     } else {
       log("❌ Could not find Sign Up button. " + submitResult);
       return { success: false, error: "Sign Up button not found" };
