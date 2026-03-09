@@ -1070,16 +1070,18 @@ export async function registerRoutes(
         proxyUrl
       );
 
+      const smsCost = result.smsCost || 0;
       if (result.success) {
         const updated = await storage.updateAccount(accountId, { status: "verified" });
         if (updated) broadcastAccountUpdate(updated, ownerId);
-        broadcastLog(batchId, accountId, `TM account verified successfully!`, ownerId);
+        const smsNote = smsCost > 0 ? ` (SMS: $${smsCost.toFixed(2)})` : "";
+        broadcastLog(batchId, accountId, `TM account verified successfully!${smsNote}`, ownerId);
 
         const tmBillingPrice = await getCostPerAccount();
         await storage.createBillingRecord({
           accountId,
-          amount: tmBillingPrice.toFixed(2),
-          description: `TM Account: ${firstName} ${lastName} (${addisonEmail})`,
+          amount: (tmBillingPrice + smsCost).toFixed(2),
+          description: `TM Account: ${firstName} ${lastName} (${addisonEmail})${smsNote}`,
           ownerId,
         });
 
@@ -1089,8 +1091,12 @@ export async function registerRoutes(
         }
       } else {
         const costPerAccount = await getCostPerAccount();
-        await storage.creditWallet(ownerId, costPerAccount);
-        broadcastLog(batchId, accountId, `Refunded $${costPerAccount.toFixed(2)} for failed account`, ownerId);
+        const totalRefund = costPerAccount + smsCost;
+        await storage.creditWallet(ownerId, totalRefund);
+        const refundBreakdown = smsCost > 0
+          ? `Refunded $${totalRefund.toFixed(2)} (account $${costPerAccount.toFixed(2)} + SMS $${smsCost.toFixed(2)})`
+          : `Refunded $${costPerAccount.toFixed(2)} for failed account`;
+        broadcastLog(batchId, accountId, refundBreakdown, ownerId);
         const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: result.error || "Failed" });
         if (updated) broadcastAccountUpdate(updated, ownerId);
         broadcastLog(batchId, accountId, `Failed: ${result.error}`, ownerId);

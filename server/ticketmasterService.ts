@@ -152,11 +152,18 @@ export async function tmFullRegistrationFlow(
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
   proxyUrl?: string
-): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number }> {
   const maxRetries = 4;
+  let totalSmsCost = 0;
+  const MAX_SMS_SPEND = 0.72;
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
-      console.log(`[TM-Playwright] Retry attempt ${attempt + 1}/${maxRetries}...`);
+      if (totalSmsCost >= MAX_SMS_SPEND) {
+        console.log(`[TM-Playwright] SMS spend cap reached ($${totalSmsCost.toFixed(2)} / $${MAX_SMS_SPEND}), stopping retries`);
+        break;
+      }
+      console.log(`[TM-Playwright] Retry attempt ${attempt + 1}/${maxRetries} (SMS spent so far: $${totalSmsCost.toFixed(2)})...`);
       if (browserInstance) {
         try { await browserInstance.close(); } catch {}
         browserInstance = null;
@@ -165,6 +172,7 @@ export async function tmFullRegistrationFlow(
     }
 
     const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, proxyUrl);
+    totalSmsCost += result.smsCost || 0;
 
     if (result.error?.includes("browser has been closed") || result.error?.includes("crashed")) {
       console.log(`[TM-Playwright] Browser crashed, will retry...`);
@@ -180,25 +188,28 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
-    return result;
+    return { ...result, smsCost: totalSmsCost };
   }
 
-  return { success: false, error: "Failed after multiple retries (bot detection or crashes)" };
+  return { success: false, error: "Failed after multiple retries (bot detection or crashes)", smsCost: totalSmsCost };
 }
 
 async function handlePhoneVerification(
   page: Page,
   onStatusUpdate: (status: string) => void
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; smsCost: number }> {
   let smsOrderId: string | null = null;
+  let smsCost = 0;
 
   try {
     const smsOrder = await orderSMSNumber(1, "Ticketmaster");
     if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
-      return { success: false, error: `SMSPool order failed: ${smsOrder.error}` };
+      return { success: false, error: `SMSPool order failed: ${smsOrder.error}`, smsCost: 0 };
     }
 
     smsOrderId = smsOrder.orderId;
+    smsCost = 0.36;
+    console.log(`[TM-Playwright] SMS number ordered: $${smsCost} charged from SMSPool`);
     let phoneNumber = String(smsOrder.number);
     if (!phoneNumber.startsWith("+")) {
       phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
@@ -404,7 +415,7 @@ async function handlePhoneVerification(
     if (!phoneFilled) {
       console.log("[TM-Playwright] Could not find phone input field");
       await cancelSMSOrder(smsOrderId);
-      return { success: false, error: "Phone input field not found on page" };
+      return { success: false, error: "Phone input field not found on page", smsCost };
     }
 
     await page.waitForTimeout(1000);
@@ -493,7 +504,7 @@ async function handlePhoneVerification(
     if (!smsCode) {
       console.log("[TM-Playwright] No SMS code received from SMSPool");
       await cancelSMSOrder(smsOrderId);
-      return { success: false, error: "Timed out waiting for SMS verification code" };
+      return { success: false, error: "Timed out waiting for SMS verification code", smsCost };
     }
 
     console.log(`[TM-Playwright] Got phone verification code: ${smsCode}`);
@@ -627,13 +638,13 @@ async function handlePhoneVerification(
     if (phoneVerifyState.stillNeedsPhone && smsOrderId) {
       await cancelSMSOrder(smsOrderId);
     }
-    return { success: !phoneVerifyState.stillNeedsPhone };
+    return { success: !phoneVerifyState.stillNeedsPhone, smsCost };
   } catch (err: any) {
     console.log("[TM-Playwright] Phone verification error:", err.message);
     if (smsOrderId) {
       await cancelSMSOrder(smsOrderId);
     }
-    return { success: false, error: err.message };
+    return { success: false, error: err.message, smsCost };
   }
 }
 
@@ -645,13 +656,14 @@ async function doTMRegistration(
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
   proxyUrl?: string
-): Promise<{ success: boolean; error?: string; pageContent?: string }> {
+): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number }> {
   console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
   const isBrowserAPI = proxyUrl && proxyUrl.startsWith('wss://');
   console.log(`[TM-Playwright] isBrowserAPI: ${isBrowserAPI}`);
   let remoteBrowser: Browser | null = null;
   let page: Page;
   let context: any;
+  let totalSmsCost = 0;
 
   try {
     if (isBrowserAPI) {
@@ -1403,11 +1415,14 @@ async function doTMRegistration(
     if (pageLowerFinal.includes("add my phone") || pageLowerFinal.includes("verify your phone") || pageLowerFinal.includes("phone number")) {
       console.log("[TM-Playwright] Phone verification required, starting SMSPool flow...");
       const phoneResult = await handlePhoneVerification(page, onStatusUpdate);
+      totalSmsCost += phoneResult.smsCost || 0;
       if (phoneResult.success) {
         console.log("[TM-Playwright] Phone verification completed successfully!");
       } else {
         console.log("[TM-Playwright] Phone verification failed:", phoneResult.error);
-        console.log("[TM-Playwright] Account is email-verified but phone-unverified, marking as success");
+        if (totalSmsCost > 0) {
+          console.log(`[TM-Playwright] SMS cost spent: $${totalSmsCost.toFixed(2)} (non-recoverable)`);
+        }
       }
 
       await page.waitForTimeout(3000);
@@ -1443,30 +1458,30 @@ async function doTMRegistration(
                       (emailDonePhonePending && phoneVerified);
 
     if (isSuccess) {
-      return { success: true, pageContent: finalText.substring(0, 500) };
+      return { success: true, pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
     }
 
     if (finalLower.includes("almost there") || finalLower.includes("verify your account")) {
       const stillNeedsEmail = finalLower.includes("verify my email") || finalLower.includes("send code");
       const stillNeedsPhone = finalLower.includes("add my phone") && !finalLower.includes("phone verified");
       if (stillNeedsEmail && stillNeedsPhone) {
-        return { success: false, error: "Registration submitted but both email and phone verification incomplete.", pageContent: finalText.substring(0, 500) };
+        return { success: false, error: "Registration submitted but both email and phone verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
       if (stillNeedsEmail) {
-        return { success: false, error: "Registration submitted but email verification incomplete.", pageContent: finalText.substring(0, 500) };
+        return { success: false, error: "Registration submitted but email verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
       if (stillNeedsPhone) {
-        return { success: false, error: "Registration submitted but phone verification incomplete.", pageContent: finalText.substring(0, 500) };
+        return { success: false, error: "Registration submitted but phone verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
     }
 
     if (finalLower.includes("error") || finalLower.includes("failed") || finalLower.includes("invalid")) {
-      return { success: false, error: "Registration failed: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500) };
+      return { success: false, error: "Registration failed: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
     }
 
-    return { success: false, error: "Registration status unclear: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500) };
+    return { success: false, error: "Registration status unclear: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: err.message, smsCost: totalSmsCost };
   } finally {
     try {
       if (remoteBrowser) {
