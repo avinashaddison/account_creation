@@ -10,6 +10,7 @@ import { fullRegistrationFlow, retryDrawRegistration } from "./playwrightService
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsSignupFlow } from "./brunoMarsService";
+import { getSMSPoolBalance } from "./smspoolService";
 import { randomUUID, createHash } from "crypto";
 
 const DEFAULT_BROWSER_API_URL = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
@@ -430,6 +431,15 @@ export async function registerRoutes(
     try {
       const price = await getCostPerAccount();
       res.json({ price });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/smspool/balance", requireAuth, async (_req, res) => {
+    try {
+      const result = await getSMSPoolBalance();
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

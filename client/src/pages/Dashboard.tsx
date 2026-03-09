@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Users, CheckCircle2, XCircle, Clock, DollarSign, Loader2, Wallet,
-  TrendingUp, Activity, Zap, Shield, ArrowUpRight, Copy, Trophy
+  TrendingUp, Activity, Zap, Shield, ArrowUpRight, Copy, Trophy, Phone
 } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -32,6 +32,7 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [recentAccounts, setRecentAccounts] = useState<RecentAccount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [smsPoolBalance, setSmsPoolBalance] = useState<string | null>(null);
   const { toast } = useToast();
   const accountPrice = useAccountPrice();
 
@@ -45,10 +46,15 @@ export default function Dashboard() {
         if (!r.ok) return [];
         return r.json();
       }),
+      fetch("/api/smspool/balance", { credentials: "include" }).then((r) => {
+        if (!r.ok) return null;
+        return r.json();
+      }).catch(() => null),
     ])
-      .then(([dashData, accounts]) => {
+      .then(([dashData, accounts, smsData]) => {
         if (dashData) setData(dashData);
         setRecentAccounts((accounts || []).slice(0, 8));
+        if (smsData?.configured && smsData?.balance) setSmsPoolBalance(smsData.balance);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -226,6 +232,16 @@ export default function Dashboard() {
                 </div>
                 <div className="text-2xl font-black text-amber-300">${accountPrice.toFixed(2)}</div>
               </div>
+              {smsPoolBalance !== null && (
+                <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 col-span-2" data-testid="card-smspool-balance">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Phone className="w-4 h-4 text-blue-400" />
+                    <span className="text-xs font-medium text-blue-400">SMSPool Balance</span>
+                  </div>
+                  <div className="text-2xl font-black text-blue-300">${parseFloat(smsPoolBalance).toFixed(2)}</div>
+                  <div className="text-[10px] text-zinc-600 mt-1">Phone verification credits</div>
+                </div>
+              )}
             </div>
           </div>
         )}

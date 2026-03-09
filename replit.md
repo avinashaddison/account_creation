@@ -107,8 +107,15 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Flow**: Navigate to `https://www.ticketmaster.com/member/create_account` → redirects to `auth.ticketmaster.com` with `client_id=8bf7204a7e97.web.ticketmaster.us`
 - **Two-step form**: Step 1: email → Continue. Step 2: password, firstName, lastName, countryCode (US), postalCode, privacyPolicyCheckbox → Submit
 - **Password bypass**: ContentSquare analytics overrides `HTMLInputElement.prototype.value` setter and Bright Data blocks CDP `Input.dispatchKeyEvent` on password fields. Solution: create hidden iframe → get clean native setter from `iframe.contentWindow.HTMLInputElement.prototype.value.set` → use it to set password value
-- **Verification**: After registration, page shows "ALMOST THERE" → click "Verify My Email" → poll for email code → enter code → verify
-- **Key file**: `server/ticketmasterService.ts`
+- **Verification**: After registration, page shows "ALMOST THERE" → click "Verify My Email" → poll for email code → enter code → verify → then phone verification via SMSPool
+- **Phone Verification**: Ticketmaster requires phone verification after email. Uses SMSPool API to rent US phone numbers, enter on TM page, poll for SMS code, and complete verification. If SMSPool fails, account is still marked as verified (email-verified).
+- **Key files**: `server/ticketmasterService.ts`, `server/smspoolService.ts`
+
+## SMSPool Integration
+- **API**: `https://api.smspool.net` with `SMSPOOL_API_KEY` env secret
+- **Service**: `server/smspoolService.ts` — orderSMSNumber, checkSMSCode, pollForSMSCode, cancelSMSOrder, getSMSPoolBalance
+- **Endpoints**: `GET /api/smspool/balance` — check SMSPool balance (shown on dashboard)
+- **Usage**: Automatically orders US phone number for Ticketmaster service during TM registration flow
 
 ## Deployment
 - **Target**: VM (required for Playwright + persistent WebSocket connections)

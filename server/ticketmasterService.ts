@@ -1,7 +1,14 @@
 import { chromium, type Browser, type Page } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 
 chromium.use(StealthPlugin());
+
+function tmIsChallenge(text: string): boolean {
+  if (text.includes("don't refresh") || text.includes("one moment") || text.includes("please wait") || text.includes("checking your browser")) return true;
+  if (text.includes("almost there") && !text.includes("verify your account") && !text.includes("verify my email") && !text.includes("one more step")) return true;
+  return false;
+}
 
 let browserInstance: Browser | null = null;
 let launching = false;
@@ -179,6 +186,270 @@ export async function tmFullRegistrationFlow(
   return { success: false, error: "Failed after multiple retries (bot detection or crashes)" };
 }
 
+async function handlePhoneVerification(
+  page: Page,
+  onStatusUpdate: (status: string) => void
+): Promise<{ success: boolean; error?: string }> {
+  let smsOrderId: string | null = null;
+
+  try {
+    const smsOrder = await orderSMSNumber(1, "Ticketmaster");
+    if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
+      return { success: false, error: `SMSPool order failed: ${smsOrder.error}` };
+    }
+
+    smsOrderId = smsOrder.orderId;
+    let phoneNumber = smsOrder.number;
+    if (!phoneNumber.startsWith("+")) {
+      phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
+    }
+    console.log(`[TM-Playwright] Got SMS number: ${phoneNumber} (order: ${smsOrderId})`);
+
+    let addPhoneClicked = await clickButton(page, "add my phone");
+    if (!addPhoneClicked) addPhoneClicked = await clickButton(page, "verify phone");
+    if (!addPhoneClicked) addPhoneClicked = await clickButton(page, "add phone");
+    console.log(`[TM-Playwright] Add My Phone clicked: ${addPhoneClicked}`);
+
+    await page.waitForTimeout(3000);
+
+    let pageText = await getPageText(page);
+    let pageLower = pageText.toLowerCase();
+
+    if (tmIsChallenge(pageLower)) {
+      console.log("[TM-Playwright] Challenge after phone click, waiting...");
+      for (let cw = 0; cw < 30; cw++) {
+        await page.waitForTimeout(3000);
+        try {
+          pageText = await getPageText(page);
+          pageLower = pageText.toLowerCase();
+          if (!tmIsChallenge(pageLower)) {
+            console.log("[TM-Playwright] Phone challenge resolved!");
+            break;
+          }
+        } catch {}
+      }
+    }
+
+    console.log("[TM-Playwright] Phone page (first 500):", pageText.substring(0, 500));
+
+    const phoneInputs = await page.evaluate(`(() => {
+      var inputs = document.querySelectorAll('input');
+      var result = [];
+      for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          result.push({
+            tag: el.tagName, type: el.type, name: el.name, id: el.id,
+            placeholder: el.placeholder, maxLength: el.maxLength,
+            ariaLabel: el.getAttribute('aria-label') || ''
+          });
+        }
+      }
+      return result;
+    })()`);
+    console.log("[TM-Playwright] Phone page inputs:", JSON.stringify(phoneInputs));
+
+    const rawDigits = phoneNumber.replace(/\D/g, '');
+    const localNumber = rawDigits.startsWith("1") ? rawDigits.substring(1) : rawDigits;
+
+    const phoneSelectors = [
+      'input[type="tel"]',
+      'input[name*="phone"]',
+      'input[id*="phone"]',
+      'input[placeholder*="phone" i]',
+      'input[placeholder*="Phone"]',
+      'input[aria-label*="phone" i]',
+      'input[aria-label*="Phone"]',
+      'input[name*="mobile"]',
+      'input[id*="mobile"]',
+    ];
+
+    let phoneFilled = false;
+    for (const sel of phoneSelectors) {
+      try {
+        const exists = await page.$(sel);
+        if (exists) {
+          const visible = await exists.isVisible().catch(() => false);
+          if (visible) {
+            await exists.click();
+            await page.waitForTimeout(300);
+            await exists.fill(localNumber);
+            console.log(`[TM-Playwright] Phone filled via ${sel}: ${localNumber}`);
+            phoneFilled = true;
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!phoneFilled) {
+      const filledViaJS = await page.evaluate(`((number) => {
+        var selectors = ['input[type="tel"]', 'input[name*="phone"]', 'input[id*="phone"]'];
+        for (var s = 0; s < selectors.length; s++) {
+          var els = document.querySelectorAll(selectors[s]);
+          for (var i = 0; i < els.length; i++) {
+            var rect = els[i].getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+              if (nativeSet && nativeSet.set) nativeSet.set.call(els[i], number);
+              else els[i].value = number;
+              els[i].dispatchEvent(new Event('input', { bubbles: true }));
+              els[i].dispatchEvent(new Event('change', { bubbles: true }));
+              return 'filled:' + selectors[s];
+            }
+          }
+        }
+        return 'not-found';
+      })("${localNumber}")`);
+      console.log(`[TM-Playwright] Phone JS fill result: ${filledViaJS}`);
+      phoneFilled = filledViaJS !== 'not-found';
+    }
+
+    if (!phoneFilled) {
+      console.log("[TM-Playwright] Could not find phone input field");
+      await cancelSMSOrder(smsOrderId);
+      return { success: false, error: "Phone input field not found on page" };
+    }
+
+    await page.waitForTimeout(1000);
+
+    let sendCodeClicked = await clickButton(page, "send code");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "verify");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "send");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "continue");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "submit");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page);
+    console.log(`[TM-Playwright] Send phone code clicked: ${sendCodeClicked}`);
+
+    await page.waitForTimeout(5000);
+
+    pageText = await getPageText(page);
+    pageLower = pageText.toLowerCase();
+
+    if (tmIsChallenge(pageLower)) {
+      console.log("[TM-Playwright] Challenge after phone code send, waiting...");
+      for (let cw = 0; cw < 30; cw++) {
+        await page.waitForTimeout(3000);
+        try {
+          pageText = await getPageText(page);
+          pageLower = pageText.toLowerCase();
+          if (!tmIsChallenge(pageLower)) break;
+        } catch {}
+      }
+    }
+
+    console.log("[TM-Playwright] After phone code send (first 500):", pageText.substring(0, 500));
+
+    onStatusUpdate("verifying");
+    console.log("[TM-Playwright] Polling SMSPool for phone verification code...");
+    const smsCode = await pollForSMSCode(smsOrderId, 60, 3000);
+
+    if (!smsCode) {
+      console.log("[TM-Playwright] No SMS code received from SMSPool");
+      await cancelSMSOrder(smsOrderId);
+      return { success: false, error: "Timed out waiting for SMS verification code" };
+    }
+
+    console.log(`[TM-Playwright] Got phone verification code: ${smsCode}`);
+
+    const codeDigits = smsCode.split('');
+    const phoneCodeEntered = await page.evaluate(`((code, digits) => {
+      var inputs = document.querySelectorAll('input[maxlength="1"], input[data-index]');
+      var visibleDigitInputs = [];
+      for (var i = 0; i < inputs.length; i++) {
+        var rect = inputs[i].getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) visibleDigitInputs.push(inputs[i]);
+      }
+
+      if (visibleDigitInputs.length >= digits.length) {
+        for (var j = 0; j < digits.length; j++) {
+          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          if (nativeSet && nativeSet.set) nativeSet.set.call(visibleDigitInputs[j], digits[j]);
+          else visibleDigitInputs[j].value = digits[j];
+          visibleDigitInputs[j].dispatchEvent(new Event('input', { bubbles: true }));
+          visibleDigitInputs[j].dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        return 'individual-digits:' + visibleDigitInputs.length;
+      }
+
+      var singleSelectors = [
+        'input[id*="otp"]', 'input[name*="otp"]', 'input[name*="code"]',
+        'input[id*="code"]', 'input[placeholder*="code"]',
+        'input[inputmode="numeric"]',
+        'input[type="text"]:not([name="email"]):not([name="firstName"]):not([name="lastName"]):not([name="postalCode"]):not([type="tel"])',
+        'input[type="number"]', 'input[type="tel"]'
+      ];
+      for (var s = 0; s < singleSelectors.length; s++) {
+        var els = document.querySelectorAll(singleSelectors[s]);
+        for (var k = 0; k < els.length; k++) {
+          var r = els[k].getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            var nativeSet2 = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet2 && nativeSet2.set) nativeSet2.set.call(els[k], code);
+            else els[k].value = code;
+            els[k].dispatchEvent(new Event('input', { bubbles: true }));
+            els[k].dispatchEvent(new Event('change', { bubbles: true }));
+            els[k].dispatchEvent(new Event('blur', { bubbles: true }));
+            return 'single-input:' + singleSelectors[s];
+          }
+        }
+      }
+      return 'no-input-found';
+    })("${smsCode}", ${JSON.stringify(codeDigits)})`);
+    console.log(`[TM-Playwright] Phone code entry result: ${phoneCodeEntered}`);
+
+    await page.waitForTimeout(1000);
+
+    let verifyPhoneClicked = await clickButton(page, "verify");
+    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "confirm");
+    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "submit");
+    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "continue");
+    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page);
+    console.log(`[TM-Playwright] Verify phone code clicked: ${verifyPhoneClicked}`);
+
+    await page.waitForTimeout(5000);
+
+    pageText = await getPageText(page);
+    pageLower = pageText.toLowerCase();
+
+    if (tmIsChallenge(pageLower)) {
+      console.log("[TM-Playwright] Challenge after phone verify, waiting...");
+      for (let cw = 0; cw < 30; cw++) {
+        await page.waitForTimeout(3000);
+        try {
+          pageText = await getPageText(page);
+          pageLower = pageText.toLowerCase();
+          if (!tmIsChallenge(pageLower)) break;
+        } catch {}
+      }
+    }
+
+    console.log("[TM-Playwright] After phone verification (first 500):", pageText.substring(0, 500));
+
+    const phoneVerifyState = await page.evaluate(`(() => {
+      var body = document.body ? document.body.innerText.toLowerCase() : '';
+      return {
+        hasPhone: body.includes('phone') && (body.includes('✓') || body.includes('verified') || body.includes('complete')),
+        stillNeedsPhone: body.includes('add my phone') || body.includes('verify your phone'),
+        bodyPreview: (document.body ? document.body.innerText : '').substring(0, 300)
+      };
+    })()`);
+    console.log("[TM-Playwright] Phone verify state:", JSON.stringify(phoneVerifyState));
+
+    if (phoneVerifyState.stillNeedsPhone && smsOrderId) {
+      await cancelSMSOrder(smsOrderId);
+    }
+    return { success: !phoneVerifyState.stillNeedsPhone };
+  } catch (err: any) {
+    console.log("[TM-Playwright] Phone verification error:", err.message);
+    if (smsOrderId) {
+      await cancelSMSOrder(smsOrderId);
+    }
+    return { success: false, error: err.message };
+  }
+}
+
 async function doTMRegistration(
   email: string,
   firstName: string,
@@ -295,11 +566,7 @@ async function doTMRegistration(
     const errorPatterns = ["unexpected error", "we're sorry"];
     const blockPatterns = ["browsing activity", "has been paused", "unusual behavior", "access denied"];
 
-    const isChallenge = (text: string) => {
-      if (text.includes("don't refresh") || text.includes("one moment") || text.includes("please wait") || text.includes("checking your browser")) return true;
-      if (text.includes("almost there") && !text.includes("verify your account") && !text.includes("verify my email") && !text.includes("one more step")) return true;
-      return false;
-    };
+    const isChallenge = tmIsChallenge;
     const isError = (text: string) => errorPatterns.some(p => text.includes(p));
     const isBlocked = (text: string) => blockPatterns.some(p => text.includes(p));
 
@@ -880,8 +1147,25 @@ async function doTMRegistration(
       console.log("[TM-Playwright] Email verification state:", JSON.stringify(emailVerified));
     }
 
+    pageText = await getPageText(page);
+    let pageLowerFinal = pageText.toLowerCase();
+
+    if (pageLowerFinal.includes("add my phone") || pageLowerFinal.includes("verify your phone") || pageLowerFinal.includes("phone number")) {
+      console.log("[TM-Playwright] Phone verification required, starting SMSPool flow...");
+      const phoneResult = await handlePhoneVerification(page, onStatusUpdate);
+      if (phoneResult.success) {
+        console.log("[TM-Playwright] Phone verification completed successfully!");
+      } else {
+        console.log("[TM-Playwright] Phone verification failed:", phoneResult.error);
+        console.log("[TM-Playwright] Account is email-verified but phone-unverified, marking as success");
+      }
+
+      await page.waitForTimeout(3000);
+      pageText = await getPageText(page);
+    }
+
     const currentUrl = page.url();
-    const finalText = await getPageText(page);
+    const finalText = pageText;
     const finalLower = finalText.toLowerCase();
 
     console.log("[TM-Playwright] Final URL:", currentUrl);
@@ -896,17 +1180,25 @@ async function doTMRegistration(
     const verifyPageWithCodeDone = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
                       !finalLower.includes("verify my email") &&
                       !finalLower.includes("send code");
+    const emailDonePhonePending = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
+                      !finalLower.includes("verify my email") &&
+                      !finalLower.includes("send code") &&
+                      finalLower.includes("phone");
 
-    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageWithCodeDone;
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageWithCodeDone || emailDonePhonePending;
 
     if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500) };
     }
 
     if (finalLower.includes("almost there") || finalLower.includes("verify your account")) {
-      const stillNeedsVerify = finalLower.includes("verify my email") || finalLower.includes("send code") || finalLower.includes("add my phone");
+      const onlyPhoneLeft = !finalLower.includes("verify my email") && !finalLower.includes("send code") && finalLower.includes("phone");
+      if (onlyPhoneLeft) {
+        return { success: true, pageContent: finalText.substring(0, 500) };
+      }
+      const stillNeedsVerify = finalLower.includes("verify my email") || finalLower.includes("send code");
       if (stillNeedsVerify) {
-        return { success: false, error: "Registration submitted but verification incomplete. Page still shows verification requirements.", pageContent: finalText.substring(0, 500) };
+        return { success: false, error: "Registration submitted but email verification incomplete.", pageContent: finalText.substring(0, 500) };
       }
     }
 
