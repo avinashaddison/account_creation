@@ -6,29 +6,34 @@ chromium.use(StealthPlugin());
 
 const PRESALE_URL = "https://signup.ticketmaster.ca/brunomars";
 
+const TARGET_EVENTS = [
+  { date: "30", month: "SEP", city: "INGLEWOOD" },
+  { date: "03", month: "DEC", city: "CIUDAD" },
+  { date: "08", month: "DEC", city: "CIUDAD" },
+];
+
 export async function brunoMarsPresaleStep(
   page: Page,
   browser: Browser | null,
   log: (msg: string) => void,
   onStatusUpdate: (status: string) => void,
-  proxyUrl?: string
+  proxyUrl?: string,
+  tmCredentials?: { email: string; password: string }
 ): Promise<{ success: boolean; error?: string }> {
   let ownBrowser: Browser | null = null;
 
   try {
-    let sessionReused = false;
     if (!page || !browser) {
-      log("🌐 Opening new browser for presale (no active session)...");
+      log("Opening new browser for presale (no active session)...");
       ownBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
       const ctx = ownBrowser.contexts()[0];
       page = ctx ? (ctx.pages()[0] || await ctx.newPage()) : await ownBrowser.newPage();
     } else {
       try {
         await page.evaluate("1+1");
-        sessionReused = true;
-        log("🔄 Reusing authenticated TM browser session");
+        log("Reusing authenticated TM browser session");
       } catch {
-        log("⚠️ TM session expired, opening new browser...");
+        log("TM session expired, opening new browser...");
         browser = null;
         ownBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
         const ctx = ownBrowser.contexts()[0];
@@ -37,32 +42,34 @@ export async function brunoMarsPresaleStep(
     }
 
     onStatusUpdate("presale_loading");
-    log("🔗 Navigating to Bruno Mars presale page...");
+    log("Navigating to Bruno Mars presale page...");
 
     await page.route("**/*contentsquare*", (route) => route.abort()).catch(() => {});
     await page.route("**/*cs-sdk*", (route) => route.abort()).catch(() => {});
 
     await page.goto(PRESALE_URL, { waitUntil: "domcontentloaded", timeout: 120000 });
 
-    for (let w = 0; w < 20; w++) {
+    for (let w = 0; w < 30; w++) {
       await page.waitForTimeout(2000);
-      const text = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500).toLowerCase());
-      if (text.includes("select your events") || text.includes("sign up") || text.includes("inglewood") || text.includes("vancouver") || text.includes("ciudad")) {
-        log("📄 Presale page loaded!");
+      const text = await page.evaluate(() => (document.body?.innerText || "").substring(0, 1000).toLowerCase());
+      if (text.includes("select your events") || text.includes("sign up") || text.includes("inglewood") || text.includes("vancouver") || text.includes("ciudad") || text.includes("sélectionnez")) {
+        log("Presale page loaded!");
         break;
       }
-      if (text.includes("checking") || text.includes("one moment") || text.includes("loading")) {
-        log(`⏳ Waiting for page to load... (${w * 2}s)`);
-        continue;
+      if (text.includes("you're all set") || text.includes("your selections") || text.includes("edit selections")) {
+        log("Already signed up! Success page detected.");
+        onStatusUpdate("completed");
+        return { success: true };
       }
-      if (w >= 19) {
+      if (w % 5 === 4) log("Waiting for page to load... (" + (w * 2) + "s)");
+      if (w >= 29) {
         const url = page.url();
-        log("⚠️ Page may not have fully loaded. URL: " + url.substring(0, 100));
+        log("Page may not have fully loaded. URL: " + url.substring(0, 100));
       }
     }
 
     await page.evaluate(`(() => {
-      var selectors = ['[id*="onetrust"]', '[class*="onetrust"]', '[id*="cookie"]', '[class*="cookie"]', '[class*="consent-banner"]', '[id*="consent"]', '.modal-overlay', '.overlay'];
+      var selectors = ['[id*="onetrust"]', '[class*="onetrust"]', '[id*="cookie"]', '[class*="cookie"]', '[class*="consent-banner"]'];
       for (var i = 0; i < selectors.length; i++) {
         var els = document.querySelectorAll(selectors[i]);
         for (var j = 0; j < els.length; j++) { els[j].remove(); }
@@ -72,216 +79,115 @@ export async function brunoMarsPresaleStep(
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_events");
-    log("🎵 Selecting events (up to 3)...");
-    console.log("[BM-Presale] Starting event selection...");
+    log("Selecting target events (30 SEP, 03 DEC, 08 DEC)...");
 
-    let selectedCount = 0;
-
-    const domInfo = await page.evaluate(`(() => {
-      var result = { checkboxInputs: [], eventRowHtml: '', firstRowParentHtml: '' };
-      var cbs = document.querySelectorAll('input[type="checkbox"]');
+    const eventInfo = await page.evaluate(`(() => {
+      var cbs = document.querySelectorAll('input[type="checkbox"][name="markets"]');
+      var events = [];
       for (var i = 0; i < cbs.length; i++) {
-        var parent = cbs[i].closest('label') || cbs[i].closest('div') || cbs[i].parentElement;
-        var grandparent = parent ? parent.parentElement : null;
-        var text = '';
-        var searchEl = parent;
-        for (var depth = 0; depth < 5 && searchEl; depth++) {
-          text = (searchEl.innerText || '').replace(/\\n/g, ' ').substring(0, 150);
-          if (text.length > 20) break;
-          searchEl = searchEl.parentElement;
+        var row = cbs[i];
+        for (var d = 0; d < 10; d++) {
+          if (!row.parentElement) break;
+          row = row.parentElement;
+          if (row.textContent && row.textContent.length > 30) break;
         }
-        result.checkboxInputs.push({
-          id: cbs[i].id || '',
-          name: cbs[i].name || '',
-          checked: cbs[i].checked,
-          visible: cbs[i].offsetParent !== null || cbs[i].offsetWidth > 0 || cbs[i].offsetHeight > 0,
-          parentTag: parent ? parent.tagName : '',
-          parentClasses: parent ? (parent.className || '').toString().substring(0, 100) : '',
-          grandparentTag: grandparent ? grandparent.tagName : '',
-          nearbyText: text,
-          isConsent: text.toLowerCase().includes('consent') || text.toLowerCase().includes('submitting') || text.toLowerCase().includes('privacy') || text.toLowerCase().includes('fan list') || text.toLowerCase().includes('marketing')
+        events.push({
+          index: i,
+          text: (row.textContent || '').replace(/\\s+/g, ' ').substring(0, 200),
+          checked: cbs[i].checked
         });
       }
-      var inglewood = null;
-      var allEls = document.querySelectorAll('*');
-      for (var j = 0; j < allEls.length; j++) {
-        if (allEls[j].children.length < 3 && (allEls[j].textContent || '').includes('INGLEWOOD')) {
-          inglewood = allEls[j];
+      var consent = [];
+      var allCbs = document.querySelectorAll('input[type="checkbox"]');
+      for (var j = 0; j < allCbs.length; j++) {
+        if (allCbs[j].name !== 'markets') {
+          consent.push({ index: j, id: allCbs[j].id, checked: allCbs[j].checked });
+        }
+      }
+      var btns = document.querySelectorAll('button');
+      var btnTexts = [];
+      for (var k = 0; k < btns.length; k++) {
+        btnTexts.push((btns[k].textContent || '').trim().substring(0, 80));
+      }
+      return { events: events, consent: consent, buttons: btnTexts, totalCheckboxes: allCbs.length };
+    })()`) as any;
+
+    log("Found " + eventInfo.events.length + " event checkboxes, " + eventInfo.consent.length + " consent checkboxes");
+    log("Buttons on page: " + JSON.stringify(eventInfo.buttons));
+    for (const ev of eventInfo.events) {
+      log("  Event[" + ev.index + "]: " + ev.text.substring(0, 80) + " checked=" + ev.checked);
+    }
+
+    let selectedCount = 0;
+    const targetIndices: number[] = [];
+
+    for (const target of TARGET_EVENTS) {
+      for (const ev of eventInfo.events) {
+        const t = ev.text.toUpperCase();
+        if (t.includes(target.date) && (t.includes(target.city) || t.includes(target.month)) && !targetIndices.includes(ev.index)) {
+          targetIndices.push(ev.index);
           break;
         }
       }
-      if (inglewood) {
-        var row = inglewood;
-        for (var k = 0; k < 8; k++) {
-          if (!row.parentElement) break;
-          row = row.parentElement;
-          var rowCbs = row.querySelectorAll('input[type="checkbox"]');
-          if (rowCbs.length === 1) {
-            result.eventRowHtml = row.outerHTML.substring(0, 800);
-            result.firstRowParentHtml = row.parentElement ? row.parentElement.outerHTML.substring(0, 200) : '';
-            break;
-          }
-        }
-      }
-      return result;
-    })()`) as any;
-
-    console.log("[BM-Presale] Found " + domInfo.checkboxInputs.length + " checkbox inputs total");
-    for (const cb of domInfo.checkboxInputs) {
-      console.log("[BM-Presale] CB: id=" + cb.id + " name=" + cb.name + " checked=" + cb.checked + " visible=" + cb.visible + " isConsent=" + cb.isConsent + " text=" + cb.nearbyText.substring(0, 60));
-      log("  CB: id=" + cb.id + " checked=" + cb.checked + " consent=" + cb.isConsent + " text=" + cb.nearbyText.substring(0, 50));
     }
-    console.log("[BM-Presale] Event row HTML: " + domInfo.eventRowHtml.substring(0, 500));
 
-    const eventCheckboxes = domInfo.checkboxInputs.filter((cb: any) => !cb.isConsent);
-    const consentCheckboxes = domInfo.checkboxInputs.filter((cb: any) => cb.isConsent);
-    log("  Event checkboxes: " + eventCheckboxes.length + ", Consent checkboxes: " + consentCheckboxes.length);
-
-    if (eventCheckboxes.length > 0) {
-      log("🎯 Strategy 1: Click event checkbox inputs directly...");
-      for (let i = 0; i < Math.min(3, eventCheckboxes.length); i++) {
-        try {
-          const cb = eventCheckboxes[i];
-          let locator;
-          if (cb.id) {
-            locator = page.locator('#' + cb.id);
-          } else if (cb.name) {
-            locator = page.locator('input[type="checkbox"][name="' + cb.name + '"]').nth(i);
-          } else {
-            const allCbs = page.locator('input[type="checkbox"]');
-            const idx = domInfo.checkboxInputs.indexOf(cb);
-            locator = allCbs.nth(idx);
-          }
-
-          await locator.evaluate((el: any) => {
-            el.scrollIntoView({ block: 'center' });
-          }).catch(() => {});
-          await page.waitForTimeout(300);
-
-          const labelLocator = locator.locator('xpath=ancestor::label');
-          const hasLabel = await labelLocator.count().catch(() => 0);
-          if (hasLabel > 0) {
-            await labelLocator.first().click({ timeout: 3000 });
-            log("  ☑ Clicked label for event checkbox " + i);
-          } else {
-            await locator.click({ force: true, timeout: 3000 });
-            log("  ☑ Force-clicked event checkbox " + i);
-          }
-
-          await page.waitForTimeout(300);
-          const isNowChecked = await locator.isChecked().catch(() => false);
-          if (!isNowChecked) {
-            log("  ⚠️ Checkbox " + i + " not checked after click, trying dispatchEvent...");
-            await locator.evaluate((el: any) => {
-              el.checked = true;
-              el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-            await page.waitForTimeout(200);
-            const rechecked = await locator.isChecked().catch(() => false);
-            if (!rechecked) {
-              log("  ⚠️ Still not checked, trying parent click...");
-              const parent = locator.locator('xpath=..');
-              await parent.click({ timeout: 3000 }).catch(() => {});
-            }
-          }
-          selectedCount++;
-          console.log("[BM-Presale] Clicked event checkbox " + i + " (id=" + cb.id + ")");
-          await page.waitForTimeout(500);
-        } catch (cbErr: any) {
-          log("  ⚠️ Checkbox click error: " + cbErr.message.substring(0, 80));
-          console.log("[BM-Presale] Checkbox click error: " + cbErr.message.substring(0, 100));
-        }
+    if (targetIndices.length < 3) {
+      log("Could not find all 3 target events by text. Falling back to indices 0, 2, 5 (30 SEP, 03 DEC, 08 DEC)");
+      if (eventInfo.events.length >= 6) {
+        targetIndices.length = 0;
+        targetIndices.push(0, 2, 5);
+      } else if (eventInfo.events.length >= 3) {
+        targetIndices.length = 0;
+        targetIndices.push(0, 1, 2);
       }
     }
 
-    if (selectedCount === 0) {
-      log("🔍 Strategy 2: Find and click event row containers...");
-      const eventCities = ["INGLEWOOD", "VANCOUVER", "CIUDAD DE MÉXICO"];
-      for (const city of eventCities) {
-        if (selectedCount >= 3) break;
-        try {
-          const cityEl = page.locator(`text=${city}`).first();
-          const isVis = await cityEl.isVisible({ timeout: 2000 }).catch(() => false);
-          if (!isVis) continue;
+    log("Target event indices: " + JSON.stringify(targetIndices));
 
-          let clickTarget = cityEl;
-          for (let depth = 0; depth < 6; depth++) {
-            const parent = clickTarget.locator('xpath=..');
-            const hasCb = await parent.locator('input[type="checkbox"]').count().catch(() => 0);
-            if (hasCb > 0) {
-              const cbInRow = parent.locator('input[type="checkbox"]').first();
-              const labelWrap = cbInRow.locator('xpath=ancestor::label');
-              const hasLbl = await labelWrap.count().catch(() => 0);
-              if (hasLbl > 0) {
-                await labelWrap.first().click({ timeout: 3000 });
-              } else {
-                await cbInRow.click({ force: true, timeout: 3000 });
-              }
-              selectedCount++;
-              log("  ☑ Clicked checkbox in row for " + city + " (depth " + depth + ")");
-              console.log("[BM-Presale] Clicked checkbox in row for " + city);
-              await page.waitForTimeout(500);
-              break;
-            }
-            clickTarget = parent;
-          }
-        } catch (rowErr: any) {
-          log("  ⚠️ Row search error for " + city + ": " + rowErr.message.substring(0, 80));
-        }
-      }
-    }
-
-    if (selectedCount === 0) {
-      log("🔍 Strategy 3: Click all non-consent checkboxes by index...");
+    for (const idx of targetIndices) {
       try {
-        const allCbs = page.locator('input[type="checkbox"]');
-        const total = await allCbs.count();
-        log("  Total checkboxes on page: " + total);
-        let clicked = 0;
-        for (let i = 0; i < total && clicked < 3; i++) {
-          const cbText = await allCbs.nth(i).evaluate((el: any) => {
-            var p = el;
-            for (var d = 0; d < 5; d++) { p = p.parentElement; if (!p) break; }
-            return (p ? p.innerText : '').toLowerCase().substring(0, 100);
-          }).catch(() => '');
-          const isConsent = cbText.includes('consent') || cbText.includes('submitting') || cbText.includes('privacy') || cbText.includes('fan list');
-          if (!isConsent) {
-            await allCbs.nth(i).click({ force: true, timeout: 3000 });
-            clicked++;
-            selectedCount++;
-            log("  ☑ Clicked checkbox index " + i);
-            await page.waitForTimeout(500);
-          }
+        const cb = page.locator('input[type="checkbox"][name="markets"]').nth(idx);
+        const exists = await cb.count().catch(() => 0);
+        if (exists === 0) {
+          log("  Event checkbox index " + idx + " not found, skipping");
+          continue;
         }
-      } catch (idxErr: any) {
-        log("  ⚠️ Index click error: " + idxErr.message.substring(0, 80));
+
+        await cb.evaluate((el: any) => {
+          el.scrollIntoView({ block: 'center' });
+        }).catch(() => {});
+        await page.waitForTimeout(300);
+
+        const labelLocator = cb.locator('xpath=ancestor::label');
+        const hasLabel = await labelLocator.count().catch(() => 0);
+        if (hasLabel > 0) {
+          await labelLocator.first().click({ timeout: 5000 });
+          log("  Clicked label for event " + idx);
+        } else {
+          await cb.click({ force: true, timeout: 5000 });
+          log("  Force-clicked event " + idx);
+        }
+
+        await page.waitForTimeout(500);
+        const isChecked = await cb.isChecked().catch(() => false);
+        if (!isChecked) {
+          log("  Event " + idx + " not checked, trying evaluate...");
+          await cb.evaluate((el: any) => {
+            el.checked = true;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          });
+        }
+        selectedCount++;
+      } catch (err: any) {
+        log("  Error clicking event " + idx + ": " + err.message.substring(0, 80));
       }
     }
 
-    const verifyChecked = await page.evaluate(`(() => {
-      var cbs = document.querySelectorAll('input[type="checkbox"]');
-      var results = [];
-      for (var i = 0; i < cbs.length; i++) {
-        results.push({ idx: i, checked: cbs[i].checked, id: cbs[i].id || '' });
-      }
-      return results;
-    })()`) as any[];
-    log("📋 Checkbox states after selection:");
-    for (const v of verifyChecked) {
-      log("  [" + v.idx + "] " + (v.checked ? "✅" : "❌") + " id=" + v.id);
-      console.log("[BM-Presale] Verify CB[" + v.idx + "] checked=" + v.checked + " id=" + v.id);
-    }
+    log("Selected " + selectedCount + " events");
+    await page.waitForTimeout(500);
 
-    log("✅ Attempted " + selectedCount + " event selections");
-    console.log("[BM-Presale] Total events attempted: " + selectedCount);
-    await page.waitForTimeout(1000);
-
-    log("☑ Checking consent boxes...");
-    console.log("[BM-Presale] Checking consent boxes...");
-    let consentChecked = 0;
-
+    log("Checking consent boxes...");
     const consentIds = ["allow_artist_sms", "allow_marketing"];
     for (const consentId of consentIds) {
       try {
@@ -302,46 +208,18 @@ export async function brunoMarsPresaleStep(
             if (!nowChecked) {
               await cb.evaluate((el: any) => {
                 el.checked = true;
-                el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
               });
             }
           }
-          consentChecked++;
-          log("  ☑ Consent: " + consentId + " checked");
-          console.log("[BM-Presale] Consent: " + consentId + " checked");
-        } else {
-          log("  ⚠️ Consent CB #" + consentId + " not found");
+          log("  Consent: " + consentId + " checked");
         }
-      } catch (consentErr: any) {
-        log("  ⚠️ Consent error " + consentId + ": " + consentErr.message.substring(0, 60));
+      } catch (err: any) {
+        log("  Consent error " + consentId + ": " + err.message.substring(0, 60));
       }
     }
 
-    if (consentChecked === 0) {
-      log("  Trying fallback: check all non-event checkboxes...");
-      const allCbs2 = page.locator('input[type="checkbox"]');
-      const totalCbs2 = await allCbs2.count();
-      for (let i = 0; i < totalCbs2; i++) {
-        try {
-          const cbName = await allCbs2.nth(i).getAttribute('name').catch(() => '');
-          if (cbName !== 'markets') {
-            const checked = await allCbs2.nth(i).isChecked().catch(() => false);
-            if (!checked) {
-              await allCbs2.nth(i).click({ force: true, timeout: 3000 });
-              consentChecked++;
-              log("  ☑ Fallback consent CB " + i + " (name=" + cbName + ")");
-            } else {
-              consentChecked++;
-            }
-          }
-        } catch {}
-      }
-    }
-
-    log("✅ " + consentChecked + " consent box(es) checked");
-    console.log("[BM-Presale] Consent checked: " + consentChecked);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(500);
 
     const finalState = await page.evaluate(`(() => {
       var cbs = document.querySelectorAll('input[type="checkbox"]');
@@ -351,163 +229,202 @@ export async function brunoMarsPresaleStep(
       }
       return r;
     })()`) as any[];
-    log("📋 Final checkbox states before Sign Up:");
+    log("Final checkbox states:");
     for (const s of finalState) {
-      log("  [" + s.idx + "] " + (s.checked ? "✅" : "❌") + " id=" + s.id + " name=" + s.name);
-      console.log("[BM-Presale] Final CB[" + s.idx + "] checked=" + s.checked + " id=" + s.id + " name=" + s.name);
+      log("  [" + s.idx + "] " + (s.checked ? "YES" : "NO") + " id=" + s.id + " name=" + s.name);
     }
 
     onStatusUpdate("presale_submitting");
-    log("🔘 Clicking Sign Up button...");
-    console.log("[BM-Presale] Clicking Sign Up...");
+    log("Clicking Sign Up button...");
 
     let submitResult = "not-found";
 
-    const allBtnsDebug = await page.evaluate(`(() => {
-      var btns = document.querySelectorAll('button, input[type="submit"]');
-      var r = [];
-      for (var i = 0; i < btns.length; i++) {
-        r.push({ tag: btns[i].tagName, text: (btns[i].textContent || btns[i].value || '').trim().substring(0, 80), type: btns[i].type || '', disabled: btns[i].disabled });
-      }
-      return r;
-    })()`) as any[];
-    log("  All buttons on page: " + JSON.stringify(allBtnsDebug));
-    console.log("[BM-Presale] All buttons: " + JSON.stringify(allBtnsDebug));
-
     try {
-      const signUpBtn = page.locator('button:has-text("Sign Up"), button:has-text("S\'inscrire"), button:has-text("Inscription"), input[type="submit"]').first();
-      const btnVisible = await signUpBtn.isVisible({ timeout: 3000 }).catch(() => false);
-      if (btnVisible) {
-        const isDisabled = await signUpBtn.isDisabled().catch(() => false);
-        const btnText = await signUpBtn.textContent().catch(() => "");
-        log("  Sign Up button found: '" + btnText?.trim() + "', disabled=" + isDisabled);
-        console.log("[BM-Presale] Sign Up button visible: '" + btnText?.trim() + "', disabled=" + isDisabled);
-        await signUpBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-        await page.waitForTimeout(500);
-        await signUpBtn.click({ timeout: 10000, force: true });
-        submitResult = "clicked: " + (btnText?.trim() || "Sign Up");
-      } else {
-        const altBtn = page.locator('button, input[type="submit"]').filter({ hasText: /sign up|signup|register|submit|s'inscrire|inscription|soumettre/i }).first();
-        const altVisible = await altBtn.isVisible({ timeout: 3000 }).catch(() => false);
-        if (altVisible) {
-          await altBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-          await altBtn.click({ timeout: 10000, force: true });
-          submitResult = "clicked: alt button";
-        } else {
-          log("  Trying evaluate click fallback...");
-          const evalResult = await page.evaluate(`(() => {
-            var btns = document.querySelectorAll('button, input[type="submit"]');
-            var keywords = ['sign up', 'signup', 's\\'inscrire', 'inscription', 'submit', 'soumettre', 'register'];
-            for (var i = 0; i < btns.length; i++) {
-              var text = (btns[i].textContent || btns[i].value || '').trim().toLowerCase();
-              for (var k = 0; k < keywords.length; k++) {
-                if (text.includes(keywords[k])) {
-                  btns[i].scrollIntoView();
-                  btns[i].click();
-                  return 'eval-clicked: ' + (btns[i].textContent || btns[i].value || '').trim();
-                }
-              }
-            }
-            // Last resort: click the last button on the page (likely the submit)
-            if (btns.length > 0) {
-              var lastBtn = btns[btns.length - 1];
-              lastBtn.scrollIntoView();
-              lastBtn.click();
-              return 'eval-clicked-last: ' + (lastBtn.textContent || lastBtn.value || '').trim();
-            }
-            return 'eval-not-found';
-          })()`) as string;
-          submitResult = evalResult;
+      const clicked = await page.evaluate(`(() => {
+        var btns = document.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+          var text = (btns[i].textContent || '').trim().toLowerCase();
+          if (text === 'sign up' || text === "s'inscrire" || text === 'inscription' || text === 'submit') {
+            btns[i].scrollIntoView({ block: 'center' });
+            btns[i].click();
+            return 'clicked: ' + (btns[i].textContent || '').trim();
+          }
         }
-      }
-    } catch (btnErr: any) {
-      log("  ⚠️ Button click error: " + btnErr.message.substring(0, 80));
-      console.log("[BM-Presale] Button error, trying evaluate fallback...");
+        for (var j = 0; j < btns.length; j++) {
+          var text2 = (btns[j].textContent || '').trim().toLowerCase();
+          if (text2.includes('sign up') || text2.includes("s'inscrire") || text2.includes('inscription')) {
+            btns[j].scrollIntoView({ block: 'center' });
+            btns[j].click();
+            return 'clicked: ' + (btns[j].textContent || '').trim();
+          }
+        }
+        var inputs = document.querySelectorAll('input[type="submit"]');
+        if (inputs.length > 0) {
+          inputs[0].scrollIntoView({ block: 'center' });
+          inputs[0].click();
+          return 'clicked-input: ' + (inputs[0].value || '');
+        }
+        return 'not-found (buttons: ' + btns.length + ')';
+      })()`) as string;
+      submitResult = clicked;
+    } catch (err: any) {
+      log("Evaluate click failed: " + err.message.substring(0, 80));
       try {
-        const evalResult = await page.evaluate(`(() => {
-          var btns = document.querySelectorAll('button, input[type="submit"]');
-          var keywords = ['sign up', 'signup', 's\\'inscrire', 'inscription', 'submit', 'soumettre'];
-          for (var i = 0; i < btns.length; i++) {
-            var text = (btns[i].textContent || btns[i].value || '').trim().toLowerCase();
-            for (var k = 0; k < keywords.length; k++) {
-              if (text.includes(keywords[k])) {
-                btns[i].scrollIntoView();
-                btns[i].click();
-                return 'fallback-clicked: ' + (btns[i].textContent || btns[i].value || '').trim();
+        const signUpBtn = page.locator('button:has-text("Sign Up")').first();
+        await signUpBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+        await signUpBtn.click({ timeout: 10000, force: true });
+        submitResult = "pw-clicked: Sign Up";
+      } catch {
+        submitResult = "failed: " + err.message.substring(0, 80);
+      }
+    }
+
+    log("Submit result: " + submitResult);
+
+    if (!submitResult.startsWith("clicked") && !submitResult.startsWith("pw-clicked")) {
+      log("Could not find Sign Up button. " + submitResult);
+      return { success: false, error: "Sign Up button not found: " + submitResult };
+    }
+
+    log("Waiting for response after Sign Up...");
+    await page.waitForTimeout(3000);
+
+    for (let checkRound = 0; checkRound < 10; checkRound++) {
+      const currentUrl = page.url();
+      const fullText = await page.evaluate(() => (document.body?.innerText || "")).catch(() => "");
+      const fullLower = fullText.toLowerCase();
+
+      log("Check " + (checkRound + 1) + "/10 — URL: " + currentUrl.substring(0, 80));
+
+      if (fullLower.includes("you're all set") || fullLower.includes("your selections") || fullLower.includes("edit selections")) {
+        onStatusUpdate("completed");
+        log("SUCCESS! 'YOU'RE ALL SET' / 'YOUR SELECTIONS' page detected!");
+        return { success: true };
+      }
+
+      if (fullLower.includes("vos sélections") || fullLower.includes("modifier les sélections") || fullLower.includes("vous êtes inscrit")) {
+        onStatusUpdate("completed");
+        log("SUCCESS! French confirmation page detected!");
+        return { success: true };
+      }
+
+      if (fullLower.includes("thank") || fullLower.includes("success") || fullLower.includes("confirmed") || fullLower.includes("merci") || fullLower.includes("confirmé")) {
+        onStatusUpdate("completed");
+        log("SUCCESS! Confirmation detected!");
+        return { success: true };
+      }
+
+      if (currentUrl.includes("auth.ticketmaster") || fullLower.includes("sign in or create account") || fullLower.includes("connexion")) {
+        log("Login page detected after Sign Up click. Attempting to log in...");
+
+        if (!tmCredentials) {
+          log("No TM credentials provided, cannot log in.");
+          return { success: false, error: "Login required but no credentials available." };
+        }
+
+        try {
+          await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+          await page.waitForTimeout(5000);
+          const loginPageText = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500));
+          log("Login page content: " + loginPageText.substring(0, 200).replace(/\n/g, ' '));
+
+          const loginInputs = await page.evaluate(`(() => {
+            var inputs = document.querySelectorAll('input');
+            var r = [];
+            for (var i = 0; i < inputs.length; i++) {
+              if (inputs[i].offsetParent !== null || inputs[i].offsetWidth > 0) {
+                r.push({ type: inputs[i].type, id: inputs[i].id, name: inputs[i].name, placeholder: inputs[i].placeholder });
               }
             }
+            return r;
+          })()`) as any[];
+          log("Login visible inputs: " + JSON.stringify(loginInputs));
+
+          const escapedEmail = tmCredentials.email.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          const emailFilled = await page.evaluate(`(() => {
+            var el = document.querySelector('#email-input') || document.querySelector('input[type="email"]') || document.querySelector('input[name="email"]');
+            if (!el) return false;
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(el, '${escapedEmail}');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          })()`);
+          log("Email filled via evaluate: " + emailFilled);
+          if (!emailFilled) {
+            log("Could not find email input on login page");
+            return { success: false, error: "Login failed: email input not found on auth page" };
           }
-          if (btns.length > 0) {
-            var lastBtn = btns[btns.length - 1];
-            lastBtn.scrollIntoView();
-            lastBtn.click();
-            return 'fallback-clicked-last: ' + (lastBtn.textContent || lastBtn.value || '').trim();
+
+          const continueBtn = page.locator('button:has-text("Continue"), button:has-text("Continuer"), button:has-text("Sign In")').first();
+          await continueBtn.click({ timeout: 5000 });
+          log("Clicked Continue/Sign In on login page");
+          await page.waitForTimeout(5000);
+
+          const afterContinue = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500).toLowerCase());
+          if (afterContinue.includes("password") || afterContinue.includes("mot de passe")) {
+            log("Password field appeared, filling...");
+            const pwInput = page.locator('#password-input, input[type="password"]').first();
+            await pwInput.waitFor({ state: 'visible', timeout: 5000 });
+
+            const escapedPw = tmCredentials.password.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            await page.evaluate(`(() => {
+              var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]');
+              if (!el) return;
+              var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              setter.call(el, '${escapedPw}');
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            log("Password filled via evaluate setter");
+
+            const signInBtn = page.locator('button:has-text("Sign In"), button:has-text("Se connecter"), button[type="submit"]').first();
+            await signInBtn.click({ timeout: 5000 });
+            log("Clicked Sign In");
+            await page.waitForTimeout(5000);
+
+            const afterLogin = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500).toLowerCase());
+            log("After login: " + afterLogin.substring(0, 200));
+
+            if (afterLogin.includes("you're all set") || afterLogin.includes("your selections") || afterLogin.includes("edit selections")) {
+              onStatusUpdate("completed");
+              log("SUCCESS! Logged in and presale confirmed!");
+              return { success: true };
+            }
+
+            if (afterLogin.includes("select your events") || afterLogin.includes("sign up") || afterLogin.includes("inglewood")) {
+              log("Redirected back to presale form after login. Re-running selection...");
+              return await brunoMarsPresaleStep(page, browser, log, onStatusUpdate, proxyUrl, tmCredentials);
+            }
+
+            log("After login page: " + afterLogin.substring(0, 300));
+          } else if (afterContinue.includes("sign up") || afterContinue.includes("first name")) {
+            log("TM showing registration form - email not recognized as existing account");
+            return { success: false, error: "Login failed - TM doesn't recognize this email as existing account" };
           }
-          return 'fallback-not-found';
-        })()`) as string;
-        submitResult = evalResult;
-      } catch {
-        submitResult = "error: " + btnErr.message.substring(0, 80);
+        } catch (loginErr: any) {
+          log("Login error: " + loginErr.message.substring(0, 100));
+          return { success: false, error: "Login failed: " + loginErr.message.substring(0, 100) };
+        }
       }
+
+      if (fullLower.includes("error") && (fullLower.includes("try again") || fullLower.includes("something went wrong"))) {
+        log("Error on page: " + fullText.substring(0, 200).replace(/\n/g, ' '));
+        return { success: false, error: "Presale form returned an error" };
+      }
+
+      if (fullLower.includes("select your events") || fullLower.includes("sign up")) {
+        log("Still on the selection page, waiting...");
+      }
+
+      await page.waitForTimeout(2000);
     }
 
-    log("Submit: " + submitResult);
-    console.log("[BM-Presale] Submit result: " + submitResult);
-
-    if (submitResult.startsWith("clicked")) {
-      log("⏳ Waiting for confirmation...");
-      const presaleUrl = page.url();
-
-      for (let checkRound = 0; checkRound < 5; checkRound++) {
-        await page.waitForTimeout(checkRound === 0 ? 2000 : 2000);
-
-        if (checkRound === 1 || checkRound === 3) {
-          await page.evaluate(`window.scrollTo(0, document.body.scrollHeight)`).catch(() => {});
-          await page.waitForTimeout(1000);
-        }
-
-        const currentUrl = page.url();
-        const fullText = await page.evaluate(() => (document.body?.innerText || "")).catch(() => "");
-        const fullLower = fullText.toLowerCase();
-
-        if (fullLower.includes("your selections") || fullLower.includes("edit selections") || fullLower.includes("you're signed up") || fullLower.includes("you are signed up") || fullLower.includes("vos sélections") || fullLower.includes("modifier les sélections") || fullLower.includes("vous êtes inscrit")) {
-          onStatusUpdate("completed");
-          log("✅ SUCCESS! Bruno Mars presale confirmed - YOUR SELECTIONS / signed up page visible!");
-          return { success: true };
-        }
-
-        if (fullLower.includes("thank") || fullLower.includes("success") || fullLower.includes("confirmed") || fullLower.includes("registered") || fullLower.includes("merci") || fullLower.includes("confirmé") || fullLower.includes("inscrit")) {
-          onStatusUpdate("completed");
-          log("✅ SUCCESS! Bruno Mars presale signup confirmed!");
-          return { success: true };
-        }
-
-        const urlChanged = currentUrl !== presaleUrl && !currentUrl.includes("brunomars");
-        const isHomepage = fullLower.includes("welcome back") || fullLower.includes("shop millions") || fullLower.includes("discover can't-miss");
-        if (urlChanged || isHomepage) {
-          onStatusUpdate("completed");
-          log("✅ SUCCESS! Page redirected away from presale form after Sign Up click — signup accepted!");
-          log("📄 Redirected to: " + currentUrl.substring(0, 120));
-          return { success: true };
-        }
-
-        if (fullLower.includes("error") && (fullLower.includes("try again") || fullLower.includes("something went wrong"))) {
-          log("❌ Error detected on page after submit: " + fullText.substring(0, 200).replace(/\n/g, ' '));
-          return { success: false, error: "Presale form returned an error after submission" };
-        }
-
-        log(`⏳ Check ${checkRound + 1}/5 — still waiting for confirmation...`);
-      }
-
-      const finalText = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500)).catch(() => "");
-      log("⚠️ No clear confirmation after all checks. Final page: " + finalText.substring(0, 200).replace(/\n/g, ' '));
-      return { success: false, error: "Form submitted but no confirmation detected after 5 checks: " + finalText.substring(0, 150).replace(/\n/g, ' ') };
-    } else {
-      log("❌ Could not find Sign Up button. " + submitResult);
-      return { success: false, error: "Sign Up button not found" };
-    }
+    const finalText = await page.evaluate(() => (document.body?.innerText || "").substring(0, 500)).catch(() => "");
+    log("No clear confirmation after 10 checks. Final page: " + finalText.substring(0, 300).replace(/\n/g, ' '));
+    return { success: false, error: "No confirmation detected: " + finalText.substring(0, 150).replace(/\n/g, ' ') };
   } catch (err: any) {
-    log("❌ Presale error: " + err.message.substring(0, 200));
+    log("Presale error: " + err.message.substring(0, 200));
     return { success: false, error: err.message };
   } finally {
     try {

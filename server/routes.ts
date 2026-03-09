@@ -1638,7 +1638,8 @@ export async function registerRoutes(
                 await storage.updateAccount(acc.id, { status });
                 broadcastAccountUpdate({ ...acc, status }, userId);
               },
-              proxyUrl
+              proxyUrl,
+              { email: acc.email, password: acc.la28Password }
             );
             if (bmResult.success) {
               await storage.updateAccount(acc.id, { status: "completed" });
