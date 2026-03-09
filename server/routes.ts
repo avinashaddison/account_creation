@@ -270,7 +270,7 @@ export async function registerRoutes(
       let cleaned = 0;
       for (const acc of allAccounts) {
         if (
-          (acc.status === "registering" || acc.status === "waiting_code" || acc.status === "filling_form" || acc.status === "selecting_events" || acc.status === "submitting") &&
+          (acc.status === "registering" || acc.status === "waiting_code" || acc.status === "filling_form" || acc.status === "selecting_events" || acc.status === "submitting" || acc.status === "verifying" || acc.status === "presale_loading" || acc.status === "presale_filling" || acc.status === "presale_events" || acc.status === "presale_submitting") &&
           acc.createdAt
         ) {
           const age = now - new Date(acc.createdAt).getTime();
@@ -1385,15 +1385,17 @@ export async function registerRoutes(
       for (let i = 0; i < numAccounts; i++) {
         const fn = randomFrom(FIRST_NAMES);
         const ln = randomFrom(LAST_NAMES);
+        const pw = generatePassword();
         const username = generateRandomUsername();
         const addisonEmail = `${username}@${domain}`;
+        const addisonEmailPassword = "TempPass123!";
 
         const account = await storage.createAccount({
           email: addisonEmail,
-          emailPassword: "TempPass123!",
+          emailPassword: addisonEmailPassword,
           firstName: fn,
           lastName: ln,
-          la28Password: "N/A",
+          la28Password: pw,
           country: "United States",
           language: "English",
           status: "pending",
@@ -1412,9 +1414,70 @@ export async function registerRoutes(
 
       (async () => {
         for (const acc of created) {
-          broadcastLog(batchId, acc.id, `Starting Bruno Mars signup for ${acc.firstName} ${acc.lastName}...`, userId);
+          broadcastLog(batchId, acc.id, `Starting TM + Bruno Mars flow for ${acc.firstName} ${acc.lastName}...`, userId);
+
+          let tmSuccess = false;
           try {
-            const result = await brunoMarsSignupFlow(
+            broadcastLog(batchId, acc.id, `📧 Phase 1: Creating TM account...`, userId);
+            broadcastLog(batchId, acc.id, `Creating temp email: ${acc.email}`, userId);
+            await createTempEmail(acc.email, acc.emailPassword);
+            const token = await getAuthToken(acc.email, acc.emailPassword);
+            broadcastLog(batchId, acc.id, `Email ready, starting TM registration...`, userId);
+
+            const tmResult = await tmFullRegistrationFlow(
+              acc.email,
+              acc.firstName,
+              acc.lastName,
+              acc.la28Password,
+              async (status) => {
+                const updated = await storage.updateAccount(acc.id, { status: status as any });
+                if (updated) broadcastAccountUpdate(updated, userId);
+                broadcastLog(batchId, acc.id, `Status: ${status}`, userId);
+              },
+              async () => {
+                broadcastLog(batchId, acc.id, `Polling for verification code...`, userId);
+                const code = await pollForVerificationCode(token, 40, 3000);
+                if (code) {
+                  await storage.updateAccount(acc.id, { verificationCode: code });
+                  broadcastLog(batchId, acc.id, `Got verification code: ${code}`, userId);
+                } else {
+                  broadcastLog(batchId, acc.id, `Timed out waiting for code`, userId);
+                }
+                return code;
+              },
+              (message) => {
+                broadcastLog(batchId, acc.id, message, userId);
+              },
+              proxyUrl
+            );
+
+            const smsCost = tmResult.smsCost || 0;
+            if (tmResult.success) {
+              tmSuccess = true;
+              await storage.updateAccount(acc.id, { status: "verified" });
+              broadcastAccountUpdate({ ...acc, status: "verified" }, userId);
+              const smsNote = smsCost > 0 ? ` (SMS: $${smsCost.toFixed(2)})` : "";
+              broadcastLog(batchId, acc.id, `✅ TM account verified!${smsNote} Moving to presale signup...`, userId);
+            } else {
+              broadcastLog(batchId, acc.id, `❌ TM account creation failed: ${tmResult.error}`, userId);
+              await storage.updateAccount(acc.id, { status: "failed", errorMessage: `TM: ${tmResult.error}` });
+              broadcastAccountUpdate({ ...acc, status: "failed" }, userId);
+              await storage.creditWallet(userId, costPerAccount);
+              continue;
+            }
+          } catch (tmErr: any) {
+            broadcastLog(batchId, acc.id, `❌ TM account error: ${tmErr.message?.substring(0, 150)}`, userId);
+            await storage.updateAccount(acc.id, { status: "failed", errorMessage: tmErr.message });
+            broadcastAccountUpdate({ ...acc, status: "failed" }, userId);
+            await storage.creditWallet(userId, costPerAccount);
+            continue;
+          }
+
+          if (!tmSuccess) continue;
+
+          try {
+            broadcastLog(batchId, acc.id, `🎵 Phase 2: Bruno Mars presale signup...`, userId);
+            const bmResult = await brunoMarsSignupFlow(
               acc.firstName,
               acc.lastName,
               acc.email,
@@ -1425,27 +1488,27 @@ export async function registerRoutes(
                 broadcastAccountUpdate({ ...acc, status }, userId);
               }
             );
-            if (result.success) {
+            if (bmResult.success) {
               await storage.updateAccount(acc.id, { status: "completed" });
               broadcastAccountUpdate({ ...acc, status: "completed" }, userId);
-              broadcastLog(batchId, acc.id, "Bruno Mars presale signup completed!", userId);
+              broadcastLog(batchId, acc.id, "✅ Full flow complete! TM account created + Bruno Mars presale signed up!", userId);
               await storage.createBillingRecord({
                 userId,
                 type: "account_creation",
                 amount: String(costPerAccount),
-                description: `Bruno Mars signup: ${acc.email}`,
+                description: `TM + Bruno Mars: ${acc.firstName} ${acc.lastName} (${acc.email})`,
                 accountId: acc.id,
               });
             } else {
-              await storage.updateAccount(acc.id, { status: "failed", errorMessage: result.error || "Unknown error" });
+              await storage.updateAccount(acc.id, { status: "failed", errorMessage: `Presale: ${bmResult.error}` });
               broadcastAccountUpdate({ ...acc, status: "failed" }, userId);
-              broadcastLog(batchId, acc.id, `Failed: ${result.error}`, userId);
+              broadcastLog(batchId, acc.id, `❌ Presale signup failed: ${bmResult.error}`, userId);
               await storage.creditWallet(userId, costPerAccount);
             }
-          } catch (err: any) {
-            await storage.updateAccount(acc.id, { status: "failed", errorMessage: err.message });
+          } catch (bmErr: any) {
+            await storage.updateAccount(acc.id, { status: "failed", errorMessage: bmErr.message });
             broadcastAccountUpdate({ ...acc, status: "failed" }, userId);
-            broadcastLog(batchId, acc.id, `Error: ${err.message.substring(0, 200)}`, userId);
+            broadcastLog(batchId, acc.id, `❌ Presale error: ${bmErr.message?.substring(0, 200)}`, userId);
             await storage.creditWallet(userId, costPerAccount);
           }
         }

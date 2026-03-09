@@ -21,11 +21,16 @@ type BatchAccount = { id: string; email: string; firstName: string; lastName: st
 
 function getLogColor(msg: string) {
   const m = msg.toLowerCase();
-  if (m.includes("error") || m.includes("failed") || m.includes("fail")) return "text-red-400";
-  if (m.includes("completed") || m.includes("success") || m.includes("signed up")) return "text-emerald-400";
-  if (m.includes("selecting") || m.includes("event")) return "text-amber-400";
-  if (m.includes("form") || m.includes("filling") || m.includes("submit")) return "text-blue-400";
-  if (m.includes("navigat") || m.includes("connect") || m.includes("loading") || m.includes("browser")) return "text-cyan-400";
+  if (m.includes("error") || m.includes("failed") || m.includes("fail") || m.includes("❌")) return "text-red-400";
+  if (m.includes("success") || m.includes("complete") || m.includes("verified") || m.includes("✅")) return "text-emerald-400";
+  if (m.includes("phase 1") || m.includes("tm account")) return "text-cyan-300";
+  if (m.includes("phase 2") || m.includes("presale")) return "text-purple-400";
+  if (m.includes("selecting") || m.includes("event") || m.includes("☑")) return "text-amber-400";
+  if (m.includes("form") || m.includes("filling") || m.includes("submit") || m.includes("✏️")) return "text-blue-400";
+  if (m.includes("navigat") || m.includes("connect") || m.includes("loading") || m.includes("browser") || m.includes("🌐")) return "text-cyan-400";
+  if (m.includes("sms") || m.includes("phone") || m.includes("📱") || m.includes("📲")) return "text-orange-400";
+  if (m.includes("captcha") || m.includes("🛡️")) return "text-yellow-400";
+  if (m.includes("code") || m.includes("otp") || m.includes("verification")) return "text-violet-400";
   if (m.includes("status:")) return "text-sky-400";
   if (m.includes("starting") || m.includes("creating")) return "text-zinc-300";
   return "text-zinc-500";
@@ -33,14 +38,20 @@ function getLogColor(msg: string) {
 
 function getStepInfo(status: string): { label: string; color: string; icon: React.ReactNode } {
   switch (status) {
-    case "completed": return { label: "Signed Up", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
+    case "completed": return { label: "Complete", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
     case "failed": return { label: "Failed", color: "text-red-400", icon: <XCircle className="w-3.5 h-3.5" /> };
-    case "registering": return { label: "Loading Page", color: "text-cyan-400", icon: <Globe className="w-3.5 h-3.5" /> };
-    case "filling_form": return { label: "Filling Form", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };
-    case "selecting_events": return { label: "Selecting Events", color: "text-amber-400", icon: <Music className="w-3.5 h-3.5" /> };
-    case "submitting": return { label: "Submitting", color: "text-violet-400", icon: <Rocket className="w-3.5 h-3.5" /> };
+    case "registering": return { label: "TM: Registering", color: "text-cyan-400", icon: <Globe className="w-3.5 h-3.5" /> };
+    case "waiting_code": return { label: "TM: Waiting Code", color: "text-amber-400", icon: <Clock className="w-3.5 h-3.5" /> };
+    case "verifying": return { label: "TM: Verifying", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };
+    case "verified": return { label: "TM: Verified", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
+    case "presale_loading": return { label: "Presale: Loading", color: "text-purple-400", icon: <Globe className="w-3.5 h-3.5" /> };
+    case "presale_filling": return { label: "Presale: Filling", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };
+    case "presale_events": return { label: "Presale: Events", color: "text-amber-400", icon: <Music className="w-3.5 h-3.5" /> };
+    case "presale_submitting": return { label: "Presale: Submit", color: "text-violet-400", icon: <Rocket className="w-3.5 h-3.5" /> };
     case "pending": return { label: "Queued", color: "text-zinc-500", icon: <Clock className="w-3.5 h-3.5" /> };
-    default: return { label: "Processing", color: "text-sky-400", icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> };
+    default: 
+      if (status?.startsWith("phone_retry")) return { label: "TM: Phone Retry", color: "text-orange-400", icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> };
+      return { label: "Processing", color: "text-sky-400", icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> };
   }
 }
 
@@ -167,7 +178,7 @@ export default function BrunoMarsCreate() {
             <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-brunomars-title">TM - Bruno Mars</h1>
             <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/15 text-[10px]">Presale</Badge>
           </div>
-          <p className="text-zinc-500 text-sm mt-0.5">Automated presale signup on signup.ticketmaster.ca/brunomars</p>
+          <p className="text-zinc-500 text-sm mt-0.5">Creates TM account first, then registers for Bruno Mars presale</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/5">
           <Wallet className="w-3.5 h-3.5 text-emerald-400" />
@@ -378,7 +389,7 @@ export default function BrunoMarsCreate() {
                       <>
                         <Terminal className="w-10 h-10 text-zinc-800" />
                         <span className="text-zinc-600">Logs will appear here when you start signups</span>
-                        <span className="text-zinc-700 text-xs">Each signup goes through: Load Page &rarr; Fill Form &rarr; Select Events &rarr; Submit</span>
+                        <span className="text-zinc-700 text-xs">Phase 1: Create TM Account &rarr; Phase 2: Presale Signup &rarr; Select Events &rarr; Submit</span>
                       </>
                     )}
                   </div>
