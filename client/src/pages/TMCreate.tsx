@@ -23,7 +23,9 @@ type BatchAccount = { id: string; email: string; firstName: string; lastName: st
 function getLogColor(msg: string) {
   const m = msg.toLowerCase();
   if (m.includes("error") || m.includes("failed") || m.includes("fail")) return "text-red-400";
+  if (m.includes("refunded")) return "text-orange-400";
   if (m.includes("verified") || m.includes("success") || m.includes("phone verification completed")) return "text-emerald-400";
+  if (m.includes("sms number ordered") || m.includes("sms cost") || m.includes("$0.36")) return "text-amber-300 font-medium";
   if (m.includes("code") || m.includes("otp") || m.includes("sms")) return "text-amber-400";
   if (m.includes("phone") || m.includes("smspool")) return "text-violet-400";
   if (m.includes("email") || m.includes("mail")) return "text-sky-400";
@@ -245,12 +247,17 @@ export default function TMCreate() {
                   <span className="text-zinc-500">Price/account</span>
                   <span className="text-zinc-400">${accountPrice.toFixed(2)}</span>
                 </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-zinc-500">SMS verify/account</span>
+                  <span className="text-amber-400">$0.36</span>
+                </div>
                 <div className="flex justify-between text-xs border-t border-white/5 pt-1.5">
                   <span className="font-semibold text-zinc-300 flex items-center gap-1">
-                    <DollarSign className="w-3 h-3" /> Total
+                    <DollarSign className="w-3 h-3" /> Est. Total
                   </span>
-                  <span className="font-bold text-base bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${estimatedCost}</span>
+                  <span className="font-bold text-base bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${(count * (accountPrice + 0.36)).toFixed(2)}</span>
                 </div>
+                <p className="text-[10px] text-zinc-600 pt-0.5">SMS cost billed on success, refunded on failure</p>
               </div>
 
               {error && (
@@ -319,6 +326,44 @@ export default function TMCreate() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {!isRunning && accounts.length > 0 && (verified > 0 || failed > 0) && (
+            <div className="rounded-xl bg-[#111118] border border-white/5 p-4">
+              <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">Batch Summary</p>
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-zinc-500">Verified</span>
+                  <span className="text-emerald-400 font-semibold">{verified} / {accounts.length}</span>
+                </div>
+                {failed > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-500">Failed (refunded)</span>
+                    <span className="text-red-400">{failed}</span>
+                  </div>
+                )}
+                {(() => {
+                  const smsLogs = logs.filter(l => l.message.toLowerCase().includes("sms number ordered"));
+                  const refundLogs = logs.filter(l => l.message.toLowerCase().includes("refunded"));
+                  return (
+                    <>
+                      {smsLogs.length > 0 && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-zinc-500">SMS numbers used</span>
+                          <span className="text-amber-400">{smsLogs.length} × $0.36</span>
+                        </div>
+                      )}
+                      {refundLogs.length > 0 && (
+                        <div className="flex justify-between text-xs border-t border-white/5 pt-1.5">
+                          <span className="text-zinc-500">Refunds issued</span>
+                          <span className="text-orange-400">{refundLogs.length}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -392,13 +437,18 @@ export default function TMCreate() {
                 ) : (
                   filteredLogs.map((log, i) => {
                     const acct = accounts.find(a => a.id === log.accountId);
+                    const m = log.message.toLowerCase();
+                    const isCostLine = m.includes("sms number ordered") || m.includes("refunded") || m.includes("$0.36") || m.includes("sms cost");
                     return (
-                      <div key={i} className="flex gap-2 py-0.5 leading-relaxed group hover:bg-white/[0.02] px-1 -mx-1 rounded" data-testid={`log-tm-${i}`}>
+                      <div key={i} className={`flex gap-2 py-0.5 leading-relaxed group hover:bg-white/[0.02] px-1 -mx-1 rounded ${isCostLine ? "bg-white/[0.02]" : ""}`} data-testid={`log-tm-${i}`}>
                         <span className="text-zinc-700 shrink-0 select-none w-[72px]">{new Date(log.timestamp).toLocaleTimeString()}</span>
                         {!filterAccountId && accounts.length > 1 && acct && (
                           <span className="text-zinc-600 shrink-0 w-[60px] truncate">[{acct.firstName}]</span>
                         )}
-                        <span className={getLogColor(log.message)}>{log.message}</span>
+                        <span className={getLogColor(log.message)}>
+                          {isCostLine && <DollarSign className="w-3 h-3 inline mr-1 -mt-0.5" />}
+                          {log.message}
+                        </span>
                       </div>
                     );
                   })
