@@ -1429,6 +1429,60 @@ async function doTMRegistration(
       pageText = await getPageText(page);
     }
 
+    const postVerifyLower = pageText.toLowerCase();
+    if (postVerifyLower.includes("phone verified") && (postVerifyLower.includes("almost there") || postVerifyLower.includes("verify your account"))) {
+      console.log("[TM-Playwright] Both verifications done, looking for Continue/Done button to finalize...");
+
+      const finalizeClicked = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        const candidates = ["continue", "done", "finish", "complete", "let's go", "go to my account", "submit", "next"];
+        for (const btn of buttons) {
+          const text = (btn.textContent || "").trim().toLowerCase();
+          const rect = (btn as HTMLElement).getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            for (const c of candidates) {
+              if (text.includes(c)) {
+                (btn as HTMLElement).click();
+                return `clicked:${text}`;
+              }
+            }
+          }
+        }
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        for (const link of links) {
+          const href = (link as HTMLAnchorElement).href.toLowerCase();
+          const text = (link.textContent || "").trim().toLowerCase();
+          if (href.includes("ticketmaster.com") && !href.includes("authorization.oauth2") && !text.includes("cancel")) {
+            (link as HTMLElement).click();
+            return `link:${text}:${href}`;
+          }
+        }
+        return null;
+      });
+      console.log("[TM-Playwright] Finalize button result:", finalizeClicked);
+
+      if (finalizeClicked) {
+        try {
+          await page.waitForTimeout(5000);
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+        } catch {}
+      }
+
+      if (!finalizeClicked) {
+        try {
+          console.log("[TM-Playwright] No button found, trying to navigate to TM account page directly...");
+          await page.goto("https://www.ticketmaster.com/member/edit_account", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(3000);
+        } catch (navErr: any) {
+          console.log("[TM-Playwright] Direct navigation attempt failed:", navErr.message?.substring(0, 100));
+        }
+      }
+
+      pageText = await getPageText(page);
+      console.log("[TM-Playwright] After finalize (first 300):", pageText.substring(0, 300));
+      console.log("[TM-Playwright] After finalize URL:", page.url());
+    }
+
     const currentUrl = page.url();
     const finalText = pageText;
     const finalLower = finalText.toLowerCase();

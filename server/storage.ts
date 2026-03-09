@@ -30,6 +30,7 @@ export interface IStorage {
   getPaymentRequest(id: string): Promise<PaymentRequest | undefined>;
   updatePaymentRequest(id: string, updates: Partial<PaymentRequest>): Promise<PaymentRequest | undefined>;
   debitWallet(userId: string, amount: number): Promise<boolean>;
+  creditWallet(userId: string, amount: number): Promise<boolean>;
   approvePaymentAtomic(requestId: string): Promise<{ success: boolean; newBalance?: string; error?: string }>;
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
@@ -162,6 +163,30 @@ export class DatabaseStorage implements IStorage {
       await client.query("BEGIN");
       const res = await client.query(
         `UPDATE users SET wallet_balance = wallet_balance - $1 WHERE id = $2 AND wallet_balance >= $1 RETURNING wallet_balance`,
+        [amount.toFixed(2), userId]
+      );
+      if (res.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await client.query("COMMIT");
+      return true;
+    } catch {
+      await client.query("ROLLBACK");
+      return false;
+    } finally {
+      client.release();
+      pool.end();
+    }
+  }
+
+  async creditWallet(userId: string, amount: number): Promise<boolean> {
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const res = await client.query(
+        `UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id = $2 RETURNING wallet_balance`,
         [amount.toFixed(2), userId]
       );
       if (res.rowCount === 0) {
