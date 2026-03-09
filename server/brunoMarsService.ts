@@ -362,19 +362,32 @@ export async function brunoMarsPresaleStep(
     console.log("[BM-Presale] Clicking Sign Up...");
 
     let submitResult = "not-found";
+
+    const allBtnsDebug = await page.evaluate(`(() => {
+      var btns = document.querySelectorAll('button, input[type="submit"]');
+      var r = [];
+      for (var i = 0; i < btns.length; i++) {
+        r.push({ tag: btns[i].tagName, text: (btns[i].textContent || btns[i].value || '').trim().substring(0, 80), type: btns[i].type || '', disabled: btns[i].disabled });
+      }
+      return r;
+    })()`) as any[];
+    log("  All buttons on page: " + JSON.stringify(allBtnsDebug));
+    console.log("[BM-Presale] All buttons: " + JSON.stringify(allBtnsDebug));
+
     try {
-      const signUpBtn = page.locator('button:has-text("Sign Up")').first();
+      const signUpBtn = page.locator('button:has-text("Sign Up"), button:has-text("S\'inscrire"), button:has-text("Inscription"), input[type="submit"]').first();
       const btnVisible = await signUpBtn.isVisible({ timeout: 3000 }).catch(() => false);
       if (btnVisible) {
         const isDisabled = await signUpBtn.isDisabled().catch(() => false);
-        log("  Sign Up button found, disabled=" + isDisabled);
-        console.log("[BM-Presale] Sign Up button visible, disabled=" + isDisabled);
+        const btnText = await signUpBtn.textContent().catch(() => "");
+        log("  Sign Up button found: '" + btnText?.trim() + "', disabled=" + isDisabled);
+        console.log("[BM-Presale] Sign Up button visible: '" + btnText?.trim() + "', disabled=" + isDisabled);
         await signUpBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
         await page.waitForTimeout(500);
         await signUpBtn.click({ timeout: 10000, force: true });
-        submitResult = "clicked: Sign Up";
+        submitResult = "clicked: " + (btnText?.trim() || "Sign Up");
       } else {
-        const altBtn = page.locator('button, input[type="submit"]').filter({ hasText: /sign up|signup|register|submit/i }).first();
+        const altBtn = page.locator('button, input[type="submit"]').filter({ hasText: /sign up|signup|register|submit|s'inscrire|inscription|soumettre/i }).first();
         const altVisible = await altBtn.isVisible({ timeout: 3000 }).catch(() => false);
         if (altVisible) {
           await altBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
@@ -383,13 +396,24 @@ export async function brunoMarsPresaleStep(
         } else {
           log("  Trying evaluate click fallback...");
           const evalResult = await page.evaluate(`(() => {
-            var btns = document.querySelectorAll('button');
+            var btns = document.querySelectorAll('button, input[type="submit"]');
+            var keywords = ['sign up', 'signup', 's\\'inscrire', 'inscription', 'submit', 'soumettre', 'register'];
             for (var i = 0; i < btns.length; i++) {
-              if ((btns[i].textContent || '').trim().toLowerCase().includes('sign up')) {
-                btns[i].scrollIntoView();
-                btns[i].click();
-                return 'eval-clicked: ' + btns[i].textContent.trim();
+              var text = (btns[i].textContent || btns[i].value || '').trim().toLowerCase();
+              for (var k = 0; k < keywords.length; k++) {
+                if (text.includes(keywords[k])) {
+                  btns[i].scrollIntoView();
+                  btns[i].click();
+                  return 'eval-clicked: ' + (btns[i].textContent || btns[i].value || '').trim();
+                }
               }
+            }
+            // Last resort: click the last button on the page (likely the submit)
+            if (btns.length > 0) {
+              var lastBtn = btns[btns.length - 1];
+              lastBtn.scrollIntoView();
+              lastBtn.click();
+              return 'eval-clicked-last: ' + (lastBtn.textContent || lastBtn.value || '').trim();
             }
             return 'eval-not-found';
           })()`) as string;
@@ -401,13 +425,23 @@ export async function brunoMarsPresaleStep(
       console.log("[BM-Presale] Button error, trying evaluate fallback...");
       try {
         const evalResult = await page.evaluate(`(() => {
-          var btns = document.querySelectorAll('button');
+          var btns = document.querySelectorAll('button, input[type="submit"]');
+          var keywords = ['sign up', 'signup', 's\\'inscrire', 'inscription', 'submit', 'soumettre'];
           for (var i = 0; i < btns.length; i++) {
-            if ((btns[i].textContent || '').trim().toLowerCase().includes('sign up')) {
-              btns[i].scrollIntoView();
-              btns[i].click();
-              return 'fallback-clicked: ' + btns[i].textContent.trim();
+            var text = (btns[i].textContent || btns[i].value || '').trim().toLowerCase();
+            for (var k = 0; k < keywords.length; k++) {
+              if (text.includes(keywords[k])) {
+                btns[i].scrollIntoView();
+                btns[i].click();
+                return 'fallback-clicked: ' + (btns[i].textContent || btns[i].value || '').trim();
+              }
             }
+          }
+          if (btns.length > 0) {
+            var lastBtn = btns[btns.length - 1];
+            lastBtn.scrollIntoView();
+            lastBtn.click();
+            return 'fallback-clicked-last: ' + (lastBtn.textContent || lastBtn.value || '').trim();
           }
           return 'fallback-not-found';
         })()`) as string;
@@ -436,13 +470,13 @@ export async function brunoMarsPresaleStep(
         const fullText = await page.evaluate(() => (document.body?.innerText || "")).catch(() => "");
         const fullLower = fullText.toLowerCase();
 
-        if (fullLower.includes("your selections") || fullLower.includes("edit selections") || fullLower.includes("you're signed up") || fullLower.includes("you are signed up")) {
+        if (fullLower.includes("your selections") || fullLower.includes("edit selections") || fullLower.includes("you're signed up") || fullLower.includes("you are signed up") || fullLower.includes("vos sélections") || fullLower.includes("modifier les sélections") || fullLower.includes("vous êtes inscrit")) {
           onStatusUpdate("completed");
           log("✅ SUCCESS! Bruno Mars presale confirmed - YOUR SELECTIONS / signed up page visible!");
           return { success: true };
         }
 
-        if (fullLower.includes("thank") || fullLower.includes("success") || fullLower.includes("confirmed") || fullLower.includes("registered")) {
+        if (fullLower.includes("thank") || fullLower.includes("success") || fullLower.includes("confirmed") || fullLower.includes("registered") || fullLower.includes("merci") || fullLower.includes("confirmé") || fullLower.includes("inscrit")) {
           onStatusUpdate("completed");
           log("✅ SUCCESS! Bruno Mars presale signup confirmed!");
           return { success: true };

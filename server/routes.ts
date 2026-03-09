@@ -1670,5 +1670,43 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/test-presale", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ error: "Email required" });
+
+      const proxyUrl = await getDefaultBrowserApiUrl();
+      const logs: string[] = [];
+      const log = (msg: string) => {
+        logs.push(msg);
+        console.log("[TestPresale] " + msg);
+      };
+
+      log("Starting presale-only test for " + email);
+      log("Proxy: " + proxyUrl.substring(0, 60) + "...");
+
+      res.json({ status: "started", message: "Presale test started for " + email + ". Check server logs." });
+
+      (async () => {
+        try {
+          const { chromium } = await import("playwright-extra");
+          log("Connecting to browser...");
+          const browser = await chromium.connectOverCDP(proxyUrl, { timeout: 60000 });
+          log("Connected!");
+
+          const ctx = browser.contexts()[0];
+          const page = ctx ? (ctx.pages()[0] || await ctx.newPage()) : await browser.newPage();
+
+          const result = await brunoMarsPresaleStep(page, browser, log, (s) => log("Status: " + s), proxyUrl);
+          log("RESULT: " + JSON.stringify(result));
+        } catch (err: any) {
+          log("ERROR: " + err.message);
+        }
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return httpServer;
 }
