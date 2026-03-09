@@ -94,7 +94,7 @@ async function fillInput(page: Page, selectors: string[], value: string, useType
       const el = page.locator(selector).first();
       if (await el.isVisible({ timeout: 500 })) {
         await el.click({ timeout: 2000 });
-        await page.waitForTimeout(200);
+        await page.waitForTimeout(300);
         if (useType) {
           await el.pressSequentially(value, { delay: 30 + Math.random() * 50 });
         } else {
@@ -104,7 +104,24 @@ async function fillInput(page: Page, selectors: string[], value: string, useType
             await el.pressSequentially(value, { delay: 30 + Math.random() * 50 });
           }
         }
-        return true;
+        await page.waitForTimeout(200);
+        const currentVal = await el.inputValue().catch(() => '');
+        if (currentVal && currentVal.length > 0) return true;
+        console.log(`[TM-Playwright] fillInput: ${selector} fill attempt returned empty, trying native setter...`);
+        const nativeResult = await page.evaluate(`((sel, val) => {
+          var el = document.querySelector(sel);
+          if (!el) return false;
+          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          if (nativeSet && nativeSet.set) nativeSet.set.call(el, val);
+          else el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+          return el.value.length > 0;
+        })` + `(${JSON.stringify(selector)}, ${JSON.stringify(value)})`) as boolean;
+        if (nativeResult) return true;
+        console.log(`[TM-Playwright] fillInput: native setter also failed for ${selector}`);
+        continue;
       }
     } catch {}
   }
@@ -183,7 +200,7 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
-    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Forbidden action") || result.error?.includes("robots.txt") || result.error?.includes("phone verification incomplete") || result.error?.includes("email verification incomplete") || result.error?.includes("status unclear")) {
+    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Could not fill first name") || result.error?.includes("Could not fill last name") || result.error?.includes("Password validation failed") || result.error?.includes("Still on sign-up form") || result.error?.includes("Form validation errors") || result.error?.includes("Forbidden action") || result.error?.includes("robots.txt") || result.error?.includes("phone verification incomplete") || result.error?.includes("email verification incomplete") || result.error?.includes("status unclear") || result.error?.includes("Verification page present")) {
       console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 120)}`);
       continue;
     }
@@ -1020,12 +1037,58 @@ async function doTMRegistration(
     ], firstName);
     console.log(`[TM-Playwright] FirstName filled: ${fnFilled}`);
 
+    if (!fnFilled) {
+      const fnFilledJS = await page.evaluate(`((val) => {
+        var selectors = ['input[name="firstName"]', 'input[name="first_name"]', 'input[id*="first"]', 'input[autocomplete="given-name"]'];
+        for (var s = 0; s < selectors.length; s++) {
+          var el = document.querySelector(selectors[s]);
+          if (el) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet && nativeSet.set) nativeSet.set.call(el, val);
+            else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            return true;
+          }
+        }
+        return false;
+      })` + `(${JSON.stringify(firstName)})`) as boolean;
+      console.log(`[TM-Playwright] FirstName JS fallback: ${fnFilledJS}`);
+      if (!fnFilledJS) {
+        return { success: false, error: "Could not fill first name field" };
+      }
+    }
+
     const lnFilled = await fillInput(page, [
       'input[name="lastName"]', 'input[name="last_name"]', 'input[id*="last"]',
       'input[placeholder*="ast"]', 'input[data-testid*="last"]',
       'input[autocomplete="family-name"]',
     ], lastName);
     console.log(`[TM-Playwright] LastName filled: ${lnFilled}`);
+
+    if (!lnFilled) {
+      const lnFilledJS = await page.evaluate(`((val) => {
+        var selectors = ['input[name="lastName"]', 'input[name="last_name"]', 'input[id*="last"]', 'input[autocomplete="family-name"]'];
+        for (var s = 0; s < selectors.length; s++) {
+          var el = document.querySelector(selectors[s]);
+          if (el) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet && nativeSet.set) nativeSet.set.call(el, val);
+            else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            return true;
+          }
+        }
+        return false;
+      })` + `(${JSON.stringify(lastName)})`) as boolean;
+      console.log(`[TM-Playwright] LastName JS fallback: ${lnFilledJS}`);
+      if (!lnFilledJS) {
+        return { success: false, error: "Could not fill last name field" };
+      }
+    }
 
     let pwFilled = false;
     console.log("[TM-Playwright] Attempting password fill with keyboard method...");
@@ -1035,13 +1098,25 @@ async function doTMRegistration(
       const pwEl = page.locator(pwSelector).first();
       if (await pwEl.isVisible({ timeout: 5000 })) {
         await pwEl.click({ timeout: 3000 });
-        await page.waitForTimeout(300);
-        await pwEl.pressSequentially(password, { delay: 25 + Math.floor(Math.random() * 40) });
+        await page.waitForTimeout(500);
+        await pwEl.fill('');
         await page.waitForTimeout(200);
+        await pwEl.pressSequentially(password, { delay: 30 + Math.floor(Math.random() * 50) });
+        await page.waitForTimeout(500);
         const val = await pwEl.inputValue();
         if (val && val.length > 0) {
           pwFilled = true;
           console.log("[TM-Playwright] Password filled via keyboard pressSequentially");
+        } else {
+          console.log("[TM-Playwright] pressSequentially typed but inputValue is empty, checking via JS...");
+          const jsVal = await page.evaluate(`(() => {
+            var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+            return el ? el.value.length : 0;
+          })()`) as number;
+          if (jsVal > 0) {
+            pwFilled = true;
+            console.log("[TM-Playwright] Password confirmed via JS value check");
+          }
         }
       }
     } catch (e: any) {
@@ -1059,9 +1134,9 @@ async function doTMRegistration(
           return true;
         })()`);
         if (focused) {
-          await page.waitForTimeout(200);
-          await page.keyboard.type(password, { delay: 30 + Math.floor(Math.random() * 40) });
-          await page.waitForTimeout(200);
+          await page.waitForTimeout(300);
+          await page.keyboard.type(password, { delay: 35 + Math.floor(Math.random() * 50) });
+          await page.waitForTimeout(300);
           const pwVal = await page.evaluate(`(() => {
             var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
             return el ? el.value.length : 0;
@@ -1078,9 +1153,9 @@ async function doTMRegistration(
 
     if (!pwFilled) {
       console.log("[TM-Playwright] Trying clean iframe setter method...");
-      const escapedPw = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`');
       try {
-        pwFilled = await page.evaluate(`((pwd) => {
+        pwFilled = await page.evaluate(
+          `((pwd) => {
           var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
           if (!el) return false;
           try {
@@ -1096,19 +1171,59 @@ async function doTMRegistration(
             return el.value.length > 0;
           } catch (e1) {
             try {
-              el.setAttribute('type', 'text');
-              el.value = pwd;
-              el.setAttribute('type', 'password');
+              var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+              if (nativeSet && nativeSet.set) nativeSet.set.call(el, pwd);
+              else el.value = pwd;
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
               return el.value.length > 0;
             } catch (e2) {
-              return false;
+              try {
+                el.setAttribute('type', 'text');
+                el.value = pwd;
+                el.setAttribute('type', 'password');
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return el.value.length > 0;
+              } catch (e3) {
+                return false;
+              }
             }
           }
-        })("${escapedPw}")`) as boolean;
+        })` + `(${JSON.stringify(password)})`) as boolean;
       } catch (e: any) {
         console.log(`[TM-Playwright] Iframe setter failed: ${e.message.substring(0, 100)}`);
+      }
+    }
+
+    if (!pwFilled) {
+      console.log("[TM-Playwright] Trying direct React dispatchEvent method...");
+      try {
+        pwFilled = await page.evaluate(
+          `((pwd) => {
+          var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+          if (!el) return false;
+          el.focus();
+          var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          if (nativeSet && nativeSet.set) {
+            nativeSet.set.call(el, pwd);
+          } else {
+            el.value = pwd;
+          }
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: pwd }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+          var reactKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance') || k.startsWith('__reactProps'); });
+          if (reactKey && el[reactKey] && typeof el[reactKey].onChange === 'function') {
+            el[reactKey].onChange({ target: el, currentTarget: el });
+          }
+          return el.value.length > 0;
+        })` + `(${JSON.stringify(password)})`) as boolean;
+        if (pwFilled) console.log("[TM-Playwright] Password filled via React dispatchEvent");
+      } catch (e: any) {
+        console.log(`[TM-Playwright] React dispatch failed: ${e.message.substring(0, 100)}`);
       }
     }
 
@@ -1116,6 +1231,67 @@ async function doTMRegistration(
 
     if (!pwFilled) {
       return { success: false, error: "Could not fill password field" };
+    }
+
+    await page.waitForTimeout(500);
+
+    const formFieldsVerify = await page.evaluate(`(() => {
+      var pw = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
+      var fn = document.querySelector('input[name="firstName"]') || document.querySelector('input[autocomplete="given-name"]');
+      var ln = document.querySelector('input[name="lastName"]') || document.querySelector('input[autocomplete="family-name"]');
+      return {
+        pwLen: pw ? pw.value.length : -1,
+        fnLen: fn ? fn.value.length : -1,
+        lnLen: ln ? ln.value.length : -1
+      };
+    })()`);
+    console.log(`[TM-Playwright] Field verification - PW:${(formFieldsVerify as any).pwLen} FN:${(formFieldsVerify as any).fnLen} LN:${(formFieldsVerify as any).lnLen}`);
+
+    if ((formFieldsVerify as any).fnLen === 0) {
+      console.log("[TM-Playwright] WARNING: FirstName empty after fill, retrying...");
+      try {
+        await page.evaluate(`((val) => {
+          var el = document.querySelector('input[name="firstName"]') || document.querySelector('input[autocomplete="given-name"]');
+          if (!el) return;
+          el.focus();
+          var ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          if (ns && ns.set) ns.set.call(el, val); else el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+        })` + `(${JSON.stringify(firstName)})`);
+      } catch {}
+    }
+
+    if ((formFieldsVerify as any).lnLen === 0) {
+      console.log("[TM-Playwright] WARNING: LastName empty after fill, retrying...");
+      try {
+        await page.evaluate(`((val) => {
+          var el = document.querySelector('input[name="lastName"]') || document.querySelector('input[autocomplete="family-name"]');
+          if (!el) return;
+          el.focus();
+          var ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          if (ns && ns.set) ns.set.call(el, val); else el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+        })` + `(${JSON.stringify(lastName)})`);
+      } catch {}
+    }
+
+    if ((formFieldsVerify as any).pwLen === 0) {
+      console.log("[TM-Playwright] WARNING: Password field appears empty after fill, retrying with keyboard...");
+      try {
+        const pwEl = page.locator('#password-input, input[type="password"], input[name="password"]').first();
+        await pwEl.click({ timeout: 3000 });
+        await page.waitForTimeout(300);
+        await page.keyboard.press('Control+a');
+        await page.waitForTimeout(100);
+        await page.keyboard.type(password, { delay: 40 + Math.floor(Math.random() * 30) });
+        await page.waitForTimeout(500);
+      } catch (retryErr: any) {
+        console.log(`[TM-Playwright] Password retry failed: ${retryErr.message.substring(0, 80)}`);
+      }
     }
 
     const usZips = ["90001","90012","90024","90034","90045","90056","90067","90210","90291","90301","90401","91001","91101","91201","91301","91401","91501","91601","91701","91801","92101","92201"];
@@ -1127,6 +1303,26 @@ async function doTMRegistration(
     ], randomZip);
     console.log(`[TM-Playwright] PostalCode filled: ${zipFilled} (${randomZip})`);
 
+    if (!zipFilled) {
+      const zipFilledJS = await page.evaluate(`((val) => {
+        var selectors = ['input[name="postalCode"]', 'input[id*="postalCode"]', 'input[id*="postal"]', 'input[id*="zip"]', 'input[name="zipCode"]'];
+        for (var s = 0; s < selectors.length; s++) {
+          var el = document.querySelector(selectors[s]);
+          if (el) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet && nativeSet.set) nativeSet.set.call(el, val);
+            else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+            return true;
+          }
+        }
+        return false;
+      })` + `(${JSON.stringify(randomZip)})`) as boolean;
+      console.log(`[TM-Playwright] PostalCode JS fallback: ${zipFilledJS}`);
+    }
+
     const cbChecked = await page.evaluate(`(() => {
       var checked = 0;
       var checkboxes = document.querySelectorAll('input[type="checkbox"]');
@@ -1136,6 +1332,17 @@ async function doTMRegistration(
         if (rect.width > 0 && rect.height > 0 && !el.checked) {
           el.click();
           checked++;
+        }
+      }
+      if (checked === 0) {
+        var labels = document.querySelectorAll('label, span[role="checkbox"], div[role="checkbox"]');
+        for (var j = 0; j < labels.length; j++) {
+          var el = labels[j];
+          var text = (el.textContent || '').toLowerCase();
+          if (text.includes('privacy') || text.includes('terms') || text.includes('agree') || text.includes('acknowledge')) {
+            el.click();
+            checked++;
+          }
         }
       }
       return checked;
@@ -1157,7 +1364,19 @@ async function doTMRegistration(
     }
 
     console.log("[TM-Playwright] Waiting for response...");
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(3000);
+
+    const postSubmitText = await getPageText(page);
+    const postSubmitLower = postSubmitText.toLowerCase();
+    if (postSubmitLower.includes("please enter a valid password") ||
+        postSubmitLower.includes("password is required") ||
+        postSubmitLower.includes("first name is required") ||
+        postSubmitLower.includes("last name is required")) {
+      console.log("[TM-Playwright] Form validation errors after submit:", postSubmitText.substring(0, 300));
+      return { success: false, error: "Form validation errors: " + postSubmitText.substring(0, 200), pageContent: postSubmitText.substring(0, 500), smsCost: totalSmsCost };
+    }
+
+    await page.waitForTimeout(5000);
 
     pageText = await getPageText(page);
     pageLower = pageText.toLowerCase();
@@ -1488,28 +1707,37 @@ async function doTMRegistration(
     const finalLower = finalText.toLowerCase();
 
     console.log("[TM-Playwright] Final URL:", currentUrl);
-    console.log("[TM-Playwright] Final text (first 300):", finalText.substring(0, 300));
+    console.log("[TM-Playwright] Final text (first 500):", finalText.substring(0, 500));
 
-    const redirectedToAccount = currentUrl.includes("ticketmaster.com") && !currentUrl.includes("authorization.oauth2");
+    if (finalLower.includes("please enter a valid password") || finalLower.includes("password is required")) {
+      return { success: false, error: "Password validation failed on TM form - password field was not accepted", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
+    }
+
+    if (finalLower.includes("sign up") && finalLower.includes("password") && finalLower.includes("first name")) {
+      return { success: false, error: "Still on sign-up form - registration was not submitted successfully", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
+    }
+
+    const redirectedToAccount = currentUrl.includes("ticketmaster.com/member") ||
+                      currentUrl.includes("ticketmaster.com/user") ||
+                      (currentUrl.includes("ticketmaster.com") && !currentUrl.includes("authorization.oauth2") && !currentUrl.includes("auth.ticketmaster"));
     const textIndicatesSuccess = finalLower.includes("account created") ||
-                      finalLower.includes("success") ||
                       finalLower.includes("my account") ||
                       finalLower.includes("you're in") ||
-                      finalLower.includes("welcome back");
-    const verifyPageWithCodeDone = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
-                      !finalLower.includes("verify my email") &&
-                      !finalLower.includes("send code");
-    const emailDonePhonePending = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
+                      finalLower.includes("welcome back") ||
+                      finalLower.includes("account settings");
+    const phoneVerified = finalLower.includes("phone verified") || finalLower.includes("phone number verified");
+    const emailVerifiedOnPage = finalLower.includes("email verified") || finalLower.includes("email address verified");
+
+    const verifyPageCompleted = (finalLower.includes("almost there") || finalLower.includes("verify your account") || finalLower.includes("one more step")) &&
                       !finalLower.includes("verify my email") &&
                       !finalLower.includes("send code") &&
-                      finalLower.includes("phone");
-    const phoneVerified = finalLower.includes("phone verified");
-    const emailVerifiedCheckmark = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
-                      !finalLower.includes("verify my email");
+                      !finalLower.includes("add my phone") &&
+                      (phoneVerified || emailVerifiedOnPage || !finalLower.includes("phone"));
 
-    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageWithCodeDone || phoneVerified ||
-                      (emailVerifiedCheckmark && phoneVerified) ||
-                      (emailDonePhonePending && phoneVerified);
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted ||
+                      (phoneVerified && emailVerifiedOnPage);
+
+    console.log("[TM-Playwright] Success checks - redirected:", redirectedToAccount, "textSuccess:", textIndicatesSuccess, "phoneVerified:", phoneVerified, "emailVerified:", emailVerifiedOnPage, "verifyComplete:", verifyPageCompleted, "result:", isSuccess);
 
     if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
@@ -1517,7 +1745,7 @@ async function doTMRegistration(
 
     if (finalLower.includes("almost there") || finalLower.includes("verify your account")) {
       const stillNeedsEmail = finalLower.includes("verify my email") || finalLower.includes("send code");
-      const stillNeedsPhone = finalLower.includes("add my phone") && !finalLower.includes("phone verified");
+      const stillNeedsPhone = finalLower.includes("add my phone") && !phoneVerified;
       if (stillNeedsEmail && stillNeedsPhone) {
         return { success: false, error: "Registration submitted but both email and phone verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
@@ -1527,6 +1755,7 @@ async function doTMRegistration(
       if (stillNeedsPhone) {
         return { success: false, error: "Registration submitted but phone verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
+      return { success: false, error: "Verification page present but status unclear. " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
     }
 
     if (finalLower.includes("error") || finalLower.includes("failed") || finalLower.includes("invalid")) {
