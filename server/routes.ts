@@ -20,9 +20,10 @@ async function getDefaultBrowserApiUrl(): Promise<string> {
   return saved || process.env.LA28_PROXY_URL || FALLBACK_BROWSER_API_URL;
 }
 
-function getDefaultProxies(proxyList?: string[]): string[] {
+async function getDefaultProxies(proxyList?: string[]): Promise<string[]> {
   if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;
-  return [FALLBACK_BROWSER_API_URL];
+  const saved = await getDefaultBrowserApiUrl();
+  return [saved];
 }
 
 function hashPassword(password: string): string {
@@ -739,7 +740,7 @@ export async function registerRoutes(
       batchOwners.set(batchId, userId);
       res.json({ batchId, accounts: created, count: numAccounts });
 
-      const proxies = getDefaultProxies(proxyList);
+      const proxies = await getDefaultProxies(proxyList);
 
       (async () => {
         for (let i = 0; i < created.length; i++) {
@@ -781,7 +782,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "firstName, lastName, and password are required" });
       }
 
-      const proxies = getDefaultProxies(proxyList);
+      const proxies = await getDefaultProxies(proxyList);
       const resolvedProxy = proxies[Math.floor(Math.random() * proxies.length)];
 
       const domain = await getAvailableDomain();

@@ -487,17 +487,8 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr: any) {
           if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted") || navErr.message.includes("brob"))) {
-            log("robots.txt restriction on /mycustomerdata, trying tickets.la28.org root...");
-            try {
-              await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
-            } catch (rootErr: any) {
-              if (rootErr.message && (rootErr.message.includes("robots.txt") || rootErr.message.includes("restricted"))) {
-                log("robots.txt also blocked root, trying la28id.la28.org directly...");
-                await ticketsPage.goto("https://la28id.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
-              } else {
-                throw rootErr;
-              }
-            }
+            log("robots.txt restriction detected. Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in Bright Data dashboard > Zone settings.");
+            throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.");
           } else {
             throw navErr;
           }
@@ -624,8 +615,8 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr: any) {
           if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted"))) {
-            log("robots.txt blocked tickets.la28.org root, trying la28id.la28.org...");
-            await ticketsPage.goto("https://la28id.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
+            log("robots.txt restriction detected. Enable 'Ignore robots.txt' in Bright Data zone settings.");
+            throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.");
           } else {
             throw navErr;
           }
@@ -644,8 +635,8 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr2: any) {
           if (navErr2.message && (navErr2.message.includes("robots.txt") || navErr2.message.includes("restricted"))) {
-            log("robots.txt blocked /mycustomerdata, trying hash route...");
-            await ticketsPage.goto("https://tickets.la28.org/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
+            log("robots.txt restriction detected on /mycustomerdata. Enable 'Ignore robots.txt' in Bright Data zone settings.");
+            throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org/mycustomerdata. Enable 'Ignore robots.txt' in zone settings.");
           } else {
             throw navErr2;
           }
@@ -660,10 +651,8 @@ async function loginAndSubmitTicketRegistration(
             await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
           } catch (navErr3: any) {
             if (navErr3.message && (navErr3.message.includes("robots.txt") || navErr3.message.includes("restricted"))) {
-              log("robots.txt blocked /mycustomerdata, trying hash-only route...");
-              try {
-                await ticketsPage.goto("https://tickets.la28.org/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
-              } catch { /* may be interrupted */ }
+              log("robots.txt restriction on /mycustomerdata. Enable 'Ignore robots.txt' in Bright Data zone settings.");
+              throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org/mycustomerdata. Enable 'Ignore robots.txt' in zone settings.");
             }
           }
         }
