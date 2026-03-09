@@ -1088,11 +1088,17 @@ export async function registerRoutes(
           await storage.updateUserFreeAccountsUsed(ownerId, user.freeAccountsUsed + 1);
         }
       } else {
+        const costPerAccount = await getCostPerAccount();
+        await storage.creditWallet(ownerId, costPerAccount);
+        broadcastLog(batchId, accountId, `Refunded $${costPerAccount.toFixed(2)} for failed account`, ownerId);
         const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: result.error || "Failed" });
         if (updated) broadcastAccountUpdate(updated, ownerId);
         broadcastLog(batchId, accountId, `Failed: ${result.error}`, ownerId);
       }
     } catch (err: any) {
+      const costPerAccount = await getCostPerAccount();
+      await storage.creditWallet(ownerId, costPerAccount);
+      broadcastLog(batchId, accountId, `Refunded $${costPerAccount.toFixed(2)} for failed account`, ownerId);
       const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: err.message });
       if (updated) broadcastAccountUpdate(updated, ownerId);
       broadcastLog(batchId, accountId, `Error: ${err.message}`, ownerId);
@@ -1165,6 +1171,26 @@ export async function registerRoutes(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
             acc.email, acc.emailPassword, userId, proxyUrl
           );
+
+          const afterAccount = await storage.getAccount(acc.id);
+          if (afterAccount && afterAccount.status === "failed") {
+            broadcastLog(batchId, acc.id, `Retrying with new email address...`, userId);
+            const retryDomain = await getAvailableDomain();
+            const retryUsername = generateRandomUsername();
+            const retryEmail = `${retryUsername}@${retryDomain}`;
+            await storage.updateAccount(acc.id, { email: retryEmail, status: "pending", errorMessage: null } as any);
+            broadcastAccountUpdate({ ...afterAccount, email: retryEmail, status: "pending" }, userId);
+            broadcastLog(batchId, acc.id, `Retry with new email: ${retryEmail}`, userId);
+            const reDebited = await storage.debitWallet(userId, await getCostPerAccount());
+            if (!reDebited) {
+              broadcastLog(batchId, acc.id, `Insufficient balance for retry, skipping.`, userId);
+              continue;
+            }
+            await processTMAccount(
+              acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
+              retryEmail, "TempPass123!", userId, proxyUrl
+            );
+          }
         }
         broadcastBatchComplete(batchId, userId);
       })();

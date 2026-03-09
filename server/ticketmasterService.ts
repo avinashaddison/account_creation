@@ -175,8 +175,8 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
-    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Forbidden action")) {
-      console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 80)}`);
+    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Forbidden action") || result.error?.includes("robots.txt") || result.error?.includes("phone verification incomplete") || result.error?.includes("email verification incomplete") || result.error?.includes("status unclear")) {
+      console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 120)}`);
       continue;
     }
 
@@ -1435,23 +1435,28 @@ async function doTMRegistration(
                       !finalLower.includes("send code") &&
                       finalLower.includes("phone");
     const phoneVerified = finalLower.includes("phone verified");
-    const emailVerifiedOnPage = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
-                      finalLower.includes("add my phone");
+    const emailVerifiedCheckmark = (finalLower.includes("almost there") || finalLower.includes("verify your account")) &&
+                      !finalLower.includes("verify my email");
 
-    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageWithCodeDone || emailDonePhonePending || phoneVerified || emailVerifiedOnPage;
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageWithCodeDone || phoneVerified ||
+                      (emailVerifiedCheckmark && phoneVerified) ||
+                      (emailDonePhonePending && phoneVerified);
 
     if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500) };
     }
 
     if (finalLower.includes("almost there") || finalLower.includes("verify your account")) {
-      const onlyPhoneLeft = !finalLower.includes("verify my email") && !finalLower.includes("send code") && finalLower.includes("phone");
-      if (onlyPhoneLeft) {
-        return { success: true, pageContent: finalText.substring(0, 500) };
+      const stillNeedsEmail = finalLower.includes("verify my email") || finalLower.includes("send code");
+      const stillNeedsPhone = finalLower.includes("add my phone") && !finalLower.includes("phone verified");
+      if (stillNeedsEmail && stillNeedsPhone) {
+        return { success: false, error: "Registration submitted but both email and phone verification incomplete.", pageContent: finalText.substring(0, 500) };
       }
-      const stillNeedsVerify = finalLower.includes("verify my email") || finalLower.includes("send code");
-      if (stillNeedsVerify) {
+      if (stillNeedsEmail) {
         return { success: false, error: "Registration submitted but email verification incomplete.", pageContent: finalText.substring(0, 500) };
+      }
+      if (stillNeedsPhone) {
+        return { success: false, error: "Registration submitted but phone verification incomplete.", pageContent: finalText.substring(0, 500) };
       }
     }
 
