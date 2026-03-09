@@ -256,13 +256,33 @@ export async function registerRoutes(
       if (oldAdmin) {
         await storage.deleteUser(oldAdmin.id);
       }
-      await storage.createUser({
+      const sa = await storage.createUser({
         username: "avinash",
         email: "avinashaddison@gmail.com",
         password: hashPassword("@AJAYkn8085123"),
         role: "superadmin",
       });
-      console.log("[Auth] Super admin created: avinashaddison@gmail.com");
+      await storage.updateUserWalletBalance(sa.id, "499.45");
+      await storage.updateUserFreeAccountsUsed(sa.id, 5);
+      console.log("[Auth] Super admin created: avinashaddison@gmail.com ($499.45)");
+
+      const existingPetr = await storage.getUserByEmail("bobca2004@gmail.com");
+      if (!existingPetr) {
+        const petr = await storage.createUser({
+          username: "Petr",
+          email: "bobca2004@gmail.com",
+          password: hashPassword("petr123"),
+          role: "admin",
+          panelName: "Petr Panel v2",
+        });
+        await storage.updateUserWalletBalance(petr.id, "47.57");
+        await storage.updateUserFreeAccountsUsed(petr.id, 15);
+        console.log("[Auth] Admin created: bobca2004@gmail.com ($47.57)");
+      }
+
+      await storage.setSetting("account_price", "0.24");
+      await storage.setSetting("browser_proxy_url", "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
+      console.log("[Auth] Default settings seeded");
     }
   }
   await ensureDefaultSuperAdmin();
