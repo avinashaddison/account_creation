@@ -72,176 +72,290 @@ export async function brunoMarsPresaleStep(
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_events");
-    log("🎵 Selecting events (up to 3) using Playwright clicks...");
+    log("🎵 Selecting events (up to 3)...");
     console.log("[BM-Presale] Starting event selection...");
 
-    const eventTexts = ["INGLEWOOD", "VANCOUVER", "CIUDAD DE MÉXICO"];
     let selectedCount = 0;
 
-    for (const eventCity of eventTexts) {
-      if (selectedCount >= 3) break;
-      try {
-        const locator = page.locator(`text=${eventCity}`).first();
-        const isVisible = await locator.isVisible({ timeout: 3000 }).catch(() => false);
-        if (isVisible) {
-          await locator.click({ timeout: 5000 });
-          selectedCount++;
-          log("  ☑ Clicked: " + eventCity);
-          console.log("[BM-Presale] Clicked event: " + eventCity);
-          await page.waitForTimeout(500);
-        } else {
-          log("  ⚠️ Not visible: " + eventCity);
-          console.log("[BM-Presale] Not visible: " + eventCity);
+    const domInfo = await page.evaluate(`(() => {
+      var result = { checkboxInputs: [], eventRowHtml: '', firstRowParentHtml: '' };
+      var cbs = document.querySelectorAll('input[type="checkbox"]');
+      for (var i = 0; i < cbs.length; i++) {
+        var parent = cbs[i].closest('label') || cbs[i].closest('div') || cbs[i].parentElement;
+        var grandparent = parent ? parent.parentElement : null;
+        var text = '';
+        var searchEl = parent;
+        for (var depth = 0; depth < 5 && searchEl; depth++) {
+          text = (searchEl.innerText || '').replace(/\\n/g, ' ').substring(0, 150);
+          if (text.length > 20) break;
+          searchEl = searchEl.parentElement;
         }
-      } catch (clickErr: any) {
-        log("  ⚠️ Could not click " + eventCity + ": " + clickErr.message.substring(0, 80));
-        console.log("[BM-Presale] Click error for " + eventCity + ": " + clickErr.message.substring(0, 100));
+        result.checkboxInputs.push({
+          id: cbs[i].id || '',
+          name: cbs[i].name || '',
+          checked: cbs[i].checked,
+          visible: cbs[i].offsetParent !== null || cbs[i].offsetWidth > 0 || cbs[i].offsetHeight > 0,
+          parentTag: parent ? parent.tagName : '',
+          parentClasses: parent ? (parent.className || '').toString().substring(0, 100) : '',
+          grandparentTag: grandparent ? grandparent.tagName : '',
+          nearbyText: text,
+          isConsent: text.toLowerCase().includes('consent') || text.toLowerCase().includes('submitting') || text.toLowerCase().includes('privacy') || text.toLowerCase().includes('fan list') || text.toLowerCase().includes('marketing')
+        });
       }
-    }
-
-    if (selectedCount === 0) {
-      log("🔍 Text-based click failed, trying alternative selectors...");
-      console.log("[BM-Presale] Text click failed, dumping page structure...");
-
-      const domDump = await page.evaluate(`(() => {
-        var selectHeader = null;
-        var allEls = document.querySelectorAll('h1, h2, h3, h4, h5');
-        for (var i = 0; i < allEls.length; i++) {
-          if ((allEls[i].textContent || '').toLowerCase().includes('select your events')) {
-            selectHeader = allEls[i];
+      var inglewood = null;
+      var allEls = document.querySelectorAll('*');
+      for (var j = 0; j < allEls.length; j++) {
+        if (allEls[j].children.length < 3 && (allEls[j].textContent || '').includes('INGLEWOOD')) {
+          inglewood = allEls[j];
+          break;
+        }
+      }
+      if (inglewood) {
+        var row = inglewood;
+        for (var k = 0; k < 8; k++) {
+          if (!row.parentElement) break;
+          row = row.parentElement;
+          var rowCbs = row.querySelectorAll('input[type="checkbox"]');
+          if (rowCbs.length === 1) {
+            result.eventRowHtml = row.outerHTML.substring(0, 800);
+            result.firstRowParentHtml = row.parentElement ? row.parentElement.outerHTML.substring(0, 200) : '';
             break;
           }
         }
-        var container = selectHeader ? selectHeader.parentElement : document.body;
-        var children = container ? container.children : [];
-        var dump = [];
-        for (var j = 0; j < children.length && j < 20; j++) {
-          dump.push({
-            tag: children[j].tagName,
-            classes: (children[j].className || '').toString().substring(0, 150),
-            role: children[j].getAttribute('role') || '',
-            ariaChecked: children[j].getAttribute('aria-checked') || '',
-            childCount: children[j].querySelectorAll('*').length,
-            text: (children[j].innerText || '').replace(/\\n/g, ' ').substring(0, 120),
-            outerHtml: children[j].outerHTML.substring(0, 300)
-          });
-        }
-        var allCheckboxLike = document.querySelectorAll('[role="checkbox"], [role="option"], [role="listitem"], [role="button"]');
-        var cbDump = [];
-        for (var k = 0; k < allCheckboxLike.length && k < 20; k++) {
-          cbDump.push({
-            tag: allCheckboxLike[k].tagName,
-            role: allCheckboxLike[k].getAttribute('role'),
-            ariaChecked: allCheckboxLike[k].getAttribute('aria-checked'),
-            classes: (allCheckboxLike[k].className || '').toString().substring(0, 100),
-            text: (allCheckboxLike[k].innerText || '').replace(/\\n/g, ' ').substring(0, 80)
-          });
-        }
-        return { containerChildren: dump, ariaElements: cbDump, containerTag: container ? container.tagName : 'none' };
-      })()`) as any;
-
-      console.log("[BM-Presale] Container tag:", domDump.containerTag);
-      for (const child of (domDump.containerChildren || [])) {
-        console.log("[BM-Presale] Child:", child.tag, "role:", child.role, "aria-checked:", child.ariaChecked, "classes:", child.classes?.substring(0, 60), "text:", child.text?.substring(0, 60));
-        log("  DOM: <" + child.tag + "> role=" + child.role + " classes=" + (child.classes || '').substring(0, 40) + " text=" + (child.text || '').substring(0, 50));
       }
-      for (const ae of (domDump.ariaElements || [])) {
-        console.log("[BM-Presale] ARIA:", ae.tag, "role:", ae.role, "aria-checked:", ae.ariaChecked, "text:", ae.text?.substring(0, 60));
-      }
+      return result;
+    })()`) as any;
 
-      try {
-        const allClickable = page.locator('[role="checkbox"], [role="option"], [role="listitem"]');
-        const count = await allClickable.count();
-        log("  Found " + count + " ARIA clickable elements");
-        for (let i = 0; i < Math.min(count, 3); i++) {
-          await allClickable.nth(i).click({ timeout: 3000 });
+    console.log("[BM-Presale] Found " + domInfo.checkboxInputs.length + " checkbox inputs total");
+    for (const cb of domInfo.checkboxInputs) {
+      console.log("[BM-Presale] CB: id=" + cb.id + " name=" + cb.name + " checked=" + cb.checked + " visible=" + cb.visible + " isConsent=" + cb.isConsent + " text=" + cb.nearbyText.substring(0, 60));
+      log("  CB: id=" + cb.id + " checked=" + cb.checked + " consent=" + cb.isConsent + " text=" + cb.nearbyText.substring(0, 50));
+    }
+    console.log("[BM-Presale] Event row HTML: " + domInfo.eventRowHtml.substring(0, 500));
+
+    const eventCheckboxes = domInfo.checkboxInputs.filter((cb: any) => !cb.isConsent);
+    const consentCheckboxes = domInfo.checkboxInputs.filter((cb: any) => cb.isConsent);
+    log("  Event checkboxes: " + eventCheckboxes.length + ", Consent checkboxes: " + consentCheckboxes.length);
+
+    if (eventCheckboxes.length > 0) {
+      log("🎯 Strategy 1: Click event checkbox inputs directly...");
+      for (let i = 0; i < Math.min(3, eventCheckboxes.length); i++) {
+        try {
+          const cb = eventCheckboxes[i];
+          let locator;
+          if (cb.id) {
+            locator = page.locator('#' + cb.id);
+          } else if (cb.name) {
+            locator = page.locator('input[type="checkbox"][name="' + cb.name + '"]').nth(i);
+          } else {
+            const allCbs = page.locator('input[type="checkbox"]');
+            const idx = domInfo.checkboxInputs.indexOf(cb);
+            locator = allCbs.nth(idx);
+          }
+
+          await locator.evaluate((el: any) => {
+            el.scrollIntoView({ block: 'center' });
+          }).catch(() => {});
+          await page.waitForTimeout(300);
+
+          const labelLocator = locator.locator('xpath=ancestor::label');
+          const hasLabel = await labelLocator.count().catch(() => 0);
+          if (hasLabel > 0) {
+            await labelLocator.first().click({ timeout: 3000 });
+            log("  ☑ Clicked label for event checkbox " + i);
+          } else {
+            await locator.click({ force: true, timeout: 3000 });
+            log("  ☑ Force-clicked event checkbox " + i);
+          }
+
+          await page.waitForTimeout(300);
+          const isNowChecked = await locator.isChecked().catch(() => false);
+          if (!isNowChecked) {
+            log("  ⚠️ Checkbox " + i + " not checked after click, trying dispatchEvent...");
+            await locator.evaluate((el: any) => {
+              el.checked = true;
+              el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            await page.waitForTimeout(200);
+            const rechecked = await locator.isChecked().catch(() => false);
+            if (!rechecked) {
+              log("  ⚠️ Still not checked, trying parent click...");
+              const parent = locator.locator('xpath=..');
+              await parent.click({ timeout: 3000 }).catch(() => {});
+            }
+          }
           selectedCount++;
-          const itemText = await allClickable.nth(i).innerText().catch(() => "unknown");
-          log("  ☑ Clicked ARIA element " + i + ": " + itemText.replace(/\n/g, ' ').substring(0, 60));
+          console.log("[BM-Presale] Clicked event checkbox " + i + " (id=" + cb.id + ")");
           await page.waitForTimeout(500);
+        } catch (cbErr: any) {
+          log("  ⚠️ Checkbox click error: " + cbErr.message.substring(0, 80));
+          console.log("[BM-Presale] Checkbox click error: " + cbErr.message.substring(0, 100));
         }
-      } catch (ariaErr: any) {
-        log("  ⚠️ ARIA click failed: " + ariaErr.message.substring(0, 80));
       }
     }
 
     if (selectedCount === 0) {
-      log("🔍 Trying to click event rows by visible structure...");
-      try {
-        const rows = page.locator('div:has(> div), li, article').filter({ hasText: /INGLEWOOD|VANCOUVER|CIUDAD/ });
-        const rowCount = await rows.count();
-        log("  Found " + rowCount + " matching rows");
-        for (let i = 0; i < Math.min(rowCount, 3); i++) {
-          await rows.nth(i).click({ timeout: 3000, force: true });
-          selectedCount++;
-          log("  ☑ Force-clicked row " + i);
-          await page.waitForTimeout(500);
+      log("🔍 Strategy 2: Find and click event row containers...");
+      const eventCities = ["INGLEWOOD", "VANCOUVER", "CIUDAD DE MÉXICO"];
+      for (const city of eventCities) {
+        if (selectedCount >= 3) break;
+        try {
+          const cityEl = page.locator(`text=${city}`).first();
+          const isVis = await cityEl.isVisible({ timeout: 2000 }).catch(() => false);
+          if (!isVis) continue;
+
+          let clickTarget = cityEl;
+          for (let depth = 0; depth < 6; depth++) {
+            const parent = clickTarget.locator('xpath=..');
+            const hasCb = await parent.locator('input[type="checkbox"]').count().catch(() => 0);
+            if (hasCb > 0) {
+              const cbInRow = parent.locator('input[type="checkbox"]').first();
+              const labelWrap = cbInRow.locator('xpath=ancestor::label');
+              const hasLbl = await labelWrap.count().catch(() => 0);
+              if (hasLbl > 0) {
+                await labelWrap.first().click({ timeout: 3000 });
+              } else {
+                await cbInRow.click({ force: true, timeout: 3000 });
+              }
+              selectedCount++;
+              log("  ☑ Clicked checkbox in row for " + city + " (depth " + depth + ")");
+              console.log("[BM-Presale] Clicked checkbox in row for " + city);
+              await page.waitForTimeout(500);
+              break;
+            }
+            clickTarget = parent;
+          }
+        } catch (rowErr: any) {
+          log("  ⚠️ Row search error for " + city + ": " + rowErr.message.substring(0, 80));
         }
-      } catch (rowErr: any) {
-        log("  ⚠️ Row click failed: " + rowErr.message.substring(0, 80));
       }
     }
 
-    log("✅ Selected " + selectedCount + " events");
-    console.log("[BM-Presale] Total events selected: " + selectedCount);
+    if (selectedCount === 0) {
+      log("🔍 Strategy 3: Click all non-consent checkboxes by index...");
+      try {
+        const allCbs = page.locator('input[type="checkbox"]');
+        const total = await allCbs.count();
+        log("  Total checkboxes on page: " + total);
+        let clicked = 0;
+        for (let i = 0; i < total && clicked < 3; i++) {
+          const cbText = await allCbs.nth(i).evaluate((el: any) => {
+            var p = el;
+            for (var d = 0; d < 5; d++) { p = p.parentElement; if (!p) break; }
+            return (p ? p.innerText : '').toLowerCase().substring(0, 100);
+          }).catch(() => '');
+          const isConsent = cbText.includes('consent') || cbText.includes('submitting') || cbText.includes('privacy') || cbText.includes('fan list');
+          if (!isConsent) {
+            await allCbs.nth(i).click({ force: true, timeout: 3000 });
+            clicked++;
+            selectedCount++;
+            log("  ☑ Clicked checkbox index " + i);
+            await page.waitForTimeout(500);
+          }
+        }
+      } catch (idxErr: any) {
+        log("  ⚠️ Index click error: " + idxErr.message.substring(0, 80));
+      }
+    }
+
+    const verifyChecked = await page.evaluate(`(() => {
+      var cbs = document.querySelectorAll('input[type="checkbox"]');
+      var results = [];
+      for (var i = 0; i < cbs.length; i++) {
+        results.push({ idx: i, checked: cbs[i].checked, id: cbs[i].id || '' });
+      }
+      return results;
+    })()`) as any[];
+    log("📋 Checkbox states after selection:");
+    for (const v of verifyChecked) {
+      log("  [" + v.idx + "] " + (v.checked ? "✅" : "❌") + " id=" + v.id);
+      console.log("[BM-Presale] Verify CB[" + v.idx + "] checked=" + v.checked + " id=" + v.id);
+    }
+
+    log("✅ Attempted " + selectedCount + " event selections");
+    console.log("[BM-Presale] Total events attempted: " + selectedCount);
     await page.waitForTimeout(1000);
 
     log("☑ Checking consent boxes...");
     console.log("[BM-Presale] Checking consent boxes...");
     let consentChecked = 0;
 
-    const consentTexts = [
-      "submitting my mobile phone",
-      "submitting my email address",
-      "consent to receive",
-      "consent to joining",
-      "fan list"
-    ];
-
-    for (const consentText of consentTexts) {
+    const consentIds = ["allow_artist_sms", "allow_marketing"];
+    for (const consentId of consentIds) {
       try {
-        const consentLocator = page.locator(`text=${consentText}`).first();
-        const isVis = await consentLocator.isVisible({ timeout: 2000 }).catch(() => false);
-        if (isVis) {
-          await consentLocator.click({ timeout: 3000 });
+        const cb = page.locator('#' + consentId);
+        const exists = await cb.count().catch(() => 0);
+        if (exists > 0) {
+          const alreadyChecked = await cb.isChecked().catch(() => false);
+          if (!alreadyChecked) {
+            const labelWrap = cb.locator('xpath=ancestor::label');
+            const hasLabel = await labelWrap.count().catch(() => 0);
+            if (hasLabel > 0) {
+              await labelWrap.first().click({ timeout: 3000 });
+            } else {
+              await cb.click({ force: true, timeout: 3000 });
+            }
+            await page.waitForTimeout(300);
+            const nowChecked = await cb.isChecked().catch(() => false);
+            if (!nowChecked) {
+              await cb.evaluate((el: any) => {
+                el.checked = true;
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+            }
+          }
           consentChecked++;
-          log("  ☑ Consent: " + consentText.substring(0, 40));
-          console.log("[BM-Presale] Clicked consent: " + consentText);
-          await page.waitForTimeout(300);
+          log("  ☑ Consent: " + consentId + " checked");
+          console.log("[BM-Presale] Consent: " + consentId + " checked");
+        } else {
+          log("  ⚠️ Consent CB #" + consentId + " not found");
         }
-      } catch {
-        // try next
+      } catch (consentErr: any) {
+        log("  ⚠️ Consent error " + consentId + ": " + consentErr.message.substring(0, 60));
       }
     }
 
     if (consentChecked === 0) {
-      log("  Trying checkbox inputs for consent...");
-      const cbCount = await page.evaluate(`(() => {
-        var checked = 0;
-        var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-        for (var i = 0; i < checkboxes.length; i++) {
-          var label = checkboxes[i].closest('label') || checkboxes[i].closest('div') || checkboxes[i].parentElement;
-          var text = (label ? label.innerText : '').toLowerCase();
-          if (text.includes('consent') || text.includes('privacy') || text.includes('submitting') || text.includes('email address') || text.includes('mobile phone') || text.includes('fan list')) {
-            if (!checkboxes[i].checked) {
-              checkboxes[i].click();
-              checkboxes[i].checked = true;
-              checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
-              checkboxes[i].dispatchEvent(new Event('input', { bubbles: true }));
-              checked++;
+      log("  Trying fallback: check all non-event checkboxes...");
+      const allCbs2 = page.locator('input[type="checkbox"]');
+      const totalCbs2 = await allCbs2.count();
+      for (let i = 0; i < totalCbs2; i++) {
+        try {
+          const cbName = await allCbs2.nth(i).getAttribute('name').catch(() => '');
+          if (cbName !== 'markets') {
+            const checked = await allCbs2.nth(i).isChecked().catch(() => false);
+            if (!checked) {
+              await allCbs2.nth(i).click({ force: true, timeout: 3000 });
+              consentChecked++;
+              log("  ☑ Fallback consent CB " + i + " (name=" + cbName + ")");
             } else {
-              checked++;
+              consentChecked++;
             }
           }
-        }
-        return checked;
-      })()`) as number;
-      consentChecked = cbCount;
+        } catch {}
+      }
     }
 
     log("✅ " + consentChecked + " consent box(es) checked");
     console.log("[BM-Presale] Consent checked: " + consentChecked);
     await page.waitForTimeout(1000);
+
+    const finalState = await page.evaluate(`(() => {
+      var cbs = document.querySelectorAll('input[type="checkbox"]');
+      var r = [];
+      for (var i = 0; i < cbs.length; i++) {
+        r.push({ idx: i, id: cbs[i].id || '', name: cbs[i].name || '', checked: cbs[i].checked });
+      }
+      return r;
+    })()`) as any[];
+    log("📋 Final checkbox states before Sign Up:");
+    for (const s of finalState) {
+      log("  [" + s.idx + "] " + (s.checked ? "✅" : "❌") + " id=" + s.id + " name=" + s.name);
+      console.log("[BM-Presale] Final CB[" + s.idx + "] checked=" + s.checked + " id=" + s.id + " name=" + s.name);
+    }
 
     onStatusUpdate("presale_submitting");
     log("🔘 Clicking Sign Up button...");
@@ -255,19 +369,52 @@ export async function brunoMarsPresaleStep(
         const isDisabled = await signUpBtn.isDisabled().catch(() => false);
         log("  Sign Up button found, disabled=" + isDisabled);
         console.log("[BM-Presale] Sign Up button visible, disabled=" + isDisabled);
-        await signUpBtn.click({ timeout: 5000 });
+        await signUpBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(500);
+        await signUpBtn.click({ timeout: 10000, force: true });
         submitResult = "clicked: Sign Up";
       } else {
         const altBtn = page.locator('button, input[type="submit"]').filter({ hasText: /sign up|signup|register|submit/i }).first();
         const altVisible = await altBtn.isVisible({ timeout: 3000 }).catch(() => false);
         if (altVisible) {
-          await altBtn.click({ timeout: 5000 });
+          await altBtn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+          await altBtn.click({ timeout: 10000, force: true });
           submitResult = "clicked: alt button";
+        } else {
+          log("  Trying evaluate click fallback...");
+          const evalResult = await page.evaluate(`(() => {
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+              if ((btns[i].textContent || '').trim().toLowerCase().includes('sign up')) {
+                btns[i].scrollIntoView();
+                btns[i].click();
+                return 'eval-clicked: ' + btns[i].textContent.trim();
+              }
+            }
+            return 'eval-not-found';
+          })()`) as string;
+          submitResult = evalResult;
         }
       }
     } catch (btnErr: any) {
       log("  ⚠️ Button click error: " + btnErr.message.substring(0, 80));
-      submitResult = "error: " + btnErr.message.substring(0, 80);
+      console.log("[BM-Presale] Button error, trying evaluate fallback...");
+      try {
+        const evalResult = await page.evaluate(`(() => {
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            if ((btns[i].textContent || '').trim().toLowerCase().includes('sign up')) {
+              btns[i].scrollIntoView();
+              btns[i].click();
+              return 'fallback-clicked: ' + btns[i].textContent.trim();
+            }
+          }
+          return 'fallback-not-found';
+        })()`) as string;
+        submitResult = evalResult;
+      } catch {
+        submitResult = "error: " + btnErr.message.substring(0, 80);
+      }
     }
 
     log("Submit: " + submitResult);
