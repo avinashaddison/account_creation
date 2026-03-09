@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings, KeyRound } from "lucide-react";
+import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings, KeyRound, Globe } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { sounds } from "@/lib/sounds";
 import { useToast } from "@/hooks/use-toast";
@@ -51,6 +51,9 @@ export default function ManageAdmins() {
   const [changingPasswordFor, setChangingPasswordFor] = useState<AdminUser | null>(null);
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
+  const [browserProxy, setBrowserProxy] = useState("");
+  const [newBrowserProxy, setNewBrowserProxy] = useState("");
+  const [savingProxy, setSavingProxy] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -60,6 +63,13 @@ export default function ManageAdmins() {
         const p = parseFloat(d.price).toFixed(2);
         setAccountPrice(p);
         setNewPrice(p);
+      })
+      .catch(() => {});
+    fetch("/api/settings/browser-proxy", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => {
+        setBrowserProxy(d.url || "");
+        setNewBrowserProxy(d.url || "");
       })
       .catch(() => {});
   }, []);
@@ -87,6 +97,32 @@ export default function ManageAdmins() {
       toast({ title: "Error", description: "Failed to update price", variant: "destructive" });
     } finally {
       setSavingPrice(false);
+    }
+  }
+
+  async function updateProxy(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingProxy(true);
+    try {
+      const res = await fetch("/api/admin/browser-proxy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: newBrowserProxy }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        sounds.notification();
+        toast({ title: "Proxy Updated", description: "Browser API Proxy URL updated globally" });
+        setBrowserProxy(data.url);
+        setNewBrowserProxy(data.url);
+      } else {
+        toast({ title: "Error", description: data.error, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to update proxy", variant: "destructive" });
+    } finally {
+      setSavingProxy(false);
     }
   }
 
@@ -279,6 +315,42 @@ export default function ManageAdmins() {
           </Button>
         </form>
         <p className="text-[11px] text-zinc-600 mt-2">This price is charged per account creation across all platforms (LA28, Ticketmaster, UEFA).</p>
+      </div>
+
+      <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="p-1.5 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white">
+            <Globe className="w-3.5 h-3.5" />
+          </div>
+          <span className="text-sm font-semibold text-zinc-200">Browser API Proxy</span>
+        </div>
+        <form onSubmit={updateProxy} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current Proxy URL</Label>
+            <div className="text-xs font-mono text-cyan-400 bg-white/[0.02] border border-white/5 rounded-lg px-3 py-2 truncate" data-testid="text-current-proxy">
+              {browserProxy || "Not set"}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">New Proxy URL</Label>
+            <Input
+              value={newBrowserProxy}
+              onChange={(e) => setNewBrowserProxy(e.target.value)}
+              placeholder="wss://... Browser API URL"
+              className="h-9 text-xs font-mono bg-white/[0.02] border-white/5 text-zinc-300"
+              data-testid="input-browser-proxy"
+            />
+          </div>
+          <Button
+            type="submit"
+            disabled={savingProxy || newBrowserProxy === browserProxy || !newBrowserProxy.trim()}
+            className="h-9 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 border-0"
+            data-testid="button-update-proxy"
+          >
+            {savingProxy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update Proxy"}
+          </Button>
+        </form>
+        <p className="text-[11px] text-zinc-600 mt-2">This proxy is used globally for all account creation flows (TM, Bruno Mars, LA28, UEFA).</p>
       </div>
 
       {showForm && (

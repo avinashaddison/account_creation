@@ -62,7 +62,7 @@ function getStepFromLogs(logs: LogEntry[], accountId: string): { step: string; c
 
 export default function TMCreate() {
   const [count, setCount] = useState(1);
-  const [proxyUrl, setProxyUrl] = useState("wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
+  const [proxyUrl, setProxyUrl] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<BatchAccount[]>([]);
@@ -80,6 +80,9 @@ export default function TMCreate() {
     fetch("/api/auth/me", { credentials: "include" }).then(r => r.json()).then(d => {
       if (d.role) setUserRole(d.role);
       if (d.walletBalance) setWalletBalance(parseFloat(d.walletBalance));
+    }).catch(() => {});
+    fetch("/api/settings/browser-proxy", { credentials: "include" }).then(r => r.json()).then(d => {
+      if (d.url) setProxyUrl(d.url);
     }).catch(() => {});
   }, []);
   const { toast } = useToast();

@@ -31,7 +31,7 @@ const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 export default function AutoCreate() {
   const [count, setCount] = useState(1);
-  const [proxyList, setProxyList] = useState("wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
+  const [proxyList, setProxyList] = useState("");
   const [country, setCountry] = useState("United States");
   const [language, setLanguage] = useState("English");
   const [isRunning, setIsRunning] = useState(false);
@@ -47,6 +47,9 @@ export default function AutoCreate() {
 
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.role) setUserRole(d.role); }).catch(() => {});
+    fetch("/api/settings/browser-proxy", { credentials: "include" }).then(r => r.json()).then(d => {
+      if (d.url) setProxyList(d.url);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {

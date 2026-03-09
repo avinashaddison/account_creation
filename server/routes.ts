@@ -13,11 +13,16 @@ import { brunoMarsSignupFlow } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
 import { randomUUID, createHash } from "crypto";
 
-const DEFAULT_BROWSER_API_URL = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
+const FALLBACK_BROWSER_API_URL = "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
+
+async function getDefaultBrowserApiUrl(): Promise<string> {
+  const saved = await storage.getSetting("browser_proxy_url");
+  return saved || process.env.LA28_PROXY_URL || FALLBACK_BROWSER_API_URL;
+}
 
 function getDefaultProxies(proxyList?: string[]): string[] {
   if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;
-  return [DEFAULT_BROWSER_API_URL];
+  return [FALLBACK_BROWSER_API_URL];
 }
 
 function hashPassword(password: string): string {
@@ -452,6 +457,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/browser-proxy", requireAuth, async (_req, res) => {
+    try {
+      const url = await getDefaultBrowserApiUrl();
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/browser-proxy", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string" || url.trim().length < 5) {
+        return res.status(400).json({ error: "Valid proxy URL is required" });
+      }
+      await storage.setSetting("browser_proxy_url", url.trim());
+      res.json({ success: true, url: url.trim() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/smspool/balance", requireAuth, async (_req, res) => {
     try {
       const result = await getSMSPoolBalance();
@@ -753,7 +780,7 @@ export async function registerRoutes(
       (async () => {
         await processAccount(
           account.id, batchId, cleanFirstName, cleanLastName, cleanPassword,
-          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId, DEFAULT_BROWSER_API_URL
+          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId, await getDefaultBrowserApiUrl()
         );
         broadcastBatchComplete(batchId, userId);
       })();
@@ -863,7 +890,7 @@ export async function registerRoutes(
       const drawResult = await retryDrawRegistration(
         account.tempEmail,
         account.la28Password,
-        DEFAULT_BROWSER_API_URL,
+        await getDefaultBrowserApiUrl(),
         account.zipCode || undefined,
         log
       );
@@ -1138,7 +1165,7 @@ export async function registerRoutes(
 
       const { count = 1 } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
-      const proxyUrl = req.body.proxyUrl || DEFAULT_BROWSER_API_URL;
+      const proxyUrl = req.body.proxyUrl || await getDefaultBrowserApiUrl();
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -1377,7 +1404,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Count must be between 1 and 100" });
       }
       const numAccounts = parsed;
-      const proxyUrl = req.body.proxyUrl || DEFAULT_BROWSER_API_URL;
+      const proxyUrl = req.body.proxyUrl || await getDefaultBrowserApiUrl();
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
