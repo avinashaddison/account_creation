@@ -16,11 +16,24 @@ export async function brunoMarsPresaleStep(
   let ownBrowser: Browser | null = null;
 
   try {
+    let sessionReused = false;
     if (!page || !browser) {
       log("🌐 Opening new browser for presale (no active session)...");
       ownBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
       const ctx = ownBrowser.contexts()[0];
       page = ctx ? (ctx.pages()[0] || await ctx.newPage()) : await ownBrowser.newPage();
+    } else {
+      try {
+        await page.evaluate("1+1");
+        sessionReused = true;
+        log("🔄 Reusing authenticated TM browser session");
+      } catch {
+        log("⚠️ TM session expired, opening new browser...");
+        browser = null;
+        ownBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
+        const ctx = ownBrowser.contexts()[0];
+        page = ctx ? (ctx.pages()[0] || await ctx.newPage()) : await ownBrowser.newPage();
+      }
     }
 
     onStatusUpdate("presale_loading");

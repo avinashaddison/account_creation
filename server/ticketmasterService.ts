@@ -2080,9 +2080,13 @@ async function doTMRegistration(
           if (passkeyDismissed) {
             console.log("[TM-Playwright] Waiting for redirect to landing page...");
             try {
-              await page.waitForTimeout(10000);
-              await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-              await page.waitForTimeout(3000);
+              if (keepBrowserOpen) {
+                await page.waitForTimeout(5000);
+              } else {
+                await page.waitForTimeout(10000);
+                await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+                await page.waitForTimeout(3000);
+              }
             } catch {}
 
             try {
@@ -2095,7 +2099,7 @@ async function doTMRegistration(
               if (isOnTMLanding || isOnMyTM) {
                 console.log("[TM-Playwright] Redirected to TM! Waiting for full page load...");
                 try {
-                  await page.waitForTimeout(5000);
+                  await page.waitForTimeout(keepBrowserOpen ? 2000 : 5000);
                 } catch {}
 
                 try {
