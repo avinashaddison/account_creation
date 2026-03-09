@@ -59,49 +59,48 @@ export async function brunoMarsPresaleStep(
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_events");
-    log("🎵 Selecting ALL events...");
+    log("🎵 Selecting Inglewood, CA - SoFi Stadium (Sep 30) event only...");
 
     const eventResult = await page.evaluate(`(() => {
       var results = [];
       var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      var eventCheckboxes = [];
+      var found = false;
       for (var i = 0; i < checkboxes.length; i++) {
-        var label = checkboxes[i].closest('label') || checkboxes[i].parentElement;
-        var text = (label ? label.innerText : '').trim();
-        if (text && (text.includes('SEP') || text.includes('OCT') || text.includes('NOV') || text.includes('DEC') || text.includes('JAN') || text.includes('FEB') || text.includes('MAR') || text.includes('INGLEWOOD') || text.includes('VANCOUVER') || text.includes('CIUDAD') || text.includes('Stadium') || text.includes('Place') || text.includes('Seguros') || text.includes('PRESALE'))) {
-          eventCheckboxes.push({ checkbox: checkboxes[i], text: text.substring(0, 80) });
+        var container = checkboxes[i].closest('label') || checkboxes[i].closest('[class*="event"]') || checkboxes[i].closest('li') || checkboxes[i].closest('div');
+        var text = (container ? container.innerText : '').toUpperCase();
+        if ((text.includes('INGLEWOOD') || text.includes('SOFI')) && (text.includes('SEP') || text.includes('30'))) {
+          if (!checkboxes[i].checked) {
+            checkboxes[i].click();
+            checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          found = true;
+          results.push((container ? container.innerText : '').replace(/\\n/g, ' ').substring(0, 100));
         }
       }
-      if (eventCheckboxes.length === 0) {
-        var allCbs = document.querySelectorAll('input[type="checkbox"]');
-        var nonConsent = [];
-        for (var j = 0; j < allCbs.length; j++) {
-          var lbl = allCbs[j].closest('label') || allCbs[j].parentElement;
-          var t = (lbl ? lbl.innerText : '').toLowerCase();
-          if (!t.includes('consent') && !t.includes('privacy') && !t.includes('marketing') && !t.includes('submitting') && !t.includes('email address')) {
-            nonConsent.push({ checkbox: allCbs[j], text: (lbl ? lbl.innerText : '').substring(0, 80) });
+      if (!found) {
+        for (var j = 0; j < checkboxes.length; j++) {
+          var c2 = checkboxes[j].closest('label') || checkboxes[j].closest('[class*="event"]') || checkboxes[j].closest('li') || checkboxes[j].closest('div');
+          var t2 = (c2 ? c2.innerText : '').toUpperCase();
+          if (t2.includes('INGLEWOOD') || t2.includes('SOFI')) {
+            if (!checkboxes[j].checked) {
+              checkboxes[j].click();
+              checkboxes[j].dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            found = true;
+            results.push((c2 ? c2.innerText : '').replace(/\\n/g, ' ').substring(0, 100));
           }
         }
-        eventCheckboxes = nonConsent;
       }
-      for (var k = 0; k < eventCheckboxes.length; k++) {
-        var cb = eventCheckboxes[k].checkbox;
-        if (!cb.checked) {
-          cb.click();
-          cb.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        results.push(eventCheckboxes[k].text.replace(/\\n/g, ' ').substring(0, 60));
-      }
-      return { selected: results, total: checkboxes.length };
+      return { selected: results, found: found, total: checkboxes.length };
     })()`) as any;
 
-    if (eventResult.selected && eventResult.selected.length > 0) {
-      log(`✅ Selected ${eventResult.selected.length} events:`);
+    if (eventResult.found && eventResult.selected.length > 0) {
+      log(`✅ Selected Inglewood event:`);
       for (const ev of eventResult.selected) {
         log(`  ☑ ${ev}`);
       }
     } else {
-      log(`⚠️ No event checkboxes found (total checkboxes on page: ${eventResult.total})`);
+      log(`⚠️ Inglewood/SoFi event not found (total checkboxes: ${eventResult.total}). Page may have different layout.`);
     }
 
     await page.waitForTimeout(500);
