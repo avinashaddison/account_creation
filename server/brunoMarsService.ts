@@ -72,209 +72,206 @@ export async function brunoMarsPresaleStep(
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_events");
-    log("🎵 Selecting events (up to 3)...");
+    log("🎵 Selecting events (up to 3) using Playwright clicks...");
+    console.log("[BM-Presale] Starting event selection...");
 
-    const pageDebug = await page.evaluate(`(() => {
-      var allEls = document.querySelectorAll('*');
-      var eventKeywords = ['inglewood', 'vancouver', 'ciudad', 'sofi', 'bc place', 'estadio', 'gnp'];
-      var foundElements = [];
-      for (var i = 0; i < allEls.length; i++) {
-        var el = allEls[i];
-        var text = (el.innerText || '').toLowerCase().substring(0, 200);
-        for (var k = 0; k < eventKeywords.length; k++) {
-          if (text.includes(eventKeywords[k]) && el.children.length < 20) {
-            foundElements.push({
-              tag: el.tagName,
-              classes: (el.className || '').toString().substring(0, 100),
-              role: el.getAttribute('role') || '',
-              ariaChecked: el.getAttribute('aria-checked') || '',
-              dataTestId: el.getAttribute('data-testid') || '',
-              clickable: typeof el.onclick === 'function' || el.style.cursor === 'pointer',
-              text: (el.innerText || '').replace(/\\n/g, ' ').substring(0, 80)
-            });
+    const eventTexts = ["INGLEWOOD", "VANCOUVER", "CIUDAD DE MÉXICO"];
+    let selectedCount = 0;
+
+    for (const eventCity of eventTexts) {
+      if (selectedCount >= 3) break;
+      try {
+        const locator = page.locator(`text=${eventCity}`).first();
+        const isVisible = await locator.isVisible({ timeout: 3000 }).catch(() => false);
+        if (isVisible) {
+          await locator.click({ timeout: 5000 });
+          selectedCount++;
+          log("  ☑ Clicked: " + eventCity);
+          console.log("[BM-Presale] Clicked event: " + eventCity);
+          await page.waitForTimeout(500);
+        } else {
+          log("  ⚠️ Not visible: " + eventCity);
+          console.log("[BM-Presale] Not visible: " + eventCity);
+        }
+      } catch (clickErr: any) {
+        log("  ⚠️ Could not click " + eventCity + ": " + clickErr.message.substring(0, 80));
+        console.log("[BM-Presale] Click error for " + eventCity + ": " + clickErr.message.substring(0, 100));
+      }
+    }
+
+    if (selectedCount === 0) {
+      log("🔍 Text-based click failed, trying alternative selectors...");
+      console.log("[BM-Presale] Text click failed, dumping page structure...");
+
+      const domDump = await page.evaluate(`(() => {
+        var selectHeader = null;
+        var allEls = document.querySelectorAll('h1, h2, h3, h4, h5');
+        for (var i = 0; i < allEls.length; i++) {
+          if ((allEls[i].textContent || '').toLowerCase().includes('select your events')) {
+            selectHeader = allEls[i];
             break;
           }
         }
-      }
-      var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      var cbInfo = [];
-      for (var j = 0; j < checkboxes.length; j++) {
-        var lbl = checkboxes[j].closest('label') || checkboxes[j].parentElement;
-        cbInfo.push({
-          id: checkboxes[j].id,
-          name: checkboxes[j].name,
-          visible: checkboxes[j].offsetParent !== null,
-          checked: checkboxes[j].checked,
-          labelText: (lbl ? lbl.innerText : '').replace(/\\n/g, ' ').substring(0, 80)
-        });
-      }
-      return { eventElements: foundElements.slice(0, 30), checkboxes: cbInfo };
-    })()`) as any;
-
-    log("🔍 Page structure: " + (pageDebug.eventElements?.length || 0) + " event elements, " + (pageDebug.checkboxes?.length || 0) + " checkboxes");
-    for (const el of (pageDebug.eventElements || []).slice(0, 10)) {
-      log("  Element: <" + el.tag + "> role=" + el.role + " aria-checked=" + el.ariaChecked + " data-testid=" + el.dataTestId + " classes=" + el.classes.substring(0, 50));
-    }
-    for (const cb of (pageDebug.checkboxes || [])) {
-      log("  Checkbox: id=" + cb.id + " name=" + cb.name + " visible=" + cb.visible + " checked=" + cb.checked + " label=" + cb.labelText.substring(0, 50));
-    }
-
-    const eventResult = await page.evaluate(`(() => {
-      var results = [];
-      var maxEvents = 3;
-
-      var cards = document.querySelectorAll('[role="checkbox"], [role="option"], [data-testid*="event"], [class*="event-card"], [class*="EventCard"], [class*="event_card"]');
-      if (cards.length > 0) {
-        var count = 0;
-        for (var i = 0; i < cards.length && count < maxEvents; i++) {
-          var isChecked = cards[i].getAttribute('aria-checked') === 'true' || cards[i].classList.contains('selected') || cards[i].classList.contains('checked');
-          if (!isChecked) {
-            cards[i].click();
-            count++;
-          } else {
-            count++;
-          }
-          results.push((cards[i].innerText || '').replace(/\\n/g, ' ').substring(0, 80));
+        var container = selectHeader ? selectHeader.parentElement : document.body;
+        var children = container ? container.children : [];
+        var dump = [];
+        for (var j = 0; j < children.length && j < 20; j++) {
+          dump.push({
+            tag: children[j].tagName,
+            classes: (children[j].className || '').toString().substring(0, 150),
+            role: children[j].getAttribute('role') || '',
+            ariaChecked: children[j].getAttribute('aria-checked') || '',
+            childCount: children[j].querySelectorAll('*').length,
+            text: (children[j].innerText || '').replace(/\\n/g, ' ').substring(0, 120),
+            outerHtml: children[j].outerHTML.substring(0, 300)
+          });
         }
-        if (count > 0) return { selected: results, method: 'aria-role', total: cards.length };
-      }
-
-      var allDivs = document.querySelectorAll('div, li, article, section, button');
-      var eventKeywords = ['INGLEWOOD', 'VANCOUVER', 'CIUDAD', 'SOFI', 'BC PLACE', 'ESTADIO'];
-      var eventCards = [];
-      for (var j = 0; j < allDivs.length; j++) {
-        var el = allDivs[j];
-        var text = (el.innerText || '').toUpperCase();
-        var directText = '';
-        for (var c = 0; c < el.childNodes.length; c++) {
-          if (el.childNodes[c].nodeType === 3) directText += el.childNodes[c].textContent;
+        var allCheckboxLike = document.querySelectorAll('[role="checkbox"], [role="option"], [role="listitem"], [role="button"]');
+        var cbDump = [];
+        for (var k = 0; k < allCheckboxLike.length && k < 20; k++) {
+          cbDump.push({
+            tag: allCheckboxLike[k].tagName,
+            role: allCheckboxLike[k].getAttribute('role'),
+            ariaChecked: allCheckboxLike[k].getAttribute('aria-checked'),
+            classes: (allCheckboxLike[k].className || '').toString().substring(0, 100),
+            text: (allCheckboxLike[k].innerText || '').replace(/\\n/g, ' ').substring(0, 80)
+          });
         }
-        var childCount = el.querySelectorAll('*').length;
-        if (childCount > 30) continue;
-        
-        var hasKeyword = false;
-        for (var k = 0; k < eventKeywords.length; k++) {
-          if (text.includes(eventKeywords[k])) { hasKeyword = true; break; }
+        return { containerChildren: dump, ariaElements: cbDump, containerTag: container ? container.tagName : 'none' };
+      })()`) as any;
+
+      console.log("[BM-Presale] Container tag:", domDump.containerTag);
+      for (const child of (domDump.containerChildren || [])) {
+        console.log("[BM-Presale] Child:", child.tag, "role:", child.role, "aria-checked:", child.ariaChecked, "classes:", child.classes?.substring(0, 60), "text:", child.text?.substring(0, 60));
+        log("  DOM: <" + child.tag + "> role=" + child.role + " classes=" + (child.classes || '').substring(0, 40) + " text=" + (child.text || '').substring(0, 50));
+      }
+      for (const ae of (domDump.ariaElements || [])) {
+        console.log("[BM-Presale] ARIA:", ae.tag, "role:", ae.role, "aria-checked:", ae.ariaChecked, "text:", ae.text?.substring(0, 60));
+      }
+
+      try {
+        const allClickable = page.locator('[role="checkbox"], [role="option"], [role="listitem"]');
+        const count = await allClickable.count();
+        log("  Found " + count + " ARIA clickable elements");
+        for (let i = 0; i < Math.min(count, 3); i++) {
+          await allClickable.nth(i).click({ timeout: 3000 });
+          selectedCount++;
+          const itemText = await allClickable.nth(i).innerText().catch(() => "unknown");
+          log("  ☑ Clicked ARIA element " + i + ": " + itemText.replace(/\n/g, ' ').substring(0, 60));
+          await page.waitForTimeout(500);
         }
-        if (!hasKeyword) continue;
-        
-        var hasDate = text.includes('SEP') || text.includes('OCT') || text.includes('DEC') || text.includes('PRESALE');
-        if (!hasDate) continue;
-
-        var isDuplicate = false;
-        for (var d = 0; d < eventCards.length; d++) {
-          if (eventCards[d].el.contains(el) || el.contains(eventCards[d].el)) {
-            if (el.querySelectorAll('*').length < eventCards[d].el.querySelectorAll('*').length) {
-              eventCards[d] = { el: el, text: text };
-            }
-            isDuplicate = true;
-            break;
-          }
-        }
-        if (!isDuplicate) eventCards.push({ el: el, text: text });
+      } catch (ariaErr: any) {
+        log("  ⚠️ ARIA click failed: " + ariaErr.message.substring(0, 80));
       }
-
-      var selected = 0;
-      for (var m = 0; m < eventCards.length && selected < maxEvents; m++) {
-        eventCards[m].el.click();
-        selected++;
-        results.push((eventCards[m].el.innerText || '').replace(/\\n/g, ' ').substring(0, 80));
-      }
-      if (selected > 0) return { selected: results, method: 'keyword-click', total: eventCards.length };
-
-      var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      var evtCbs = [];
-      for (var n = 0; n < checkboxes.length; n++) {
-        var container = checkboxes[n].closest('label') || checkboxes[n].parentElement;
-        var cText = (container ? container.innerText : '').toLowerCase();
-        var isConsent = cText.includes('consent') || cText.includes('privacy') || cText.includes('marketing') || cText.includes('submitting') || cText.includes('email address') || cText.includes('mobile phone') || cText.includes('fan list');
-        if (!isConsent && checkboxes[n].offsetParent !== null) {
-          evtCbs.push({ cb: checkboxes[n], text: (container ? container.innerText : '').replace(/\\n/g, ' ').substring(0, 80) });
-        }
-      }
-      for (var p = 0; p < evtCbs.length && p < maxEvents; p++) {
-        if (!evtCbs[p].cb.checked) {
-          evtCbs[p].cb.click();
-          evtCbs[p].cb.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        results.push(evtCbs[p].text);
-      }
-      if (results.length > 0) return { selected: results, method: 'checkbox', total: evtCbs.length };
-
-      return { selected: [], method: 'none', total: 0 };
-    })()`) as any;
-
-    log("Selection method: " + (eventResult.method || 'unknown'));
-    if (eventResult.selected && eventResult.selected.length > 0) {
-      log("✅ Selected " + eventResult.selected.length + " events:");
-      for (const ev of eventResult.selected) {
-        log("  ☑ " + ev);
-      }
-    } else {
-      log("⚠️ No events could be selected. Total found: " + eventResult.total);
     }
 
-    await page.waitForTimeout(1500);
-
-    const verifySelection = await page.evaluate(`(() => {
-      var checked = document.querySelectorAll('[aria-checked="true"], .selected, .checked, input[type="checkbox"]:checked');
-      var texts = [];
-      for (var i = 0; i < checked.length; i++) {
-        var t = (checked[i].innerText || '').replace(/\\n/g, ' ').substring(0, 60);
-        if (t) texts.push(t);
+    if (selectedCount === 0) {
+      log("🔍 Trying to click event rows by visible structure...");
+      try {
+        const rows = page.locator('div:has(> div), li, article').filter({ hasText: /INGLEWOOD|VANCOUVER|CIUDAD/ });
+        const rowCount = await rows.count();
+        log("  Found " + rowCount + " matching rows");
+        for (let i = 0; i < Math.min(rowCount, 3); i++) {
+          await rows.nth(i).click({ timeout: 3000, force: true });
+          selectedCount++;
+          log("  ☑ Force-clicked row " + i);
+          await page.waitForTimeout(500);
+        }
+      } catch (rowErr: any) {
+        log("  ⚠️ Row click failed: " + rowErr.message.substring(0, 80));
       }
-      return { count: checked.length, items: texts };
-    })()`) as any;
-    log("📋 Verified selections: " + verifySelection.count + " items checked");
+    }
 
-    await page.waitForTimeout(500);
+    log("✅ Selected " + selectedCount + " events");
+    console.log("[BM-Presale] Total events selected: " + selectedCount);
+    await page.waitForTimeout(1000);
 
     log("☑ Checking consent boxes...");
-    const consentResult = await page.evaluate(`(() => {
-      var checked = 0;
-      var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      for (var i = 0; i < checkboxes.length; i++) {
-        var label = checkboxes[i].closest('label') || checkboxes[i].parentElement;
-        var text = (label ? label.innerText : '').toLowerCase();
-        if (text.includes('consent') || text.includes('privacy') || text.includes('submitting') || text.includes('marketing') || text.includes('email address') || text.includes('mobile phone') || text.includes('fan list')) {
-          if (!checkboxes[i].checked) {
-            checkboxes[i].click();
-            checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
-            checked++;
-          } else {
-            checked++;
+    console.log("[BM-Presale] Checking consent boxes...");
+    let consentChecked = 0;
+
+    const consentTexts = [
+      "submitting my mobile phone",
+      "submitting my email address",
+      "consent to receive",
+      "consent to joining",
+      "fan list"
+    ];
+
+    for (const consentText of consentTexts) {
+      try {
+        const consentLocator = page.locator(`text=${consentText}`).first();
+        const isVis = await consentLocator.isVisible({ timeout: 2000 }).catch(() => false);
+        if (isVis) {
+          await consentLocator.click({ timeout: 3000 });
+          consentChecked++;
+          log("  ☑ Consent: " + consentText.substring(0, 40));
+          console.log("[BM-Presale] Clicked consent: " + consentText);
+          await page.waitForTimeout(300);
+        }
+      } catch {
+        // try next
+      }
+    }
+
+    if (consentChecked === 0) {
+      log("  Trying checkbox inputs for consent...");
+      const cbCount = await page.evaluate(`(() => {
+        var checked = 0;
+        var checkboxes = document.querySelectorAll('input[type="checkbox"]');
+        for (var i = 0; i < checkboxes.length; i++) {
+          var label = checkboxes[i].closest('label') || checkboxes[i].closest('div') || checkboxes[i].parentElement;
+          var text = (label ? label.innerText : '').toLowerCase();
+          if (text.includes('consent') || text.includes('privacy') || text.includes('submitting') || text.includes('email address') || text.includes('mobile phone') || text.includes('fan list')) {
+            if (!checkboxes[i].checked) {
+              checkboxes[i].click();
+              checkboxes[i].checked = true;
+              checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
+              checkboxes[i].dispatchEvent(new Event('input', { bubbles: true }));
+              checked++;
+            } else {
+              checked++;
+            }
           }
         }
-      }
-      return checked;
-    })()`) as number;
-    log(`✅ ${consentResult} consent box(es) checked`);
+        return checked;
+      })()`) as number;
+      consentChecked = cbCount;
+    }
 
+    log("✅ " + consentChecked + " consent box(es) checked");
+    console.log("[BM-Presale] Consent checked: " + consentChecked);
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_submitting");
     log("🔘 Clicking Sign Up button...");
+    console.log("[BM-Presale] Clicking Sign Up...");
 
-    const submitResult = await page.evaluate(`(() => {
-      var buttons = document.querySelectorAll('button, input[type="submit"], a');
-      for (var i = 0; i < buttons.length; i++) {
-        var t = (buttons[i].textContent || buttons[i].value || '').toLowerCase().trim();
-        if (t === 'sign up' || t === 'signup' || t === 'register' || t === 'submit') {
-          buttons[i].click();
-          return 'clicked: ' + (buttons[i].textContent || buttons[i].value || '').trim();
+    let submitResult = "not-found";
+    try {
+      const signUpBtn = page.locator('button:has-text("Sign Up")').first();
+      const btnVisible = await signUpBtn.isVisible({ timeout: 3000 }).catch(() => false);
+      if (btnVisible) {
+        const isDisabled = await signUpBtn.isDisabled().catch(() => false);
+        log("  Sign Up button found, disabled=" + isDisabled);
+        console.log("[BM-Presale] Sign Up button visible, disabled=" + isDisabled);
+        await signUpBtn.click({ timeout: 5000 });
+        submitResult = "clicked: Sign Up";
+      } else {
+        const altBtn = page.locator('button, input[type="submit"]').filter({ hasText: /sign up|signup|register|submit/i }).first();
+        const altVisible = await altBtn.isVisible({ timeout: 3000 }).catch(() => false);
+        if (altVisible) {
+          await altBtn.click({ timeout: 5000 });
+          submitResult = "clicked: alt button";
         }
       }
-      for (var j = 0; j < buttons.length; j++) {
-        var t2 = (buttons[j].textContent || buttons[j].value || '').toLowerCase().trim();
-        if (t2.includes('sign up') || t2.includes('signup')) {
-          buttons[j].click();
-          return 'clicked: ' + (buttons[j].textContent || buttons[j].value || '').trim();
-        }
-      }
-      return 'not-found: buttons=' + buttons.length;
-    })()`) as string;
+    } catch (btnErr: any) {
+      log("  ⚠️ Button click error: " + btnErr.message.substring(0, 80));
+      submitResult = "error: " + btnErr.message.substring(0, 80);
+    }
 
     log("Submit: " + submitResult);
+    console.log("[BM-Presale] Submit result: " + submitResult);
 
     if (submitResult.startsWith("clicked")) {
       log("⏳ Waiting for confirmation...");
