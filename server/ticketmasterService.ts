@@ -107,7 +107,7 @@ async function fillInput(page: Page, selectors: string[], value: string, useType
         await page.waitForTimeout(200);
         const currentVal = await el.inputValue().catch(() => '');
         if (currentVal && currentVal.length > 0) return true;
-        console.log(`[TM-Playwright] fillInput: ${selector} fill attempt returned empty, trying native setter...`);
+        console.log(`[TM-Playwright] fillInput: ${selector} fill attempt returned empty, trying native setter + React trigger...`);
         const nativeResult = await page.evaluate(`((sel, val) => {
           var el = document.querySelector(sel);
           if (!el) return false;
@@ -116,6 +116,10 @@ async function fillInput(page: Page, selectors: string[], value: string, useType
           else el.value = val;
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
+          var reactPropsKey = Object.keys(el).find(function(k) { return k.startsWith('__reactProps') || k.startsWith('__reactEvents'); });
+          if (reactPropsKey && el[reactPropsKey] && typeof el[reactPropsKey].onChange === 'function') {
+            el[reactPropsKey].onChange({ target: el, currentTarget: el, type: 'change' });
+          }
           el.dispatchEvent(new Event('blur', { bubbles: true }));
           return el.value.length > 0;
         })` + `(${JSON.stringify(selector)}, ${JSON.stringify(value)})`) as boolean;
@@ -542,6 +546,10 @@ async function handlePhoneVerification(
           else visibleDigitInputs[j].value = digits[j];
           visibleDigitInputs[j].dispatchEvent(new Event('input', { bubbles: true }));
           visibleDigitInputs[j].dispatchEvent(new Event('change', { bubbles: true }));
+          var rp = Object.keys(visibleDigitInputs[j]).find(function(k) { return k.startsWith('__reactProps'); });
+          if (rp && visibleDigitInputs[j][rp] && typeof visibleDigitInputs[j][rp].onChange === 'function') {
+            visibleDigitInputs[j][rp].onChange({ target: visibleDigitInputs[j], currentTarget: visibleDigitInputs[j], type: 'change' });
+          }
         }
         return 'individual-digits:' + visibleDigitInputs.length;
       }
@@ -558,11 +566,16 @@ async function handlePhoneVerification(
         for (var k = 0; k < els.length; k++) {
           var r = els[k].getBoundingClientRect();
           if (r.width > 0 && r.height > 0) {
+            els[k].focus();
             var nativeSet2 = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
             if (nativeSet2 && nativeSet2.set) nativeSet2.set.call(els[k], code);
             else els[k].value = code;
             els[k].dispatchEvent(new Event('input', { bubbles: true }));
             els[k].dispatchEvent(new Event('change', { bubbles: true }));
+            var rp2 = Object.keys(els[k]).find(function(kk) { return kk.startsWith('__reactProps'); });
+            if (rp2 && els[k][rp2] && typeof els[k][rp2].onChange === 'function') {
+              els[k][rp2].onChange({ target: els[k], currentTarget: els[k], type: 'change' });
+            }
             els[k].dispatchEvent(new Event('blur', { bubbles: true }));
             return 'single-input:' + singleSelectors[s];
           }
@@ -1152,78 +1165,94 @@ async function doTMRegistration(
     }
 
     if (!pwFilled) {
-      console.log("[TM-Playwright] Trying clean iframe setter method...");
+      console.log("[TM-Playwright] Trying clean iframe setter + React trigger method...");
       try {
         pwFilled = await page.evaluate(
           `((pwd) => {
           var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
           if (!el) return false;
-          try {
-            var iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            document.body.appendChild(iframe);
-            var cleanSetter = Object.getOwnPropertyDescriptor(iframe.contentWindow.HTMLInputElement.prototype, 'value').set;
-            document.body.removeChild(iframe);
-            cleanSetter.call(el, pwd);
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
-            return el.value.length > 0;
-          } catch (e1) {
+
+          function triggerReactChange(element, value) {
+            var nativeSetter;
             try {
-              var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-              if (nativeSet && nativeSet.set) nativeSet.set.call(el, pwd);
-              else el.value = pwd;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              el.dispatchEvent(new Event('blur', { bubbles: true }));
-              return el.value.length > 0;
-            } catch (e2) {
-              try {
-                el.setAttribute('type', 'text');
-                el.value = pwd;
-                el.setAttribute('type', 'password');
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-                return el.value.length > 0;
-              } catch (e3) {
-                return false;
+              var iframe = document.createElement('iframe');
+              iframe.style.display = 'none';
+              document.body.appendChild(iframe);
+              nativeSetter = Object.getOwnPropertyDescriptor(iframe.contentWindow.HTMLInputElement.prototype, 'value').set;
+              document.body.removeChild(iframe);
+            } catch (e) {
+              nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            }
+            nativeSetter.call(element, value);
+
+            var reactPropsKey = Object.keys(element).find(function(k) {
+              return k.startsWith('__reactProps') || k.startsWith('__reactEvents');
+            });
+            var reactFiberKey = Object.keys(element).find(function(k) {
+              return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance');
+            });
+
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+
+            if (reactPropsKey && element[reactPropsKey]) {
+              var props = element[reactPropsKey];
+              if (typeof props.onChange === 'function') {
+                props.onChange({ target: element, currentTarget: element, type: 'change' });
+              }
+              if (typeof props.onInput === 'function') {
+                props.onInput({ target: element, currentTarget: element, type: 'input' });
               }
             }
+
+            if (reactFiberKey) {
+              var fiber = element[reactFiberKey];
+              while (fiber) {
+                if (fiber.memoizedProps) {
+                  if (typeof fiber.memoizedProps.onChange === 'function') {
+                    fiber.memoizedProps.onChange({ target: element, currentTarget: element, type: 'change' });
+                    break;
+                  }
+                }
+                fiber = fiber.return;
+              }
+            }
+
+            element.dispatchEvent(new Event('blur', { bubbles: true }));
+            return element.value.length > 0;
           }
+
+          el.focus();
+          el.click();
+          return triggerReactChange(el, pwd);
         })` + `(${JSON.stringify(password)})`) as boolean;
+        if (pwFilled) console.log("[TM-Playwright] Password filled via iframe setter + React trigger");
       } catch (e: any) {
-        console.log(`[TM-Playwright] Iframe setter failed: ${e.message.substring(0, 100)}`);
+        console.log(`[TM-Playwright] Iframe setter + React trigger failed: ${e.message.substring(0, 100)}`);
       }
     }
 
     if (!pwFilled) {
-      console.log("[TM-Playwright] Trying direct React dispatchEvent method...");
+      console.log("[TM-Playwright] Trying direct value setter as last resort...");
       try {
         pwFilled = await page.evaluate(
           `((pwd) => {
           var el = document.querySelector('#password-input') || document.querySelector('input[type="password"]') || document.querySelector('input[name="password"]');
           if (!el) return false;
           el.focus();
-          var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-          if (nativeSet && nativeSet.set) {
-            nativeSet.set.call(el, pwd);
-          } else {
-            el.value = pwd;
-          }
+          el.setAttribute('type', 'text');
+          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          if (nativeSet && nativeSet.set) nativeSet.set.call(el, pwd);
+          else el.value = pwd;
+          el.setAttribute('type', 'password');
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
-          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: pwd }));
           el.dispatchEvent(new Event('blur', { bubbles: true }));
-          var reactKey = Object.keys(el).find(function(k) { return k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance') || k.startsWith('__reactProps'); });
-          if (reactKey && el[reactKey] && typeof el[reactKey].onChange === 'function') {
-            el[reactKey].onChange({ target: el, currentTarget: el });
-          }
           return el.value.length > 0;
         })` + `(${JSON.stringify(password)})`) as boolean;
-        if (pwFilled) console.log("[TM-Playwright] Password filled via React dispatchEvent");
+        if (pwFilled) console.log("[TM-Playwright] Password filled via direct setter");
       } catch (e: any) {
-        console.log(`[TM-Playwright] React dispatch failed: ${e.message.substring(0, 100)}`);
+        console.log(`[TM-Playwright] Direct setter failed: ${e.message.substring(0, 100)}`);
       }
     }
 
@@ -1406,10 +1435,105 @@ async function doTMRegistration(
       return { success: false, error: "Account already exists for this email" };
     }
 
-    const needsCode = pageText.toLowerCase().includes("code") ||
-                      pageText.toLowerCase().includes("verify") ||
-                      pageText.toLowerCase().includes("confirmation") ||
-                      pageText.toLowerCase().includes("check your email");
+    const stillOnSignUpForm = pageLower.includes("sign up") && pageLower.includes("password") && pageLower.includes("first name");
+    if (stillOnSignUpForm) {
+      console.log("[TM-Playwright] Still on sign-up form after submit, re-verifying fields and retrying...");
+
+      const fieldCheck = await page.evaluate(`(() => {
+        var pw = document.querySelector('#password-input');
+        var fn = document.querySelector('#firstName-input');
+        var ln = document.querySelector('#lastName-input');
+        return {
+          pw: pw ? pw.value.length : -1,
+          fn: fn ? fn.value.length : -1,
+          ln: ln ? ln.value.length : -1
+        };
+      })()`) as any;
+      console.log("[TM-Playwright] Field values after failed submit:", JSON.stringify(fieldCheck));
+
+      if (fieldCheck.pw === 0 || fieldCheck.fn === 0 || fieldCheck.ln === 0) {
+        console.log("[TM-Playwright] Empty fields detected, re-filling with React triggers...");
+        if (fieldCheck.pw === 0) {
+          await page.evaluate(`((pwd) => {
+            var el = document.querySelector('#password-input');
+            if (!el) return;
+            var nativeSetter;
+            try {
+              var iframe = document.createElement('iframe');
+              iframe.style.display = 'none';
+              document.body.appendChild(iframe);
+              nativeSetter = Object.getOwnPropertyDescriptor(iframe.contentWindow.HTMLInputElement.prototype, 'value').set;
+              document.body.removeChild(iframe);
+            } catch(e) { nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; }
+            nativeSetter.call(el, pwd);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            var rp = Object.keys(el).find(function(k) { return k.startsWith('__reactProps'); });
+            if (rp && el[rp] && typeof el[rp].onChange === 'function') el[rp].onChange({ target: el, currentTarget: el, type: 'change' });
+            el.dispatchEvent(new Event('blur', { bubbles: true }));
+          })` + `(${JSON.stringify(password)})`);
+        }
+        if (fieldCheck.fn === 0) {
+          await page.evaluate(`((val) => {
+            var el = document.querySelector('#firstName-input');
+            if (!el) return;
+            var ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (ns && ns.set) ns.set.call(el, val); else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            var rp = Object.keys(el).find(function(k) { return k.startsWith('__reactProps'); });
+            if (rp && el[rp] && typeof el[rp].onChange === 'function') el[rp].onChange({ target: el, currentTarget: el, type: 'change' });
+          })` + `(${JSON.stringify(firstName)})`);
+        }
+        if (fieldCheck.ln === 0) {
+          await page.evaluate(`((val) => {
+            var el = document.querySelector('#lastName-input');
+            if (!el) return;
+            var ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (ns && ns.set) ns.set.call(el, val); else el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            var rp = Object.keys(el).find(function(k) { return k.startsWith('__reactProps'); });
+            if (rp && el[rp] && typeof el[rp].onChange === 'function') el[rp].onChange({ target: el, currentTarget: el, type: 'change' });
+          })` + `(${JSON.stringify(lastName)})`);
+        }
+        await page.waitForTimeout(1000);
+
+        console.log("[TM-Playwright] Re-submitting after field re-fill...");
+        let resubmitted = await clickButton(page, "create account");
+        if (!resubmitted) resubmitted = await clickButton(page, "sign up");
+        if (!resubmitted) resubmitted = await clickButton(page, "register");
+        if (!resubmitted) resubmitted = await clickButton(page, "continue");
+        if (!resubmitted) resubmitted = await clickButton(page);
+        console.log(`[TM-Playwright] Re-submit clicked: ${resubmitted}`);
+        await page.waitForTimeout(5000);
+        pageText = await getPageText(page);
+        pageLower = pageText.toLowerCase();
+      }
+
+      for (let waitIdx = 0; waitIdx < 10; waitIdx++) {
+        if (!pageLower.includes("sign up") || pageLower.includes("almost there") || pageLower.includes("verify your account")) {
+          console.log(`[TM-Playwright] Page transitioned after extended wait`);
+          break;
+        }
+        if (pageLower.includes("please enter a valid password") || pageLower.includes("password is required") ||
+            pageLower.includes("first name is required") || pageLower.includes("last name is required")) {
+          console.log("[TM-Playwright] Form validation errors detected during wait");
+          return { success: false, error: "Form validation errors after delayed submit: " + pageText.substring(0, 200), pageContent: pageText.substring(0, 500), smsCost: totalSmsCost };
+        }
+        await page.waitForTimeout(3000);
+        pageText = await getPageText(page);
+        pageLower = pageText.toLowerCase();
+        if (waitIdx % 3 === 0) console.log(`[TM-Playwright] Still waiting for page transition [${(waitIdx + 1) * 3}s]...`);
+      }
+      console.log("[TM-Playwright] After extended wait (first 500):", pageText.substring(0, 500));
+    }
+
+    const needsCode = pageLower.includes("almost there") ||
+                      pageLower.includes("verify your account") ||
+                      pageLower.includes("verify my email") ||
+                      pageLower.includes("check your email") ||
+                      (pageLower.includes("verify") && pageLower.includes("email") && !stillOnSignUpForm);
 
     if (needsCode) {
       console.log("[TM-Playwright] Verification page detected, clicking 'Verify My Email'...");
@@ -1483,60 +1607,134 @@ async function doTMRegistration(
       onStatusUpdate("verifying");
       console.log(`[TM-Playwright] Entering verification code: ${code}`);
 
-      const codeDigits = code.split('');
-      const codeEntered = await page.evaluate(`((code, digits) => {
-        var inputs = document.querySelectorAll('input[maxlength="1"], input[data-index]');
-        var visibleDigitInputs = [];
-        for (var i = 0; i < inputs.length; i++) {
-          var rect = inputs[i].getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) visibleDigitInputs.push(inputs[i]);
-        }
-
-        if (visibleDigitInputs.length >= digits.length) {
-          for (var j = 0; j < digits.length; j++) {
-            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') ||
-                            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-            if (nativeSet && nativeSet.set) nativeSet.set.call(visibleDigitInputs[j], digits[j]);
-            else visibleDigitInputs[j].value = digits[j];
-            visibleDigitInputs[j].dispatchEvent(new Event('input', { bubbles: true }));
-            visibleDigitInputs[j].dispatchEvent(new Event('change', { bubbles: true }));
+      let codeEntered = 'not-attempted';
+      try {
+        const otpInput = page.locator('#otp-input-input, input[aria-label="One-Time Code"], input[maxlength="6"]').first();
+        if (await otpInput.isVisible({ timeout: 3000 })) {
+          await otpInput.click({ timeout: 2000 });
+          await page.waitForTimeout(300);
+          await otpInput.fill('');
+          await page.waitForTimeout(200);
+          await otpInput.pressSequentially(code, { delay: 50 + Math.floor(Math.random() * 30) });
+          await page.waitForTimeout(300);
+          const val = await otpInput.inputValue().catch(() => '');
+          if (val && val.length > 0) {
+            codeEntered = 'typed-otp:' + val.length;
+          } else {
+            codeEntered = 'typed-but-empty';
           }
-          return 'individual-digits:' + visibleDigitInputs.length;
         }
+      } catch (e: any) {
+        console.log(`[TM-Playwright] OTP typing failed: ${e.message.substring(0, 80)}`);
+      }
 
-        var singleSelectors = [
-          'input[name="code"]', 'input[id*="code"]', 'input[placeholder*="code"]',
-          'input[data-testid*="code"]', 'input[inputmode="numeric"]',
-          'input[type="text"]:not([name="email"]):not([name="firstName"]):not([name="lastName"]):not([name="postalCode"])',
-          'input[type="number"]', 'input[type="tel"]'
-        ];
-        for (var s = 0; s < singleSelectors.length; s++) {
-          var els = document.querySelectorAll(singleSelectors[s]);
-          for (var k = 0; k < els.length; k++) {
-            var r = els[k].getBoundingClientRect();
-            if (r.width > 0 && r.height > 0) {
-              var nativeSet2 = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') ||
-                               Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-              if (nativeSet2 && nativeSet2.set) nativeSet2.set.call(els[k], code);
-              else els[k].value = code;
-              els[k].dispatchEvent(new Event('input', { bubbles: true }));
-              els[k].dispatchEvent(new Event('change', { bubbles: true }));
-              els[k].dispatchEvent(new Event('blur', { bubbles: true }));
-              return 'single-input:' + singleSelectors[s];
+      if (codeEntered === 'not-attempted' || codeEntered === 'typed-but-empty') {
+        const codeDigits = code.split('');
+        codeEntered = await page.evaluate(`((code, digits) => {
+          var inputs = document.querySelectorAll('input[maxlength="1"], input[data-index]');
+          var visibleDigitInputs = [];
+          for (var i = 0; i < inputs.length; i++) {
+            var rect = inputs[i].getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) visibleDigitInputs.push(inputs[i]);
+          }
+
+          function reactTrigger(element) {
+            var rp = Object.keys(element).find(function(k) { return k.startsWith('__reactProps'); });
+            if (rp && element[rp] && typeof element[rp].onChange === 'function') {
+              element[rp].onChange({ target: element, currentTarget: element, type: 'change' });
+            }
+          }
+
+          if (visibleDigitInputs.length >= digits.length) {
+            for (var j = 0; j < digits.length; j++) {
+              var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') ||
+                              Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+              if (nativeSet && nativeSet.set) nativeSet.set.call(visibleDigitInputs[j], digits[j]);
+              else visibleDigitInputs[j].value = digits[j];
+              visibleDigitInputs[j].dispatchEvent(new Event('input', { bubbles: true }));
+              visibleDigitInputs[j].dispatchEvent(new Event('change', { bubbles: true }));
+              reactTrigger(visibleDigitInputs[j]);
+            }
+            return 'individual-digits:' + visibleDigitInputs.length;
+          }
+
+          var otpEl = document.querySelector('#otp-input-input') || document.querySelector('input[aria-label="One-Time Code"]');
+          if (otpEl) {
+            otpEl.focus();
+            var nativeSet2 = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet2 && nativeSet2.set) nativeSet2.set.call(otpEl, code);
+            else otpEl.value = code;
+            otpEl.dispatchEvent(new Event('input', { bubbles: true }));
+            otpEl.dispatchEvent(new Event('change', { bubbles: true }));
+            reactTrigger(otpEl);
+            otpEl.dispatchEvent(new Event('blur', { bubbles: true }));
+            return 'otp-native-setter';
+          }
+
+          var singleSelectors = [
+            'input[name="code"]', 'input[id*="code"]', 'input[placeholder*="code"]',
+            'input[data-testid*="code"]', 'input[inputmode="numeric"]',
+            'input[type="text"]:not([name="email"]):not([name="firstName"]):not([name="lastName"]):not([name="postalCode"])',
+            'input[type="number"]', 'input[type="tel"]'
+          ];
+          for (var s = 0; s < singleSelectors.length; s++) {
+            var els = document.querySelectorAll(singleSelectors[s]);
+            for (var k = 0; k < els.length; k++) {
+              var r = els[k].getBoundingClientRect();
+              if (r.width > 0 && r.height > 0) {
+                els[k].focus();
+                var nativeSet3 = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') ||
+                                 Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                if (nativeSet3 && nativeSet3.set) nativeSet3.set.call(els[k], code);
+                else els[k].value = code;
+                els[k].dispatchEvent(new Event('input', { bubbles: true }));
+                els[k].dispatchEvent(new Event('change', { bubbles: true }));
+                reactTrigger(els[k]);
+                els[k].dispatchEvent(new Event('blur', { bubbles: true }));
+                return 'single-input:' + singleSelectors[s];
+              }
+            }
+          }
+          return 'no-input-found';
+        })` + `(${JSON.stringify(code)}, ${JSON.stringify(code.split(''))})`) as string;
+      }
+      console.log(`[TM-Playwright] Code entry result: ${codeEntered}`);
+
+      await page.waitForTimeout(1500);
+
+      let verifyClicked = await page.evaluate(`(() => {
+        var otpForm = document.querySelector('form:has(#otp-input-input), form:has(input[aria-label="One-Time Code"]), form:has(input[maxlength="6"])');
+        if (otpForm) {
+          var btns = otpForm.querySelectorAll('button, input[type="submit"]');
+          for (var i = 0; i < btns.length; i++) {
+            var rect = btns[i].getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              var text = (btns[i].innerText || btns[i].textContent || '').trim().toLowerCase();
+              if (text.includes('verify') || text.includes('submit') || text.includes('confirm') || text.includes('continue')) {
+                btns[i].click();
+                return 'otp-form-btn:' + text.substring(0, 40);
+              }
+            }
+          }
+          for (var j = 0; j < btns.length; j++) {
+            var rect2 = btns[j].getBoundingClientRect();
+            if (rect2.width > 0 && rect2.height > 0) {
+              btns[j].click();
+              return 'otp-form-btn-any:' + (btns[j].innerText || '').trim().substring(0, 40);
             }
           }
         }
-        return 'no-input-found';
-      })("${code}", ${JSON.stringify(codeDigits)})`);
-      console.log(`[TM-Playwright] Code entry result: ${codeEntered}`);
+        return false;
+      })()`) as string | boolean;
 
-      await page.waitForTimeout(1000);
-
-      let verifyClicked = await clickButton(page, "verify");
-      if (!verifyClicked) verifyClicked = await clickButton(page, "confirm");
-      if (!verifyClicked) verifyClicked = await clickButton(page, "submit");
-      if (!verifyClicked) verifyClicked = await clickButton(page, "continue");
-      if (!verifyClicked) verifyClicked = await clickButton(page);
+      if (!verifyClicked) {
+        verifyClicked = await clickButton(page, "verify code");
+        if (!verifyClicked) verifyClicked = await clickButton(page, "verify");
+        if (!verifyClicked) verifyClicked = await clickButton(page, "confirm");
+        if (!verifyClicked) verifyClicked = await clickButton(page, "submit");
+        if (!verifyClicked) verifyClicked = await clickButton(page, "continue");
+        if (!verifyClicked) verifyClicked = await clickButton(page);
+      }
       console.log(`[TM-Playwright] Verify code clicked: ${verifyClicked}`);
 
       await page.waitForTimeout(5000);
@@ -1725,34 +1923,56 @@ async function doTMRegistration(
                       finalLower.includes("you're in") ||
                       finalLower.includes("welcome back") ||
                       finalLower.includes("account settings");
-    const phoneVerified = finalLower.includes("phone verified") || finalLower.includes("phone number verified");
-    const emailVerifiedOnPage = finalLower.includes("email verified") || finalLower.includes("email address verified");
 
-    const verifyPageCompleted = (finalLower.includes("almost there") || finalLower.includes("verify your account") || finalLower.includes("one more step")) &&
-                      !finalLower.includes("verify my email") &&
-                      !finalLower.includes("send code") &&
-                      !finalLower.includes("add my phone") &&
-                      (phoneVerified || emailVerifiedOnPage || !finalLower.includes("phone"));
+    const domVerifyState = await page.evaluate(`(() => {
+      var body = document.body ? document.body.innerHTML : '';
+      var bodyLower = body.toLowerCase();
+      var emailSection = '';
+      var phoneSection = '';
+      var allSections = document.querySelectorAll('section, div[class*="verify"], div[class*="Verify"]');
+      for (var i = 0; i < allSections.length; i++) {
+        var text = allSections[i].innerText.toLowerCase();
+        if (text.includes('verify your email') || text.includes('verify my email')) emailSection = allSections[i].innerHTML.toLowerCase();
+        if (text.includes('phone') && (text.includes('verify') || text.includes('add'))) phoneSection = allSections[i].innerHTML.toLowerCase();
+      }
+      var emailHasCheck = emailSection.includes('✓') || emailSection.includes('checkmark') || emailSection.includes('svg') || emailSection.includes('check-circle') || emailSection.includes('success');
+      var phoneHasCheck = phoneSection.includes('✓') || phoneSection.includes('checkmark') || phoneSection.includes('svg') || phoneSection.includes('check-circle') || phoneSection.includes('success');
+      var bodyText = document.body ? document.body.innerText.toLowerCase() : '';
+      var emailVerifiedText = bodyText.includes('email verified') || bodyText.includes('email address verified');
+      var phoneVerifiedText = bodyText.includes('phone verified') || bodyText.includes('phone number verified') || bodyText.includes('phone number added');
+      return {
+        emailVerified: emailHasCheck || emailVerifiedText,
+        phoneVerified: phoneHasCheck || phoneVerifiedText,
+        hasVerifyPage: bodyText.includes('almost there') || bodyText.includes('verify your account'),
+        stillNeedsEmail: !emailHasCheck && !emailVerifiedText && bodyText.includes('verify my email'),
+        stillNeedsPhone: !phoneHasCheck && !phoneVerifiedText && bodyText.includes('add my phone')
+      };
+    })()`) as any;
+    console.log("[TM-Playwright] DOM verify state:", JSON.stringify(domVerifyState));
 
-    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted ||
-                      (phoneVerified && emailVerifiedOnPage);
+    const phoneVerified = domVerifyState.phoneVerified;
+    const emailVerifiedOnPage = domVerifyState.emailVerified;
 
-    console.log("[TM-Playwright] Success checks - redirected:", redirectedToAccount, "textSuccess:", textIndicatesSuccess, "phoneVerified:", phoneVerified, "emailVerified:", emailVerifiedOnPage, "verifyComplete:", verifyPageCompleted, "result:", isSuccess);
+    const emailVerifiedPhonePending = domVerifyState.hasVerifyPage && emailVerifiedOnPage && !phoneVerified;
+    const bothVerified = emailVerifiedOnPage && phoneVerified;
+    const verifyPageCompleted = domVerifyState.hasVerifyPage && !domVerifyState.stillNeedsEmail && !domVerifyState.stillNeedsPhone;
+
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted || bothVerified || emailVerifiedPhonePending;
+
+    console.log("[TM-Playwright] Success checks - redirected:", redirectedToAccount, "textSuccess:", textIndicatesSuccess, "phoneVerified:", phoneVerified, "emailVerified:", emailVerifiedOnPage, "emailOnlyDone:", emailVerifiedPhonePending, "verifyComplete:", verifyPageCompleted, "result:", isSuccess);
 
     if (isSuccess) {
       return { success: true, pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
     }
 
-    if (finalLower.includes("almost there") || finalLower.includes("verify your account")) {
-      const stillNeedsEmail = finalLower.includes("verify my email") || finalLower.includes("send code");
-      const stillNeedsPhone = finalLower.includes("add my phone") && !phoneVerified;
-      if (stillNeedsEmail && stillNeedsPhone) {
+    if (domVerifyState.hasVerifyPage) {
+      if (domVerifyState.stillNeedsEmail && domVerifyState.stillNeedsPhone) {
         return { success: false, error: "Registration submitted but both email and phone verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
-      if (stillNeedsEmail) {
+      if (domVerifyState.stillNeedsEmail) {
         return { success: false, error: "Registration submitted but email verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
-      if (stillNeedsPhone) {
+      if (domVerifyState.stillNeedsPhone) {
         return { success: false, error: "Registration submitted but phone verification incomplete.", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
       }
       return { success: false, error: "Verification page present but status unclear. " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
