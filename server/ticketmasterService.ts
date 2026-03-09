@@ -208,7 +208,7 @@ export async function tmFullRegistrationFlow(
       continue;
     }
 
-    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Could not fill first name") || result.error?.includes("Could not fill last name") || result.error?.includes("Password validation failed") || result.error?.includes("Still on sign-up form") || result.error?.includes("Form validation errors") || result.error?.includes("Forbidden action") || result.error?.includes("robots.txt") || result.error?.includes("phone verification incomplete") || result.error?.includes("email verification incomplete") || result.error?.includes("status unclear") || result.error?.includes("Verification page present")) {
+    if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Could not fill first name") || result.error?.includes("Could not fill last name") || result.error?.includes("Password validation failed") || result.error?.includes("Still on sign-up form") || result.error?.includes("Form validation errors") || result.error?.includes("Forbidden action") || result.error?.includes("robots.txt") || result.error?.includes("phone verification incomplete") || result.error?.includes("email verification incomplete") || result.error?.includes("status unclear") || result.error?.includes("Verification page present") || result.error?.includes("Proxy connection failed") || result.error?.includes("proxy_error") || result.error?.includes("Proxy Error")) {
       console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 120)}`);
       continue;
     }
@@ -870,11 +870,19 @@ async function doTMRegistration(
 
     console.log("[TM-Playwright] Navigating to TM create_account...");
     try {
-      await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 120000 });
+      await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 60000 });
     } catch (navErr: any) {
       if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("brob") || navErr.message.includes("restricted"))) {
         console.log("[TM-Playwright] robots.txt restriction, navigating directly to auth URL...");
-        await page.goto("https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf7204a7e97.web.ticketmaster.us&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-us", { waitUntil: "domcontentloaded", timeout: 120000 });
+        try {
+          await page.goto("https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf7204a7e97.web.ticketmaster.us&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-us", { waitUntil: "domcontentloaded", timeout: 60000 });
+        } catch (authNavErr: any) {
+          console.log("[TM-Playwright] Auth URL navigation failed:", authNavErr.message?.substring(0, 150));
+          throw new Error("Proxy connection failed - could not navigate to Ticketmaster auth page");
+        }
+      } else if (navErr.message && (navErr.message.includes("Proxy Error") || navErr.message.includes("proxy_error") || navErr.message.includes("ERR_PROXY") || navErr.message.includes("net::ERR"))) {
+        console.log("[TM-Playwright] Proxy error during navigation:", navErr.message?.substring(0, 150));
+        throw new Error("Proxy connection failed - Bright Data proxy error during navigation");
       } else {
         throw navErr;
       }
