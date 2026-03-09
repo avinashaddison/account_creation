@@ -269,7 +269,7 @@ async function handlePhoneVerification(
       }
 
       log(`🔄 Retrying with new phone number...`);
-      onStatusUpdate(`phone_retry_${attempt + 1}`);
+      onStatusUpdate("verifying");
       console.log("[TM-Playwright] Dismissing phone OTP dialog before retry...");
       await dismissPhoneDialog(page);
       await page.waitForTimeout(2000);
