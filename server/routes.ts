@@ -120,7 +120,7 @@ function broadcastLog(batchId: string, accountId: string, message: string, owner
 }
 
 function broadcastAccountUpdate(account: any, ownerId?: string) {
-  broadcast({ type: "account_update", account }, ownerId);
+  broadcast({ type: "account_update", account, batchId: account.batchId }, ownerId);
 }
 
 function broadcastBatchComplete(batchId: string, ownerId?: string) {

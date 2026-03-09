@@ -45,8 +45,11 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Billing** (`/admin/billing`) - Cost tracking at $0.11 per account
 - **Wallet** (`/admin/wallet`) - View balance, submit TRC20 payment requests, see payment history
 - **LA28 Registration** (`/admin/home`) - Single account registration with form, auto-fill, live progress logs, and registration history table
-- **Account Create Server** (`/admin/create-server`) - Platform selection page with LA28 card
+- **Account Create Server** (`/admin/create-server`) - Platform selection page with LA28, Ticketmaster, UEFA, Bruno Mars cards
 - **LA28 Account Creator** (`/admin/la28-create`) - Batch account creation (1-30) with live terminal logs
+- **Ticketmaster Creator** (`/admin/tm-create`) - TM account creation with email+phone verification, per-account log filtering, wallet display, batch-scoped real-time logs
+- **Bruno Mars Presale** (`/admin/brunomars-create`) - Bruno Mars presale signup on ticketmaster.ca, per-account log filtering, wallet display, batch-scoped real-time logs
+- **UEFA Creator** (`/admin/uefa-create`) - UEFA account creation with email verification
 - **Manage Admins** (`/admin/manage-admins`) - Superadmin only: create/delete admins, add funds, approve/reject payment requests
 
 ## Key Files
