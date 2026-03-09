@@ -250,6 +250,16 @@ export async function registerRoutes(
   });
 
   async function ensureDefaultData() {
+    try {
+      await wsPool.query("ALTER TYPE account_status ADD VALUE IF NOT EXISTS 'presale_loading'");
+      await wsPool.query("ALTER TYPE account_status ADD VALUE IF NOT EXISTS 'presale_filling'");
+      await wsPool.query("ALTER TYPE account_status ADD VALUE IF NOT EXISTS 'presale_events'");
+      await wsPool.query("ALTER TYPE account_status ADD VALUE IF NOT EXISTS 'presale_submitting'");
+      console.log("[Migration] Ensured presale enum values exist");
+    } catch (err: any) {
+      console.error("[Migration] Enum update error:", err.message);
+    }
+
     const oldAdmin = await storage.getUserByEmail("admin@la28panel.com");
     if (oldAdmin) {
       await storage.deleteUser(oldAdmin.id);
