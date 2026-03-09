@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings } from "lucide-react";
+import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings, KeyRound } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { sounds } from "@/lib/sounds";
 import { useToast } from "@/hooks/use-toast";
@@ -48,6 +48,9 @@ export default function ManageAdmins() {
   const [accountPrice, setAccountPrice] = useState("0.11");
   const [newPrice, setNewPrice] = useState("0.11");
   const [savingPrice, setSavingPrice] = useState(false);
+  const [changingPasswordFor, setChangingPasswordFor] = useState<AdminUser | null>(null);
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -150,6 +153,32 @@ export default function ManageAdmins() {
     } catch {
       toast({ title: "Error", description: "Failed to delete admin", variant: "destructive" });
     }
+  }
+
+  async function changePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!changingPasswordFor || !newAdminPassword) return;
+    setSavingPassword(true);
+    try {
+      const res = await fetch(`/api/admin/users/${changingPasswordFor.id}/password`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password: newAdminPassword }),
+      });
+      if (res.ok) {
+        sounds.success();
+        toast({ title: "Password Changed", description: `Password updated for ${changingPasswordFor.email}` });
+        setChangingPasswordFor(null);
+        setNewAdminPassword("");
+      } else {
+        const data = await res.json();
+        toast({ title: "Error", description: data.error, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to change password", variant: "destructive" });
+    }
+    setSavingPassword(false);
   }
 
   async function addFunds(e: React.FormEvent) {
@@ -357,15 +386,27 @@ export default function ManageAdmins() {
                           </TableCell>
                           <TableCell>
                             {admin.role !== "superadmin" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => { sounds.warning(); deleteAdmin(admin.id, admin.email); }}
-                                className="text-red-500 hover:text-red-700"
-                                data-testid={`button-delete-admin-${admin.id}`}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => { setChangingPasswordFor(admin); setNewAdminPassword(""); }}
+                                  className="text-amber-500 hover:text-amber-700"
+                                  data-testid={`button-change-password-${admin.id}`}
+                                  title="Change Password"
+                                >
+                                  <KeyRound className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => { sounds.warning(); deleteAdmin(admin.id, admin.email); }}
+                                  className="text-red-500 hover:text-red-700"
+                                  data-testid={`button-delete-admin-${admin.id}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
                             )}
                           </TableCell>
                         </TableRow>
@@ -521,6 +562,51 @@ export default function ManageAdmins() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {changingPasswordFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl bg-[#111118] border border-white/10 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-white mb-1">Change Password</h3>
+            <p className="text-sm text-zinc-400 mb-4">
+              Set a new password for <span className="text-white font-medium">{changingPasswordFor.email}</span>
+            </p>
+            <form onSubmit={changePassword} className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-zinc-500">New Password</Label>
+                <Input
+                  type="text"
+                  value={newAdminPassword}
+                  onChange={(e) => setNewAdminPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  className="bg-white/5 border-white/10 text-white"
+                  autoFocus
+                  data-testid="input-new-admin-password"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => { setChangingPasswordFor(null); setNewAdminPassword(""); }}
+                  className="text-zinc-400"
+                  data-testid="button-cancel-password"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={savingPassword || newAdminPassword.length < 4}
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  data-testid="button-save-password"
+                >
+                  {savingPassword ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <KeyRound className="w-4 h-4 mr-2" />}
+                  Save Password
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

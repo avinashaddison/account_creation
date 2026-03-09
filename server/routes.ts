@@ -407,6 +407,22 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/admin/users/:id/password", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { password } = req.body;
+      if (!password || password.length < 4) {
+        return res.status(400).json({ error: "Password must be at least 4 characters" });
+      }
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.role === "superadmin") return res.status(400).json({ error: "Cannot change super admin password from here" });
+      await storage.updateUserPassword(req.params.id, hashPassword(password));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/admin/add-funds", requireAuth, requireSuperAdmin, async (req, res) => {
     try {
       const { userId, amount } = req.body;

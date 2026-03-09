@@ -12,6 +12,7 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUserFreeAccountsUsed(id: string, count: number): Promise<void>;
   updateUserWalletBalance(id: string, balance: string): Promise<void>;
+  updateUserPassword(id: string, hashedPassword: string): Promise<void>;
   deleteUser(id: string): Promise<void>;
   createAccount(data: InsertAccount): Promise<Account>;
   updateAccount(id: string, updates: Partial<Account>): Promise<Account | undefined>;
@@ -67,6 +68,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateUserWalletBalance(id: string, balance: string): Promise<void> {
     await db.update(users).set({ walletBalance: balance }).where(eq(users.id, id));
+  }
+
+  async updateUserPassword(id: string, hashedPassword: string): Promise<void> {
+    await db.update(users).set({ password: hashedPassword }).where(eq(users.id, id));
   }
 
   async deleteUser(id: string): Promise<void> {
