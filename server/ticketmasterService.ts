@@ -173,8 +173,9 @@ export async function tmFullRegistrationFlow(
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
   onLog?: (message: string) => void,
-  proxyUrl?: string
-): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number }> {
+  proxyUrl?: string,
+  keepBrowserOpen?: boolean
+): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number; browser?: any; page?: any }> {
   const log = onLog || ((msg: string) => console.log(`[TM] ${msg}`));
   const maxRetries = 4;
   let totalSmsCost = 0;
@@ -196,8 +197,14 @@ export async function tmFullRegistrationFlow(
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     }
 
-    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl);
+    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl, keepBrowserOpen);
     totalSmsCost += result.smsCost || 0;
+
+    const closeBrowserIfKept = () => {
+      if (keepBrowserOpen && result.browser) {
+        try { result.browser.close(); } catch {}
+      }
+    };
 
     if (result.error?.includes("browser has been closed") || result.error?.includes("crashed")) {
       if (result.pageContent?.includes("passkey") || result.pageContent?.includes("Email verified") || result.pageContent?.includes("Phone verified") || result.pageContent?.includes("confirm your account")) {
@@ -205,6 +212,7 @@ export async function tmFullRegistrationFlow(
         return { success: true, pageContent: result.pageContent, smsCost: totalSmsCost };
       }
       console.log(`[TM-Playwright] Browser crashed, will retry...`);
+      closeBrowserIfKept();
       if (browserInstance) {
         try { await browserInstance.close(); } catch {}
         browserInstance = null;
@@ -214,7 +222,12 @@ export async function tmFullRegistrationFlow(
 
     if (result.error?.includes("bot detection") || result.error?.includes("blocked") || result.error?.includes("Access blocked") || result.error?.includes("server error") || result.error?.includes("form did not load") || result.error?.includes("cooldown") || result.error?.includes("no_peers") || result.error?.includes("Could not fill password") || result.error?.includes("Could not fill first name") || result.error?.includes("Could not fill last name") || result.error?.includes("Password validation failed") || result.error?.includes("Still on sign-up form") || result.error?.includes("Form validation errors") || result.error?.includes("Forbidden action") || result.error?.includes("robots.txt") || result.error?.includes("phone verification incomplete") || result.error?.includes("email verification incomplete") || result.error?.includes("status unclear") || result.error?.includes("Verification page present") || result.error?.includes("Proxy connection failed") || result.error?.includes("proxy_error") || result.error?.includes("Proxy Error")) {
       console.log(`[TM-Playwright] Retryable error on attempt ${attempt + 1}: ${result.error?.substring(0, 120)}`);
+      closeBrowserIfKept();
       continue;
+    }
+
+    if (!result.success) {
+      closeBrowserIfKept();
     }
 
     return { ...result, smsCost: totalSmsCost };
@@ -803,8 +816,9 @@ async function doTMRegistration(
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
   log: (message: string) => void,
-  proxyUrl?: string
-): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number }> {
+  proxyUrl?: string,
+  keepBrowserOpen?: boolean
+): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number; browser?: any; page?: any }> {
   console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
   const isBrowserAPI = proxyUrl && proxyUrl.startsWith('wss://');
   console.log(`[TM-Playwright] isBrowserAPI: ${isBrowserAPI}`);
@@ -2038,7 +2052,7 @@ async function doTMRegistration(
           await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
         } catch (doneWaitErr: any) {
           console.log(`[TM-Playwright] Browser closed after Done click (account is verified): ${doneWaitErr.message?.substring(0, 100)}`);
-          return { success: true, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed during redirect.", smsCost: totalSmsCost };
+          return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed during redirect.", smsCost: totalSmsCost };
         }
       }
 
@@ -2050,7 +2064,7 @@ async function doTMRegistration(
         console.log("[TM-Playwright] After Done URL:", page.url());
       } catch (getTextErr: any) {
         console.log(`[TM-Playwright] Browser closed after Done (account verified): ${getTextErr.message?.substring(0, 100)}`);
-        return { success: true, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed.", smsCost: totalSmsCost };
+        return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed.", smsCost: totalSmsCost };
       }
 
       if (pageLowerNow.includes("add a passkey") || pageLowerNow.includes("passkey")) {
@@ -2094,7 +2108,7 @@ async function doTMRegistration(
 
                   if (hasMyAccount) {
                     console.log("[TM-Playwright] SUCCESS: Landing page shows 'My Account' - account fully created and logged in!");
-                    return { success: true, pageContent: "Account created. Email verified. Phone verified. Landing page shows 'My Account'.", smsCost: totalSmsCost };
+                    return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Landing page shows 'My Account'.", smsCost: totalSmsCost };
                   }
 
                   const menuCheck = await page.evaluate(`(() => {
@@ -2109,32 +2123,32 @@ async function doTMRegistration(
                   console.log("[TM-Playwright] Menu DOM check:", menuCheck);
                   if (typeof menuCheck === 'string' && menuCheck.startsWith('found:')) {
                     console.log("[TM-Playwright] SUCCESS: 'My Account' found in DOM!");
-                    return { success: true, pageContent: "Account created. Email verified. Phone verified. 'My Account' confirmed in menu.", smsCost: totalSmsCost };
+                    return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. 'My Account' confirmed in menu.", smsCost: totalSmsCost };
                   }
                 } catch (domErr: any) {
                   console.log(`[TM-Playwright] DOM check failed (browser closing): ${domErr.message?.substring(0, 100)}`);
                 }
 
                 console.log("[TM-Playwright] SUCCESS: Redirected to TM landing/account page. Account created.");
-                return { success: true, pageContent: "Account created. Email verified. Phone verified. Redirected to: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
+                return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Redirected to: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
               } else {
                 console.log("[TM-Playwright] Still on auth page but verifications done. Account created.");
-                return { success: true, pageContent: "Account created. Email verified. Phone verified. Passkey dismissed. URL: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
+                return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Passkey dismissed. URL: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
               }
             } catch (landingErr: any) {
               console.log(`[TM-Playwright] Browser closed during landing check (account verified): ${landingErr.message?.substring(0, 100)}`);
-              return { success: true, pageContent: "Account created. Email verified. Phone verified. Browser closed after passkey dismiss.", smsCost: totalSmsCost };
+              return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Browser closed after passkey dismiss.", smsCost: totalSmsCost };
             }
           }
         } catch (passkeyErr: any) {
           console.log(`[TM-Playwright] Passkey dismiss error (account is verified): ${passkeyErr.message?.substring(0, 100)}`);
-          return { success: true, pageContent: "Account created. Email verified. Phone verified. Passkey page reached but dismiss failed.", smsCost: totalSmsCost };
+          return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Passkey page reached but dismiss failed.", smsCost: totalSmsCost };
         }
       }
 
       if (pageLowerNow.includes("confirm your account") && pageLowerNow.includes("email verified") && pageLowerNow.includes("phone verified")) {
         console.log("[TM-Playwright] Still on CONFIRM YOUR ACCOUNT page with both verifications done. Returning success.");
-        return { success: true, pageContent: "Account created. Both verifications confirmed. Done button may have failed.", smsCost: totalSmsCost };
+        return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Both verifications confirmed. Done button may have failed.", smsCost: totalSmsCost };
       }
 
       if (!doneClicked) {
@@ -2215,7 +2229,7 @@ async function doTMRegistration(
     console.log("[TM-Playwright] Success checks - redirected:", redirectedToAccount, "textSuccess:", textIndicatesSuccess, "phoneVerified:", phoneVerified, "emailVerified:", emailVerifiedOnPage, "emailOnlyDone:", emailVerifiedPhonePending, "verifyComplete:", verifyPageCompleted, "result:", isSuccess);
 
     if (isSuccess) {
-      return { success: true, pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
+      return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
     }
 
     if (domVerifyState.hasVerifyPage) {
@@ -2237,14 +2251,19 @@ async function doTMRegistration(
 
     return { success: false, error: "Registration status unclear: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
   } catch (err: any) {
+    if (keepBrowserOpen) {
+      try { if (remoteBrowser) await remoteBrowser.close(); else if (context) await context.close(); } catch {}
+    }
     return { success: false, error: err.message, smsCost: totalSmsCost };
   } finally {
-    try {
-      if (remoteBrowser) {
-        await remoteBrowser.close();
-      } else if (context) {
-        await context.close();
-      }
-    } catch {}
+    if (!keepBrowserOpen) {
+      try {
+        if (remoteBrowser) {
+          await remoteBrowser.close();
+        } else if (context) {
+          await context.close();
+        }
+      } catch {}
+    }
   }
 }

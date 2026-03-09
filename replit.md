@@ -106,6 +106,15 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - `settings` - Key-value settings store (e.g., `account_price` for per-account cost)
 - `user_sessions` - PostgreSQL session store (auto-created by connect-pg-simple)
 
+## TM + Bruno Mars Combined Flow
+- **Combined route**: `POST /api/brunomars-create-batch` creates TM accounts then immediately navigates to Bruno Mars presale
+- **Phase 1**: Full TM registration with email+phone verification (using `keepBrowserOpen=true` to preserve authenticated session)
+- **Phase 2**: Uses the same authenticated browser/page to navigate to `https://signup.ticketmaster.ca/brunomars`, select ALL event checkboxes, check consent boxes, click Sign Up
+- **Success**: "YOUR SELECTIONS" page visible after submission
+- **Session handoff**: `tmFullRegistrationFlow` returns `{ browser, page }` on success when `keepBrowserOpen=true`; `brunoMarsPresaleStep` receives and uses them; browser is always closed in `finally` block
+- **Browser cleanup**: On TM failure/retry, browser is closed even if `keepBrowserOpen` was requested (prevents CDP session leaks)
+- **Key files**: `server/ticketmasterService.ts` (TM registration), `server/brunoMarsService.ts` (presale step), `client/src/pages/BrunoMarsCreate.tsx`
+
 ## Ticketmaster Account Creation
 - **Flow**: Navigate to `https://www.ticketmaster.com/member/create_account` → redirects to `auth.ticketmaster.com` with `client_id=8bf7204a7e97.web.ticketmaster.us`
 - **Two-step form**: Step 1: email → Continue. Step 2: password, firstName, lastName, countryCode (US), postalCode, privacyPolicyCheckbox → Submit

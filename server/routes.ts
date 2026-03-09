@@ -9,7 +9,7 @@ import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationC
 import { fullRegistrationFlow, retryDrawRegistration } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
-import { brunoMarsSignupFlow } from "./brunoMarsService";
+import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
 import { randomUUID, createHash } from "crypto";
 
@@ -1562,6 +1562,8 @@ export async function registerRoutes(
           broadcastLog(batchId, acc.id, `Starting TM + Bruno Mars flow for ${acc.firstName} ${acc.lastName}...`, userId);
 
           let tmSuccess = false;
+          let tmBrowser: any = null;
+          let tmPage: any = null;
           try {
             broadcastLog(batchId, acc.id, `📧 Phase 1: Creating TM account...`, userId);
             broadcastLog(batchId, acc.id, `Creating temp email: ${acc.email}`, userId);
@@ -1593,12 +1595,15 @@ export async function registerRoutes(
               (message) => {
                 broadcastLog(batchId, acc.id, message, userId);
               },
-              proxyUrl
+              proxyUrl,
+              true
             );
 
             const smsCost = tmResult.smsCost || 0;
             if (tmResult.success) {
               tmSuccess = true;
+              tmBrowser = tmResult.browser || null;
+              tmPage = tmResult.page || null;
               await storage.updateAccount(acc.id, { status: "verified" });
               broadcastAccountUpdate({ ...acc, status: "verified" }, userId);
               const smsNote = smsCost > 0 ? ` (SMS: $${smsCost.toFixed(2)})` : "";
@@ -1621,28 +1626,29 @@ export async function registerRoutes(
           if (!tmSuccess) continue;
 
           try {
+            if (!tmPage || !tmBrowser) {
+              broadcastLog(batchId, acc.id, `⚠️ No active browser session from TM registration, opening fresh session for presale...`, userId);
+            }
             broadcastLog(batchId, acc.id, `🎵 Phase 2: Bruno Mars presale signup...`, userId);
-            const bmResult = await brunoMarsSignupFlow(
-              acc.firstName,
-              acc.lastName,
-              acc.email,
-              proxyUrl,
+            const bmResult = await brunoMarsPresaleStep(
+              tmPage,
+              tmBrowser,
               (msg) => broadcastLog(batchId, acc.id, msg, userId),
               async (status) => {
                 await storage.updateAccount(acc.id, { status });
                 broadcastAccountUpdate({ ...acc, status }, userId);
-              }
+              },
+              proxyUrl
             );
             if (bmResult.success) {
               await storage.updateAccount(acc.id, { status: "completed" });
               broadcastAccountUpdate({ ...acc, status: "completed" }, userId);
               broadcastLog(batchId, acc.id, "✅ Full flow complete! TM account created + Bruno Mars presale signed up!", userId);
               await storage.createBillingRecord({
-                userId,
-                type: "account_creation",
+                accountId: acc.id,
                 amount: String(costPerAccount),
                 description: `TM + Bruno Mars: ${acc.firstName} ${acc.lastName} (${acc.email})`,
-                accountId: acc.id,
+                ownerId: userId,
               });
             } else {
               await storage.updateAccount(acc.id, { status: "failed", errorMessage: `Presale: ${bmResult.error}` });
