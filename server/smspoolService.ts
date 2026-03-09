@@ -65,8 +65,8 @@ export async function orderSMSNumber(
     if (data.success === 1 || data.order_id) {
       return {
         success: true,
-        number: data.number || data.phonenumber,
-        orderId: data.order_id,
+        number: String(data.phonenumber || data.number),
+        orderId: data.order_id || data.orderid,
         expiresIn: data.expires_in,
       };
     }

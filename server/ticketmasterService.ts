@@ -199,37 +199,120 @@ async function handlePhoneVerification(
     }
 
     smsOrderId = smsOrder.orderId;
-    let phoneNumber = smsOrder.number;
+    let phoneNumber = String(smsOrder.number);
     if (!phoneNumber.startsWith("+")) {
       phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
     }
     console.log(`[TM-Playwright] Got SMS number: ${phoneNumber} (order: ${smsOrderId})`);
 
-    let addPhoneClicked = await clickButton(page, "add my phone");
-    if (!addPhoneClicked) addPhoneClicked = await clickButton(page, "verify phone");
-    if (!addPhoneClicked) addPhoneClicked = await clickButton(page, "add phone");
-    console.log(`[TM-Playwright] Add My Phone clicked: ${addPhoneClicked}`);
+    const phoneClickResult = await page.evaluate(`(() => {
+      function findAndClick(text) {
+        var all = document.querySelectorAll('button, a, a[role="button"], input[type="submit"], span[role="button"], div[role="button"]');
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            var content = (el.textContent || el.value || '').toLowerCase().trim();
+            if (content.includes(text)) {
+              el.click();
+              return 'clicked:' + el.tagName + ':' + content.substring(0, 50);
+            }
+          }
+        }
+        return null;
+      }
+      var result = findAndClick('add my phone');
+      if (!result) result = findAndClick('verify phone');
+      if (!result) result = findAndClick('add phone');
+      if (!result) {
+        var links = document.querySelectorAll('a');
+        for (var i = 0; i < links.length; i++) {
+          var el = links[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            var text = (el.textContent || '').toLowerCase().trim();
+            if (text.includes('phone')) {
+              el.click();
+              return 'link-clicked:' + text.substring(0, 50);
+            }
+          }
+        }
+      }
+      if (!result) {
+        var allEls = document.querySelectorAll('*');
+        var candidates = [];
+        for (var i = 0; i < allEls.length; i++) {
+          var el = allEls[i];
+          var rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0 && el.childElementCount === 0) {
+            var text = (el.textContent || '').toLowerCase().trim();
+            if (text === 'add my phone') {
+              candidates.push({ tag: el.tagName, text: text, parent: el.parentElement ? el.parentElement.tagName : 'none' });
+              el.click();
+              if (el.parentElement) el.parentElement.click();
+              return 'leaf-clicked:' + el.tagName + ':' + (el.parentElement ? el.parentElement.tagName : 'none');
+            }
+          }
+        }
+      }
+      return result || 'not-found';
+    })()`);
+    console.log(`[TM-Playwright] Phone button click result: ${phoneClickResult}`);
+    let addPhoneClicked = phoneClickResult !== 'not-found';
 
     await page.waitForTimeout(3000);
 
-    let pageText = await getPageText(page);
-    let pageLower = pageText.toLowerCase();
+    const htmlSnapshot = await page.evaluate(`(() => {
+      var sections = document.querySelectorAll('section, div[class*="phone"], div[class*="verify"], form');
+      var html = [];
+      for (var i = 0; i < Math.min(sections.length, 10); i++) {
+        html.push(sections[i].outerHTML.substring(0, 500));
+      }
+      return html;
+    })()`);
+    console.log("[TM-Playwright] HTML sections after phone click:", JSON.stringify(htmlSnapshot).substring(0, 2000));
 
-    if (tmIsChallenge(pageLower)) {
-      console.log("[TM-Playwright] Challenge after phone click, waiting...");
-      for (let cw = 0; cw < 30; cw++) {
-        await page.waitForTimeout(3000);
-        try {
-          pageText = await getPageText(page);
-          pageLower = pageText.toLowerCase();
-          if (!tmIsChallenge(pageLower)) {
-            console.log("[TM-Playwright] Phone challenge resolved!");
-            break;
+    const allInputsDump = await page.evaluate(`(() => {
+      var all = document.querySelectorAll('input, select, textarea');
+      var result = [];
+      for (var i = 0; i < all.length; i++) {
+        var el = all[i];
+        var rect = el.getBoundingClientRect();
+        result.push({ tag: el.tagName, type: el.type, name: el.name, id: el.id, placeholder: el.placeholder || '', maxLength: el.maxLength, ariaLabel: el.getAttribute('aria-label') || '', visible: rect.width > 0 && rect.height > 0, w: rect.width, h: rect.height });
+      }
+      return result;
+    })()`);
+    console.log("[TM-Playwright] ALL inputs after phone click:", JSON.stringify(allInputsDump));
+
+    for (let waitAttempt = 0; waitAttempt < 10; waitAttempt++) {
+      await page.waitForTimeout(2000);
+      const hasPhoneInput = await page.evaluate(`(() => {
+        var selectors = ['input[type="tel"]', 'input[name*="phone"]', 'input[id*="phone"]', 'input[placeholder*="phone" i]', 'input[aria-label*="phone" i]', 'input[name*="mobile"]', 'input[id*="mobile"]'];
+        for (var s = 0; s < selectors.length; s++) {
+          var els = document.querySelectorAll(selectors[s]);
+          for (var i = 0; i < els.length; i++) {
+            var rect = els[i].getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) return true;
           }
-        } catch {}
+        }
+        return false;
+      })()`);
+      if (hasPhoneInput) {
+        console.log(`[TM-Playwright] Phone input appeared after ${(waitAttempt + 1) * 2}s`);
+        break;
+      }
+      let checkText = "";
+      try { checkText = await getPageText(page); } catch {}
+      if (tmIsChallenge(checkText.toLowerCase())) {
+        console.log("[TM-Playwright] Challenge detected while waiting for phone input...");
+        continue;
+      }
+      if (waitAttempt === 9) {
+        console.log("[TM-Playwright] Phone input did not appear after 20s");
       }
     }
 
+    let pageText = await getPageText(page);
     console.log("[TM-Playwright] Phone page (first 500):", pageText.substring(0, 500));
 
     const phoneInputs = await page.evaluate(`(() => {
@@ -285,7 +368,7 @@ async function handlePhoneVerification(
 
     if (!phoneFilled) {
       const filledViaJS = await page.evaluate(`((number) => {
-        var selectors = ['input[type="tel"]', 'input[name*="phone"]', 'input[id*="phone"]'];
+        var selectors = ['input[type="tel"]', 'input[name*="phone"]', 'input[id*="phone"]', 'input[aria-label*="phone" i]'];
         for (var s = 0; s < selectors.length; s++) {
           var els = document.querySelectorAll(selectors[s]);
           for (var i = 0; i < els.length; i++) {
@@ -298,6 +381,18 @@ async function handlePhoneVerification(
               els[i].dispatchEvent(new Event('change', { bubbles: true }));
               return 'filled:' + selectors[s];
             }
+          }
+        }
+        var genericInputs = document.querySelectorAll('input[type="text"]:not([id="otp-input-input"]):not([name="email"]):not([name="firstName"]):not([name="lastName"]):not([name="postalCode"])');
+        for (var i = 0; i < genericInputs.length; i++) {
+          var rect = genericInputs[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0 && genericInputs[i].maxLength !== 6) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet && nativeSet.set) nativeSet.set.call(genericInputs[i], number);
+            else genericInputs[i].value = number;
+            genericInputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+            genericInputs[i].dispatchEvent(new Event('change', { bubbles: true }));
+            return 'filled-generic:' + (genericInputs[i].id || genericInputs[i].name || 'unnamed');
           }
         }
         return 'not-found';
@@ -314,18 +409,68 @@ async function handlePhoneVerification(
 
     await page.waitForTimeout(1000);
 
-    let sendCodeClicked = await clickButton(page, "send code");
-    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "verify");
-    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "send");
-    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "continue");
-    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "submit");
-    if (!sendCodeClicked) sendCodeClicked = await clickButton(page);
+    let sendCodeClicked = await clickButton(page, "add number");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "send code");
+    if (!sendCodeClicked) sendCodeClicked = await clickButton(page, "send verification");
+    if (!sendCodeClicked) {
+      const dialogBtn = await page.evaluate(`(() => {
+        var dialog = document.querySelector('[id*="phoneDialog"], [class*="phone"], [data-bdd*="phone"], form:has(input[type="tel"])');
+        if (!dialog) return 'no-dialog-found';
+        var btns = dialog.querySelectorAll('button, input[type="submit"], a[role="button"], span[role="button"]');
+        for (var i = 0; i < btns.length; i++) {
+          var rect = btns[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            btns[i].click();
+            return 'dialog-btn-clicked:' + (btns[i].innerText || btns[i].textContent || '').trim().substring(0, 60);
+          }
+        }
+        return 'no-dialog-btn';
+      })()`);
+      console.log("[TM-Playwright] Dialog button fallback:", dialogBtn);
+      sendCodeClicked = dialogBtn.startsWith('dialog-btn-clicked');
+    }
     console.log(`[TM-Playwright] Send phone code clicked: ${sendCodeClicked}`);
 
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
+
+    const afterSendState = await page.evaluate(`(() => {
+      var hasPhoneOTP = !!document.querySelector('#otp-input-input, input[maxlength="6"]');
+      var lower = (document.body ? document.body.innerText : '').toLowerCase();
+      var hasPhoneDialog = lower.includes('add your phone') || lower.includes('verify your phone');
+      return {hasPhoneOTP: hasPhoneOTP, hasPhoneDialog: hasPhoneDialog};
+    })()`);
+    console.log("[TM-Playwright] After send code - OTP visible:", afterSendState.hasPhoneOTP, "dialog open:", afterSendState.hasPhoneDialog);
+
+    if (!afterSendState.hasPhoneOTP && afterSendState.hasPhoneDialog) {
+      console.log("[TM-Playwright] Phone dialog open but no OTP yet, waiting...");
+      await page.waitForTimeout(5000);
+    } else if (!afterSendState.hasPhoneOTP && !afterSendState.hasPhoneDialog) {
+      console.log("[TM-Playwright] Phone dialog closed without OTP, retrying add number flow...");
+      const reClickPhone = await clickButton(page, "add my phone");
+      if (reClickPhone) {
+        await page.waitForTimeout(3000);
+        await page.evaluate(`(() => {
+          var tel = document.querySelector('input[type="tel"]');
+          if (tel) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+            if (nativeSet && nativeSet.set) nativeSet.set.call(tel, '${localNumber}');
+            else tel.value = '${localNumber}';
+            tel.dispatchEvent(new Event('input', { bubbles: true }));
+            tel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        })()`);
+        await page.waitForTimeout(1000);
+        let retrySend = await clickButton(page, "add number");
+        if (!retrySend) retrySend = await clickButton(page, "send code");
+        console.log("[TM-Playwright] Retry add number clicked:", retrySend);
+        await page.waitForTimeout(5000);
+      }
+    } else {
+      await page.waitForTimeout(2000);
+    }
 
     pageText = await getPageText(page);
-    pageLower = pageText.toLowerCase();
+    let pageLower = pageText.toLowerCase();
 
     if (tmIsChallenge(pageLower)) {
       console.log("[TM-Playwright] Challenge after phone code send, waiting...");
@@ -401,12 +546,54 @@ async function handlePhoneVerification(
 
     await page.waitForTimeout(1000);
 
-    let verifyPhoneClicked = await clickButton(page, "verify");
-    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "confirm");
-    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "submit");
-    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "continue");
-    if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page);
-    console.log(`[TM-Playwright] Verify phone code clicked: ${verifyPhoneClicked}`);
+    let verifyPhoneClicked = await page.evaluate(`(() => {
+      var form = document.querySelector('form:has(input[id*="otp"])');
+      if (form) {
+        var btns = form.querySelectorAll('button, input[type="submit"]');
+        for (var i = 0; i < btns.length; i++) {
+          var rect = btns[i].getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            var text = (btns[i].innerText || btns[i].textContent || '').trim().toLowerCase();
+            if (text.includes('verify') || text.includes('submit') || text.includes('confirm') || text.includes('continue')) {
+              btns[i].click();
+              return 'form-btn:' + text.substring(0, 40);
+            }
+          }
+        }
+        for (var j = 0; j < btns.length; j++) {
+          var rect2 = btns[j].getBoundingClientRect();
+          if (rect2.width > 0 && rect2.height > 0) {
+            btns[j].click();
+            return 'form-btn-any:' + (btns[j].innerText || '').trim().substring(0, 40);
+          }
+        }
+      }
+
+      var dialogs = document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="overlay"], [class*="Dialog"]');
+      for (var d = 0; d < dialogs.length; d++) {
+        var dBtns = dialogs[d].querySelectorAll('button');
+        for (var k = 0; k < dBtns.length; k++) {
+          var rect3 = dBtns[k].getBoundingClientRect();
+          var txt = (dBtns[k].innerText || '').trim().toLowerCase();
+          if (rect3.width > 0 && rect3.height > 0 && (txt.includes('verify') || txt.includes('submit') || txt.includes('confirm'))) {
+            dBtns[k].click();
+            return 'dialog-btn:' + txt.substring(0, 40);
+          }
+        }
+      }
+
+      return false;
+    })()`);
+    console.log(`[TM-Playwright] Phone OTP form verify result: ${verifyPhoneClicked}`);
+
+    if (!verifyPhoneClicked) {
+      verifyPhoneClicked = await clickButton(page, "verify number");
+      if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "verify phone");
+      if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "confirm");
+      if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page, "submit");
+      if (!verifyPhoneClicked) verifyPhoneClicked = await clickButton(page);
+      console.log(`[TM-Playwright] Verify phone fallback clicked: ${verifyPhoneClicked}`);
+    }
 
     await page.waitForTimeout(5000);
 
@@ -1145,6 +1332,60 @@ async function doTMRegistration(
         return { hasCheckmark: hasCheckmark, verifyStillShowing: verifyStillShowing, bodyPreview: (document.body ? document.body.innerText : '').substring(0, 300) };
       })()`);
       console.log("[TM-Playwright] Email verification state:", JSON.stringify(emailVerified));
+
+      if (emailVerified.hasCheckmark) {
+        console.log("[TM-Playwright] Email verified, dismissing OTP overlay...");
+        const dismissResult = await page.evaluate(`(() => {
+          var closeButtons = document.querySelectorAll('button[aria-label="Close"], button[aria-label="close"], button.close, [data-dismiss], [aria-label*="close" i], [aria-label*="dismiss" i]');
+          for (var i = 0; i < closeButtons.length; i++) {
+            var rect = closeButtons[i].getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              closeButtons[i].click();
+              return 'close-button';
+            }
+          }
+          var doneButtons = document.querySelectorAll('button, a');
+          for (var i = 0; i < doneButtons.length; i++) {
+            var el = doneButtons[i];
+            var rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              var text = (el.textContent || '').toLowerCase().trim();
+              if (text === 'done' || text === 'ok' || text === 'close' || text === 'back' || text === 'continue' || text === 'got it') {
+                el.click();
+                return 'done-button:' + text;
+              }
+            }
+          }
+          var overlays = document.querySelectorAll('[class*="overlay"], [class*="modal"], [class*="backdrop"]');
+          for (var i = 0; i < overlays.length; i++) {
+            overlays[i].click();
+            return 'overlay-click';
+          }
+          return 'no-dismiss-found';
+        })()`);
+        console.log("[TM-Playwright] Dismiss result:", dismissResult);
+        await page.waitForTimeout(2000);
+
+        try { await page.keyboard.press('Escape'); } catch {}
+        await page.waitForTimeout(1000);
+
+        const postDismissText = await getPageText(page);
+        console.log("[TM-Playwright] After dismiss (first 300):", postDismissText.substring(0, 300));
+
+        const postDismissInputs = await page.evaluate(`(() => {
+          var all = document.querySelectorAll('input, select, textarea');
+          var result = [];
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            var rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              result.push({ tag: el.tagName, type: el.type, name: el.name, id: el.id, maxLength: el.maxLength, ariaLabel: el.getAttribute('aria-label') || '' });
+            }
+          }
+          return result;
+        })()`);
+        console.log("[TM-Playwright] Post-dismiss inputs:", JSON.stringify(postDismissInputs));
+      }
     }
 
     pageText = await getPageText(page);

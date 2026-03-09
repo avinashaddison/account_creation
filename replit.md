@@ -108,7 +108,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Two-step form**: Step 1: email → Continue. Step 2: password, firstName, lastName, countryCode (US), postalCode, privacyPolicyCheckbox → Submit
 - **Password bypass**: ContentSquare analytics overrides `HTMLInputElement.prototype.value` setter and Bright Data blocks CDP `Input.dispatchKeyEvent` on password fields. Solution: create hidden iframe → get clean native setter from `iframe.contentWindow.HTMLInputElement.prototype.value.set` → use it to set password value
 - **Verification**: After registration, page shows "ALMOST THERE" → click "Verify My Email" → poll for email code → enter code → verify → then phone verification via SMSPool
-- **Phone Verification**: Ticketmaster requires phone verification after email. Uses SMSPool API to rent US phone numbers, enter on TM page, poll for SMS code, and complete verification. If SMSPool fails, account is still marked as verified (email-verified).
+- **Phone Verification**: Ticketmaster requires phone verification after email. After email OTP code is entered and checkmark appears, the email OTP overlay is dismissed (Escape key). Then "Add My Phone" button opens phone dialog. Phone number filled via `input[type="tel"]`, "Add Number" button submits the phone. Phone OTP appears, SMS code from SMSPool entered via `input[id*="otp"]`, "Confirm Code" button (found via form:has(input[id*="otp"]) query) submits verification. If SMSPool fails, account still marked as verified (email-verified).
 - **Key files**: `server/ticketmasterService.ts`, `server/smspoolService.ts`
 
 ## SMSPool Integration
