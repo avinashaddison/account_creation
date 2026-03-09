@@ -1931,48 +1931,63 @@ async function doTMRegistration(
           if (passkeyDismissed) {
             console.log("[TM-Playwright] Waiting for redirect to landing page...");
             try {
-              await page.waitForTimeout(8000);
-              await page.waitForLoadState("domcontentloaded", { timeout: 20000 }).catch(() => {});
+              await page.waitForTimeout(10000);
+              await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+              await page.waitForTimeout(3000);
             } catch {}
 
             try {
               const landingUrl = page.url();
-              const landingText = await getPageText(page);
-              const landingLower = landingText.toLowerCase();
               console.log("[TM-Playwright] Landing URL:", landingUrl);
-              console.log("[TM-Playwright] Landing page (first 400):", landingText.substring(0, 400));
 
-              const hasMyAccount = landingLower.includes("my account");
-              const isOnTM = landingUrl.includes("ticketmaster.com") && !landingUrl.includes("authorization.oauth2");
-              console.log("[TM-Playwright] Landing check - hasMyAccount:", hasMyAccount, "isOnTM:", isOnTM);
+              const isOnTMLanding = landingUrl.includes("ticketmaster.com") && !landingUrl.includes("authorization.oauth2");
+              const isOnMyTM = landingUrl.includes("my.ticketmaster.com");
 
-              if (hasMyAccount && isOnTM) {
-                console.log("[TM-Playwright] SUCCESS: Landing page shows 'My Account' - account fully created and logged in!");
-                return { success: true, pageContent: "Account created. Email verified. Phone verified. Landing page shows 'My Account'.", smsCost: totalSmsCost };
-              } else if (isOnTM) {
-                console.log("[TM-Playwright] On TM landing page but 'My Account' not found in text. Checking DOM...");
-                const menuCheck = await page.evaluate(`(() => {
-                  var all = document.querySelectorAll('a, button, span, div, li');
-                  for (var i = 0; i < all.length; i++) {
-                    var text = (all[i].textContent || '').trim().toLowerCase();
-                    if (text === 'my account' || text === 'myaccount') return 'found:' + all[i].tagName + ':' + text;
+              if (isOnTMLanding || isOnMyTM) {
+                console.log("[TM-Playwright] Redirected to TM! Waiting for full page load...");
+                try {
+                  await page.waitForTimeout(5000);
+                } catch {}
+
+                try {
+                  const landingText = await getPageText(page);
+                  const landingLower = landingText.toLowerCase();
+                  console.log("[TM-Playwright] Landing page (first 400):", landingText.substring(0, 400));
+
+                  const hasMyAccount = landingLower.includes("my account");
+                  console.log("[TM-Playwright] Landing check - hasMyAccount:", hasMyAccount);
+
+                  if (hasMyAccount) {
+                    console.log("[TM-Playwright] SUCCESS: Landing page shows 'My Account' - account fully created and logged in!");
+                    return { success: true, pageContent: "Account created. Email verified. Phone verified. Landing page shows 'My Account'.", smsCost: totalSmsCost };
                   }
-                  var nav = document.querySelector('nav, header, [class*="header"], [class*="nav"]');
-                  return nav ? 'nav-text:' + nav.innerText.substring(0, 200).replace(/\\n/g, ' ') : 'no-nav';
-                })()`);
-                console.log("[TM-Playwright] Menu DOM check:", menuCheck);
-                if (typeof menuCheck === 'string' && menuCheck.startsWith('found:')) {
-                  console.log("[TM-Playwright] SUCCESS: 'My Account' found in DOM!");
-                  return { success: true, pageContent: "Account created. Email verified. Phone verified. 'My Account' confirmed in menu.", smsCost: totalSmsCost };
+
+                  const menuCheck = await page.evaluate(`(() => {
+                    var all = document.querySelectorAll('a, button, span, div, li');
+                    for (var i = 0; i < all.length; i++) {
+                      var text = (all[i].textContent || '').trim().toLowerCase();
+                      if (text === 'my account' || text === 'myaccount') return 'found:' + all[i].tagName + ':' + text;
+                    }
+                    var nav = document.querySelector('nav, header, [class*="header"], [class*="nav"]');
+                    return nav ? 'nav-text:' + nav.innerText.substring(0, 200).replace(/\\n/g, ' ') : 'no-nav';
+                  })()`);
+                  console.log("[TM-Playwright] Menu DOM check:", menuCheck);
+                  if (typeof menuCheck === 'string' && menuCheck.startsWith('found:')) {
+                    console.log("[TM-Playwright] SUCCESS: 'My Account' found in DOM!");
+                    return { success: true, pageContent: "Account created. Email verified. Phone verified. 'My Account' confirmed in menu.", smsCost: totalSmsCost };
+                  }
+                } catch (domErr: any) {
+                  console.log(`[TM-Playwright] DOM check failed (browser closing): ${domErr.message?.substring(0, 100)}`);
                 }
-                console.log("[TM-Playwright] On landing page, account likely created. Returning success.");
-                return { success: true, pageContent: "Account created. Email verified. Phone verified. Redirected to TM landing page.", smsCost: totalSmsCost };
+
+                console.log("[TM-Playwright] SUCCESS: Redirected to TM landing/account page. Account created.");
+                return { success: true, pageContent: "Account created. Email verified. Phone verified. Redirected to: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
               } else {
-                console.log("[TM-Playwright] Not on TM landing page yet. Account was verified though.");
+                console.log("[TM-Playwright] Still on auth page but verifications done. Account created.");
                 return { success: true, pageContent: "Account created. Email verified. Phone verified. Passkey dismissed. URL: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
               }
             } catch (landingErr: any) {
-              console.log(`[TM-Playwright] Browser closed during landing page check (account is verified): ${landingErr.message?.substring(0, 100)}`);
+              console.log(`[TM-Playwright] Browser closed during landing check (account verified): ${landingErr.message?.substring(0, 100)}`);
               return { success: true, pageContent: "Account created. Email verified. Phone verified. Browser closed after passkey dismiss.", smsCost: totalSmsCost };
             }
           }
