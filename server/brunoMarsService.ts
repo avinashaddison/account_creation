@@ -72,40 +72,160 @@ export async function brunoMarsPresaleStep(
     await page.waitForTimeout(1000);
 
     onStatusUpdate("presale_events");
-    log("🎵 Selecting ALL events...");
+    log("🎵 Selecting events (up to 3)...");
+
+    const pageDebug = await page.evaluate(`(() => {
+      var allEls = document.querySelectorAll('*');
+      var eventKeywords = ['inglewood', 'vancouver', 'ciudad', 'sofi', 'bc place', 'estadio', 'gnp'];
+      var foundElements = [];
+      for (var i = 0; i < allEls.length; i++) {
+        var el = allEls[i];
+        var text = (el.innerText || '').toLowerCase().substring(0, 200);
+        for (var k = 0; k < eventKeywords.length; k++) {
+          if (text.includes(eventKeywords[k]) && el.children.length < 20) {
+            foundElements.push({
+              tag: el.tagName,
+              classes: (el.className || '').toString().substring(0, 100),
+              role: el.getAttribute('role') || '',
+              ariaChecked: el.getAttribute('aria-checked') || '',
+              dataTestId: el.getAttribute('data-testid') || '',
+              clickable: typeof el.onclick === 'function' || el.style.cursor === 'pointer',
+              text: (el.innerText || '').replace(/\\n/g, ' ').substring(0, 80)
+            });
+            break;
+          }
+        }
+      }
+      var checkboxes = document.querySelectorAll('input[type="checkbox"]');
+      var cbInfo = [];
+      for (var j = 0; j < checkboxes.length; j++) {
+        var lbl = checkboxes[j].closest('label') || checkboxes[j].parentElement;
+        cbInfo.push({
+          id: checkboxes[j].id,
+          name: checkboxes[j].name,
+          visible: checkboxes[j].offsetParent !== null,
+          checked: checkboxes[j].checked,
+          labelText: (lbl ? lbl.innerText : '').replace(/\\n/g, ' ').substring(0, 80)
+        });
+      }
+      return { eventElements: foundElements.slice(0, 30), checkboxes: cbInfo };
+    })()`) as any;
+
+    log("🔍 Page structure: " + (pageDebug.eventElements?.length || 0) + " event elements, " + (pageDebug.checkboxes?.length || 0) + " checkboxes");
+    for (const el of (pageDebug.eventElements || []).slice(0, 10)) {
+      log("  Element: <" + el.tag + "> role=" + el.role + " aria-checked=" + el.ariaChecked + " data-testid=" + el.dataTestId + " classes=" + el.classes.substring(0, 50));
+    }
+    for (const cb of (pageDebug.checkboxes || [])) {
+      log("  Checkbox: id=" + cb.id + " name=" + cb.name + " visible=" + cb.visible + " checked=" + cb.checked + " label=" + cb.labelText.substring(0, 50));
+    }
 
     const eventResult = await page.evaluate(`(() => {
       var results = [];
+      var maxEvents = 3;
+
+      var cards = document.querySelectorAll('[role="checkbox"], [role="option"], [data-testid*="event"], [class*="event-card"], [class*="EventCard"], [class*="event_card"]');
+      if (cards.length > 0) {
+        var count = 0;
+        for (var i = 0; i < cards.length && count < maxEvents; i++) {
+          var isChecked = cards[i].getAttribute('aria-checked') === 'true' || cards[i].classList.contains('selected') || cards[i].classList.contains('checked');
+          if (!isChecked) {
+            cards[i].click();
+            count++;
+          } else {
+            count++;
+          }
+          results.push((cards[i].innerText || '').replace(/\\n/g, ' ').substring(0, 80));
+        }
+        if (count > 0) return { selected: results, method: 'aria-role', total: cards.length };
+      }
+
+      var allDivs = document.querySelectorAll('div, li, article, section, button');
+      var eventKeywords = ['INGLEWOOD', 'VANCOUVER', 'CIUDAD', 'SOFI', 'BC PLACE', 'ESTADIO'];
+      var eventCards = [];
+      for (var j = 0; j < allDivs.length; j++) {
+        var el = allDivs[j];
+        var text = (el.innerText || '').toUpperCase();
+        var directText = '';
+        for (var c = 0; c < el.childNodes.length; c++) {
+          if (el.childNodes[c].nodeType === 3) directText += el.childNodes[c].textContent;
+        }
+        var childCount = el.querySelectorAll('*').length;
+        if (childCount > 30) continue;
+        
+        var hasKeyword = false;
+        for (var k = 0; k < eventKeywords.length; k++) {
+          if (text.includes(eventKeywords[k])) { hasKeyword = true; break; }
+        }
+        if (!hasKeyword) continue;
+        
+        var hasDate = text.includes('SEP') || text.includes('OCT') || text.includes('DEC') || text.includes('PRESALE');
+        if (!hasDate) continue;
+
+        var isDuplicate = false;
+        for (var d = 0; d < eventCards.length; d++) {
+          if (eventCards[d].el.contains(el) || el.contains(eventCards[d].el)) {
+            if (el.querySelectorAll('*').length < eventCards[d].el.querySelectorAll('*').length) {
+              eventCards[d] = { el: el, text: text };
+            }
+            isDuplicate = true;
+            break;
+          }
+        }
+        if (!isDuplicate) eventCards.push({ el: el, text: text });
+      }
+
+      var selected = 0;
+      for (var m = 0; m < eventCards.length && selected < maxEvents; m++) {
+        eventCards[m].el.click();
+        selected++;
+        results.push((eventCards[m].el.innerText || '').replace(/\\n/g, ' ').substring(0, 80));
+      }
+      if (selected > 0) return { selected: results, method: 'keyword-click', total: eventCards.length };
+
       var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      var eventCheckboxes = [];
-      for (var i = 0; i < checkboxes.length; i++) {
-        var container = checkboxes[i].closest('label') || checkboxes[i].closest('[class*="event"]') || checkboxes[i].closest('li') || checkboxes[i].closest('div');
-        var text = (container ? container.innerText : '').toUpperCase();
-        var textLower = text.toLowerCase();
-        var isConsent = textLower.includes('consent') || textLower.includes('privacy') || textLower.includes('marketing') || textLower.includes('submitting') || textLower.includes('email address') || textLower.includes('mobile phone') || textLower.includes('fan list');
-        if (!isConsent && text.length > 5) {
-          eventCheckboxes.push({ checkbox: checkboxes[i], text: (container ? container.innerText : '').replace(/\\n/g, ' ').substring(0, 100) });
+      var evtCbs = [];
+      for (var n = 0; n < checkboxes.length; n++) {
+        var container = checkboxes[n].closest('label') || checkboxes[n].parentElement;
+        var cText = (container ? container.innerText : '').toLowerCase();
+        var isConsent = cText.includes('consent') || cText.includes('privacy') || cText.includes('marketing') || cText.includes('submitting') || cText.includes('email address') || cText.includes('mobile phone') || cText.includes('fan list');
+        if (!isConsent && checkboxes[n].offsetParent !== null) {
+          evtCbs.push({ cb: checkboxes[n], text: (container ? container.innerText : '').replace(/\\n/g, ' ').substring(0, 80) });
         }
       }
-      for (var k = 0; k < eventCheckboxes.length; k++) {
-        var cb = eventCheckboxes[k].checkbox;
-        if (!cb.checked) {
-          cb.click();
-          cb.dispatchEvent(new Event('change', { bubbles: true }));
+      for (var p = 0; p < evtCbs.length && p < maxEvents; p++) {
+        if (!evtCbs[p].cb.checked) {
+          evtCbs[p].cb.click();
+          evtCbs[p].cb.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        results.push(eventCheckboxes[k].text);
+        results.push(evtCbs[p].text);
       }
-      return { selected: results, total: checkboxes.length };
+      if (results.length > 0) return { selected: results, method: 'checkbox', total: evtCbs.length };
+
+      return { selected: [], method: 'none', total: 0 };
     })()`) as any;
 
+    log("Selection method: " + (eventResult.method || 'unknown'));
     if (eventResult.selected && eventResult.selected.length > 0) {
       log("✅ Selected " + eventResult.selected.length + " events:");
       for (const ev of eventResult.selected) {
         log("  ☑ " + ev);
       }
     } else {
-      log("⚠️ No event checkboxes found (total checkboxes: " + eventResult.total + "). Page may have different layout.");
+      log("⚠️ No events could be selected. Total found: " + eventResult.total);
     }
+
+    await page.waitForTimeout(1500);
+
+    const verifySelection = await page.evaluate(`(() => {
+      var checked = document.querySelectorAll('[aria-checked="true"], .selected, .checked, input[type="checkbox"]:checked');
+      var texts = [];
+      for (var i = 0; i < checked.length; i++) {
+        var t = (checked[i].innerText || '').replace(/\\n/g, ' ').substring(0, 60);
+        if (t) texts.push(t);
+      }
+      return { count: checked.length, items: texts };
+    })()`) as any;
+    log("📋 Verified selections: " + verifySelection.count + " items checked");
 
     await page.waitForTimeout(500);
 
