@@ -290,6 +290,66 @@ export async function registerRoutes(
       await storage.setSetting("browser_proxy_url", "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
       console.log("[Auth] Default browser proxy URL set");
     }
+
+    const migrated = await storage.getSetting("neon_migration_done");
+    if (!migrated) {
+      try {
+        const neonUrl = "postgresql://neondb_owner:npg_6K4XpdfYwhqM@ep-bold-flower-aivou9uw.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require";
+        const neonPool = new pgModule.default.Pool({ connectionString: neonUrl, ssl: { rejectUnauthorized: false } });
+        
+        const neonUsers = await neonPool.query("SELECT id, email FROM users");
+        const ownerMap: Record<string, string> = {};
+        for (const nu of neonUsers.rows) {
+          const localUser = await storage.getUserByEmail(nu.email);
+          if (localUser) ownerMap[nu.id] = localUser.id;
+        }
+        console.log("[Migration] Owner mapping:", ownerMap);
+
+        const existingAccounts = await storage.getAllAccounts();
+        if (existingAccounts.length === 0) {
+          const neonAccounts = await neonPool.query("SELECT * FROM accounts ORDER BY created_at");
+          for (const a of neonAccounts.rows) {
+            const mappedOwner = ownerMap[a.owner_id] || a.owner_id;
+            await storage.createAccount({
+              tempEmail: a.temp_email,
+              tempEmailPassword: a.temp_email_password,
+              firstName: a.first_name,
+              lastName: a.last_name,
+              la28Password: a.la28_password,
+              country: a.country,
+              language: a.language,
+              status: a.status,
+              verificationCode: a.verification_code,
+              errorMessage: a.error_message,
+              batchId: a.batch_id,
+              ownerId: mappedOwner,
+              platform: a.platform,
+              isUsed: a.is_used,
+              zipCode: a.zip_code,
+            });
+          }
+          console.log(`[Migration] Migrated ${neonAccounts.rows.length} accounts`);
+
+          const neonBilling = await neonPool.query("SELECT * FROM billing_records ORDER BY created_at");
+          for (const b of neonBilling.rows) {
+            const mappedOwner = ownerMap[b.owner_id] || b.owner_id;
+            await storage.createBillingRecord({
+              accountId: b.account_id,
+              amount: b.amount.toString(),
+              description: b.description,
+              ownerId: mappedOwner,
+            });
+          }
+          console.log(`[Migration] Migrated ${neonBilling.rows.length} billing records`);
+        }
+
+        await neonPool.end();
+        await storage.setSetting("neon_migration_done", "true");
+        console.log("[Migration] Neon migration complete");
+      } catch (err: any) {
+        console.error("[Migration] Neon migration failed:", err.message);
+      }
+    }
   }
   await ensureDefaultData();
 
