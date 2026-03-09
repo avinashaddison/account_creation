@@ -172,8 +172,10 @@ export async function tmFullRegistrationFlow(
   password: string,
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
+  onLog?: (message: string) => void,
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number }> {
+  const log = onLog || ((msg: string) => console.log(`[TM] ${msg}`));
   const maxRetries = 4;
   let totalSmsCost = 0;
   const MAX_SMS_SPEND = 0.72;
@@ -181,9 +183,11 @@ export async function tmFullRegistrationFlow(
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
       if (totalSmsCost >= MAX_SMS_SPEND) {
+        log(`⚠️ SMS spend cap reached ($${totalSmsCost.toFixed(2)}), stopping retries`);
         console.log(`[TM-Playwright] SMS spend cap reached ($${totalSmsCost.toFixed(2)} / $${MAX_SMS_SPEND}), stopping retries`);
         break;
       }
+      log(`🔄 Retry attempt ${attempt + 1}/${maxRetries}...`);
       console.log(`[TM-Playwright] Retry attempt ${attempt + 1}/${maxRetries} (SMS spent so far: $${totalSmsCost.toFixed(2)})...`);
       if (browserInstance) {
         try { await browserInstance.close(); } catch {}
@@ -192,7 +196,7 @@ export async function tmFullRegistrationFlow(
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     }
 
-    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, proxyUrl);
+    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl);
     totalSmsCost += result.smsCost || 0;
 
     if (result.error?.includes("browser has been closed") || result.error?.includes("crashed")) {
@@ -221,31 +225,37 @@ export async function tmFullRegistrationFlow(
 
 async function handlePhoneVerification(
   page: Page,
-  onStatusUpdate: (status: string) => void
+  onStatusUpdate: (status: string) => void,
+  log: (message: string) => void
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
   const MAX_PHONE_RETRIES = 3;
   let totalSmsCost = 0;
   let lastError = "";
 
   for (let attempt = 1; attempt <= MAX_PHONE_RETRIES; attempt++) {
+    log(`📱 Phone verification attempt ${attempt}/${MAX_PHONE_RETRIES}`);
     console.log(`[TM-Playwright] Phone verification attempt ${attempt}/${MAX_PHONE_RETRIES}`);
-    const result = await attemptPhoneVerification(page, onStatusUpdate, attempt);
+    const result = await attemptPhoneVerification(page, onStatusUpdate, attempt, log);
     totalSmsCost += result.smsCost;
 
     if (result.success) {
+      log(`✅ Phone verified successfully!`);
       return { success: true, smsCost: totalSmsCost };
     }
 
     lastError = result.error || "Unknown phone verification error";
+    log(`⚠️ Phone attempt ${attempt} failed: ${lastError.substring(0, 80)}`);
     console.log(`[TM-Playwright] Phone attempt ${attempt}/${MAX_PHONE_RETRIES} failed: ${lastError}`);
 
     if (attempt < MAX_PHONE_RETRIES) {
       const isNonRetryable = lastError.includes("Phone input field not found") || lastError.includes("Challenge") || lastError.includes("browser closed");
       if (isNonRetryable) {
+        log(`❌ Non-retryable phone error, stopping`);
         console.log("[TM-Playwright] Non-retryable phone error, stopping retries");
         break;
       }
 
+      log(`🔄 Retrying with new phone number...`);
       onStatusUpdate(`phone_retry_${attempt + 1}`);
       console.log("[TM-Playwright] Dismissing phone OTP dialog before retry...");
       await dismissPhoneDialog(page);
@@ -301,19 +311,23 @@ async function dismissPhoneDialog(page: Page): Promise<void> {
 async function attemptPhoneVerification(
   page: Page,
   onStatusUpdate: (status: string) => void,
-  attemptNum: number
+  attemptNum: number,
+  log: (message: string) => void
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
   let smsOrderId: string | null = null;
   let smsCost = 0;
 
   try {
+    log(`📲 Ordering SMS number from SMSPool...`);
     const smsOrder = await orderSMSNumber(1, "Ticketmaster");
     if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
+      log(`❌ SMSPool order failed: ${smsOrder.error}`);
       return { success: false, error: `SMSPool order failed: ${smsOrder.error}`, smsCost: 0 };
     }
 
     smsOrderId = smsOrder.orderId;
     smsCost = 0.36;
+    log(`📱 Got phone number: ${String(smsOrder.number).replace(/(\d{3})\d{4}(\d{3})/, '$1****$2')}`);
     console.log(`[TM-Playwright] SMS number ordered (attempt ${attemptNum}): $${smsCost} charged from SMSPool`);
     let phoneNumber = String(smsOrder.number);
     if (!phoneNumber.startsWith("+")) {
@@ -524,11 +538,13 @@ async function attemptPhoneVerification(
     }
 
     if (!phoneFilled) {
+      log(`❌ Could not find phone input field`);
       console.log("[TM-Playwright] Could not find phone input field");
       await cancelSMSOrder(smsOrderId);
       return { success: false, error: "Phone input field not found on page", smsCost };
     }
 
+    log(`✏️ Phone number entered, clicking send code...`);
     await page.waitForTimeout(1000);
 
     let sendCodeClicked = await clickButton(page, "add number");
@@ -609,15 +625,18 @@ async function attemptPhoneVerification(
     console.log("[TM-Playwright] After phone code send (first 500):", pageText.substring(0, 500));
 
     onStatusUpdate("verifying");
+    log(`⏳ Waiting for SMS verification code...`);
     console.log("[TM-Playwright] Polling SMSPool for phone verification code...");
     const smsCode = await pollForSMSCode(smsOrderId, 60, 3000);
 
     if (!smsCode) {
+      log(`⏰ SMS code timeout - no code received`);
       console.log("[TM-Playwright] No SMS code received from SMSPool");
       await cancelSMSOrder(smsOrderId);
       return { success: false, error: "Timed out waiting for SMS verification code", smsCost };
     }
 
+    log(`📩 Got SMS code: ${smsCode}`);
     console.log(`[TM-Playwright] Got phone verification code: ${smsCode}`);
 
     const codeDigits = smsCode.split('');
@@ -673,10 +692,12 @@ async function attemptPhoneVerification(
       }
       return 'no-input-found';
     })("${smsCode}", ${JSON.stringify(codeDigits)})`);
+    log(`✏️ Entering SMS code on TM page...`);
     console.log(`[TM-Playwright] Phone code entry result: ${phoneCodeEntered}`);
 
     await page.waitForTimeout(1000);
 
+    log(`🔘 Clicking confirm code button...`);
     let verifyPhoneClicked = await page.evaluate(`(() => {
       var form = document.querySelector('form:has(input[id*="otp"])');
       if (form) {
@@ -759,10 +780,13 @@ async function attemptPhoneVerification(
       await cancelSMSOrder(smsOrderId);
     }
     if (phoneVerifyState.stillNeedsPhone) {
+      log(`❌ Phone verification not confirmed after code entry`);
       return { success: false, error: "Phone verification not confirmed after OTP submission", smsCost };
     }
+    log(`✅ Phone code accepted!`);
     return { success: true, smsCost };
   } catch (err: any) {
+    log(`❌ Phone error: ${err.message?.substring(0, 80)}`);
     console.log("[TM-Playwright] Phone verification error:", err.message);
     if (smsOrderId) {
       await cancelSMSOrder(smsOrderId);
@@ -778,6 +802,7 @@ async function doTMRegistration(
   password: string,
   onStatusUpdate: (status: string) => void,
   getVerificationCode: () => Promise<string | null>,
+  log: (message: string) => void,
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number }> {
   console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
@@ -790,6 +815,7 @@ async function doTMRegistration(
 
   try {
     if (isBrowserAPI) {
+      log(`🌐 Connecting to Bright Data browser...`);
       console.log("[TM-Playwright] Connecting via Bright Data Browser API...");
       remoteBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
       const defaultContext = remoteBrowser.contexts()[0];
@@ -800,6 +826,7 @@ async function doTMRegistration(
         page = await remoteBrowser.newPage();
       }
       page.setDefaultTimeout(60000);
+      log(`✅ Connected to remote browser`);
       console.log("[TM-Playwright] Connected to remote browser.");
     } else {
       let browser: Browser;
@@ -868,6 +895,7 @@ async function doTMRegistration(
       console.log("[TM-Playwright] Could not block ContentSquare:", e.message);
     }
 
+    log(`🔗 Navigating to Ticketmaster sign-up page...`);
     console.log("[TM-Playwright] Navigating to TM create_account...");
     try {
       await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -910,6 +938,7 @@ async function doTMRegistration(
     const isBlocked = (text: string) => blockPatterns.some(p => text.includes(p));
 
     if (isChallenge(pageLower)) {
+      log(`🛡️ CAPTCHA detected, waiting for auto-solver...`);
       console.log("[TM-Playwright] Captcha/challenge detected. Waiting for Browser API captcha solver (up to 120s)...");
       for (let cw = 0; cw < 40; cw++) {
         await page.waitForTimeout(3000);
@@ -922,6 +951,7 @@ async function doTMRegistration(
             console.log(`[TM-Playwright] URL: ${currentUrl.substring(0, 120)}`);
           }
           if (!isChallenge(pageLower)) {
+            log(`✅ CAPTCHA solved!`);
             console.log("[TM-Playwright] Challenge resolved!");
             break;
           }
@@ -971,6 +1001,7 @@ async function doTMRegistration(
 
     await removeOverlays(page);
 
+    log(`📄 Page loaded, looking for sign-up form...`);
     console.log("[TM-Playwright] Waiting for sign-up form...");
     let formFound = false;
     let formPage: Page = page;
@@ -1049,6 +1080,7 @@ async function doTMRegistration(
     })()`);
     console.log("[TM-Playwright] Visible form fields:", JSON.stringify(allFields));
 
+    log(`✏️ Step 1: Entering email address...`);
     console.log("[TM-Playwright] Step 1: Filling email...");
 
     const emailFilled = await fillInput(page, [
@@ -1064,6 +1096,7 @@ async function doTMRegistration(
 
     await page.waitForTimeout(1000);
 
+    log(`🔘 Clicking Continue...`);
     console.log("[TM-Playwright] Clicking Continue...");
     let continueClicked = await clickButton(page, "continue");
     if (!continueClicked) continueClicked = await clickButton(page, "next");
@@ -1084,6 +1117,7 @@ async function doTMRegistration(
     }
     console.log(`[TM-Playwright] Continue clicked: ${continueClicked}`);
 
+    log(`⏳ Step 2: Waiting for registration form...`);
     console.log("[TM-Playwright] Step 2: Waiting for registration form...");
     await page.waitForTimeout(5000);
 
@@ -1142,6 +1176,7 @@ async function doTMRegistration(
       return { success: false, error: "Registration form did not load after email step", pageContent: step2Text.substring(0, 500) };
     }
 
+    log(`✏️ Step 3: Filling name and password...`);
     console.log("[TM-Playwright] Password field visible, filling registration form...");
 
     const fnFilled = await fillInput(page, [
@@ -1481,6 +1516,7 @@ async function doTMRegistration(
 
     await page.waitForTimeout(1000);
 
+    log(`🔘 Step 4: Submitting registration form...`);
     console.log("[TM-Playwright] Submitting registration...");
     let submitted = await clickButton(page, "next");
     if (!submitted) submitted = await clickButton(page, "create account");
@@ -1638,6 +1674,7 @@ async function doTMRegistration(
                       (pageLower.includes("verify") && pageLower.includes("email") && !stillOnSignUpForm);
 
     if (needsCode) {
+      log(`📧 Step 5: Email verification required, clicking "Verify My Email"...`);
       console.log("[TM-Playwright] Verification page detected, clicking 'Verify My Email'...");
 
       let verifyEmailClicked = await clickButton(page, "verify my email");
@@ -1691,6 +1728,7 @@ async function doTMRegistration(
       console.log("[TM-Playwright] Visible inputs on verify page:", JSON.stringify(allInputs));
 
       onStatusUpdate("waiting_code");
+      log(`⏳ Waiting for email verification code...`);
 
       let code: string | null = null;
       try {
@@ -1707,6 +1745,7 @@ async function doTMRegistration(
       }
 
       onStatusUpdate("verifying");
+      log(`✏️ Entering email verification code: ${code}`);
       console.log(`[TM-Playwright] Entering verification code: ${code}`);
 
       let codeEntered = 'not-attempted';
@@ -1804,6 +1843,7 @@ async function doTMRegistration(
 
       await page.waitForTimeout(1500);
 
+      log(`🔘 Clicking verify code button...`);
       let verifyClicked = await page.evaluate(`(() => {
         var otpForm = document.querySelector('form:has(#otp-input-input), form:has(input[aria-label="One-Time Code"]), form:has(input[maxlength="6"])');
         if (otpForm) {
@@ -1874,6 +1914,7 @@ async function doTMRegistration(
       console.log("[TM-Playwright] Email verification state:", JSON.stringify(emailVerified));
 
       if (emailVerified.hasCheckmark) {
+        log(`✅ Email verified! Dismissing overlay...`);
         console.log("[TM-Playwright] Email verified, dismissing OTP overlay...");
         const dismissResult = await page.evaluate(`(() => {
           var closeButtons = document.querySelectorAll('button[aria-label="Close"], button[aria-label="close"], button.close, [data-dismiss], [aria-label*="close" i], [aria-label*="dismiss" i]');
@@ -1932,8 +1973,9 @@ async function doTMRegistration(
     let pageLowerFinal = pageText.toLowerCase();
 
     if (pageLowerFinal.includes("add my phone") || pageLowerFinal.includes("verify your phone") || pageLowerFinal.includes("phone number")) {
+      log(`📱 Step 6: Phone verification required, starting SMS flow...`);
       console.log("[TM-Playwright] Phone verification required, starting SMSPool flow...");
-      const phoneResult = await handlePhoneVerification(page, onStatusUpdate);
+      const phoneResult = await handlePhoneVerification(page, onStatusUpdate, log);
       totalSmsCost += phoneResult.smsCost || 0;
       if (phoneResult.success) {
         console.log("[TM-Playwright] Phone verification completed successfully!");
@@ -1980,6 +2022,7 @@ async function doTMRegistration(
         await page.waitForTimeout(2000);
       }
 
+      log(`🔘 Step 7: Clicking "Done" to confirm account...`);
       console.log("[TM-Playwright] Looking for Done button to confirm account...");
       let doneClicked = await clickButton(page, "done");
       if (!doneClicked) doneClicked = await clickButton(page, "continue");
@@ -2011,6 +2054,7 @@ async function doTMRegistration(
       }
 
       if (pageLowerNow.includes("add a passkey") || pageLowerNow.includes("passkey")) {
+        log(`🔑 Passkey prompt detected, dismissing...`);
         console.log("[TM-Playwright] ADD A PASSKEY page detected, clicking 'Not Right Now'...");
         try {
           let passkeyDismissed = await clickButton(page, "not right now");

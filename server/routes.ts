@@ -1067,6 +1067,9 @@ export async function registerRoutes(
           }
           return code;
         },
+        (message) => {
+          broadcastLog(batchId, accountId, message, ownerId);
+        },
         proxyUrl
       );
 
