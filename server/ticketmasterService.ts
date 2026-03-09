@@ -2048,11 +2048,13 @@ async function doTMRegistration(
 
       if (doneClicked) {
         try {
-          await page.waitForTimeout(5000);
-          await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+          await page.waitForTimeout(keepBrowserOpen ? 3000 : 5000);
+          if (!keepBrowserOpen) {
+            await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+          }
         } catch (doneWaitErr: any) {
           console.log(`[TM-Playwright] Browser closed after Done click (account is verified): ${doneWaitErr.message?.substring(0, 100)}`);
-          return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed during redirect.", smsCost: totalSmsCost };
+          return { success: true, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed during redirect.", smsCost: totalSmsCost };
         }
       }
 
@@ -2064,7 +2066,7 @@ async function doTMRegistration(
         console.log("[TM-Playwright] After Done URL:", page.url());
       } catch (getTextErr: any) {
         console.log(`[TM-Playwright] Browser closed after Done (account verified): ${getTextErr.message?.substring(0, 100)}`);
-        return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed.", smsCost: totalSmsCost };
+        return { success: true, pageContent: "Account created. Both verifications confirmed. Done clicked. Browser closed.", smsCost: totalSmsCost };
       }
 
       if (pageLowerNow.includes("add a passkey") || pageLowerNow.includes("passkey")) {
@@ -2097,56 +2099,51 @@ async function doTMRegistration(
               const isOnMyTM = landingUrl.includes("my.ticketmaster.com");
 
               if (isOnTMLanding || isOnMyTM) {
-                console.log("[TM-Playwright] Redirected to TM! Waiting for full page load...");
-                try {
-                  await page.waitForTimeout(keepBrowserOpen ? 2000 : 5000);
-                } catch {}
+                console.log("[TM-Playwright] Redirected to TM! Checking page is alive...");
+                let browserAlive = true;
 
                 try {
-                  const landingText = await getPageText(page);
-                  const landingLower = landingText.toLowerCase();
-                  console.log("[TM-Playwright] Landing page (first 400):", landingText.substring(0, 400));
+                  await page.evaluate("1+1");
+                } catch {
+                  browserAlive = false;
+                  console.log("[TM-Playwright] Browser died after redirect, but account is verified.");
+                }
 
-                  const hasMyAccount = landingLower.includes("my account");
-                  console.log("[TM-Playwright] Landing check - hasMyAccount:", hasMyAccount);
+                if (browserAlive && keepBrowserOpen) {
+                  console.log("[TM-Playwright] SUCCESS: Browser alive, returning for presale reuse.");
+                  return { success: true, browser: remoteBrowser, page, pageContent: "Account created. Email verified. Phone verified. Redirected to: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
+                }
 
-                  if (hasMyAccount) {
-                    console.log("[TM-Playwright] SUCCESS: Landing page shows 'My Account' - account fully created and logged in!");
-                    return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Landing page shows 'My Account'.", smsCost: totalSmsCost };
-                  }
-
-                  const menuCheck = await page.evaluate(`(() => {
-                    var all = document.querySelectorAll('a, button, span, div, li');
-                    for (var i = 0; i < all.length; i++) {
-                      var text = (all[i].textContent || '').trim().toLowerCase();
-                      if (text === 'my account' || text === 'myaccount') return 'found:' + all[i].tagName + ':' + text;
-                    }
-                    var nav = document.querySelector('nav, header, [class*="header"], [class*="nav"]');
-                    return nav ? 'nav-text:' + nav.innerText.substring(0, 200).replace(/\\n/g, ' ') : 'no-nav';
-                  })()`);
-                  console.log("[TM-Playwright] Menu DOM check:", menuCheck);
-                  if (typeof menuCheck === 'string' && menuCheck.startsWith('found:')) {
-                    console.log("[TM-Playwright] SUCCESS: 'My Account' found in DOM!");
-                    return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. 'My Account' confirmed in menu.", smsCost: totalSmsCost };
-                  }
-                } catch (domErr: any) {
-                  console.log(`[TM-Playwright] DOM check failed (browser closing): ${domErr.message?.substring(0, 100)}`);
+                if (browserAlive && !keepBrowserOpen) {
+                  try {
+                    await page.waitForTimeout(3000);
+                    const landingText = await getPageText(page);
+                    console.log("[TM-Playwright] Landing page (first 400):", landingText.substring(0, 400));
+                  } catch {}
                 }
 
                 console.log("[TM-Playwright] SUCCESS: Redirected to TM landing/account page. Account created.");
-                return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Redirected to: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
+                return { success: true, pageContent: "Account created. Email verified. Phone verified. Redirected to: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
               } else {
+                let browserAlive = true;
+                try { await page.evaluate("1+1"); } catch { browserAlive = false; }
+
+                if (browserAlive && keepBrowserOpen) {
+                  console.log("[TM-Playwright] Still on auth page but verifications done. Browser alive for presale.");
+                  return { success: true, browser: remoteBrowser, page, pageContent: "Account created. Email verified. Phone verified. Passkey dismissed. URL: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
+                }
+
                 console.log("[TM-Playwright] Still on auth page but verifications done. Account created.");
-                return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Passkey dismissed. URL: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
+                return { success: true, pageContent: "Account created. Email verified. Phone verified. Passkey dismissed. URL: " + landingUrl.substring(0, 100), smsCost: totalSmsCost };
               }
             } catch (landingErr: any) {
               console.log(`[TM-Playwright] Browser closed during landing check (account verified): ${landingErr.message?.substring(0, 100)}`);
-              return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Browser closed after passkey dismiss.", smsCost: totalSmsCost };
+              return { success: true, pageContent: "Account created. Email verified. Phone verified. Browser closed after passkey dismiss.", smsCost: totalSmsCost };
             }
           }
         } catch (passkeyErr: any) {
           console.log(`[TM-Playwright] Passkey dismiss error (account is verified): ${passkeyErr.message?.substring(0, 100)}`);
-          return { success: true, browser: keepBrowserOpen ? remoteBrowser : undefined, page: keepBrowserOpen ? page : undefined, pageContent: "Account created. Email verified. Phone verified. Passkey page reached but dismiss failed.", smsCost: totalSmsCost };
+          return { success: true, pageContent: "Account created. Email verified. Phone verified. Passkey page reached but dismiss failed.", smsCost: totalSmsCost };
         }
       }
 
