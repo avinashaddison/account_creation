@@ -406,11 +406,17 @@ async function handlePhoneVerification(
           for (var i = 0; i < els.length; i++) {
             var rect = els[i].getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
+              els[i].focus();
               var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
               if (nativeSet && nativeSet.set) nativeSet.set.call(els[i], number);
               else els[i].value = number;
               els[i].dispatchEvent(new Event('input', { bubbles: true }));
               els[i].dispatchEvent(new Event('change', { bubbles: true }));
+              var rp = Object.keys(els[i]).find(function(k) { return k.startsWith('__reactProps'); });
+              if (rp && els[i][rp] && typeof els[i][rp].onChange === 'function') {
+                els[i][rp].onChange({ target: els[i], currentTarget: els[i], type: 'change' });
+              }
+              els[i].dispatchEvent(new Event('blur', { bubbles: true }));
               return 'filled:' + selectors[s];
             }
           }
@@ -1381,7 +1387,8 @@ async function doTMRegistration(
     await page.waitForTimeout(1000);
 
     console.log("[TM-Playwright] Submitting registration...");
-    let submitted = await clickButton(page, "create account");
+    let submitted = await clickButton(page, "next");
+    if (!submitted) submitted = await clickButton(page, "create account");
     if (!submitted) submitted = await clickButton(page, "sign up");
     if (!submitted) submitted = await clickButton(page, "register");
     if (!submitted) submitted = await clickButton(page, "continue");
@@ -1847,55 +1854,90 @@ async function doTMRegistration(
     }
 
     const postVerifyLower = pageText.toLowerCase();
-    if (postVerifyLower.includes("phone verified") && (postVerifyLower.includes("almost there") || postVerifyLower.includes("verify your account"))) {
-      console.log("[TM-Playwright] Both verifications done, looking for Continue/Done button to finalize...");
+    const emailDone = postVerifyLower.includes("email verified");
+    const phoneDone = postVerifyLower.includes("phone verified");
+    const onVerifyPage = postVerifyLower.includes("almost there") || postVerifyLower.includes("verify your account") || postVerifyLower.includes("confirm your account");
 
-      const finalizeClicked = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-        const candidates = ["continue", "done", "finish", "complete", "let's go", "go to my account", "submit", "next"];
-        for (const btn of buttons) {
-          const text = (btn.textContent || "").trim().toLowerCase();
-          const rect = (btn as HTMLElement).getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) {
-            for (const c of candidates) {
-              if (text.includes(c)) {
-                (btn as HTMLElement).click();
-                return `clicked:${text}`;
-              }
-            }
+    if (onVerifyPage && (emailDone || phoneDone)) {
+      console.log(`[TM-Playwright] Verification state - email: ${emailDone}, phone: ${phoneDone}`);
+
+      if (emailDone && phoneDone) {
+        console.log("[TM-Playwright] Both verifications done!");
+      } else if (!emailDone && phoneDone) {
+        console.log("[TM-Playwright] Phone verified but email not yet, waiting for page update...");
+        for (let w = 0; w < 5; w++) {
+          await page.waitForTimeout(3000);
+          pageText = await getPageText(page);
+          if (pageText.toLowerCase().includes("email verified")) {
+            console.log("[TM-Playwright] Email verified after wait");
+            break;
           }
         }
-        const links = Array.from(document.querySelectorAll('a[href]'));
-        for (const link of links) {
-          const href = (link as HTMLAnchorElement).href.toLowerCase();
-          const text = (link.textContent || "").trim().toLowerCase();
-          if (href.includes("ticketmaster.com") && !href.includes("authorization.oauth2") && !text.includes("cancel")) {
-            (link as HTMLElement).click();
-            return `link:${text}:${href}`;
-          }
-        }
-        return null;
-      });
-      console.log("[TM-Playwright] Finalize button result:", finalizeClicked);
+      }
 
-      if (finalizeClicked) {
+      for (let confirmWait = 0; confirmWait < 5; confirmWait++) {
+        pageText = await getPageText(page);
+        const pLower = pageText.toLowerCase();
+        if (pLower.includes("confirm your account") || pLower.includes("done")) {
+          console.log("[TM-Playwright] CONFIRM YOUR ACCOUNT page detected");
+          break;
+        }
+        await page.waitForTimeout(2000);
+      }
+
+      console.log("[TM-Playwright] Looking for Done button to confirm account...");
+      let doneClicked = await clickButton(page, "done");
+      if (!doneClicked) doneClicked = await clickButton(page, "continue");
+      if (!doneClicked) doneClicked = await clickButton(page, "finish");
+      if (!doneClicked) doneClicked = await clickButton(page, "complete");
+      if (!doneClicked) doneClicked = await clickButton(page, "let's go");
+      if (!doneClicked) doneClicked = await clickButton(page, "go to my account");
+      console.log(`[TM-Playwright] Done button clicked: ${doneClicked}`);
+
+      if (doneClicked) {
+        await page.waitForTimeout(5000);
         try {
-          await page.waitForTimeout(5000);
           await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
         } catch {}
       }
 
-      if (!finalizeClicked) {
+      pageText = await getPageText(page);
+      let pageLowerNow = pageText.toLowerCase();
+      console.log("[TM-Playwright] After Done click (first 300):", pageText.substring(0, 300));
+      console.log("[TM-Playwright] After Done URL:", page.url());
+
+      if (pageLowerNow.includes("add a passkey") || pageLowerNow.includes("passkey")) {
+        console.log("[TM-Playwright] ADD A PASSKEY page detected, clicking 'Not Right Now'...");
+        let passkeyDismissed = await clickButton(page, "not right now");
+        if (!passkeyDismissed) passkeyDismissed = await clickButton(page, "skip");
+        if (!passkeyDismissed) passkeyDismissed = await clickButton(page, "no thanks");
+        if (!passkeyDismissed) passkeyDismissed = await clickButton(page, "maybe later");
+        console.log(`[TM-Playwright] Passkey dismissed: ${passkeyDismissed}`);
+
+        if (passkeyDismissed) {
+          await page.waitForTimeout(5000);
+          try {
+            await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+          } catch {}
+        }
+
+        pageText = await getPageText(page);
+        pageLowerNow = pageText.toLowerCase();
+        console.log("[TM-Playwright] After passkey dismiss (first 300):", pageText.substring(0, 300));
+        console.log("[TM-Playwright] After passkey dismiss URL:", page.url());
+      }
+
+      if (!doneClicked) {
         try {
           console.log("[TM-Playwright] No button found, trying to navigate to TM account page directly...");
           await page.goto("https://www.ticketmaster.com/member/edit_account", { waitUntil: "domcontentloaded", timeout: 30000 });
           await page.waitForTimeout(3000);
+          pageText = await getPageText(page);
         } catch (navErr: any) {
           console.log("[TM-Playwright] Direct navigation attempt failed:", navErr.message?.substring(0, 100));
         }
       }
 
-      pageText = await getPageText(page);
       console.log("[TM-Playwright] After finalize (first 300):", pageText.substring(0, 300));
       console.log("[TM-Playwright] After finalize URL:", page.url());
     }
@@ -1922,7 +1964,9 @@ async function doTMRegistration(
                       finalLower.includes("my account") ||
                       finalLower.includes("you're in") ||
                       finalLower.includes("welcome back") ||
-                      finalLower.includes("account settings");
+                      finalLower.includes("account settings") ||
+                      finalLower.includes("add a passkey") ||
+                      finalLower.includes("confirm your account");
 
     const domVerifyState = await page.evaluate(`(() => {
       var body = document.body ? document.body.innerHTML : '';
