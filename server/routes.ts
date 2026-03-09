@@ -301,7 +301,7 @@ export async function registerRoutes(
       console.log("[Auth] Default browser proxy URL set");
     }
 
-    const migrated = await storage.getSetting("neon_migration_done");
+    const migrated = await storage.getSetting("neon_migration_v2_done");
     if (!migrated) {
       try {
         const neonUrl = "postgresql://neondb_owner:npg_6K4XpdfYwhqM@ep-bold-flower-aivou9uw.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require";
@@ -313,34 +313,40 @@ export async function registerRoutes(
           const localUser = await storage.getUserByEmail(nu.email);
           if (localUser) ownerMap[nu.id] = localUser.id;
         }
-        console.log("[Migration] Owner mapping:", ownerMap);
+        console.log("[Migration v2] Owner mapping:", ownerMap);
 
         const existingAccounts = await storage.getAllAccounts();
-        if (existingAccounts.length === 0) {
-          const neonAccounts = await neonPool.query("SELECT * FROM accounts ORDER BY created_at");
-          for (const a of neonAccounts.rows) {
-            const mappedOwner = ownerMap[a.owner_id] || a.owner_id;
-            await storage.createAccount({
-              tempEmail: a.temp_email,
-              tempEmailPassword: a.temp_email_password,
-              firstName: a.first_name,
-              lastName: a.last_name,
-              la28Password: a.la28_password,
-              country: a.country,
-              language: a.language,
-              status: a.status,
-              verificationCode: a.verification_code,
-              errorMessage: a.error_message,
-              batchId: a.batch_id,
-              ownerId: mappedOwner,
-              platform: a.platform,
-              isUsed: a.is_used,
-              zipCode: a.zip_code,
-            });
-          }
-          console.log(`[Migration] Migrated ${neonAccounts.rows.length} accounts`);
+        const existingEmails = new Set(existingAccounts.map(a => a.email));
 
-          const neonBilling = await neonPool.query("SELECT * FROM billing_records ORDER BY created_at");
+        const neonAccounts = await neonPool.query("SELECT * FROM accounts ORDER BY created_at");
+        let importedAccounts = 0;
+        for (const a of neonAccounts.rows) {
+          if (existingEmails.has(a.temp_email)) continue;
+          const mappedOwner = ownerMap[a.owner_id] || a.owner_id;
+          await storage.createAccount({
+            email: a.temp_email,
+            emailPassword: a.temp_email_password,
+            firstName: a.first_name,
+            lastName: a.last_name,
+            la28Password: a.la28_password,
+            country: a.country,
+            language: a.language,
+            status: a.status,
+            verificationCode: a.verification_code,
+            errorMessage: a.error_message,
+            batchId: a.batch_id,
+            ownerId: mappedOwner,
+            platform: a.platform,
+            isUsed: a.is_used,
+            zipCode: a.zip_code,
+          });
+          importedAccounts++;
+        }
+        console.log(`[Migration v2] Imported ${importedAccounts} new accounts (${neonAccounts.rows.length} total in Neon)`);
+
+        const neonBilling = await neonPool.query("SELECT * FROM billing_records ORDER BY created_at");
+        const existingBillingCount = (await storage.getAllBillingRecords()).length;
+        if (existingBillingCount === 0) {
           for (const b of neonBilling.rows) {
             const mappedOwner = ownerMap[b.owner_id] || b.owner_id;
             await storage.createBillingRecord({
@@ -350,14 +356,14 @@ export async function registerRoutes(
               ownerId: mappedOwner,
             });
           }
-          console.log(`[Migration] Migrated ${neonBilling.rows.length} billing records`);
+          console.log(`[Migration v2] Imported ${neonBilling.rows.length} billing records`);
         }
 
         await neonPool.end();
-        await storage.setSetting("neon_migration_done", "true");
-        console.log("[Migration] Neon migration complete");
+        await storage.setSetting("neon_migration_v2_done", "true");
+        console.log("[Migration v2] Complete");
       } catch (err: any) {
-        console.error("[Migration] Neon migration failed:", err.message);
+        console.error("[Migration v2] Failed:", err.message);
       }
     }
   }
