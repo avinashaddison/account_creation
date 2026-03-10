@@ -487,8 +487,18 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr: any) {
           if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted") || navErr.message.includes("brob"))) {
-            log("robots.txt restriction detected. Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in Bright Data dashboard > Zone settings.");
-            throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.");
+            log("robots.txt block on page.goto — trying JS-based navigation...");
+            try {
+              await ticketsPage.goto("about:blank", { timeout: 10000 });
+            } catch {}
+            await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org/mycustomerdata/"; });
+            await ticketsPage.waitForTimeout(5000);
+            try {
+              await ticketsPage.waitForFunction(
+                () => document.readyState === "complete" || document.readyState === "interactive",
+                { timeout: 120000 }
+              );
+            } catch {}
           } else {
             throw navErr;
           }
@@ -615,8 +625,9 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr: any) {
           if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted"))) {
-            log("robots.txt restriction detected. Enable 'Ignore robots.txt' in Bright Data zone settings.");
-            throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.");
+            log("robots.txt block — trying JS navigation...");
+            await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org"; });
+            await ticketsPage.waitForTimeout(15000);
           } else {
             throw navErr;
           }
@@ -635,8 +646,9 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr2: any) {
           if (navErr2.message && (navErr2.message.includes("robots.txt") || navErr2.message.includes("restricted"))) {
-            log("robots.txt restriction detected on /mycustomerdata. Enable 'Ignore robots.txt' in Bright Data zone settings.");
-            throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org/mycustomerdata. Enable 'Ignore robots.txt' in zone settings.");
+            log("robots.txt block on /mycustomerdata — trying JS navigation...");
+            await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org/mycustomerdata/?#/myCustomerData"; });
+            await ticketsPage.waitForTimeout(15000);
           } else {
             throw navErr2;
           }
@@ -651,8 +663,9 @@ async function loginAndSubmitTicketRegistration(
             await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
           } catch (navErr3: any) {
             if (navErr3.message && (navErr3.message.includes("robots.txt") || navErr3.message.includes("restricted"))) {
-              log("robots.txt restriction on /mycustomerdata. Enable 'Ignore robots.txt' in Bright Data zone settings.");
-              throw new Error("robots.txt: Bright Data zone blocks tickets.la28.org/mycustomerdata. Enable 'Ignore robots.txt' in zone settings.");
+              log("robots.txt block — trying JS navigation to /mycustomerdata...");
+              await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org/mycustomerdata/#/myCustomerData"; });
+              await ticketsPage.waitForTimeout(15000);
             }
           }
         }

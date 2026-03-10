@@ -30,7 +30,7 @@ export async function brunoMarsPresaleStep(
       } catch {
         log("⚠️ TM session expired, opening new browser...");
         browser = null;
-        ownBrowser = await chromium.connectOverCDP(proxyUrl!, { timeout: 60000 });
+        ownBrowser = await chromium.connectOverCDP(bmCdpUrl, { timeout: 60000 });
         const ctx = ownBrowser.contexts()[0];
         page = ctx ? (ctx.pages()[0] || await ctx.newPage()) : await ownBrowser.newPage();
       }
