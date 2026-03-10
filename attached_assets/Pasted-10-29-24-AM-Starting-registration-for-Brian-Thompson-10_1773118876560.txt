@@ -1,0 +1,86 @@
+10:29:24 AM
+Starting registration for Brian Thompson...
+10:29:24 AM
+Creating Addison email: purefox5524@dollicons.com
+10:29:25 AM
+Addison email ready, starting registration...
+10:29:29 AM
+Using LA zip code 90004 for all steps.
+10:29:29 AM
+Registration/consent on la28id.la28.org (no proxy needed). Proxy reserved for tickets.la28.org step.
+10:29:29 AM
+Status: registering
+10:29:48 AM
+Polling for verification code...
+10:29:48 AM
+Status: waiting_code
+10:29:49 AM
+Got verification code: 561712
+10:29:49 AM
+Status: verifying
+10:29:57 AM
+Registration verified! Waiting for post-verification page to settle...
+10:29:57 AM
+Status: verified
+10:30:00 AM
+Gigya SDK ready. Completing profile...
+10:30:00 AM
+Setting profile: birth year 1970, 5 Olympic sports, 3 Paralympic sports, 4 teams...
+10:30:00 AM
+Status: profile_saving
+10:30:02 AM
+Birth year 1970 set!
+10:30:02 AM
+Setting favorite sports and teams...
+10:30:03 AM
+Favorites saved! 5 Olympic + 3 Paralympic sports, 4 teams
+10:30:03 AM
+Profile data saved via Gigya SDK!
+10:30:03 AM
+Profile data saved via Gigya SDK. Now submitting ticket registration...
+10:30:03 AM
+Logging in to submit ticket draw registration...
+10:30:03 AM
+Status: draw_registering
+10:30:10 AM
+Login submitted. Waiting for redirect...
+10:30:13 AM
+Consent page detected. Filling profile completion form...
+10:30:17 AM
+Consent form submitted via Playwright.
+10:30:22 AM
+After consent: https://la28id.la28.org/consent.html?UID=02b88062359d4b19997478359f907464&UIDSignature=5gr1JmyzSl5Lq
+10:30:22 AM
+Opening tickets portal via Bright Data Browser API...
+10:30:22 AM
+Attempt 1/3: Connecting to remote browser...
+10:30:23 AM
+Navigating to tickets.la28.org/mycustomerdata (triggers OIDC login)...
+10:30:24 AM
+robots.txt restriction detected. Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in Bright Data dashboard > Zone settings.
+10:30:24 AM
+Attempt 1 error: robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.
+10:30:24 AM
+Attempt 2/3: Connecting to remote browser...
+10:30:25 AM
+Navigating to tickets.la28.org/mycustomerdata (triggers OIDC login)...
+10:30:25 AM
+robots.txt restriction detected. Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in Bright Data dashboard > Zone settings.
+10:30:25 AM
+Attempt 2 error: robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.
+10:30:25 AM
+Attempt 3/3: Connecting to remote browser...
+10:30:25 AM
+Navigating to tickets.la28.org/mycustomerdata (triggers OIDC login)...
+10:30:25 AM
+robots.txt restriction detected. Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in Bright Data dashboard > Zone settings.
+10:30:25 AM
+Attempt 3 error: robots.txt: Bright Data zone blocks tickets.la28.org. Enable 'Ignore robots.txt' in zone settings.
+10:30:26 AM
+Max retries reached for ticket registration.
+10:30:26 AM
+Draw registration attempted but may not have fully submitted. Marking as completed since profile is saved.
+10:30:26 AM
+Status: completed
+10:30:26 AM
+✅ Account created successfully! Email: purefox5524@dollicons.com
