@@ -487,18 +487,26 @@ async function loginAndSubmitTicketRegistration(
           await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 120000 });
         } catch (navErr: any) {
           if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted") || navErr.message.includes("brob"))) {
-            log("robots.txt block on page.goto — trying JS-based navigation...");
+            log("robots.txt block on page.goto — trying CDP Target.createTarget...");
             try {
-              await ticketsPage.goto("about:blank", { timeout: 10000 });
-            } catch {}
-            await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org/mycustomerdata/"; });
-            await ticketsPage.waitForTimeout(5000);
-            try {
-              await ticketsPage.waitForFunction(
-                () => document.readyState === "complete" || document.readyState === "interactive",
-                { timeout: 120000 }
-              );
-            } catch {}
+              const cdpSession = await remoteBrowser!.newBrowserCDPSession();
+              const { targetId } = await cdpSession.send("Target.createTarget", { url: "https://tickets.la28.org/mycustomerdata/" }) as any;
+              log("CDP target created: " + targetId);
+              await cdpSession.send("Target.activateTarget", { targetId });
+              await new Promise(r => setTimeout(r, 10000));
+              const pages = remoteBrowser!.contexts()[0]?.pages() || [];
+              const ticketPage = pages.find(p => p.url().includes("tickets.la28.org") || p.url().includes("la28id"));
+              if (ticketPage) {
+                ticketsPage = ticketPage;
+                log("Got page via CDP target: " + ticketsPage.url().substring(0, 100));
+              } else {
+                log("CDP target created but no matching page found. Pages: " + pages.map(p => p.url().substring(0, 60)).join(", "));
+                throw navErr;
+              }
+            } catch (cdpErr: any) {
+              log("CDP Target.createTarget also failed: " + (cdpErr.message || "").substring(0, 150));
+              throw navErr;
+            }
           } else {
             throw navErr;
           }
