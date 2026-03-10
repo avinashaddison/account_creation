@@ -8,6 +8,17 @@ let browserInstalled = false;
 function parseProxyUrl(proxyUrl: string): { host: string; port: string; username: string; password: string } | null {
   try {
     let normalized = proxyUrl.trim();
+    if (normalized.startsWith("http://") || normalized.startsWith("https://") || normalized.startsWith("socks5://")) {
+      const parsed = new URL(normalized);
+      if (parsed.hostname && parsed.port) {
+        return {
+          host: parsed.hostname,
+          port: parsed.port || '80',
+          username: decodeURIComponent(parsed.username),
+          password: decodeURIComponent(parsed.password),
+        };
+      }
+    }
     const hostPortUserPass = normalized.match(/^(\d+\.\d+\.\d+\.\d+|[a-zA-Z0-9.-]+):(\d+):([^:]+):(.+)$/);
     if (hostPortUserPass) {
       return { host: hostPortUserPass[1], port: hostPortUserPass[2], username: hostPortUserPass[3], password: hostPortUserPass[4] };
@@ -20,9 +31,7 @@ function parseProxyUrl(proxyUrl: string): { host: string; port: string; username
     if (authHostMatch) {
       return { host: authHostMatch[3], port: authHostMatch[4], username: authHostMatch[1], password: authHostMatch[2] };
     }
-    if (!normalized.startsWith("http://") && !normalized.startsWith("https://") && !normalized.startsWith("socks5://")) {
-      normalized = `http://${normalized}`;
-    }
+    normalized = `http://${normalized}`;
     const parsed = new URL(normalized);
     if (parsed.hostname && parsed.port) {
       return {
@@ -619,7 +628,7 @@ async function loginAndSubmitTicketRegistration(
         if (!proxyConfig) { log("Invalid proxy URL: " + effectiveProxyUrl.substring(0, 50)); return; }
         let pu = proxyConfig.username;
         if (proxyConfig.host.includes('brd.superproxy.io') && !pu.includes('-country-')) pu += '-country-us';
-        log(`Using proxy: ${proxyConfig.host}:${proxyConfig.port}`);
+        log(`Launching browser with proxy: ${proxyConfig.host}:${proxyConfig.port}`);
         const proxyBrowser = await chromium.launch({
           headless: true,
           proxy: { server: `http://${proxyConfig.host}:${proxyConfig.port}`, username: pu, password: proxyConfig.password },
@@ -632,7 +641,7 @@ async function loginAndSubmitTicketRegistration(
           viewport: { width: 1280, height: 720 },
         });
         ticketsPage = await ticketsContext.newPage();
-        ticketsPage.setDefaultTimeout(60000);
+        ticketsPage.setDefaultTimeout(120000);
       }
 
       if (!isBrowserAPI) {
