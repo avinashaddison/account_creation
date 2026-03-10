@@ -13,11 +13,12 @@ import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
 import { randomUUID, createHash } from "crypto";
 
-const FALLBACK_BROWSER_API_URL = "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
-
 async function getDefaultBrowserApiUrl(): Promise<string> {
   const saved = await storage.getSetting("browser_proxy_url");
-  return saved || process.env.LA28_PROXY_URL || FALLBACK_BROWSER_API_URL;
+  if (!saved) {
+    throw new Error("No browser proxy URL configured. Please set it in Settings > Browser Proxy URL.");
+  }
+  return saved;
 }
 
 async function getDefaultProxies(proxyList?: string[]): Promise<string[]> {
@@ -298,8 +299,7 @@ export async function registerRoutes(
     }
     const proxy = await storage.getSetting("browser_proxy_url");
     if (!proxy) {
-      await storage.setSetting("browser_proxy_url", "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222");
-      console.log("[Auth] Default browser proxy URL set");
+      console.log("[Auth] No browser proxy URL set. Please configure it in Settings.");
     }
 
     const migrated = await storage.getSetting("neon_migration_v2_done");
