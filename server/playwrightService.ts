@@ -67,6 +67,28 @@ function generateUSZip(): string {
   return LA_ZIP_CODES[Math.floor(Math.random() * LA_ZIP_CODES.length)];
 }
 
+async function dismissOneTrustConsent(page: Page, log: (msg: string) => void): Promise<void> {
+  try {
+    const dismissed = await page.evaluate(`(() => {
+      var acceptBtn = document.querySelector('#onetrust-accept-btn-handler');
+      if (acceptBtn) { acceptBtn.click(); return 'clicked-accept'; }
+      var banner = document.querySelector('#onetrust-banner-sdk');
+      if (banner) { banner.style.display = 'none'; return 'hidden-banner'; }
+      var closeBtn = document.querySelector('.onetrust-close-btn-handler, [aria-label="Close"]');
+      if (closeBtn) { closeBtn.click(); return 'clicked-close'; }
+      return 'no-banner';
+    })()`) as string;
+    if (dismissed !== 'no-banner') {
+      log("OneTrust consent: " + dismissed);
+      await page.waitForTimeout(1000);
+    }
+  } catch {}
+}
+
+function isQueueItPage(url: string): boolean {
+  return url.includes('c=web&e=la28q') || url.includes('enqueuetoken=') || url.includes('queue-it.net');
+}
+
 function generateRandomBirthYear(): string {
   const minYear = 1960;
   const maxYear = 2000;
@@ -466,6 +488,204 @@ async function loginAndSubmitTicketRegistration(
   const afterConsentUrl = page.url();
   log("After consent: " + afterConsentUrl.substring(0, 100));
 
+  log("Attempting OIDC flow to get tickets.la28.org session...");
+
+  let oidcTargetUrl: string | null = null;
+
+  try {
+    const gigyaCheck = await page.evaluate(`
+      new Promise(function(resolve) {
+        try {
+          gigya.accounts.getAccountInfo({
+            callback: function(r) { resolve({ uid: r.UID || null, code: r.errorCode }); }
+          });
+          setTimeout(function() { resolve({ uid: null, code: -1 }); }, 10000);
+        } catch(e) { resolve({ uid: null, code: -2 }); }
+      })
+    `) as { uid: string | null; code: number };
+    log("Gigya session on consent page: UID=" + (gigyaCheck.uid || 'null'));
+
+    if (!gigyaCheck.uid) {
+      log("Gigya session lost. Re-logging in...");
+      await page.evaluate(`
+        new Promise(function(resolve) {
+          gigya.accounts.login({
+            loginID: "${email.replace(/"/g, '\\"')}",
+            password: "${password.replace(/"/g, '\\"').replace(/\$/g, '\\$')}",
+            callback: function(r) { resolve(r.errorCode === 0); }
+          });
+          setTimeout(function() { resolve(false); }, 15000);
+        })
+      `);
+      await page.waitForTimeout(2000);
+    }
+
+    const sessionInfo = await page.evaluate(`
+      new Promise(function(resolve) {
+        gigya.accounts.getAccountInfo({
+          callback: function(r) {
+            resolve({
+              uid: r.UID || null,
+              uidSig: r.UIDSignature || null,
+              sigTs: r.signatureTimestamp || null
+            });
+          }
+        });
+        setTimeout(function() { resolve({}); }, 10000);
+      })
+    `) as { uid?: string; uidSig?: string; sigTs?: string };
+
+    log("Session info: UID=" + (sessionInfo.uid || 'null') + " sig=" + (sessionInfo.uidSig || 'null').substring(0, 20) + " ts=" + (sessionInfo.sigTs || 'null'));
+
+    page.on("request", (request: any) => {
+      try {
+        const url = request.url();
+        if ((url.startsWith("https://tickets.la28.org") || url.startsWith("http://tickets.la28.org")) && !oidcTargetUrl) {
+          oidcTargetUrl = url;
+          log("Captured redirect to tickets.la28.org: " + url.substring(0, 250));
+        }
+      } catch {}
+    });
+
+    log("Injecting gigya.oidc.js on consent page (where session is active)...");
+
+    const injectResult = await page.evaluate(`
+      new Promise(function(resolve) {
+        try {
+          var script = document.createElement('script');
+          script.src = 'https://cdns.gigya.com/JS/gigya.oidc.js?apiKey=4_w4CcQ6tKu4jTeDPirnKxnA';
+          script.onload = function() { resolve('loaded'); };
+          script.onerror = function() { resolve('error'); };
+          document.head.appendChild(script);
+          setTimeout(function() { resolve('timeout'); }, 10000);
+        } catch(e) { resolve('exception: ' + e.message); }
+      })
+    `);
+    log("gigya.oidc.js inject: " + injectResult);
+    await page.waitForTimeout(2000);
+
+    const oidcMethods = await page.evaluate(`(() => {
+      var methods = [];
+      if (typeof gigya !== 'undefined') {
+        if (gigya.fidm) methods.push('fidm');
+        if (gigya.fidm && gigya.fidm.oidc) methods.push('fidm.oidc');
+        if (gigya.fidm && gigya.fidm.oidc && gigya.fidm.oidc.op) methods.push('fidm.oidc.op');
+        if (gigya.fidm && gigya.fidm.oidc && gigya.fidm.oidc.op && gigya.fidm.oidc.op.authorize) methods.push('fidm.oidc.op.authorize');
+        if (gigya.oidc) methods.push('oidc');
+        var allKeys = Object.keys(gigya).filter(function(k) { return typeof gigya[k] === 'object' && gigya[k] !== null; });
+        methods.push('keys:' + allKeys.join(','));
+      }
+      return methods;
+    })()`) as string[];
+    log("Gigya OIDC methods available: " + oidcMethods.join(', '));
+
+    log("Extracting OIDC config from gigya.oidc.js...");
+
+    const oidcConfig = await page.evaluate(`(() => {
+      try {
+        var result = {};
+        if (gigya.fidm && gigya.fidm.oidc && gigya.fidm.oidc.op) {
+          result.opKeys = Object.keys(gigya.fidm.oidc.op).join(',');
+          var cfg = gigya.fidm.oidc.op._config || gigya.fidm.oidc.op.config || {};
+          result.config = JSON.stringify(cfg).substring(0, 500);
+        }
+        if (gigya.oidc) {
+          result.oidcKeys = Object.keys(gigya.oidc).join(',');
+          if (gigya.oidc.OPConfig) result.opConfig = JSON.stringify(gigya.oidc.OPConfig).substring(0, 500);
+          if (gigya.oidc.settings) result.settings = JSON.stringify(gigya.oidc.settings).substring(0, 500);
+        }
+        if (gigya.partnerSettings) {
+          var ps = gigya.partnerSettings;
+          result.clientId = ps.clientId || ps.client_id || null;
+          if (ps.oidc) result.psOidc = JSON.stringify(ps.oidc).substring(0, 300);
+        }
+        if (gigya.thisScript && gigya.thisScript.globalConf) {
+          var gc = gigya.thisScript.globalConf;
+          result.gcKeys = Object.keys(gc).join(',');
+        }
+        return result;
+      } catch(e) { return { error: e.message }; }
+    })()`) as any;
+
+    log("OIDC config: " + JSON.stringify(oidcConfig).substring(0, 500));
+
+    const loginToken = await page.evaluate(`
+      new Promise(function(resolve) {
+        gigya.accounts.getJWT({
+          callback: function(r) { resolve(r.id_token || null); }
+        });
+        setTimeout(function() { resolve(null); }, 10000);
+      })
+    `) as string | null;
+
+    if (loginToken) {
+      log("Got JWT. Trying OIDC with different client_id values...");
+      const axios = (await import("axios")).default;
+
+      const OIDC_BASE = "https://la28id.la28id.la28.org/oidc/op/v1.0/4_w4CcQ6tKu4jTeDPirnKxnA";
+      const clientIds = [
+        "xSden-TmSiYYelKvu19SMyTv",
+      ];
+
+      const redirectUris = [
+        "https://tickets.la28.org/mycustomerdata/",
+        "https://tickets.la28.org/",
+        "https://tickets.la28.org",
+        "https://tickets.la28.org/mycustomerdata",
+      ];
+
+      for (const cid of clientIds) {
+        for (const rUri of redirectUris) {
+          try {
+            const oidcResp = await axios.get(`${OIDC_BASE}/authorize`, {
+              params: {
+                response_type: 'code',
+                redirect_uri: rUri,
+                scope: 'openid',
+                login_token: loginToken,
+                client_id: cid,
+              },
+              maxRedirects: 0,
+              validateStatus: (s: number) => true,
+            });
+            const loc = oidcResp.headers['location'] || '';
+            if (loc.includes("code=") && !loc.includes("errorMessage")) {
+              oidcTargetUrl = loc;
+              log("OIDC success with client_id=" + cid + ", redirect_uri=" + rUri + "! URL: " + loc.substring(0, 250));
+              break;
+            } else if (loc.includes("mode=login") || loc.includes("mode=afterLogin")) {
+              const contextMatch = loc.match(/context=([^&]+)/);
+              if (contextMatch) {
+                log("Got OIDC context from authorize: " + contextMatch[1].substring(0, 50));
+              }
+              const errMsg = loc.includes("errorMessage") ? decodeURIComponent(loc.split("errorMessage=")[1]?.split("&")[0] || '') : '';
+              log("client_id=" + cid + " redirect_uri=" + rUri + ": " + oidcResp.status + " " + (errMsg || loc.substring(0, 150)));
+            } else {
+              const errMsg = loc.includes("errorMessage") ? decodeURIComponent(loc.split("errorMessage=")[1]?.split("&")[0] || '') : '';
+              log("client_id=" + cid + " redirect_uri=" + rUri + ": " + oidcResp.status + " " + (errMsg || loc.substring(0, 100)));
+            }
+          } catch (e: any) {
+            const loc = e.response?.headers?.location || '';
+            if (loc.includes("code=") && !loc.includes("errorMessage")) {
+              oidcTargetUrl = loc;
+              log("OIDC success with client_id=" + cid + "!");
+              break;
+            }
+          }
+        }
+        if (oidcTargetUrl) break;
+      }
+    }
+
+    if (oidcTargetUrl) {
+      log("Got OIDC redirect URL: " + oidcTargetUrl.substring(0, 250));
+    } else {
+      log("No OIDC redirect. Will use proxy browser for login.");
+    }
+  } catch (e: any) {
+    log("OIDC flow error: " + e.message.substring(0, 100));
+  }
+
   const { storage } = await import("./storage");
   let effectiveProxyUrl = proxyUrl;
 
@@ -569,7 +789,7 @@ async function loginAndSubmitTicketRegistration(
           if (!loginResult.ok) {
             log("Gigya login failed: " + loginResult.err);
             try { await remoteBrowser.close(); } catch {}
-            return;
+            return { submitted: false };
           }
           log("Logged in. UID: " + loginResult.uid + ". Waiting for OIDC redirect...");
 
@@ -625,7 +845,7 @@ async function loginAndSubmitTicketRegistration(
         }
       } else {
         const proxyConfig = parseProxyUrl(effectiveProxyUrl);
-        if (!proxyConfig) { log("Invalid proxy URL: " + effectiveProxyUrl.substring(0, 50)); return; }
+        if (!proxyConfig) { log("Invalid proxy URL: " + effectiveProxyUrl.substring(0, 50)); return { submitted: false }; }
         let pu = proxyConfig.username;
         if (proxyConfig.host.includes('brd.superproxy.io') && !pu.includes('-country-')) pu += '-country-us';
         log(`Launching browser with proxy: ${proxyConfig.host}:${proxyConfig.port}`);
@@ -645,41 +865,113 @@ async function loginAndSubmitTicketRegistration(
       }
 
       if (!isBrowserAPI) {
-        log("Navigating to tickets.la28.org...");
-        try {
-          await ticketsPage.goto("https://tickets.la28.org", { waitUntil: "domcontentloaded", timeout: 120000 });
-        } catch (navErr: any) {
-          if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted"))) {
-            log("robots.txt block — trying JS navigation...");
-            await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org"; });
-            await ticketsPage.waitForTimeout(15000);
-          } else {
-            throw navErr;
+        if (oidcTargetUrl) {
+          log("Using intercepted OIDC URL on proxy browser: " + oidcTargetUrl.substring(0, 150));
+          try {
+            await ticketsPage.goto(oidcTargetUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
+          } catch (navErr: any) {
+            log("OIDC URL navigation: " + navErr.message.substring(0, 100));
+          }
+          await ticketsPage.waitForTimeout(5000);
+          log("After OIDC URL: " + ticketsPage.url().substring(0, 120));
+        } else {
+          log("No OIDC URL captured. Trying Gigya login on proxy...");
+          try {
+            await ticketsPage.goto("https://la28id.la28.org/login/?redirectUri=" + encodeURIComponent("https://tickets.la28.org/mycustomerdata/"), {
+              waitUntil: "domcontentloaded",
+              timeout: 60000,
+            });
+          } catch (navErr: any) {
+            log("la28id.la28.org navigation error: " + navErr.message.substring(0, 100));
+            try { if (remoteBrowser) await remoteBrowser.close(); } catch {}
+            continue;
+          }
+
+          await ticketsPage.waitForTimeout(5000);
+          let gigyaReady = false;
+          try {
+            await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
+            gigyaReady = true;
+          } catch {}
+
+          if (gigyaReady) {
+            try {
+              await ticketsPage.evaluate(`gigya.accounts.login({ loginID: "${safeEmail}", password: "${safePass}", callback: function(r) {} });`);
+              await ticketsPage.waitForTimeout(5000);
+            } catch {}
+          }
+
+          const afterLogin = ticketsPage.url();
+          log("After login: " + afterLogin.substring(0, 120));
+
+          if (!afterLogin.includes("tickets.la28.org")) {
+            try {
+              await ticketsPage.goto("https://la28id.la28.org/proxy.html?mode=afterLogin&gig_client_id=xSden-TmSiYYelKvu19SMyTv", {
+                waitUntil: "domcontentloaded", timeout: 60000,
+              });
+            } catch {}
+            for (let rw = 0; rw < 30; rw++) {
+              await ticketsPage.waitForTimeout(2000);
+              if (ticketsPage.url().includes("tickets.la28.org")) break;
+              if (rw === 29) log("Timed out waiting for redirect.");
+            }
           }
         }
-        await ticketsPage.waitForTimeout(10000);
 
-        const bodyText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
-        if (bodyText.toLowerCase().includes('access denied')) {
-          log(`Attempt ${attempt}: Access Denied by Akamai (bad IP). ${attempt < MAX_RETRIES ? 'Retrying with new IP...' : 'Max retries reached.'}`);
-          try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
-          continue;
+        let curUrl = ticketsPage.url();
+        if (!curUrl.includes("mycustomerdata")) {
+          log("Navigating to customer data page...");
+          try {
+            await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+          } catch {}
         }
 
-        log("Navigating to customer data page...");
-        try {
-          await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
-        } catch (navErr2: any) {
-          if (navErr2.message && (navErr2.message.includes("robots.txt") || navErr2.message.includes("restricted"))) {
-            log("robots.txt block on /mycustomerdata — trying JS navigation...");
-            await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org/mycustomerdata/?#/myCustomerData"; });
-            await ticketsPage.waitForTimeout(15000);
-          } else {
-            throw navErr2;
-          }
-        }
+        await dismissOneTrustConsent(ticketsPage, log);
+
         try { await ticketsPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
-        await ticketsPage.waitForTimeout(10000);
+
+        if (isQueueItPage(ticketsPage.url())) {
+          log("Queue-it detected. Waiting up to 120s for queue...");
+          let passedQueue = false;
+          for (let qw = 0; qw < 40; qw++) {
+            await ticketsPage.waitForTimeout(3000);
+            const qUrl = ticketsPage.url();
+            if (!isQueueItPage(qUrl)) {
+              log("Passed queue after ~" + ((qw + 1) * 3) + "s. URL: " + qUrl.substring(0, 120));
+              passedQueue = true;
+              break;
+            }
+            if (qw === 39) {
+              log("Queue timeout after 120s. Cannot proceed with draw registration.");
+              try { if (remoteBrowser) await remoteBrowser.close(); } catch {}
+              return { submitted: false };
+            }
+          }
+          if (passedQueue && !ticketsPage.url().includes("mycustomerdata")) {
+            log("Queue released to different page. Navigating to mycustomerdata...");
+            try {
+              await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+            } catch {}
+          }
+          await dismissOneTrustConsent(ticketsPage, log);
+        }
+
+        for (let w = 0; w < 20; w++) {
+          await ticketsPage.waitForTimeout(3000);
+          try {
+            const pUrl = ticketsPage.url();
+            if (pUrl.includes("mycustomerdata")) {
+              await dismissOneTrustConsent(ticketsPage, log);
+              const bt = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 500));
+              if ((bt.includes("PROFILE") || bt.includes("INFORMATION") || bt.includes("Birth Year")) && !bt.includes("Loading")) {
+                log("Profile form loaded after ~" + ((w + 1) * 3) + "s");
+                break;
+              }
+            }
+          } catch {}
+          if (w === 19) log("Profile form still loading after 60s, proceeding...");
+        }
+        await ticketsPage.waitForTimeout(3000);
       } else {
         log("Ensuring customer data page is loaded...");
         const curUrl = ticketsPage.url();
@@ -694,11 +986,40 @@ async function loginAndSubmitTicketRegistration(
             }
           }
         }
+        await dismissOneTrustConsent(ticketsPage, log);
+
+        if (isQueueItPage(ticketsPage.url())) {
+          log("Queue-it detected on Browser API. Waiting up to 120s...");
+          let passedQueue = false;
+          for (let qw = 0; qw < 40; qw++) {
+            await ticketsPage.waitForTimeout(3000);
+            const qUrl = ticketsPage.url();
+            if (!isQueueItPage(qUrl)) {
+              log("Passed queue after ~" + ((qw + 1) * 3) + "s. URL: " + qUrl.substring(0, 120));
+              passedQueue = true;
+              break;
+            }
+            if (qw === 39) {
+              log("Queue timeout after 120s.");
+              try { if (remoteBrowser) await remoteBrowser.close(); } catch {}
+              return { submitted: false };
+            }
+          }
+          if (passedQueue && !ticketsPage.url().includes("mycustomerdata")) {
+            log("Queue released to different page. Navigating to mycustomerdata...");
+            try {
+              await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+            } catch {}
+          }
+          await dismissOneTrustConsent(ticketsPage, log);
+        }
+
         for (let w = 0; w < 15; w++) {
           await ticketsPage.waitForTimeout(3000);
           try {
             const pUrl = ticketsPage.url();
             if (pUrl.includes("mycustomerdata")) {
+              await dismissOneTrustConsent(ticketsPage, log);
               const bodyText = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 300));
               if (bodyText.includes("PROFILE") && !bodyText.includes("Loading")) {
                 log("Profile loaded after ~" + ((w + 1) * 3) + "s");
@@ -899,8 +1220,8 @@ async function loginAndSubmitTicketRegistration(
       }
 
       try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
-      log("Ticket draw registration step complete.");
-      return { submitted: true };
+      log("Ticket draw registration step complete (submit button not found).");
+      return { submitted: false };
     } catch (err: any) {
       try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
       if (err.message === "SWITCH_TO_RESIDENTIAL") {

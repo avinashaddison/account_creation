@@ -56,7 +56,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - `server/index.ts` - Express app, session middleware, startup
 - `server/routes.ts` - API endpoints + WebSocket + auth/role middleware
 - `server/mailService.ts` - mail.tm API integration
-- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, Bright Data Browser API with retry for tickets.la28.org Akamai bypass via OIDC flow: mycustomerdata → la28id login → Gigya SDK → OIDC redirect back → submit registration, residential proxy fallback)
+- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, Bright Data Browser API with retry for tickets.la28.org Akamai bypass via OIDC flow: mycustomerdata → la28id login → Gigya SDK → OIDC redirect back → submit registration, residential proxy fallback). OIDC client_id: `xSden-TmSiYYelKvu19SMyTv`, OIDC authorize endpoint: `https://la28id.la28id.la28.org/oidc/op/v1.0/4_w4CcQ6tKu4jTeDPirnKxnA/authorize`. Queue-it event: `la28q06260109`. OneTrust consent auto-dismissed.
 - `server/storage.ts` - Database storage with Drizzle ORM (owner-scoped queries)
 - `server/db.ts` - Database connection pool
 - `shared/schema.ts` - Database schema (accounts, billingRecords, users, paymentRequests tables)
