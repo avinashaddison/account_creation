@@ -56,7 +56,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - `server/index.ts` - Express app, session middleware, startup
 - `server/routes.ts` - API endpoints + WebSocket + auth/role middleware
 - `server/mailService.ts` - mail.tm API integration
-- `server/playwrightService.ts` - Playwright automation for LA28 registration (includes Gigya SDK profile completion: birth year, favorite sports, favorite teams, draw registration, consent bypass, Bright Data Browser API with retry for tickets.la28.org Akamai bypass via OIDC flow: mycustomerdata → la28id login → Gigya SDK → OIDC redirect back → submit registration, residential proxy fallback). OIDC client_id: `xSden-TmSiYYelKvu19SMyTv`, OIDC authorize endpoint: `https://la28id.la28id.la28.org/oidc/op/v1.0/4_w4CcQ6tKu4jTeDPirnKxnA/authorize`. Queue-it event: `la28q06260109`. OneTrust consent auto-dismissed.
+- `server/playwrightService.ts` - Playwright automation for LA28 registration. Primary draw registration now uses pure REST API (`completeDrawRegistrationViaApi`) which calls Gigya `accounts.login` → `accounts.setAccountInfo` to set profile (birthYear, zip, country), personalization (favoritesDisciplines, favoritesCountries), and draw flags (`l2028_ticketing: true`, `l2028_fan28: true`) — no proxy or browser needed for draw registration. Falls back to browser-based flow if REST fails. Browser flow includes Gigya SDK profile completion, consent bypass, OIDC flow, and form submission on tickets.la28.org. OIDC client_id: `xSden-TmSiYYelKvu19SMyTv`, OIDC authorize endpoint: `https://la28id.la28id.la28.org/oidc/op/v1.0/4_w4CcQ6tKu4jTeDPirnKxnA/authorize`. Queue-it event: `la28q06260109` (server-side only, no client JS). OneTrust consent auto-dismissed.
 - `server/storage.ts` - Database storage with Drizzle ORM (owner-scoped queries)
 - `server/db.ts` - Database connection pool
 - `shared/schema.ts` - Database schema (accounts, billingRecords, users, paymentRequests tables)
@@ -128,6 +128,13 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Service**: `server/smspoolService.ts` — orderSMSNumber, checkSMSCode, pollForSMSCode, cancelSMSOrder, getSMSPoolBalance
 - **Endpoints**: `GET /api/smspool/balance` — check SMSPool balance (shown on dashboard)
 - **Usage**: Automatically orders US phone number for Ticketmaster service during TM registration flow
+
+## Proxy Status (as of March 11, 2026)
+- **Oxylabs Web Unblocker** (`unblock.oxylabs.io:60000`): Only proxy that passes Akamai bot detection on tickets.la28.org. Works for single HTTP requests (curl). Cannot maintain sessions or run interactive JS. Free trial limits apply (3 rendered requests per window).
+- **Bright Data scraping_browser1**: Blocked by robots.txt on tickets.la28.org. JS navigation bypass gets 403 from Akamai.
+- **Bright Data residential_proxy1**: US residential IPs but gets 403 from Akamai bot detection (headless Chrome fingerprinting detected).
+- **Queue-it on tickets.la28.org**: 100% server-side (zero client JS). `/mycustomerdata/` always returns Queue-it redirect. No known bypass — queue may open at specific time windows.
+- **Primary approach**: Pure Gigya REST API sets all draw registration data (profile + favorites + l2028_ticketing flag) without needing tickets.la28.org access at all.
 
 ## Deployment
 - **Target**: VM (required for Playwright + persistent WebSocket connections)

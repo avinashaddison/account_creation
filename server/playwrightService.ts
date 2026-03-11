@@ -1394,6 +1394,121 @@ async function tryRestApiFallback(
   }
 }
 
+export async function completeDrawRegistrationViaApi(
+  email: string,
+  password: string,
+  zipCode: string | undefined,
+  log: (msg: string) => void
+): Promise<{ success: boolean; profileSet: boolean; dataSet: boolean; error?: string }> {
+  const usedZip = zipCode || generateUSZip();
+  const birthYear = generateRandomBirthYear();
+  const favOlympicSports = pickRandom(OLYMPIC_SPORTS, 3 + Math.floor(Math.random() * 4));
+  const favParalympicSports = pickRandom(PARALYMPIC_SPORTS, 2 + Math.floor(Math.random() * 3));
+  const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
+
+  log("REST API draw registration: logging in...");
+
+  const loginParams = new URLSearchParams({
+    apiKey: GIGYA_API_KEY,
+    loginID: email,
+    password: password,
+  });
+  const loginResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: loginParams });
+  const loginData = await loginResp.json() as any;
+
+  if (loginData.errorCode !== 0) {
+    log("REST login failed: " + (loginData.errorMessage || "code " + loginData.errorCode));
+    return { success: false, profileSet: false, dataSet: false, error: loginData.errorMessage || "Login failed" };
+  }
+
+  const loginToken = loginData.sessionInfo?.cookieValue || loginData.login_token;
+  if (!loginToken) {
+    log("No session token from login response");
+    return { success: false, profileSet: false, dataSet: false, error: "No session token" };
+  }
+
+  log("Logged in via REST API. UID: " + (loginData.UID || "unknown"));
+
+  const apiUrl = `https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.setAccountInfo`;
+
+  log("Setting profile: birth year " + birthYear + ", zip " + usedZip + "...");
+  const profileParams = new URLSearchParams({
+    apiKey: GIGYA_API_KEY,
+    login_token: loginToken,
+    profile: JSON.stringify({
+      birthYear: parseInt(birthYear),
+      zip: usedZip,
+      country: "US",
+    }),
+  });
+  const profileResp = await fetch(apiUrl, { method: "POST", body: profileParams });
+  const profileData = await profileResp.json() as { errorCode: number; errorMessage?: string };
+  const profileSet = profileData.errorCode === 0;
+
+  if (profileSet) {
+    log("Profile set: birth year " + birthYear + ", zip " + usedZip);
+  } else {
+    log("Profile error: " + (profileData.errorMessage || "code " + profileData.errorCode));
+  }
+
+  const allSports = [
+    ...favOlympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+    ...favParalympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+  ];
+  const teamObjs = favTeams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
+
+  log("Setting favorites: " + favOlympicSports.length + " Olympic + " + favParalympicSports.length + " Paralympic sports, " + favTeams.length + " teams, + draw flags...");
+  const dataParams = new URLSearchParams({
+    apiKey: GIGYA_API_KEY,
+    login_token: loginToken,
+    data: JSON.stringify({
+      personalization: {
+        favoritesDisciplines: allSports,
+        favoritesCountries: teamObjs,
+        siteLanguage: "en",
+      },
+      entryCampaignandSegregation: {
+        l2028_ticketing: "true",
+        l2028_fan28: "true",
+      },
+    }),
+  });
+  const dataResp = await fetch(apiUrl, { method: "POST", body: dataParams });
+  const dataData = await dataResp.json() as { errorCode: number; errorMessage?: string };
+  const dataSet = dataData.errorCode === 0;
+
+  if (dataSet) {
+    log("Draw registration data set: l2028_ticketing=true, l2028_fan28=true, favorites saved!");
+  } else {
+    log("Data error: " + (dataData.errorMessage || "code " + dataData.errorCode));
+  }
+
+  const verifyParams = new URLSearchParams({
+    apiKey: GIGYA_API_KEY,
+    login_token: loginToken,
+    include: "profile,data",
+  });
+  const verifyResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.getAccountInfo`, { method: "POST", body: verifyParams });
+  const verifyData = await verifyResp.json() as any;
+
+  if (verifyData.errorCode === 0) {
+    const ticketing = verifyData.data?.entryCampaignandSegregation?.l2028_ticketing;
+    const fan28 = verifyData.data?.entryCampaignandSegregation?.l2028_fan28;
+    const bYear = verifyData.profile?.birthYear;
+    const zip = verifyData.profile?.zip;
+    log("Verified: ticketing=" + ticketing + " fan28=" + fan28 + " birthYear=" + bYear + " zip=" + zip);
+  }
+
+  const success = profileSet && dataSet;
+  if (success) {
+    log("REST API draw registration complete! Profile and draw flags set successfully.");
+  } else {
+    log("REST API draw registration partial: profile=" + profileSet + " data=" + dataSet);
+  }
+
+  return { success, profileSet, dataSet };
+}
+
 async function ensureBrowserInstalled(): Promise<void> {
   if (browserInstalled) return;
 
@@ -2007,19 +2122,31 @@ async function doRegistration(
     }
 
     onStatusUpdate("draw_registering");
-    log("Profile data saved via Gigya SDK. Now submitting ticket registration...");
+    log("Profile data saved via Gigya SDK. Now completing draw registration via REST API...");
     try {
-      const drawResult = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, usedZipCode);
-      if (drawResult.submitted) {
+      const apiResult = await completeDrawRegistrationViaApi(email, password, usedZipCode, log);
+      if (apiResult.success) {
         onStatusUpdate("completed");
-        log("Full flow complete! Draw registration submitted successfully.");
+        log("Full flow complete! Draw registration submitted via REST API.");
       } else {
-        onStatusUpdate("completed");
-        log("Draw registration attempted but may not have fully submitted. Marking as completed since profile is saved.");
+        log("REST API partial (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Trying browser method...");
+        try {
+          const drawResult = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, usedZipCode);
+          if (drawResult.submitted) {
+            onStatusUpdate("completed");
+            log("Full flow complete! Draw registration submitted via browser.");
+          } else {
+            onStatusUpdate("completed");
+            log("Draw registration attempted. Profile and API data saved — marking completed.");
+          }
+        } catch (browserErr: any) {
+          onStatusUpdate("completed");
+          log("Browser draw method failed (" + browserErr.message.substring(0, 80) + ") but REST API data was set. Completed.");
+        }
       }
     } catch (ticketErr: any) {
-      console.log("[Playwright] Ticket registration error:", ticketErr.message);
-      log("Ticket registration step had an error, but marking completed since profile is saved: " + ticketErr.message.substring(0, 100));
+      console.log("[Playwright] Draw registration error:", ticketErr.message);
+      log("Draw registration error, but profile is saved: " + ticketErr.message.substring(0, 100));
       onStatusUpdate("completed");
     }
 

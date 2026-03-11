@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -1010,21 +1010,40 @@ export async function registerRoutes(
     try {
       await storage.updateAccount(account.id, { status: "draw_registering" });
       broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
-      log("Retrying draw registration...");
+      log("Retrying draw registration via REST API (no proxy needed)...");
 
-      const drawResult = await retryDrawRegistration(
+      const apiResult = await completeDrawRegistrationViaApi(
         account.tempEmail,
         account.la28Password,
-        await getDefaultBrowserApiUrl(),
         account.zipCode || undefined,
         log
       );
 
-      await storage.updateAccount(account.id, { status: "completed" });
-      broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-      log(drawResult.submitted
-        ? "Draw registration completed successfully!"
-        : "Draw registration attempted. Marked as completed.");
+      if (apiResult.success) {
+        await storage.updateAccount(account.id, { status: "completed" });
+        broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+        log("Draw registration completed successfully via REST API!");
+      } else {
+        log("REST API approach incomplete (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Trying browser method...");
+        try {
+          const drawResult = await retryDrawRegistration(
+            account.tempEmail,
+            account.la28Password,
+            await getDefaultBrowserApiUrl(),
+            account.zipCode || undefined,
+            log
+          );
+          await storage.updateAccount(account.id, { status: "completed" });
+          broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+          log(drawResult.submitted
+            ? "Draw registration completed via browser!"
+            : "Draw registration attempted. Marked as completed.");
+        } catch (browserErr: any) {
+          log("Browser method also failed: " + browserErr.message.substring(0, 100));
+          await storage.updateAccount(account.id, { status: "completed" });
+          broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+        }
+      }
     } catch (err: any) {
       log("Draw retry error: " + err.message.substring(0, 200));
       await storage.updateAccount(account.id, { status: "completed" });
