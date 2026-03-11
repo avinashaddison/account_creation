@@ -185,7 +185,8 @@ async function processAccount(
 
     if (result.success) {
       const currentAccount = await storage.getAccount(accountId);
-      const finalStatus = currentAccount?.status === "completed" ? "completed" : "verified";
+      const keepStatuses = ["completed", "draw_registering"];
+      const finalStatus = keepStatuses.includes(currentAccount?.status || "") ? "completed" : "verified";
       const updateData: any = { status: finalStatus };
       if (result.zipCode) updateData.zipCode = result.zipCode;
       const updated = await storage.updateAccount(accountId, updateData);
