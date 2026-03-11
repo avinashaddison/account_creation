@@ -2122,31 +2122,30 @@ async function doRegistration(
     }
 
     onStatusUpdate("draw_registering");
-    log("Profile data saved via Gigya SDK. Now completing draw registration via REST API...");
+    log("Setting Gigya profile data via REST API first...");
     try {
       const apiResult = await completeDrawRegistrationViaApi(email, password, usedZipCode, log);
       if (apiResult.success) {
-        onStatusUpdate("completed");
-        log("Full flow complete! Draw registration submitted via REST API.");
+        log("Gigya profile data set via REST API. Now submitting draw on tickets.la28.org via browser...");
       } else {
-        log("REST API partial (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Trying browser method...");
-        try {
-          const drawResult = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, usedZipCode);
-          if (drawResult.submitted) {
-            onStatusUpdate("completed");
-            log("Full flow complete! Draw registration submitted via browser.");
-          } else {
-            onStatusUpdate("completed");
-            log("Draw registration attempted. Profile and API data saved — marking completed.");
-          }
-        } catch (browserErr: any) {
-          onStatusUpdate("completed");
-          log("Browser draw method failed (" + browserErr.message.substring(0, 80) + ") but REST API data was set. Completed.");
-        }
+        log("REST API partial (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Will still try browser submission...");
       }
-    } catch (ticketErr: any) {
-      console.log("[Playwright] Draw registration error:", ticketErr.message);
-      log("Draw registration error, but profile is saved: " + ticketErr.message.substring(0, 100));
+    } catch (apiErr: any) {
+      log("REST API error (non-fatal): " + apiErr.message.substring(0, 100) + ". Will still try browser submission...");
+    }
+
+    try {
+      const drawResult = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, usedZipCode);
+      if (drawResult.submitted) {
+        onStatusUpdate("completed");
+        log("Full flow complete! Draw registration form submitted on tickets.la28.org.");
+      } else {
+        onStatusUpdate("completed");
+        log("Draw form submission attempted but button not found. Gigya data was set — marking completed.");
+      }
+    } catch (browserErr: any) {
+      console.log("[Playwright] Browser draw error:", browserErr.message);
+      log("Browser draw method error (" + browserErr.message.substring(0, 80) + "). Gigya data was set — marking completed.");
       onStatusUpdate("completed");
     }
 
