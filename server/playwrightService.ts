@@ -1361,11 +1361,56 @@ export async function completeDrawViaGigyaBrowser(
       log("Verified: l2028_ticketing=" + verifyResult.ticketing + " fan28=" + verifyResult.fan28 + " birthYear=" + verifyResult.birthYear + " zip=" + verifyResult.zip);
     }
 
+    let oidcLinked = false;
+    try {
+      log("Attempting OIDC account linking with Eventim/Keycloak...");
+      console.log("[Draw-Gigya] Starting OIDC flow for Keycloak account linking...");
+
+      let capturedRedirectUrl: string | null = null;
+      page.on('response', (resp: any) => {
+        const loc = resp.headers()['location'] || '';
+        if (loc.includes('tickets.la28.org') && loc.includes('code=')) {
+          capturedRedirectUrl = loc;
+        }
+      });
+
+      const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+        response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
+        kc_idp_hint: 'gigya', ui_locales: 'en',
+        redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+      }).toString();
+
+      try {
+        await page.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      } catch {}
+
+      for (let qi = 0; qi < 30 && !capturedRedirectUrl; qi++) {
+        await page.waitForTimeout(3000);
+        if (qi % 10 === 0 && qi > 0) {
+          console.log("[Draw-Gigya] Waiting for Queue-it... " + (qi * 3) + "s");
+        }
+      }
+
+      if (capturedRedirectUrl) {
+        oidcLinked = true;
+        const codeUrl = new URL(capturedRedirectUrl);
+        const authCode = codeUrl.searchParams.get('code');
+        console.log("[Draw-Gigya] OIDC account linked! Auth code: " + (authCode?.substring(0, 20) || "unknown"));
+        log("OIDC account linked with Eventim/Keycloak successfully!");
+      } else {
+        console.log("[Draw-Gigya] OIDC linking: Queue-it timeout or no redirect captured. URL: " + page.url().substring(0, 150));
+        log("OIDC linking attempted but Queue-it timeout. Gigya data is still set correctly.");
+      }
+    } catch (oidcErr: any) {
+      console.log("[Draw-Gigya] OIDC linking error (non-fatal): " + oidcErr.message.substring(0, 100));
+      log("OIDC linking skipped: " + oidcErr.message.substring(0, 60));
+    }
+
     try { await context.close(); } catch {}
     try { await browser.close(); } catch {}
 
     const success = profileSet && dataSet;
-    return { success, profileSet, dataSet };
+    return { success, profileSet, dataSet, oidcLinked };
   } catch (err: any) {
     console.log("[Draw-Gigya] Error: " + err.message.substring(0, 200));
     log("Draw via Gigya browser error: " + err.message.substring(0, 100));
