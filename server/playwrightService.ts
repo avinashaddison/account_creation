@@ -1202,7 +1202,7 @@ export async function completeDrawViaGigyaBrowser(
           });
           setTimeout(function() { resolve({ ok: false, uid: null, err: 'timeout', code: -1 }); }, 20000);
         });
-      })("${email.replace(/"/g, '\\"')}", "${password.replace(/"/g, '\\"')}")`) as { ok: boolean; uid: string | null; err: string | null; code: number };
+      })(${JSON.stringify(email)}, ${JSON.stringify(password)})`) as { ok: boolean; uid: string | null; err: string | null; code: number };
 
       console.log("[Draw-Gigya] Login result: ok=" + loginResult.ok + " uid=" + (loginResult.uid || "null") + " err=" + loginResult.err);
       if (!loginResult.ok) {
@@ -1310,7 +1310,7 @@ export async function completeDrawViaGigyaBrowser(
         });
         setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
       });
-    })("${birthYear}", "${usedZip}")`) as { success: boolean; error?: string | null };
+    })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
 
     console.log("[Draw-Gigya] Profile result: " + JSON.stringify(profileResult));
     const profileSet = profileResult.success;
@@ -1342,7 +1342,7 @@ export async function completeDrawViaGigyaBrowser(
         });
         setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
       });
-    })('${allSportsJSON.replace(/'/g, "\\'")}', '${teamsJSON.replace(/'/g, "\\'")}')`) as { success: boolean; error?: string | null };
+    })(${JSON.stringify(allSportsJSON)}, ${JSON.stringify(teamsJSON)})`) as { success: boolean; error?: string | null };
 
     console.log("[Draw-Gigya] Data result: " + JSON.stringify(dataResult));
     const dataSet = dataResult.success;
@@ -1372,7 +1372,7 @@ export async function completeDrawViaGigyaBrowser(
           });
           setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 25000);
         });
-      })('${allSportsJSON.replace(/'/g, "\\'")}', '${teamsJSON.replace(/'/g, "\\'")}')`) as { success: boolean; error?: string | null };
+      })(${JSON.stringify(allSportsJSON)}, ${JSON.stringify(teamsJSON)})`) as { success: boolean; error?: string | null };
 
       if (fallbackResult.success) {
         log("Draw flags set via individual updates!");
