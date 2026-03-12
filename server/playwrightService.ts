@@ -1,5 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { execSync } from "child_process";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 let browserInstance: Browser | null = null;
 let launching = false;
@@ -1102,12 +1104,30 @@ export async function completeDrawViaGigyaBrowser(
   const favParalympicSports = pickRandom(PARALYMPIC_SPORTS, 2 + Math.floor(Math.random() * 3));
   const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
 
-  log("Draw via Gigya browser: launching headless browser (no proxy)...");
-  console.log("[Draw-Gigya] Starting for " + email);
+  let iproyalProxy: string | null = null;
+  try {
+    const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'iproyal_proxy_url'`);
+    if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+      iproyalProxy = proxyRow.rows[0].value as string;
+    }
+  } catch {}
+
+  log("Draw via Gigya browser: launching headless browser" + (iproyalProxy ? " (iProyal proxy)" : " (no proxy)") + "...");
+  console.log("[Draw-Gigya] Starting for " + email + (iproyalProxy ? " with iProyal proxy" : ""));
 
   let browser: Browser | null = null;
   try {
-    browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled'] });
+    const launchArgs = ['--disable-blink-features=AutomationControlled'];
+    const launchOpts: any = { headless: true, args: launchArgs };
+    if (iproyalProxy) {
+      const proxyUrl = new URL(iproyalProxy);
+      launchOpts.proxy = {
+        server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+        username: proxyUrl.username,
+        password: proxyUrl.password,
+      };
+    }
+    browser = await chromium.launch(launchOpts);
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 900 },
@@ -1212,8 +1232,33 @@ export async function completeDrawViaGigyaBrowser(
     } catch {}
     await page.waitForTimeout(3000);
 
-    const postLoginUrl = page.url();
+    let postLoginUrl = page.url();
     console.log("[Draw-Gigya] Post-login URL: " + postLoginUrl);
+
+    if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
+      console.log("[Draw-Gigya] On intermediate page, waiting for navigations to complete...");
+      for (let navWait = 0; navWait < 10; navWait++) {
+        await page.waitForTimeout(2000);
+        const curUrl = page.url();
+        if (curUrl !== postLoginUrl) {
+          console.log("[Draw-Gigya] Navigation detected: " + curUrl.substring(0, 120));
+          postLoginUrl = curUrl;
+        }
+        if (!curUrl.includes("proxy.html") && !curUrl.includes("consent.html")) break;
+      }
+      try { await page.waitForLoadState("domcontentloaded", { timeout: 10000 }); } catch {}
+      await page.waitForTimeout(2000);
+      postLoginUrl = page.url();
+      console.log("[Draw-Gigya] Settled URL: " + postLoginUrl);
+      if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
+        console.log("[Draw-Gigya] Still on intermediate page, navigating to la28id.la28.org/login...");
+        await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        await page.waitForTimeout(3000);
+        postLoginUrl = page.url();
+        console.log("[Draw-Gigya] After nav URL: " + postLoginUrl);
+      }
+    }
 
     console.log("[Draw-Gigya] Re-waiting for Gigya SDK after login...");
     try {
