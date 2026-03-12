@@ -362,419 +362,223 @@ async function loginAndSubmitTicketRegistration(
   zipCode?: string
 ): Promise<{ submitted: boolean }> {
   const usedZipCode = zipCode || generateUSZip();
-  log("Logging in to submit ticket draw registration...");
+  const safeEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const safePass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
 
-  await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-  try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-  await page.waitForTimeout(3000);
-
-  try {
-    await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
-  } catch {
-    log("Gigya SDK not available on login page.");
-    return { submitted: false };
-  }
-
-  await forceRemoveOverlays(page);
-
-  const loginFill = await page.evaluate(`((email, pass) => {
-    var emailFields = document.querySelectorAll('input[name="username"], input[data-gigya-name="loginID"]');
-    var passFields = document.querySelectorAll('input[type="password"][data-gigya-name="password"]');
-    var visibleEmail = null, visiblePass = null;
-    for (var i = 0; i < emailFields.length; i++) { if (emailFields[i].getBoundingClientRect().width > 0) { visibleEmail = emailFields[i]; break; } }
-    for (var i = 0; i < passFields.length; i++) { if (passFields[i].getBoundingClientRect().width > 0) { visiblePass = passFields[i]; break; } }
-    if (!visibleEmail || !visiblePass) return false;
-    var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    nativeSet.call(visibleEmail, email);
-    visibleEmail.dispatchEvent(new Event('input', {bubbles: true}));
-    visibleEmail.dispatchEvent(new Event('change', {bubbles: true}));
-    nativeSet.call(visiblePass, pass);
-    visiblePass.dispatchEvent(new Event('input', {bubbles: true}));
-    visiblePass.dispatchEvent(new Event('change', {bubbles: true}));
-    return true;
-  })("${email.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", "${password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}")`) as boolean;
-
-  if (!loginFill) {
-    log("Could not fill login form.");
-    return { submitted: false };
-  }
-
-  await page.waitForTimeout(500);
-  await page.evaluate(`(() => {
-    var btns = document.querySelectorAll('input[type="submit"]');
-    for (var i = 0; i < btns.length; i++) { if (btns[i].getBoundingClientRect().width > 0) { btns[i].click(); break; } }
-  })()`);
-  log("Login submitted. Waiting for redirect...");
-
-  try {
-    await page.waitForURL("**/consent.html*", { timeout: 20000 });
-  } catch {
-    const url = page.url();
-    if (url.includes("proxy.html")) {
-      await page.waitForTimeout(10000);
-    }
-    if (!page.url().includes("consent.html")) {
-      log("No consent page — account may already be complete. URL: " + page.url().substring(0, 100));
-    }
-  }
-
-  if (page.url().includes("consent.html")) {
-    log("Consent page detected. Filling profile completion form...");
-    try {
-      await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 10000 });
-      await page.waitForTimeout(1000);
-
-      await page.evaluate(`(() => {
-        var div = document.createElement('div');
-        div.id = 'consent-container';
-        div.style.cssText = 'width:600px;margin:20px auto;';
-        document.body.appendChild(div);
-      })()`);
-
-      const shown = await page.evaluate(`
-        new Promise(function(resolve) {
-          gigya.accounts.showScreenSet({
-            screenSet: 'Default-RegistrationLogin',
-            startScreen: 'gigya-complete-registration-screen',
-            containerID: 'consent-container',
-            onAfterScreenLoad: function(e) { resolve(true); },
-            onError: function(e) { resolve(false); }
-          });
-          setTimeout(function() { resolve(false); }, 15000);
-        })
-      `);
-
-      if (shown) {
-        await page.waitForTimeout(1000);
-
-        const birthYear = String(1970 + Math.floor(Math.random() * 30));
-        try {
-          const emailInput = page.locator('#consent-container input[name="email"]');
-          await emailInput.click({ clickCount: 3 });
-          await page.keyboard.type(email, { delay: 5 });
-        } catch {}
-
-        try {
-          await page.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear);
-        } catch {}
-
-        try {
-          const zipInput = page.locator('#consent-container input[name="profile.zip"]');
-          await zipInput.click({ clickCount: 3 });
-          await page.keyboard.type(usedZipCode, { delay: 5 });
-        } catch {}
-
-        try {
-          const sub = page.locator('#consent-container input[name="data.subscribe"]');
-          if (!(await sub.isChecked())) await sub.check();
-        } catch {}
-
-        await page.waitForTimeout(500);
-
-        try {
-          await page.locator('#consent-container input[type="submit"]').click();
-        } catch {}
-
-        log("Consent form submitted via Playwright.");
-        await page.waitForTimeout(5000);
-      } else {
-        log("Consent screen-set did not load.");
-      }
-    } catch (e: any) {
-      log("Consent handling error: " + e.message.substring(0, 100));
-    }
-  }
-
-  const afterConsentUrl = page.url();
-  log("After consent: " + afterConsentUrl.substring(0, 100));
-
-  log("Attempting OIDC flow to get tickets.la28.org session...");
-
-  let oidcTargetUrl: string | null = null;
-
-  try {
-    const gigyaCheck = await page.evaluate(`
-      new Promise(function(resolve) {
-        try {
-          gigya.accounts.getAccountInfo({
-            callback: function(r) { resolve({ uid: r.UID || null, code: r.errorCode }); }
-          });
-          setTimeout(function() { resolve({ uid: null, code: -1 }); }, 10000);
-        } catch(e) { resolve({ uid: null, code: -2 }); }
-      })
-    `) as { uid: string | null; code: number };
-    log("Gigya session on consent page: UID=" + (gigyaCheck.uid || 'null'));
-
-    if (!gigyaCheck.uid) {
-      log("Gigya session lost. Re-logging in...");
-      await page.evaluate(`
-        new Promise(function(resolve) {
-          gigya.accounts.login({
-            loginID: "${email.replace(/"/g, '\\"')}",
-            password: "${password.replace(/"/g, '\\"').replace(/\$/g, '\\$')}",
-            callback: function(r) { resolve(r.errorCode === 0); }
-          });
-          setTimeout(function() { resolve(false); }, 15000);
-        })
-      `);
-      await page.waitForTimeout(2000);
-    }
-
-    const sessionInfo = await page.evaluate(`
-      new Promise(function(resolve) {
-        gigya.accounts.getAccountInfo({
-          callback: function(r) {
-            resolve({
-              uid: r.UID || null,
-              uidSig: r.UIDSignature || null,
-              sigTs: r.signatureTimestamp || null
-            });
-          }
-        });
-        setTimeout(function() { resolve({}); }, 10000);
-      })
-    `) as { uid?: string; uidSig?: string; sigTs?: string };
-
-    log("Session info: UID=" + (sessionInfo.uid || 'null') + " sig=" + (sessionInfo.uidSig || 'null').substring(0, 20) + " ts=" + (sessionInfo.sigTs || 'null'));
-
-    page.on("request", (request: any) => {
-      try {
-        const url = request.url();
-        if ((url.startsWith("https://tickets.la28.org") || url.startsWith("http://tickets.la28.org")) && !oidcTargetUrl) {
-          oidcTargetUrl = url;
-          log("Captured redirect to tickets.la28.org: " + url.substring(0, 250));
-        }
-      } catch {}
-    });
-
-    log("Injecting gigya.oidc.js on consent page (where session is active)...");
-
-    const injectResult = await page.evaluate(`
-      new Promise(function(resolve) {
-        try {
-          var script = document.createElement('script');
-          script.src = 'https://cdns.gigya.com/JS/gigya.oidc.js?apiKey=4_w4CcQ6tKu4jTeDPirnKxnA';
-          script.onload = function() { resolve('loaded'); };
-          script.onerror = function() { resolve('error'); };
-          document.head.appendChild(script);
-          setTimeout(function() { resolve('timeout'); }, 10000);
-        } catch(e) { resolve('exception: ' + e.message); }
-      })
-    `);
-    log("gigya.oidc.js inject: " + injectResult);
-    await page.waitForTimeout(2000);
-
-    const oidcMethods = await page.evaluate(`(() => {
-      var methods = [];
-      if (typeof gigya !== 'undefined') {
-        if (gigya.fidm) methods.push('fidm');
-        if (gigya.fidm && gigya.fidm.oidc) methods.push('fidm.oidc');
-        if (gigya.fidm && gigya.fidm.oidc && gigya.fidm.oidc.op) methods.push('fidm.oidc.op');
-        if (gigya.fidm && gigya.fidm.oidc && gigya.fidm.oidc.op && gigya.fidm.oidc.op.authorize) methods.push('fidm.oidc.op.authorize');
-        if (gigya.oidc) methods.push('oidc');
-        var allKeys = Object.keys(gigya).filter(function(k) { return typeof gigya[k] === 'object' && gigya[k] !== null; });
-        methods.push('keys:' + allKeys.join(','));
-      }
-      return methods;
-    })()`) as string[];
-    log("Gigya OIDC methods available: " + oidcMethods.join(', '));
-
-    log("Extracting OIDC config from gigya.oidc.js...");
-
-    const oidcConfig = await page.evaluate(`(() => {
-      try {
-        var result = {};
-        if (gigya.fidm && gigya.fidm.oidc && gigya.fidm.oidc.op) {
-          result.opKeys = Object.keys(gigya.fidm.oidc.op).join(',');
-          var cfg = gigya.fidm.oidc.op._config || gigya.fidm.oidc.op.config || {};
-          result.config = JSON.stringify(cfg).substring(0, 500);
-        }
-        if (gigya.oidc) {
-          result.oidcKeys = Object.keys(gigya.oidc).join(',');
-          if (gigya.oidc.OPConfig) result.opConfig = JSON.stringify(gigya.oidc.OPConfig).substring(0, 500);
-          if (gigya.oidc.settings) result.settings = JSON.stringify(gigya.oidc.settings).substring(0, 500);
-        }
-        if (gigya.partnerSettings) {
-          var ps = gigya.partnerSettings;
-          result.clientId = ps.clientId || ps.client_id || null;
-          if (ps.oidc) result.psOidc = JSON.stringify(ps.oidc).substring(0, 300);
-        }
-        if (gigya.thisScript && gigya.thisScript.globalConf) {
-          var gc = gigya.thisScript.globalConf;
-          result.gcKeys = Object.keys(gc).join(',');
-        }
-        return result;
-      } catch(e) { return { error: e.message }; }
-    })()`) as any;
-
-    log("OIDC config: " + JSON.stringify(oidcConfig).substring(0, 500));
-
-    const loginToken = await page.evaluate(`
-      new Promise(function(resolve) {
-        gigya.accounts.getJWT({
-          callback: function(r) { resolve(r.id_token || null); }
-        });
-        setTimeout(function() { resolve(null); }, 10000);
-      })
-    `) as string | null;
-
-    if (loginToken) {
-      log("Got JWT. Trying OIDC with different client_id values...");
-      const axios = (await import("axios")).default;
-
-      const OIDC_BASE = "https://la28id.la28id.la28.org/oidc/op/v1.0/4_w4CcQ6tKu4jTeDPirnKxnA";
-      const clientIds = [
-        "xSden-TmSiYYelKvu19SMyTv",
-      ];
-
-      const redirectUris = [
-        "https://tickets.la28.org/mycustomerdata/",
-        "https://tickets.la28.org/",
-        "https://tickets.la28.org",
-        "https://tickets.la28.org/mycustomerdata",
-      ];
-
-      for (const cid of clientIds) {
-        for (const rUri of redirectUris) {
-          try {
-            const oidcResp = await axios.get(`${OIDC_BASE}/authorize`, {
-              params: {
-                response_type: 'code',
-                redirect_uri: rUri,
-                scope: 'openid',
-                login_token: loginToken,
-                client_id: cid,
-              },
-              maxRedirects: 0,
-              validateStatus: (s: number) => true,
-            });
-            const loc = oidcResp.headers['location'] || '';
-            if (loc.includes("code=") && !loc.includes("errorMessage")) {
-              oidcTargetUrl = loc;
-              log("OIDC success with client_id=" + cid + ", redirect_uri=" + rUri + "! URL: " + loc.substring(0, 250));
-              break;
-            } else if (loc.includes("mode=login") || loc.includes("mode=afterLogin")) {
-              const contextMatch = loc.match(/context=([^&]+)/);
-              if (contextMatch) {
-                log("Got OIDC context from authorize: " + contextMatch[1].substring(0, 50));
-              }
-              const errMsg = loc.includes("errorMessage") ? decodeURIComponent(loc.split("errorMessage=")[1]?.split("&")[0] || '') : '';
-              log("client_id=" + cid + " redirect_uri=" + rUri + ": " + oidcResp.status + " " + (errMsg || loc.substring(0, 150)));
-            } else {
-              const errMsg = loc.includes("errorMessage") ? decodeURIComponent(loc.split("errorMessage=")[1]?.split("&")[0] || '') : '';
-              log("client_id=" + cid + " redirect_uri=" + rUri + ": " + oidcResp.status + " " + (errMsg || loc.substring(0, 100)));
-            }
-          } catch (e: any) {
-            const loc = e.response?.headers?.location || '';
-            if (loc.includes("code=") && !loc.includes("errorMessage")) {
-              oidcTargetUrl = loc;
-              log("OIDC success with client_id=" + cid + "!");
-              break;
-            }
-          }
-        }
-        if (oidcTargetUrl) break;
-      }
-    }
-
-    if (oidcTargetUrl) {
-      log("Got OIDC redirect URL: " + oidcTargetUrl.substring(0, 250));
-    } else {
-      log("No OIDC redirect. Will use proxy browser for login.");
-    }
-  } catch (e: any) {
-    log("OIDC flow error: " + e.message.substring(0, 100));
-  }
+  log("Starting simplified draw registration flow...");
+  console.log("[Draw] Starting draw registration for " + email);
 
   const { storage } = await import("./storage");
   let effectiveProxyUrl = proxyUrl;
-
   if (!effectiveProxyUrl) {
     const residentialProxy = await storage.getSetting("residential_proxy_url");
     if (residentialProxy) {
       effectiveProxyUrl = residentialProxy;
-      log("No Browser API URL — using residential proxy for tickets.la28.org.");
     } else {
-      log("No proxy configured for tickets.la28.org. Skipping ticket submit.");
+      log("No proxy configured. Cannot proceed.");
       return { submitted: false };
     }
   }
 
-  let isBrowserAPI = effectiveProxyUrl.startsWith('wss://');
-  log("Opening tickets portal via " + (isBrowserAPI ? "Bright Data Browser API" : "residential proxy") + "...");
+  const isBrowserAPI = effectiveProxyUrl.startsWith('wss://');
+  let proxyBrowser: Browser | null = null;
+  let proxyContext: any = null;
+  let ticketsPage: Page;
+  let capturedOidcUrl: string | null = null;
 
-  const safeEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const safePass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
+  try {
+    if (isBrowserAPI) {
+      proxyBrowser = await chromium.connectOverCDP(effectiveProxyUrl, { timeout: 60000 });
+      ticketsPage = await proxyBrowser.newPage();
+    } else {
+      const proxyConfig = parseProxyUrl(effectiveProxyUrl);
+      if (!proxyConfig) { log("Invalid proxy URL"); return { submitted: false }; }
+      let pu = proxyConfig.username;
+      if (proxyConfig.host.includes('brd.superproxy.io') && !pu.includes('-country-')) pu += '-country-us';
+      console.log("[Draw] Launching Chromium with residential proxy...");
+      proxyBrowser = await chromium.launch({
+        headless: true,
+        proxy: { server: `http://${proxyConfig.host}:${proxyConfig.port}`, username: pu, password: proxyConfig.password },
+        args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
+      });
+      proxyContext = await proxyBrowser.newContext({
+        ignoreHTTPSErrors: true,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 900 },
+      });
+      ticketsPage = await proxyContext.newPage();
 
-  const MAX_RETRIES = 3;
+      await ticketsPage.route('**/public-api.eventim.com/**', async (route) => {
+        const url = route.request().url();
+        console.log("[Draw] Intercepted eventim.com request: " + url.substring(0, 200));
+        capturedOidcUrl = url;
+        await route.abort();
+      });
+    }
+    ticketsPage.setDefaultTimeout(60000);
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    let remoteBrowser: Browser | null = null;
-    let ticketsContext: any = null;
-    let ticketsPage: Page;
-
+    console.log("[Draw] Navigating to tickets.la28.org/mycustomerdata...");
     try {
-      if (isBrowserAPI) {
-        log(`Attempt ${attempt}/${MAX_RETRIES}: Connecting to remote browser...`);
-        remoteBrowser = await chromium.connectOverCDP(effectiveProxyUrl, { timeout: 60000 });
-        ticketsPage = await remoteBrowser.newPage();
-        ticketsPage.setDefaultTimeout(120000);
+      await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+    } catch (navErr: any) {
+      console.log("[Draw] Navigation error: " + navErr.message.substring(0, 150));
+      if (navErr.message.includes("robots.txt") || navErr.message.includes("restricted")) {
+        log("Browser blocked by robots.txt. Trying residential proxy...");
+        const residentialProxy = await storage.getSetting("residential_proxy_url");
+        if (residentialProxy && effectiveProxyUrl !== residentialProxy) {
+          try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
+          return loginAndSubmitTicketRegistration(page, email, password, log, residentialProxy, zipCode);
+        }
+      }
+    }
 
-        log("Navigating to tickets.la28.org/mycustomerdata...");
-        try {
-          await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 120000 });
-        } catch (navErr: any) {
-          if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("restricted") || navErr.message.includes("brob"))) {
-            log("Scraping browser blocked by robots.txt — switching to residential proxy...");
-            try { await remoteBrowser.close(); } catch {}
-            remoteBrowser = null;
+    await ticketsPage.waitForTimeout(5000);
+    let currentUrl = ticketsPage.url();
+    console.log("[Draw] After nav URL: " + currentUrl.substring(0, 150));
 
-            const residentialProxy = await storage.getSetting("residential_proxy_url");
-            if (residentialProxy) {
-              effectiveProxyUrl = residentialProxy;
-              isBrowserAPI = false;
-              log("Residential proxy found. Retrying with residential proxy...");
-              throw new Error("SWITCH_TO_RESIDENTIAL");
-            } else {
-              log("No residential proxy configured. Cannot proceed.");
-              throw navErr;
+    if (isQueueItPage(currentUrl)) {
+      console.log("[Draw] Queue-it detected. Waiting...");
+      for (let qw = 0; qw < 40; qw++) {
+        await ticketsPage.waitForTimeout(3000);
+        currentUrl = ticketsPage.url();
+        if (!isQueueItPage(currentUrl)) {
+          console.log("[Draw] Passed queue after " + ((qw + 1) * 3) + "s");
+          break;
+        }
+        if (qw === 39) {
+          log("Queue timeout after 120s.");
+          try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
+          return { submitted: false };
+        }
+      }
+    }
+
+    currentUrl = ticketsPage.url();
+    console.log("[Draw] Current URL after queue check: " + currentUrl.substring(0, 200));
+
+    for (let authAttempt = 0; authAttempt < 20; authAttempt++) {
+      await ticketsPage.waitForTimeout(3000);
+      currentUrl = ticketsPage.url();
+      if (authAttempt % 3 === 0) {
+        console.log("[Draw] Auth loop [" + (authAttempt * 3) + "s] URL: " + currentUrl.substring(0, 200));
+      }
+
+      if (currentUrl.includes("chrome-error://") || (capturedOidcUrl && !currentUrl.includes("mycustomerdata"))) {
+        if (capturedOidcUrl) {
+          console.log("[Draw] Eventim OIDC URL captured! Handling auth via direct HTTP...");
+          console.log("[Draw] OIDC URL: " + capturedOidcUrl.substring(0, 300));
+          try {
+            const axios = (await import("axios")).default;
+            const oidcResp = await axios.get(capturedOidcUrl, {
+              maxRedirects: 0,
+              validateStatus: (s: number) => true,
+              timeout: 15000,
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }
+            });
+            const oidcLocation = oidcResp.headers['location'] || '';
+            console.log("[Draw] OIDC response: " + oidcResp.status + " location=" + oidcLocation.substring(0, 300));
+
+            if (oidcResp.status === 200) {
+              const html = typeof oidcResp.data === 'string' ? oidcResp.data : '';
+              console.log("[Draw] OIDC returned HTML page (login form). Length=" + html.length);
+              const formAction = html.match(/action="([^"]+)"/)?.[1] || '';
+              console.log("[Draw] Form action: " + formAction.substring(0, 200));
+
+              if (formAction) {
+                const actionUrl = formAction.startsWith('http') ? formAction : 'https://public-api.eventim.com' + formAction;
+                const cookies = oidcResp.headers['set-cookie'] || [];
+                const cookieStr = Array.isArray(cookies) ? cookies.map((c: string) => c.split(';')[0]).join('; ') : '';
+
+                console.log("[Draw] Submitting login to: " + actionUrl.substring(0, 200));
+                const loginResp = await axios.post(actionUrl, new URLSearchParams({ username: email, password: password }).toString(), {
+                  maxRedirects: 0,
+                  validateStatus: (s: number) => true,
+                  timeout: 15000,
+                  headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Cookie': cookieStr,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+                  }
+                });
+                const loginLocation = loginResp.headers['location'] || '';
+                console.log("[Draw] Login response: " + loginResp.status + " location=" + loginLocation.substring(0, 300));
+
+                if (loginLocation.includes("tickets.la28.org") && loginLocation.includes("code=")) {
+                  console.log("[Draw] Got auth code! Navigating to callback URL...");
+                  await ticketsPage.unroute('**/public-api.eventim.com/**');
+                  try {
+                    await ticketsPage.goto(loginLocation, { waitUntil: "domcontentloaded", timeout: 60000 });
+                  } catch {}
+                  console.log("[Draw] After auth callback URL: " + ticketsPage.url().substring(0, 200));
+                  capturedOidcUrl = null;
+                  continue;
+                } else if (loginLocation) {
+                  console.log("[Draw] Following login redirect: " + loginLocation.substring(0, 200));
+                  let finalUrl = loginLocation;
+                  for (let followIdx = 0; followIdx < 5; followIdx++) {
+                    try {
+                      const followResp = await axios.get(finalUrl, {
+                        maxRedirects: 0,
+                        validateStatus: (s: number) => true,
+                        timeout: 15000,
+                        headers: { 'Cookie': cookieStr, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }
+                      });
+                      const nextLoc = followResp.headers['location'] || '';
+                      console.log("[Draw] Redirect " + followIdx + ": " + followResp.status + " → " + nextLoc.substring(0, 200));
+                      if (nextLoc.includes("tickets.la28.org")) {
+                        console.log("[Draw] Got tickets redirect! Navigating...");
+                        await ticketsPage.unroute('**/public-api.eventim.com/**');
+                        try { await ticketsPage.goto(nextLoc, { waitUntil: "domcontentloaded", timeout: 60000 }); } catch {}
+                        console.log("[Draw] After redirect URL: " + ticketsPage.url().substring(0, 200));
+                        capturedOidcUrl = null;
+                        break;
+                      }
+                      if (!nextLoc) break;
+                      finalUrl = nextLoc.startsWith('http') ? nextLoc : 'https://public-api.eventim.com' + nextLoc;
+                    } catch (followErr: any) {
+                      console.log("[Draw] Follow redirect error: " + followErr.message.substring(0, 100));
+                      break;
+                    }
+                  }
+                }
+              }
+            } else if (oidcLocation.includes("tickets.la28.org")) {
+              console.log("[Draw] OIDC redirected directly to tickets. Navigating...");
+              await ticketsPage.unroute('**/public-api.eventim.com/**');
+              try { await ticketsPage.goto(oidcLocation, { waitUntil: "domcontentloaded", timeout: 60000 }); } catch {}
+              capturedOidcUrl = null;
+              continue;
+            } else if (oidcLocation.includes("next.tickets.la28.org") || oidcLocation.includes("queue")) {
+              console.log("[Draw] Queue-it redirect detected in OIDC: " + oidcLocation.substring(0, 200));
+              const tParam = new URL(oidcLocation).searchParams.get('t');
+              if (tParam) {
+                console.log("[Draw] Queue target URL: " + tParam.substring(0, 200));
+              }
+            } else if (oidcLocation) {
+              console.log("[Draw] OIDC redirected to: " + oidcLocation.substring(0, 200));
+              try {
+                const followResp = await axios.get(oidcLocation, { maxRedirects: 5, timeout: 15000, validateStatus: (s: number) => true });
+                console.log("[Draw] Follow response: " + followResp.status + " final URL type: " + typeof followResp.request?.res?.responseUrl);
+              } catch (e: any) {
+                console.log("[Draw] Follow error: " + e.message.substring(0, 100));
+              }
             }
-          } else {
-            throw navErr;
+          } catch (oidcErr: any) {
+            console.log("[Draw] OIDC handling error: " + oidcErr.message.substring(0, 150));
           }
-        }
-
-        log("Waiting for redirects to settle...");
-        let settledUrl = "";
-        let akamaiBocked = false;
-        for (let rw = 0; rw < 20; rw++) {
-          await ticketsPage.waitForTimeout(3000);
+        } else {
+          console.log("[Draw] Chrome error page — retrying navigation...");
           try {
-            settledUrl = ticketsPage.url();
-            log(`  [${rw * 3}s] ${settledUrl.substring(0, 100)}`);
-            if (settledUrl.includes("la28id.la28.org") && !settledUrl.includes("proxy.html")) break;
-            if (settledUrl.includes("mycustomerdata") && settledUrl.includes("tickets.la28.org")) break;
-            const bodyCheck = await ticketsPage.evaluate(() => (document.body?.innerText || "").toLowerCase().substring(0, 100));
-            if (bodyCheck.includes("access denied")) { akamaiBocked = true; break; }
-          } catch { /* still navigating */ }
+            await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+          } catch {}
         }
+        continue;
+      }
 
-        if (akamaiBocked) {
-          log(`Attempt ${attempt}: Akamai blocked. ${attempt < MAX_RETRIES ? "Retrying..." : "Max retries."}`);
-          try { await remoteBrowser.close(); } catch {}
-          continue;
-        }
-
-        if (settledUrl.includes("la28id.la28.org")) {
-          log("On LA28 ID login page. Logging in via Gigya SDK...");
-          try {
-            await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
-          } catch {
-            log("Gigya SDK not loaded. Retrying...");
-            try { await remoteBrowser.close(); } catch {}
-            continue;
-          }
-
+      if (currentUrl.includes("la28id.la28.org")) {
+        console.log("[Draw] On la28id.la28.org login page. Logging in via Gigya...");
+        try {
+          await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
           const loginResult = await ticketsPage.evaluate(`
             new Promise(function(resolve) {
               gigya.accounts.login({
@@ -785,295 +589,150 @@ async function loginAndSubmitTicketRegistration(
               setTimeout(function() { resolve({ ok: false, err: 'timeout' }); }, 30000);
             })
           `) as { ok: boolean; uid: string | null; err: string };
-
+          console.log("[Draw] Gigya login: ok=" + loginResult.ok + " uid=" + (loginResult.uid || 'null') + " err=" + loginResult.err);
           if (!loginResult.ok) {
-            log("Gigya login failed: " + loginResult.err);
-            try { await remoteBrowser.close(); } catch {}
+            try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
             return { submitted: false };
           }
-          log("Logged in. UID: " + loginResult.uid + ". Waiting for OIDC redirect...");
-
-          let postStableUrl = "";
-          let postStableCount = 0;
-          for (let rw = 0; rw < 30; rw++) {
-            await ticketsPage.waitForTimeout(2000);
-            try {
-              const postUrl = ticketsPage.url();
-              if (postUrl === postStableUrl) postStableCount++;
-              else { postStableCount = 0; postStableUrl = postUrl; }
-              if (rw % 3 === 0) log(`  [${rw * 2}s] ${postUrl.substring(0, 100)}`);
-              if (postStableCount >= 3 && postUrl.includes("tickets.la28.org") && !postUrl.includes("la28id")) break;
-              if (postUrl.includes("consent.html")) break;
-            } catch { /* navigating */ }
-          }
-
-          if (ticketsPage.url().includes("consent.html")) {
-            log("Consent page. Handling...");
-            try {
-              await ticketsPage.waitForFunction("typeof gigya !== 'undefined'", { timeout: 10000 });
-              await ticketsPage.waitForTimeout(1000);
-              await ticketsPage.evaluate(`(() => {
-                var d = document.createElement('div'); d.id = 'consent-container';
-                d.style.cssText = 'width:600px;margin:20px auto;'; document.body.appendChild(d);
-              })()`);
-              const shown = await ticketsPage.evaluate(`
-                new Promise(function(resolve) {
-                  gigya.accounts.showScreenSet({
-                    screenSet: 'Default-RegistrationLogin', startScreen: 'gigya-complete-registration-screen',
-                    containerID: 'consent-container',
-                    onAfterScreenLoad: function() { resolve(true); }, onError: function() { resolve(false); }
-                  });
-                  setTimeout(function() { resolve(false); }, 15000);
-                })
-              `);
-              if (shown) {
-                await ticketsPage.waitForTimeout(1000);
-                const birthYear = String(1970 + Math.floor(Math.random() * 30));
-                try { const ei = ticketsPage.locator('#consent-container input[name="email"]'); await ei.click({ clickCount: 3 }); await ticketsPage.keyboard.type(email, { delay: 5 }); } catch {}
-                try { await ticketsPage.locator('#consent-container select[name="profile.birthYear"]').selectOption(birthYear); } catch {}
-                try { const zi = ticketsPage.locator('#consent-container input[name="profile.zip"]'); await zi.click({ clickCount: 3 }); await ticketsPage.keyboard.type(usedZipCode, { delay: 5 }); } catch {}
-                try { const s = ticketsPage.locator('#consent-container input[name="data.subscribe"]'); if (!(await s.isChecked())) await s.check(); } catch {}
-                await ticketsPage.waitForTimeout(500);
-                try { await ticketsPage.locator('#consent-container input[type="submit"]').click(); } catch {}
-                log("Consent submitted.");
-                await ticketsPage.waitForTimeout(5000);
-              }
-            } catch (e: any) {
-              log("Consent error: " + e.message.substring(0, 80));
-            }
-          }
-        }
-      } else {
-        const proxyConfig = parseProxyUrl(effectiveProxyUrl);
-        if (!proxyConfig) { log("Invalid proxy URL: " + effectiveProxyUrl.substring(0, 50)); return { submitted: false }; }
-        let pu = proxyConfig.username;
-        if (proxyConfig.host.includes('brd.superproxy.io') && !pu.includes('-country-')) pu += '-country-us';
-        log(`Launching browser with proxy: ${proxyConfig.host}:${proxyConfig.port}`);
-        const proxyBrowser = await chromium.launch({
-          headless: true,
-          proxy: { server: `http://${proxyConfig.host}:${proxyConfig.port}`, username: pu, password: proxyConfig.password },
-          args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
-        });
-        remoteBrowser = proxyBrowser;
-        ticketsContext = await proxyBrowser.newContext({
-          ignoreHTTPSErrors: true,
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          viewport: { width: 1280, height: 720 },
-        });
-        ticketsPage = await ticketsContext.newPage();
-        ticketsPage.setDefaultTimeout(120000);
-      }
-
-      if (!isBrowserAPI) {
-        if (oidcTargetUrl) {
-          log("Using intercepted OIDC URL on proxy browser: " + oidcTargetUrl.substring(0, 150));
-          try {
-            await ticketsPage.goto(oidcTargetUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
-          } catch (navErr: any) {
-            log("OIDC URL navigation: " + navErr.message.substring(0, 100));
-          }
-          await ticketsPage.waitForTimeout(5000);
-          log("After OIDC URL: " + ticketsPage.url().substring(0, 120));
-        } else {
-          log("No OIDC URL captured. Trying Gigya login on proxy...");
-          try {
-            await ticketsPage.goto("https://la28id.la28.org/login/?redirectUri=" + encodeURIComponent("https://tickets.la28.org/mycustomerdata/"), {
-              waitUntil: "domcontentloaded",
-              timeout: 60000,
-            });
-          } catch (navErr: any) {
-            log("la28id.la28.org navigation error: " + navErr.message.substring(0, 100));
-            try { if (remoteBrowser) await remoteBrowser.close(); } catch {}
-            continue;
-          }
-
-          await ticketsPage.waitForTimeout(5000);
-          let gigyaReady = false;
-          try {
-            await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
-            gigyaReady = true;
-          } catch {}
-
-          if (gigyaReady) {
-            try {
-              await ticketsPage.evaluate(`gigya.accounts.login({ loginID: "${safeEmail}", password: "${safePass}", callback: function(r) {} });`);
-              await ticketsPage.waitForTimeout(5000);
-            } catch {}
-          }
-
-          const afterLogin = ticketsPage.url();
-          log("After login: " + afterLogin.substring(0, 120));
-
-          if (!afterLogin.includes("tickets.la28.org")) {
-            try {
-              await ticketsPage.goto("https://la28id.la28.org/proxy.html?mode=afterLogin&gig_client_id=xSden-TmSiYYelKvu19SMyTv", {
-                waitUntil: "domcontentloaded", timeout: 60000,
-              });
-            } catch {}
-            for (let rw = 0; rw < 30; rw++) {
-              await ticketsPage.waitForTimeout(2000);
-              if (ticketsPage.url().includes("tickets.la28.org")) break;
-              if (rw === 29) log("Timed out waiting for redirect.");
-            }
-          }
-        }
-
-        let curUrl = ticketsPage.url();
-        if (!curUrl.includes("mycustomerdata")) {
-          log("Navigating to customer data page...");
-          try {
-            await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
-          } catch {}
-        }
-
-        await dismissOneTrustConsent(ticketsPage, log);
-
-        try { await ticketsPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
-
-        if (isQueueItPage(ticketsPage.url())) {
-          log("Queue-it detected. Waiting up to 120s for queue...");
-          let passedQueue = false;
-          for (let qw = 0; qw < 40; qw++) {
-            await ticketsPage.waitForTimeout(3000);
-            const qUrl = ticketsPage.url();
-            if (!isQueueItPage(qUrl)) {
-              log("Passed queue after ~" + ((qw + 1) * 3) + "s. URL: " + qUrl.substring(0, 120));
-              passedQueue = true;
-              break;
-            }
-            if (qw === 39) {
-              log("Queue timeout after 120s. Cannot proceed with draw registration.");
-              try { if (remoteBrowser) await remoteBrowser.close(); } catch {}
-              return { submitted: false };
-            }
-          }
-          if (passedQueue && !ticketsPage.url().includes("mycustomerdata")) {
-            log("Queue released to different page. Navigating to mycustomerdata...");
-            try {
-              await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
-            } catch {}
-          }
-          await dismissOneTrustConsent(ticketsPage, log);
-        }
-
-        for (let w = 0; w < 20; w++) {
-          await ticketsPage.waitForTimeout(3000);
-          try {
-            const pUrl = ticketsPage.url();
-            if (pUrl.includes("mycustomerdata")) {
-              await dismissOneTrustConsent(ticketsPage, log);
-              const bt = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 500));
-              if ((bt.includes("PROFILE") || bt.includes("INFORMATION") || bt.includes("Birth Year")) && !bt.includes("Loading")) {
-                log("Profile form loaded after ~" + ((w + 1) * 3) + "s");
-                break;
-              }
-            }
-          } catch {}
-          if (w === 19) log("Profile form still loading after 60s, proceeding...");
+        } catch (e: any) {
+          console.log("[Draw] Gigya login error: " + e.message.substring(0, 100));
         }
         await ticketsPage.waitForTimeout(3000);
-      } else {
-        log("Ensuring customer data page is loaded...");
-        const curUrl = ticketsPage.url();
-        if (!curUrl.includes("mycustomerdata")) {
-          try {
-            await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 120000 });
-          } catch (navErr3: any) {
-            if (navErr3.message && (navErr3.message.includes("robots.txt") || navErr3.message.includes("restricted"))) {
-              log("robots.txt block — trying JS navigation to /mycustomerdata...");
-              await ticketsPage.evaluate(() => { window.location.href = "https://tickets.la28.org/mycustomerdata/#/myCustomerData"; });
-              await ticketsPage.waitForTimeout(15000);
-            }
-          }
-        }
-        await dismissOneTrustConsent(ticketsPage, log);
-
-        if (isQueueItPage(ticketsPage.url())) {
-          log("Queue-it detected on Browser API. Waiting up to 120s...");
-          let passedQueue = false;
-          for (let qw = 0; qw < 40; qw++) {
-            await ticketsPage.waitForTimeout(3000);
-            const qUrl = ticketsPage.url();
-            if (!isQueueItPage(qUrl)) {
-              log("Passed queue after ~" + ((qw + 1) * 3) + "s. URL: " + qUrl.substring(0, 120));
-              passedQueue = true;
-              break;
-            }
-            if (qw === 39) {
-              log("Queue timeout after 120s.");
-              try { if (remoteBrowser) await remoteBrowser.close(); } catch {}
-              return { submitted: false };
-            }
-          }
-          if (passedQueue && !ticketsPage.url().includes("mycustomerdata")) {
-            log("Queue released to different page. Navigating to mycustomerdata...");
-            try {
-              await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
-            } catch {}
-          }
-          await dismissOneTrustConsent(ticketsPage, log);
-        }
-
-        for (let w = 0; w < 15; w++) {
-          await ticketsPage.waitForTimeout(3000);
-          try {
-            const pUrl = ticketsPage.url();
-            if (pUrl.includes("mycustomerdata")) {
-              await dismissOneTrustConsent(ticketsPage, log);
-              const bodyText = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 300));
-              if (bodyText.includes("PROFILE") && !bodyText.includes("Loading")) {
-                log("Profile loaded after ~" + ((w + 1) * 3) + "s");
-                break;
-              }
-            }
-          } catch { /* page still navigating */ }
-          if (w === 14) log("Profile still loading after 45s, proceeding anyway...");
-        }
-        await ticketsPage.waitForTimeout(3000);
+        continue;
       }
 
-      log("Customer data page loaded. Filling profile form...");
+      if (currentUrl.includes("tickets.la28.org") && currentUrl.includes("mycustomerdata") && !currentUrl.includes("#/login")) {
+        console.log("[Draw] Authenticated and on mycustomerdata page!");
+        break;
+      }
 
-      const pageSnapshot = await ticketsPage.evaluate(`(() => {
-        var selects = document.querySelectorAll('select');
-        var inputs = document.querySelectorAll('input');
-        var selectInfo = [];
-        for (var i = 0; i < selects.length; i++) {
-          var s = selects[i];
-          var label = '';
-          var prev = s.previousElementSibling;
-          if (prev) label = (prev.textContent || '').trim();
-          if (!label) {
-            var parent = s.closest('.form-group, .field-wrapper, div');
-            if (parent) {
-              var lbl = parent.querySelector('label');
-              if (lbl) label = (lbl.textContent || '').trim();
+      if (currentUrl.includes("tickets.la28.org") && currentUrl.includes("#/login")) {
+        console.log("[Draw] On tickets login page, waiting for OIDC redirect...");
+        continue;
+      }
+
+      if (authAttempt === 19) {
+        console.log("[Draw] Auth loop timed out. Final URL: " + currentUrl.substring(0, 200));
+      }
+    }
+
+    await dismissOneTrustConsent(ticketsPage, log);
+
+    currentUrl = ticketsPage.url();
+    if (!currentUrl.includes("mycustomerdata")) {
+      console.log("[Draw] Not on mycustomerdata. Navigating directly...");
+      try {
+        await ticketsPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+      } catch {}
+    }
+
+    try { await ticketsPage.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
+    await dismissOneTrustConsent(ticketsPage, log);
+
+    console.log("[Draw] Waiting for Angular SPA to render form...");
+    let formRendered = false;
+    for (let w = 0; w < 20; w++) {
+      await ticketsPage.waitForTimeout(3000);
+      try {
+        const selCount = await ticketsPage.evaluate(() => document.querySelectorAll('select').length);
+        const bodyText = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 300));
+        if (w % 3 === 0) {
+          console.log("[Draw] [" + ((w + 1) * 3) + "s] URL=" + ticketsPage.url().substring(0, 100) + " selects=" + selCount);
+          console.log("[Draw] Body: " + bodyText.substring(0, 150));
+        }
+        if (selCount > 0) {
+          console.log("[Draw] Form rendered! " + selCount + " selects found after " + ((w + 1) * 3) + "s");
+          formRendered = true;
+          break;
+        }
+        if (bodyText.includes("Birth Year") || bodyText.includes("PROFILE") || bodyText.includes("INFORMATION")) {
+          if (!bodyText.includes("Loading")) {
+            console.log("[Draw] Profile text detected, checking for form controls...");
+            await ticketsPage.waitForTimeout(3000);
+            const selCount2 = await ticketsPage.evaluate(() => document.querySelectorAll('select').length);
+            if (selCount2 > 0) {
+              console.log("[Draw] Selects appeared: " + selCount2);
+              formRendered = true;
+              break;
             }
           }
-          selectInfo.push({ id: s.id || '', name: s.name || '', label: label, optCount: s.options.length, value: s.value || '' });
         }
-        var inputInfo = [];
-        for (var j = 0; j < inputs.length; j++) {
-          var inp = inputs[j];
-          var ilabel = '';
-          var iprev = inp.previousElementSibling;
-          if (iprev) ilabel = (iprev.textContent || '').trim();
-          if (!ilabel) {
-            var iparent = inp.closest('.form-group, .field-wrapper, div');
-            if (iparent) {
-              var ilbl = iparent.querySelector('label');
-              if (ilbl) ilabel = (ilbl.textContent || '').trim();
-            }
+      } catch {}
+      if (w === 19) console.log("[Draw] Form did not render after 60s");
+    }
+
+    const diagUrl = ticketsPage.url();
+    const diagTitle = await ticketsPage.evaluate(() => document.title || "");
+    const diagText = await ticketsPage.evaluate(() => (document.body?.innerText || "").substring(0, 500));
+    const diagTags = await ticketsPage.evaluate(`(() => {
+      var tags = {};
+      var all = document.querySelectorAll('*');
+      for (var i = 0; i < all.length; i++) {
+        var t = all[i].tagName;
+        tags[t] = (tags[t] || 0) + 1;
+      }
+      return tags;
+    })()`) as Record<string, number>;
+
+    console.log("[Draw] DIAGNOSTIC URL: " + diagUrl);
+    console.log("[Draw] DIAGNOSTIC title: " + diagTitle);
+    console.log("[Draw] DIAGNOSTIC text: " + diagText.substring(0, 300));
+    console.log("[Draw] DIAGNOSTIC DOM tags: " + JSON.stringify(diagTags));
+
+    const iframeInfo = await ticketsPage.evaluate(`(() => {
+      var iframes = document.querySelectorAll('iframe');
+      var result = [];
+      for (var i = 0; i < iframes.length; i++) {
+        result.push({ src: (iframes[i].src || '').substring(0, 200), id: iframes[i].id, w: iframes[i].getBoundingClientRect().width, h: iframes[i].getBoundingClientRect().height });
+      }
+      return result;
+    })()`) as any[];
+    if (iframeInfo.length > 0) {
+      console.log("[Draw] Iframes: " + JSON.stringify(iframeInfo));
+    }
+
+    let formTarget: Page | any = ticketsPage;
+    const mainSelects = await ticketsPage.evaluate(() => document.querySelectorAll('select').length);
+    if (mainSelects === 0 && iframeInfo.length > 0) {
+      const frames = ticketsPage.frames();
+      for (const frame of frames) {
+        if (frame === ticketsPage.mainFrame()) continue;
+        try {
+          const fSelects = await frame.evaluate(() => document.querySelectorAll('select').length);
+          if (fSelects > 0) {
+            formTarget = frame;
+            console.log("[Draw] Found form in iframe with " + fSelects + " selects");
+            break;
           }
-          inputInfo.push({ id: inp.id || '', name: inp.name || '', type: inp.type || '', label: ilabel, value: inp.value || '' });
+        } catch {}
+      }
+    }
+
+    if (mainSelects === 0 && formTarget === ticketsPage) {
+      console.log("[Draw] CRITICAL: No select elements found. Dumping visible elements...");
+      const htmlDump = await ticketsPage.evaluate(() => {
+        const elements: string[] = [];
+        const all = document.body?.querySelectorAll('*') || [];
+        for (let i = 0; i < Math.min(all.length, 300); i++) {
+          const el = all[i] as HTMLElement;
+          if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            elements.push(el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).split(' ')[0] : ''));
+          }
         }
-        return { selects: selectInfo, inputs: inputInfo };
-      })()`) as { selects: any[]; inputs: any[] };
+        return elements.join(', ');
+      });
+      console.log("[Draw] Visible elements: " + String(htmlDump).substring(0, 800));
+      log("No form elements found on tickets.la28.org. The page did not render the Angular form.");
+      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
+      return { submitted: false };
+    }
 
-      console.log("[Playwright] Page form selects:", JSON.stringify(pageSnapshot.selects));
-      console.log("[Playwright] Page form inputs:", JSON.stringify(pageSnapshot.inputs));
+    log("Form found! Filling selects and inputs...");
+    console.log("[Draw] Form found. Filling form fields...");
 
-      const fillResult = await ticketsPage.evaluate(`((zipVal) => {
+    const fillResult = await formTarget.evaluate(`((zipVal) => {
         var results = [];
         var selects = document.querySelectorAll('select');
         var usedOly = {}, usedPara = {}, usedTeam = {};
@@ -1089,6 +748,24 @@ async function loginAndSubmitTicketRegistration(
               if (lbl) label = (lbl.textContent || '').trim().toLowerCase();
             }
           }
+          if (!label) {
+            var p2 = el.parentElement;
+            while (p2 && p2 !== document.body) {
+              var txt = '';
+              for (var c = 0; c < p2.childNodes.length; c++) {
+                if (p2.childNodes[c].nodeType === 3) txt += p2.childNodes[c].textContent;
+              }
+              txt = txt.trim().toLowerCase();
+              if (txt.length > 2 && txt.length < 100) { label = txt; break; }
+              var headings = p2.querySelectorAll('h1,h2,h3,h4,h5,h6,strong,b,label,span');
+              for (var h = 0; h < headings.length; h++) {
+                var ht = (headings[h].textContent || '').trim().toLowerCase();
+                if (ht.length > 2 && ht.length < 100) { label = ht; break; }
+              }
+              if (label) break;
+              p2 = p2.parentElement;
+            }
+          }
           return label;
         }
 
@@ -1098,6 +775,7 @@ async function loginAndSubmitTicketRegistration(
           else s.value = val;
           s.dispatchEvent(new Event('input', { bubbles: true }));
           s.dispatchEvent(new Event('change', { bubbles: true }));
+          s.dispatchEvent(new Event('blur', { bubbles: true }));
         }
 
         function getValidOpts(s) {
@@ -1114,34 +792,52 @@ async function loginAndSubmitTicketRegistration(
         for (var i = 0; i < selects.length; i++) {
           var s = selects[i];
           var id = (s.id || '').toLowerCase();
+          var name = (s.name || '').toLowerCase();
           var label = getLabel(s);
-          if (id.indexOf('customercountry') >= 0) continue;
+          results.push('select#' + i + ': id=' + id.substring(0, 40) + ' name=' + name.substring(0, 30) + ' label=' + label.substring(0, 40) + ' opts=' + s.options.length);
+          if (id.indexOf('customercountry') >= 0 || name.indexOf('country') >= 0) continue;
           var opts = getValidOpts(s);
           if (opts.length === 0) continue;
           var pick = null;
 
           var isBirthYear = id.indexOf('additionalcustomerattributes') >= 0
-            || label.indexOf('birth') >= 0
-            || (s.name || '').toLowerCase().indexOf('birth') >= 0;
+            || id.indexOf('birthyear') >= 0 || id.indexOf('birth_year') >= 0 || id.indexOf('birth-year') >= 0
+            || label.indexOf('birth') >= 0 || name.indexOf('birth') >= 0;
 
           var isOlySport = id.indexOf('categoryfavorites288') >= 0
-            || (label.indexOf('olympic') >= 0 && label.indexOf('paralympic') < 0 && label.indexOf('sport') >= 0);
+            || id.indexOf('olympicsport') >= 0 || id.indexOf('olympic-sport') >= 0
+            || (label.indexOf('olympic') >= 0 && label.indexOf('paralympic') < 0 && label.indexOf('sport') >= 0)
+            || (label.indexOf('olympic') >= 0 && label.indexOf('paralympic') < 0 && label.indexOf('moment') >= 0);
 
           var isParaSport = id.indexOf('categoryfavorites289') >= 0
-            || (label.indexOf('paralympic') >= 0 && label.indexOf('sport') >= 0);
+            || id.indexOf('paralympicsport') >= 0 || id.indexOf('paralympic-sport') >= 0
+            || (label.indexOf('paralympic') >= 0 && (label.indexOf('sport') >= 0 || label.indexOf('moment') >= 0));
 
-          var isTeam = id.indexOf('artistfavorites') >= 0
-            || label.indexOf('team') >= 0;
+          var isTeam = id.indexOf('artistfavorites') >= 0 || id.indexOf('team') >= 0 || label.indexOf('team') >= 0;
+
+          if (!isBirthYear && !isOlySport && !isParaSport && !isTeam) {
+            var hasYears = opts.some(function(o) { var y = parseInt(o.text); return y >= 1950 && y <= 2010; });
+            if (hasYears) isBirthYear = true;
+            else if (opts.some(function(o) { return o.text.toLowerCase().indexOf('swimming') >= 0 || o.text.toLowerCase().indexOf('basketball') >= 0 || o.text.toLowerCase().indexOf('athletics') >= 0; })) {
+              if (!usedOly['__assigned__']) isOlySport = true;
+              else if (!usedPara['__assigned__']) isParaSport = true;
+            }
+            else if (opts.some(function(o) { return o.text.length === 3 || o.text.indexOf('United States') >= 0 || o.text.indexOf('USA') >= 0; })) {
+              isTeam = true;
+            }
+          }
 
           if (isBirthYear) {
             var yearOpts = opts.filter(function(o) { var y = parseInt(o.text); return y >= 1975 && y <= 2000; });
             pick = yearOpts.length > 0 ? yearOpts[Math.floor(Math.random() * yearOpts.length)] : opts[Math.floor(opts.length / 2)];
             if (pick) results.push('BirthYear:' + pick.text);
           } else if (isOlySport) {
+            usedOly['__assigned__'] = true;
             var avail = opts.filter(function(o) { return !usedOly[o.value]; });
             pick = avail.length > 0 ? avail[Math.floor(Math.random() * avail.length)] : opts[0];
             if (pick) { usedOly[pick.value] = true; results.push('Oly:' + pick.text.substring(0, 20)); }
           } else if (isParaSport) {
+            usedPara['__assigned__'] = true;
             var avail2 = opts.filter(function(o) { return !usedPara[o.value]; });
             pick = avail2.length > 0 ? avail2[Math.floor(Math.random() * avail2.length)] : opts[0];
             if (pick) { usedPara[pick.value] = true; results.push('Para:' + pick.text.substring(0, 20)); }
@@ -1183,62 +879,62 @@ async function loginAndSubmitTicketRegistration(
         return results;
       })("${usedZipCode}")`) as string[];
 
-      log("Form: " + (fillResult || []).join(", "));
-      await ticketsPage.waitForTimeout(2000);
+    console.log("[Draw] Form fill result: " + (fillResult || []).join(", "));
+    log("Form fill: " + (fillResult || []).join(", "));
+    await ticketsPage.waitForTimeout(2000);
 
-      log("Clicking 'Save profile & submit registration'...");
-      const btnClicked = await ticketsPage.evaluate(`(() => {
-        var buttons = document.querySelectorAll('button[type="submit"], button');
-        for (var i = 0; i < buttons.length; i++) {
-          var t = (buttons[i].textContent || '').toLowerCase().trim();
-          if (t.indexOf('save profile') >= 0 && t.indexOf('submit') >= 0) {
-            buttons[i].click(); return 'clicked: ' + buttons[i].textContent.trim();
-          }
+    log("Clicking 'Save profile & submit registration'...");
+    const btnClicked = await formTarget.evaluate(`(() => {
+      var buttons = document.querySelectorAll('button[type="submit"], button, input[type="submit"], a.btn, a.button');
+      for (var i = 0; i < buttons.length; i++) {
+        var t = (buttons[i].textContent || buttons[i].value || '').toLowerCase().trim();
+        if (t.indexOf('save profile') >= 0 || (t.indexOf('submit') >= 0 && t.indexOf('registration') >= 0)) {
+          buttons[i].click(); return 'clicked: ' + (buttons[i].textContent || buttons[i].value || '').trim();
         }
-        return 'not-found: ' + (document.body?.innerText || '').substring(0, 200);
-      })()`) as string;
-
-      if (btnClicked.startsWith('clicked')) {
-        log("Submit button clicked! Draw registration submitted.");
-        try {
-          await ticketsPage.waitForTimeout(10000);
-          const afterUrl = ticketsPage.url();
-          const afterText = await ticketsPage.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
-          log("After submit URL: " + afterUrl.substring(0, 100));
-          log("After submit: " + afterText.substring(0, 300));
-          if (afterUrl.includes("mydatasuccess") || afterText.toLowerCase().includes("success")) {
-            log("SUCCESS! Ticket draw registration complete — registered for the draw.");
-          }
-        } catch (postSubmitErr: any) {
-          log("Post-submit check failed (browser may have disconnected), but form was already submitted: " + postSubmitErr.message.substring(0, 100));
-        }
-        try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
-        log("Ticket draw registration step complete.");
-        return { submitted: true };
-      } else {
-        log("Button status: " + btnClicked.substring(0, 300));
       }
+      for (var j = 0; j < buttons.length; j++) {
+        var t2 = (buttons[j].textContent || buttons[j].value || '').toLowerCase().trim();
+        if (t2.indexOf('submit') >= 0 || t2.indexOf('save') >= 0 || t2.indexOf('register') >= 0) {
+          buttons[j].click(); return 'clicked-fallback: ' + (buttons[j].textContent || buttons[j].value || '').trim();
+        }
+      }
+      var allBtnTexts = [];
+      for (var k = 0; k < buttons.length; k++) allBtnTexts.push((buttons[k].textContent || buttons[k].value || '').trim().substring(0, 40));
+      return 'not-found: buttons=[' + allBtnTexts.join('|') + '] body=' + (document.body?.innerText || '').substring(0, 200);
+    })()`) as string;
 
-      try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
-      log("Ticket draw registration step complete (submit button not found).");
+    console.log("[Draw] Button click result: " + btnClicked);
+
+    if (btnClicked.startsWith('clicked')) {
+      log("Submit button clicked: " + btnClicked);
+      try {
+        await ticketsPage.waitForTimeout(10000);
+        const afterUrl = ticketsPage.url();
+        const afterText = await formTarget.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
+        console.log("[Draw] After submit URL: " + afterUrl.substring(0, 100));
+        console.log("[Draw] After submit text: " + afterText.substring(0, 300));
+        if (afterUrl.includes("mydatasuccess") || afterText.toLowerCase().includes("success") || afterText.toLowerCase().includes("you are registered") || afterText.toLowerCase().includes("thank you")) {
+          log("SUCCESS! Draw registration complete.");
+        }
+      } catch (postErr: any) {
+        console.log("[Draw] Post-submit error: " + postErr.message.substring(0, 100));
+      }
+      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
+      log("Draw registration form submitted.");
+      return { submitted: true };
+    } else {
+      log("Submit button not found: " + btnClicked.substring(0, 300));
+      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       return { submitted: false };
-    } catch (err: any) {
-      try { if (remoteBrowser) await remoteBrowser.close(); if (ticketsContext) await ticketsContext.close(); } catch {}
-      if (err.message === "SWITCH_TO_RESIDENTIAL") {
-        log("Switched to residential proxy. Restarting attempt loop...");
-        attempt = 0;
-        continue;
-      }
-      log(`Attempt ${attempt} error: ${err.message.substring(0, 150)}`);
-      if (attempt >= MAX_RETRIES) {
-        log("Max retries reached for ticket registration.");
-        return { submitted: false };
-      }
     }
-  }
-  return { submitted: false };
-}
 
+  } catch (err: any) {
+    console.log("[Draw] Error: " + err.message.substring(0, 200));
+    log("Draw registration error: " + err.message.substring(0, 150));
+    try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
+    return { submitted: false };
+  }
+}
 async function fillTicketsProfileForm(page: Page, log: (msg: string) => void): Promise<void> {
   const birthYear = generateRandomBirthYear();
   const favOlympicSports = pickRandom(OLYMPIC_SPORTS, 3 + Math.floor(Math.random() * 4));
@@ -1391,6 +1087,290 @@ async function tryRestApiFallback(
     }
   } catch (apiErr: any) {
     log("REST API fallback failed: " + apiErr.message);
+  }
+}
+
+export async function completeDrawViaGigyaBrowser(
+  email: string,
+  password: string,
+  zipCode: string | undefined,
+  log: (msg: string) => void
+): Promise<{ success: boolean; profileSet: boolean; dataSet: boolean; error?: string }> {
+  const usedZip = zipCode || generateUSZip();
+  const birthYear = generateRandomBirthYear();
+  const favOlympicSports = pickRandom(OLYMPIC_SPORTS, 3 + Math.floor(Math.random() * 4));
+  const favParalympicSports = pickRandom(PARALYMPIC_SPORTS, 2 + Math.floor(Math.random() * 3));
+  const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
+
+  log("Draw via Gigya browser: launching headless browser (no proxy)...");
+  console.log("[Draw-Gigya] Starting for " + email);
+
+  let browser: Browser | null = null;
+  try {
+    browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled'] });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+
+    await page.route("**/*", (route) => {
+      const resourceType = route.request().resourceType();
+      if (["image", "media", "font"].includes(resourceType)) return route.abort();
+      return route.continue();
+    });
+
+    log("Navigating to la28id.la28.org/login...");
+    console.log("[Draw-Gigya] Navigating to la28id.la28.org/login...");
+    await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+    await page.waitForTimeout(3000);
+
+    const pageUrl = page.url();
+    const pageTitle = await page.title();
+    console.log("[Draw-Gigya] Page URL: " + pageUrl + " title: " + pageTitle);
+
+    const scriptInfo = await page.evaluate(() => {
+      const scripts = document.querySelectorAll('script[src]');
+      const srcs: string[] = [];
+      for (let i = 0; i < scripts.length; i++) {
+        const src = (scripts[i] as HTMLScriptElement).src;
+        if (src.includes('gigya')) srcs.push(src);
+      }
+      return {
+        gigyaScripts: srcs,
+        gigyaExists: typeof (window as any).gigya !== 'undefined',
+        gigyaAccountsExists: typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined',
+        bodyLen: document.body?.innerText?.length || 0
+      };
+    });
+    console.log("[Draw-Gigya] Script info: " + JSON.stringify(scriptInfo));
+
+    console.log("[Draw-Gigya] Waiting for Gigya SDK...");
+    try {
+      await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
+    } catch {
+      const retryInfo = await page.evaluate(() => ({
+        gigyaType: typeof (window as any).gigya,
+        gigyaKeys: typeof (window as any).gigya === 'object' ? Object.keys((window as any).gigya).slice(0, 10) : [],
+        bodySnippet: document.body?.innerText?.substring(0, 300) || ''
+      }));
+      console.log("[Draw-Gigya] Gigya SDK not available. Debug: " + JSON.stringify(retryInfo));
+      log("Gigya SDK did not load. Debug: gigyaType=" + retryInfo.gigyaType);
+      return { success: false, profileSet: false, dataSet: false, error: "Gigya SDK not loaded" };
+    }
+
+    log("Gigya SDK loaded. Logging in...");
+    console.log("[Draw-Gigya] Gigya SDK loaded, logging in...");
+
+    let loginOk = false;
+    try {
+      const loginResult = await page.evaluate(`((loginEmail, loginPass) => {
+        return new Promise(function(resolve) {
+          gigya.accounts.login({
+            loginID: loginEmail,
+            password: loginPass,
+            callback: function(resp) {
+              resolve({
+                ok: resp.errorCode === 0,
+                uid: resp.UID || null,
+                err: resp.errorCode === 0 ? null : (resp.errorMessage || 'Code: ' + resp.errorCode),
+                code: resp.errorCode
+              });
+            }
+          });
+          setTimeout(function() { resolve({ ok: false, uid: null, err: 'timeout', code: -1 }); }, 20000);
+        });
+      })("${email.replace(/"/g, '\\"')}", "${password.replace(/"/g, '\\"')}")`) as { ok: boolean; uid: string | null; err: string | null; code: number };
+
+      console.log("[Draw-Gigya] Login result: ok=" + loginResult.ok + " uid=" + (loginResult.uid || "null") + " err=" + loginResult.err);
+      if (!loginResult.ok) {
+        log("Gigya login failed: " + (loginResult.err || "unknown"));
+        return { success: false, profileSet: false, dataSet: false, error: "Login failed: " + loginResult.err };
+      }
+      loginOk = true;
+      log("Logged in! UID: " + (loginResult.uid || "unknown"));
+    } catch (loginErr: any) {
+      if (loginErr.message.includes("context was destroyed") || loginErr.message.includes("navigation")) {
+        console.log("[Draw-Gigya] Login caused page navigation (expected for successful login)");
+        loginOk = true;
+        log("Login triggered redirect (likely successful).");
+      } else {
+        console.log("[Draw-Gigya] Login error: " + loginErr.message.substring(0, 150));
+        return { success: false, profileSet: false, dataSet: false, error: "Login error: " + loginErr.message.substring(0, 80) };
+      }
+    }
+
+    if (!loginOk) {
+      return { success: false, profileSet: false, dataSet: false, error: "Login did not succeed" };
+    }
+
+    log("Waiting for post-login page to stabilize...");
+    try {
+      await page.waitForLoadState("domcontentloaded", { timeout: 15000 });
+    } catch {}
+    await page.waitForTimeout(3000);
+
+    const postLoginUrl = page.url();
+    console.log("[Draw-Gigya] Post-login URL: " + postLoginUrl);
+
+    console.log("[Draw-Gigya] Re-waiting for Gigya SDK after login...");
+    try {
+      await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 20000 });
+    } catch {
+      log("Gigya SDK not available after login redirect. Navigating to la28id homepage...");
+      await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+      await page.waitForTimeout(3000);
+      try {
+        await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 20000 });
+      } catch {
+        return { success: false, profileSet: false, dataSet: false, error: "Gigya SDK lost after login" };
+      }
+    }
+
+    const isLoggedIn = await page.evaluate(`(() => {
+      return new Promise(function(resolve) {
+        gigya.accounts.getAccountInfo({
+          callback: function(resp) {
+            resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || null });
+          }
+        });
+        setTimeout(function() { resolve({ loggedIn: false, uid: null }); }, 10000);
+      });
+    })()`) as { loggedIn: boolean; uid: string | null };
+    console.log("[Draw-Gigya] Post-login auth check: loggedIn=" + isLoggedIn.loggedIn + " uid=" + (isLoggedIn.uid || "null"));
+
+    if (!isLoggedIn.loggedIn) {
+      log("Not logged in after redirect. Login may have failed.");
+      return { success: false, profileSet: false, dataSet: false, error: "Not authenticated after login redirect" };
+    }
+
+    log("Authenticated! UID: " + (isLoggedIn.uid || "unknown") + ". Setting profile...");
+
+    const allSportsJSON = JSON.stringify([
+      ...favOlympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+      ...favParalympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+    ]);
+    const teamsJSON = JSON.stringify(favTeams.map((code: string) => ({ ocsCode: code, nocCode: code, gameType: "OG" })));
+
+    const profileResult = await page.evaluate(`((birthYr, zip) => {
+      return new Promise(function(resolve) {
+        gigya.accounts.setAccountInfo({
+          profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
+          callback: function(resp) {
+            resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+          }
+        });
+        setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+      });
+    })("${birthYear}", "${usedZip}")`) as { success: boolean; error?: string | null };
+
+    console.log("[Draw-Gigya] Profile result: " + JSON.stringify(profileResult));
+    const profileSet = profileResult.success;
+    if (profileSet) {
+      log("Profile set: birth year " + birthYear + ", zip " + usedZip);
+    } else {
+      log("Profile error: " + (profileResult.error || "unknown"));
+    }
+
+    const dataResult = await page.evaluate(`((sportsStr, teamsStr) => {
+      return new Promise(function(resolve) {
+        var sports = JSON.parse(sportsStr);
+        var teams = JSON.parse(teamsStr);
+        gigya.accounts.setAccountInfo({
+          data: {
+            personalization: {
+              favoritesDisciplines: sports,
+              favoritesCountries: teams,
+              siteLanguage: 'en'
+            },
+            entryCampaignandSegregation: {
+              l2028_ticketing: 'true',
+              l2028_fan28: 'true'
+            }
+          },
+          callback: function(resp) {
+            resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+          }
+        });
+        setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+      });
+    })('${allSportsJSON.replace(/'/g, "\\'")}', '${teamsJSON.replace(/'/g, "\\'")}')`) as { success: boolean; error?: string | null };
+
+    console.log("[Draw-Gigya] Data result: " + JSON.stringify(dataResult));
+    const dataSet = dataResult.success;
+    if (dataSet) {
+      log("Draw flags set! l2028_ticketing=true, l2028_fan28=true, favorites saved!");
+    } else {
+      log("Data error: " + (dataResult.error || "unknown") + ". Trying individual fields...");
+      const fallbackResult = await page.evaluate(`((sportsStr, teamsStr) => {
+        return new Promise(function(resolve) {
+          var sports = JSON.parse(sportsStr);
+          var teams = JSON.parse(teamsStr);
+          gigya.accounts.setAccountInfo({
+            data: { personalization: { favoritesDisciplines: sports } },
+            callback: function(r1) {
+              gigya.accounts.setAccountInfo({
+                data: { personalization: { favoritesCountries: teams } },
+                callback: function(r2) {
+                  gigya.accounts.setAccountInfo({
+                    data: { entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' } },
+                    callback: function(r3) {
+                      resolve({ success: r3.errorCode === 0, error: r3.errorCode === 0 ? null : r3.errorMessage });
+                    }
+                  });
+                }
+              });
+            }
+          });
+          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 25000);
+        });
+      })('${allSportsJSON.replace(/'/g, "\\'")}', '${teamsJSON.replace(/'/g, "\\'")}')`) as { success: boolean; error?: string | null };
+
+      if (fallbackResult.success) {
+        log("Draw flags set via individual updates!");
+        return { success: true, profileSet, dataSet: true };
+      }
+    }
+
+    const verifyResult = await page.evaluate(`(() => {
+      return new Promise(function(resolve) {
+        gigya.accounts.getAccountInfo({
+          include: 'profile,data',
+          callback: function(resp) {
+            if (resp.errorCode === 0) {
+              resolve({
+                ticketing: resp.data && resp.data.entryCampaignandSegregation && resp.data.entryCampaignandSegregation.l2028_ticketing,
+                fan28: resp.data && resp.data.entryCampaignandSegregation && resp.data.entryCampaignandSegregation.l2028_fan28,
+                birthYear: resp.profile && resp.profile.birthYear,
+                zip: resp.profile && resp.profile.zip
+              });
+            } else {
+              resolve({ error: resp.errorMessage });
+            }
+          }
+        });
+        setTimeout(function() { resolve({ error: 'timeout' }); }, 10000);
+      });
+    })()`) as any;
+
+    console.log("[Draw-Gigya] Verify result: " + JSON.stringify(verifyResult));
+    if (verifyResult.ticketing === "true" || verifyResult.ticketing === true) {
+      log("Verified: l2028_ticketing=" + verifyResult.ticketing + " fan28=" + verifyResult.fan28 + " birthYear=" + verifyResult.birthYear + " zip=" + verifyResult.zip);
+    }
+
+    try { await context.close(); } catch {}
+    try { await browser.close(); } catch {}
+
+    const success = profileSet && dataSet;
+    return { success, profileSet, dataSet };
+  } catch (err: any) {
+    console.log("[Draw-Gigya] Error: " + err.message.substring(0, 200));
+    log("Draw via Gigya browser error: " + err.message.substring(0, 100));
+    try { if (browser) await browser.close(); } catch {}
+    return { success: false, profileSet: false, dataSet: false, error: err.message };
   }
 }
 
@@ -2122,31 +2102,23 @@ async function doRegistration(
     }
 
     onStatusUpdate("draw_registering");
-    log("Setting Gigya profile data via REST API first...");
+    log("Setting draw registration via Gigya browser (no proxy needed)...");
     try {
-      const apiResult = await completeDrawRegistrationViaApi(email, password, usedZipCode, log);
-      if (apiResult.success) {
-        log("Gigya profile data set via REST API. Now submitting draw on tickets.la28.org via browser...");
-      } else {
-        log("REST API partial (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Will still try browser submission...");
-      }
-    } catch (apiErr: any) {
-      log("REST API error (non-fatal): " + apiErr.message.substring(0, 100) + ". Will still try browser submission...");
-    }
-
-    try {
-      const drawResult = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, usedZipCode);
-      if (drawResult.submitted) {
+      const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log);
+      if (gigyaResult.success) {
         onStatusUpdate("completed");
-        log("Full flow complete! Draw registration form submitted on tickets.la28.org.");
-      } else {
+        log("Full flow complete! Draw registration set via Gigya browser.");
+      } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
         onStatusUpdate("completed");
-        log("Draw form submission attempted but button not found. Gigya data was set — marking completed.");
+        log("Draw registration partially set (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
+      } else {
+        log("Gigya browser draw failed: " + (gigyaResult.error || "unknown") + ". Keeping as draw_registering for retry.");
+        onStatusUpdate("draw_registering");
       }
-    } catch (browserErr: any) {
-      console.log("[Playwright] Browser draw error:", browserErr.message);
-      log("Browser draw method error (" + browserErr.message.substring(0, 80) + "). Gigya data was set — marking completed.");
-      onStatusUpdate("completed");
+    } catch (drawErr: any) {
+      console.log("[Playwright] Draw error:", drawErr.message);
+      log("Draw error (" + drawErr.message.substring(0, 80) + "). Status kept as draw_registering for retry.");
+      onStatusUpdate("draw_registering");
     }
 
     await context.close();

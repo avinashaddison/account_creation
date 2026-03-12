@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -185,8 +185,11 @@ async function processAccount(
 
     if (result.success) {
       const currentAccount = await storage.getAccount(accountId);
-      const keepStatuses = ["completed", "draw_registering"];
-      const finalStatus = keepStatuses.includes(currentAccount?.status || "") ? "completed" : "verified";
+      const currentStatus = currentAccount?.status || "";
+      let finalStatus: string;
+      if (currentStatus === "completed") finalStatus = "completed";
+      else if (currentStatus === "draw_registering") finalStatus = "draw_registering";
+      else finalStatus = "verified";
       const updateData: any = { status: finalStatus };
       if (result.zipCode) updateData.zipCode = result.zipCode;
       const updated = await storage.updateAccount(accountId, updateData);
@@ -997,7 +1000,7 @@ export async function registerRoutes(
     if (!["verified", "profile_saving", "draw_registering"].includes(account.status || "")) {
       return res.status(400).json({ error: `Account status '${account.status}' is not eligible for draw retry. Must be verified, profile_saving, or draw_registering.` });
     }
-    if (!account.tempEmail || !account.la28Password) {
+    if (!account.email || !account.la28Password) {
       return res.status(400).json({ error: "Account is missing email or password credentials required for draw retry." });
     }
 
@@ -1011,45 +1014,36 @@ export async function registerRoutes(
     try {
       await storage.updateAccount(account.id, { status: "draw_registering" });
       broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
-      log("Retrying draw registration via REST API (no proxy needed)...");
+      log("Retrying draw registration via Gigya browser (no proxy needed)...");
 
-      const apiResult = await completeDrawRegistrationViaApi(
-        account.tempEmail,
+      const gigyaResult = await completeDrawViaGigyaBrowser(
+        account.email,
         account.la28Password,
         account.zipCode || undefined,
         log
       );
 
-      if (apiResult.success) {
+      if (gigyaResult.success) {
         await storage.updateAccount(account.id, { status: "completed" });
         broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-        log("Draw registration completed successfully via REST API!");
+        log("Draw registration completed successfully via Gigya browser!");
       } else {
-        log("REST API approach incomplete (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Trying browser method...");
-        try {
-          const drawResult = await retryDrawRegistration(
-            account.tempEmail,
-            account.la28Password,
-            await getDefaultBrowserApiUrl(),
-            account.zipCode || undefined,
-            log
-          );
+        log("Gigya browser approach incomplete (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + " error=" + (gigyaResult.error || "none") + ").");
+        if (gigyaResult.profileSet || gigyaResult.dataSet) {
           await storage.updateAccount(account.id, { status: "completed" });
           broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-          log(drawResult.submitted
-            ? "Draw registration completed via browser!"
-            : "Draw registration attempted. Marked as completed.");
-        } catch (browserErr: any) {
-          log("Browser method also failed: " + browserErr.message.substring(0, 100));
-          await storage.updateAccount(account.id, { status: "completed" });
-          broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+          log("Partial success. Marked as completed.");
+        } else {
+          await storage.updateAccount(account.id, { status: "draw_registering" });
+          broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
+          log("Draw registration failed. Status kept as draw_registering for retry.");
         }
       }
     } catch (err: any) {
       log("Draw retry error: " + err.message.substring(0, 200));
-      await storage.updateAccount(account.id, { status: "completed" });
-      broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-      log("Marked as completed despite error (profile was already saved).");
+      await storage.updateAccount(account.id, { status: "draw_registering" });
+      broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
+      log("Error during draw retry. Status kept as draw_registering.");
     }
   });
 
