@@ -1,7 +1,356 @@
 import { chromium, type Browser, type Page } from "playwright";
-import { execSync } from "child_process";
+import { execSync, execFile } from "child_process";
+import { promisify } from "util";
+import * as path from "path";
+import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+
+const execFileAsync = promisify(execFile);
+const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
+const CURL_COOKIE_DIR = "/tmp/la28_curl_sessions";
+
+async function ensureCurlImpersonate(): Promise<boolean> {
+  try {
+    const curlBinaryPath = CURL_IMPERSONATE_PATH.replace("curl_chrome116", "curl-impersonate-chrome");
+    if (!fs.existsSync(CURL_IMPERSONATE_PATH) || !fs.existsSync(curlBinaryPath)) {
+      console.log("[CurlImp] curl-impersonate not found, downloading...");
+      execSync("curl -sL https://github.com/lwthiker/curl-impersonate/releases/download/v0.6.1/curl-impersonate-v0.6.1.x86_64-linux-gnu.tar.gz -o /tmp/curl-imp.tar.gz && tar -xzf /tmp/curl-imp.tar.gz -C /tmp/ 2>/dev/null", { timeout: 30000 });
+      if (fs.existsSync("/tmp/curl_chrome116")) {
+        fs.copyFileSync("/tmp/curl_chrome116", CURL_IMPERSONATE_PATH);
+        fs.chmodSync(CURL_IMPERSONATE_PATH, 0o755);
+      }
+      if (fs.existsSync("/tmp/curl-impersonate-chrome")) {
+        fs.copyFileSync("/tmp/curl-impersonate-chrome", curlBinaryPath);
+        fs.chmodSync(curlBinaryPath, 0o755);
+      }
+    }
+    if (!fs.existsSync(CURL_COOKIE_DIR)) {
+      fs.mkdirSync(CURL_COOKIE_DIR, { recursive: true });
+    }
+    return fs.existsSync(CURL_IMPERSONATE_PATH) && fs.existsSync(curlBinaryPath);
+  } catch (e: any) {
+    console.log("[CurlImp] Setup error: " + e.message);
+    return false;
+  }
+}
+
+interface CurlResponse {
+  statusCode: number;
+  body: string;
+  headers: Record<string, string>;
+  finalUrl: string;
+}
+
+async function curlImpersonate(
+  url: string,
+  opts: {
+    method?: string;
+    cookieFile: string;
+    proxy?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    followRedirects?: boolean;
+    maxRedirs?: number;
+  }
+): Promise<CurlResponse> {
+  const headerFile = opts.cookieFile + ".headers";
+  const args: string[] = [
+    "-s",
+    "-c", opts.cookieFile,
+    "-b", opts.cookieFile,
+    "-D", headerFile,
+    "-w", "\n__CURL_STATUS__%{http_code}|%{url_effective}",
+  ];
+
+  if (opts.followRedirects !== false) {
+    args.push("-L", "--max-redirs", String(opts.maxRedirs || 10));
+  }
+
+  if (opts.proxy) {
+    args.push("-x", opts.proxy);
+  }
+
+  if (opts.method && opts.method !== "GET") {
+    args.push("-X", opts.method);
+  }
+
+  if (opts.headers) {
+    for (const [k, v] of Object.entries(opts.headers)) {
+      args.push("-H", `${k}: ${v}`);
+    }
+  }
+
+  if (opts.body) {
+    args.push("-d", opts.body);
+  }
+
+  args.push(url);
+
+  const { stdout } = await execFileAsync(CURL_IMPERSONATE_PATH, args, {
+    timeout: 60000,
+    maxBuffer: 5 * 1024 * 1024,
+  });
+
+  const statusMatch = stdout.match(/__CURL_STATUS__(\d+)\|(.*)$/m);
+  const statusCode = statusMatch ? parseInt(statusMatch[1]) : 0;
+  const finalUrl = statusMatch ? statusMatch[2] : url;
+  const body = stdout.replace(/__CURL_STATUS__.*$/m, "").trim();
+
+  const headers: Record<string, string> = {};
+  try {
+    if (fs.existsSync(headerFile)) {
+      const headersRaw = fs.readFileSync(headerFile, "utf8");
+      for (const line of headersRaw.split("\r\n")) {
+        const idx = line.indexOf(": ");
+        if (idx > 0) {
+          headers[line.substring(0, idx).toLowerCase()] = line.substring(idx + 2);
+        }
+      }
+      fs.unlinkSync(headerFile);
+    }
+  } catch {}
+
+  return { statusCode, body, headers, finalUrl };
+}
+
+async function navigateQueueIt(
+  targetUrl: string,
+  cookieFile: string,
+  proxyUrl: string,
+  log: (msg: string) => void
+): Promise<boolean> {
+  log("Navigating through Queue-it for tickets.la28.org...");
+
+  const resp1 = await curlImpersonate(targetUrl, {
+    cookieFile,
+    proxy: proxyUrl,
+    followRedirects: true,
+    maxRedirs: 5,
+  });
+
+  if (resp1.body.includes("Official LA28") || resp1.body.includes("login-app")) {
+    log("Queue-it bypassed - got real page directly!");
+    return true;
+  }
+
+  const queueRedirectMatch = resp1.body.match(/decodeURIComponent\('([^']+)'\)/);
+  if (queueRedirectMatch) {
+    const decodedPath = decodeURIComponent(queueRedirectMatch[1]);
+    const queueUrl = `https://next.tickets.la28.org${decodedPath}`;
+    console.log("[CurlImp] Following Queue-it JS redirect...");
+
+    const resp2 = await curlImpersonate(queueUrl, {
+      cookieFile,
+      proxy: proxyUrl,
+      followRedirects: true,
+      maxRedirs: 10,
+    });
+
+    if (resp2.body.includes("Official LA28") || resp2.body.includes("login-app")) {
+      log("Queue-it passed - got real page!");
+      return true;
+    }
+
+    const queueRedirect2 = resp2.body.match(/decodeURIComponent\('([^']+)'\)/);
+    if (queueRedirect2) {
+      const decodedPath2 = decodeURIComponent(queueRedirect2[1]);
+      const queueUrl2 = `https://next.tickets.la28.org${decodedPath2}`;
+      console.log("[CurlImp] Following second Queue-it redirect...");
+
+      const resp3 = await curlImpersonate(queueUrl2, {
+        cookieFile,
+        proxy: proxyUrl,
+        followRedirects: true,
+        maxRedirs: 10,
+      });
+
+      if (resp3.body.includes("Official LA28") || resp3.body.includes("login-app")) {
+        log("Queue-it passed on third attempt!");
+        return true;
+      }
+    }
+  }
+
+  if (resp1.finalUrl.includes("tickets.la28.org") && !resp1.finalUrl.includes("next.tickets")) {
+    log("Reached tickets.la28.org (may not have full page content)");
+    return true;
+  }
+
+  log("Could not navigate through Queue-it");
+  return false;
+}
+
+export async function ticketsFormFillViaCurl(
+  email: string,
+  password: string,
+  firstName: string,
+  lastName: string,
+  authCode: string,
+  zipCode: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; formSubmitted: boolean; error?: string }> {
+  const available = await ensureCurlImpersonate();
+  if (!available) {
+    log("curl-impersonate not available, skipping form fill");
+    return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
+  }
+
+  let proxyUrl = "";
+  try {
+    const proxyRows = await db.execute(sql`SELECT value FROM settings WHERE key = 'iproyal_proxy_url' LIMIT 1`);
+    const rows = proxyRows.rows as any[];
+    if (rows.length > 0 && rows[0].value) {
+      proxyUrl = rows[0].value;
+    }
+  } catch {}
+
+  if (!proxyUrl) {
+    proxyUrl = "http://jRSA9eevoPMBKCs2:MTDugb6mPndnM5VJ@geo.iproyal.com:12321";
+  }
+
+  const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
+
+  try {
+    log("Starting tickets.la28.org form fill via curl-impersonate...");
+    console.log("[CurlImp] Session: " + sessionId + ", proxy: " + proxyUrl.substring(0, 40));
+
+    const queuePassed = await navigateQueueIt(
+      "https://tickets.la28.org/mycustomerdata/",
+      cookieFile,
+      proxyUrl,
+      log
+    );
+
+    if (!queuePassed) {
+      return { success: false, formSubmitted: false, error: "Queue-it navigation failed" };
+    }
+
+    log("Authenticating with Keycloak auth code on tickets.la28.org...");
+    const ssoUrl = `https://tickets.la28.org/api/singleSignOn/857?` + new URLSearchParams({
+      code: authCode,
+      contenttype: "json",
+      force_session: "true",
+      redirectUrl: "https://tickets.la28.org/mycustomerdata/",
+    }).toString();
+
+    const ssoResp = await curlImpersonate(ssoUrl, {
+      cookieFile,
+      proxy: proxyUrl,
+      headers: {
+        "Accept": "application/json",
+        "Referer": "https://tickets.la28.org/mycustomerdata/",
+      },
+      followRedirects: false,
+    });
+
+    console.log("[CurlImp] SSO response: " + ssoResp.statusCode + " body: " + ssoResp.body.substring(0, 200));
+
+    if (ssoResp.statusCode === 403 || ssoResp.body.includes("Access Denied")) {
+      log("Akamai blocked SSO API call. Session cookies may be invalid.");
+      return { success: false, formSubmitted: false, error: "Akamai blocked API call" };
+    }
+
+    if (ssoResp.body.includes("errorCode") && ssoResp.body.includes('"message"')) {
+      const ssoData = JSON.parse(ssoResp.body);
+      if (ssoData.errorCode && ssoData.errorCode !== 0) {
+        log("SSO login error: " + (ssoData.message || "code " + ssoData.errorCode));
+        return { success: false, formSubmitted: false, error: "SSO: " + (ssoData.message || "login failed") };
+      }
+    }
+
+    log("SSO authenticated on tickets.la28.org! Loading customer form...");
+
+    const regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+      cookieFile,
+      proxy: proxyUrl,
+      headers: {
+        "Accept": "application/json",
+        "Referer": "https://tickets.la28.org/mycustomerdata/",
+      },
+    });
+
+    console.log("[CurlImp] Registration form: " + regResp.statusCode + " size=" + regResp.body.length);
+
+    let xsrfToken = "";
+    let formFields: any = null;
+    try {
+      const regData = JSON.parse(regResp.body);
+      xsrfToken = regData.xsrfToken || "";
+      formFields = regData.registrationForm || regData;
+      console.log("[CurlImp] XSRF: " + xsrfToken + ", form keys: " + Object.keys(formFields).join(","));
+    } catch {
+      console.log("[CurlImp] Could not parse registration response");
+    }
+
+    const contactFields = formFields?.contactData || formFields?.myDataData || [];
+    const fieldNames = Array.isArray(contactFields)
+      ? contactFields.map((f: any) => f.fieldName)
+      : [];
+
+    console.log("[CurlImp] Form field names: " + fieldNames.join(", "));
+
+    const formData: Record<string, string> = {};
+    for (const f of fieldNames) {
+      switch (f) {
+        case "customerEmail": formData[f] = email; break;
+        case "customerFirstName": formData[f] = firstName; break;
+        case "customerLastName": formData[f] = lastName; break;
+        case "customerCountry": formData[f] = "US"; break;
+        case "customerPostalCode": formData[f] = zipCode; break;
+        case "customerCity": formData[f] = "Los Angeles"; break;
+        case "customerStreetAndNo": formData[f] = "123 Olympic Blvd"; break;
+        case "customerProvince": formData[f] = "CA"; break;
+        case "customerPhone": formData[f] = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString(); break;
+      }
+    }
+
+    log("Submitting customer data on tickets.la28.org...");
+    console.log("[CurlImp] Submitting form data: " + JSON.stringify(formData));
+
+    const submitHeaders: Record<string, string> = {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "Referer": "https://tickets.la28.org/mycustomerdata/",
+    };
+    if (xsrfToken) {
+      submitHeaders["X-XSRF-TOKEN"] = xsrfToken;
+    }
+
+    const submitBody = JSON.stringify({
+      contactData: formData,
+      page: "registration",
+    });
+
+    const submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+      method: "POST",
+      cookieFile,
+      proxy: proxyUrl,
+      headers: submitHeaders,
+      body: submitBody,
+    });
+
+    console.log("[CurlImp] Submit response: " + submitResp.statusCode + " body: " + submitResp.body.substring(0, 300));
+
+    if (submitResp.statusCode >= 200 && submitResp.statusCode < 300) {
+      log("Form submitted on tickets.la28.org!");
+      return { success: true, formSubmitted: true };
+    } else if (submitResp.statusCode === 403) {
+      log("Akamai blocked form submission (403).");
+      return { success: false, formSubmitted: false, error: "Akamai blocked form submit" };
+    } else {
+      log("Form submit returned status " + submitResp.statusCode);
+      return { success: false, formSubmitted: false, error: "Submit status: " + submitResp.statusCode };
+    }
+  } catch (err: any) {
+    console.log("[CurlImp] Error: " + err.message.substring(0, 200));
+    log("Form fill error: " + err.message.substring(0, 80));
+    return { success: false, formSubmitted: false, error: err.message.substring(0, 100) };
+  } finally {
+    try { if (fs.existsSync(cookieFile)) fs.unlinkSync(cookieFile); } catch {}
+  }
+}
 
 let browserInstance: Browser | null = null;
 let launching = false;
@@ -1776,13 +2125,27 @@ export async function completeDrawViaGigyaBrowser(
         console.log("[Draw-Gigya] OIDC account linked! Auth code: " + (authCode?.substring(0, 20) || "unknown"));
         log("OIDC account linked with Eventim/Keycloak successfully!");
 
-        try {
-          await page.waitForTimeout(2000);
-          const postOidcUrl = page.url();
-          console.log("[Draw-Gigya] Post-OIDC URL: " + postOidcUrl);
-        } catch {}
+        if (authCode) {
+          try {
+            const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
+            const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
+            const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
 
-        log("Draw registration complete via Gigya data + OIDC linking. Form fill on tickets.la28.org skipped (Akamai protected).");
+            log("Attempting tickets.la28.org form fill via curl-impersonate...");
+            const curlResult = await ticketsFormFillViaCurl(
+              email, password, firstName, lastName, authCode, usedZip, log
+            );
+            formSubmitted = curlResult.formSubmitted;
+            if (formSubmitted) {
+              log("tickets.la28.org form submitted successfully!");
+            } else {
+              log("Form fill attempted but not submitted: " + (curlResult.error || "unknown reason"));
+            }
+          } catch (curlErr: any) {
+            console.log("[Draw-Gigya] Curl form fill error (non-fatal): " + curlErr.message.substring(0, 100));
+            log("Form fill via curl skipped: " + curlErr.message.substring(0, 60));
+          }
+        }
       } else {
         console.log("[Draw-Gigya] OIDC linking: Queue-it timeout or no redirect captured. URL: " + page.url().substring(0, 150));
         log("OIDC linking attempted but Queue-it timeout. Gigya data is still set correctly.");
