@@ -2258,71 +2258,364 @@ export async function completeDrawViaGigyaBrowser(
         redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
       }).toString();
 
+      let oidcPage = page;
       try {
         await page.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      } catch {}
-
-      let onTicketsSite = false;
-      for (let qi = 0; qi < 30 && !onTicketsSite; qi++) {
-        await page.waitForTimeout(3000);
-        const currentUrl = page.url();
-        if (currentUrl.includes('tickets.la28.org')) {
-          onTicketsSite = true;
-          console.log("[Draw-Gigya] OIDC: Browser landed on tickets.la28.org: " + currentUrl.substring(0, 100));
-          break;
-        }
-        if (qi % 10 === 0 && qi > 0) {
-          console.log("[Draw-Gigya] Waiting for Queue-it... " + (qi * 3) + "s, URL: " + currentUrl.substring(0, 80));
+      } catch (navErr: any) {
+        console.log("[Draw-Gigya] OIDC initial nav error: " + (navErr.message || '').substring(0, 100));
+        const curUrl = page.url();
+        if (curUrl.includes('chrome-error') || curUrl === 'about:blank') {
+          log("OIDC navigation crashed. Retrying with fresh page...");
+          try {
+            const newPage = await context.newPage();
+            newPage.setDefaultTimeout(30000);
+            await newPage.route("**/*", (route) => {
+              const rt = route.request().resourceType();
+              if (["image", "media", "font"].includes(rt)) return route.abort();
+              return route.continue();
+            });
+            await newPage.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            oidcPage = newPage;
+          } catch (retryErr: any) {
+            console.log("[Draw-Gigya] OIDC retry nav also failed: " + (retryErr.message || '').substring(0, 100));
+          }
         }
       }
 
-      if (onTicketsSite) {
+      let onTicketsSite = false;
+      let passedQueueIt = false;
+      for (let qi = 0; qi < 40 && !passedQueueIt; qi++) {
+        await oidcPage.waitForTimeout(3000);
+        const currentUrl = oidcPage.url();
+
+        if (currentUrl.includes('chrome-error') || currentUrl === 'about:blank') {
+          if (qi === 0) {
+            console.log("[Draw-Gigya] Page crashed on first check, attempting direct navigation...");
+            try {
+              await oidcPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+              continue;
+            } catch {}
+          }
+          if (qi > 5) {
+            console.log("[Draw-Gigya] Page stuck on chrome-error for " + (qi * 3) + "s, giving up.");
+            break;
+          }
+          continue;
+        }
+
+        const isQueueIt = currentUrl.includes('queue-it') || currentUrl.includes('?c=web&e=') || currentUrl.includes('next.tickets') || currentUrl.includes('enqueuetoken');
+        const isActualSite = currentUrl.includes('tickets.la28.org') && !isQueueIt;
+
+        if (isActualSite) {
+          passedQueueIt = true;
+          onTicketsSite = true;
+          console.log("[Draw-Gigya] OIDC: Passed Queue-it, on actual tickets.la28.org: " + currentUrl.substring(0, 120));
+          break;
+        }
+
+        if (currentUrl.includes('tickets.la28.org') && !onTicketsSite) {
+          onTicketsSite = true;
+          console.log("[Draw-Gigya] OIDC: Hit tickets.la28.org Queue-it: " + currentUrl.substring(0, 120));
+        }
+
+        if (qi % 10 === 0) {
+          console.log("[Draw-Gigya] Queue-it wait " + (qi * 3) + "s, URL: " + currentUrl.substring(0, 100));
+        }
+      }
+
+      if (!passedQueueIt && onTicketsSite) {
+        log("OIDC linked but Queue-it waiting room didn't pass. Gigya data is set correctly.");
+        console.log("[Draw-Gigya] Queue-it timeout. OIDC linked but can't reach customer data page.");
         oidcLinked = true;
-        log("OIDC account linked with Eventim/Keycloak successfully!");
+      }
 
-        await page.waitForTimeout(5000);
+      if (passedQueueIt) {
+        oidcLinked = true;
+        log("OIDC account linked! Passed Queue-it successfully.");
 
-        const browserCookies = await page.context().cookies(['https://tickets.la28.org']);
-        console.log("[Draw-Gigya] OIDC: Extracted " + browserCookies.length + " cookies from tickets.la28.org");
+        try {
+          const currentUrl = oidcPage.url();
+          if (!currentUrl.includes('/mycustomerdata')) {
+            log("Navigating to customer data page...");
+            try {
+              await oidcPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+            } catch {}
 
-        const sessionCookies = browserCookies.filter((c: any) =>
-          c.name.toLowerCase().includes('session') ||
-          c.name.toLowerCase().includes('auth') ||
-          c.name.toLowerCase().includes('jsessionid') ||
-          c.name.includes('FESESSIONID') ||
-          c.name.includes('__Host') ||
-          c.name.includes('_abck') ||
-          c.name.includes('ak_bmsc') ||
-          c.name.includes('bm_')
-        );
-        console.log("[Draw-Gigya] OIDC: Session cookies: " + browserCookies.map((c: any) => c.name + "=" + c.value.substring(0, 15)).join(", "));
+            for (let wq = 0; wq < 20; wq++) {
+              await oidcPage.waitForTimeout(3000);
+              const navUrl = oidcPage.url();
+              if (navUrl.includes('/mycustomerdata') && !navUrl.includes('queue-it') && !navUrl.includes('?c=web&e=') && !navUrl.includes('next.tickets')) {
+                console.log("[Draw-Gigya] Reached /mycustomerdata: " + navUrl.substring(0, 100));
+                break;
+              }
+              if (wq % 5 === 0) console.log("[Draw-Gigya] Waiting for /mycustomerdata... " + (wq * 3) + "s URL: " + navUrl.substring(0, 80));
+            }
+            await oidcPage.waitForTimeout(3000);
+          } else {
+            await oidcPage.waitForTimeout(5000);
+          }
 
-        if (browserCookies.length > 0) {
-          try {
+          console.log("[Draw-Gigya] OIDC: On page: " + oidcPage.url().substring(0, 120));
+
+          const pageInfo = await oidcPage.evaluate(`(() => {
+            var inputs = Array.from(document.querySelectorAll('input, select, textarea'));
+            var buttons = Array.from(document.querySelectorAll('button, [type="submit"], input[type="submit"], a.btn, a.button'));
+            var forms = Array.from(document.querySelectorAll('form'));
+            return {
+              url: window.location.href,
+              title: document.title,
+              inputCount: inputs.length,
+              inputs: inputs.slice(0, 30).map(function(el) {
+                return {
+                  tag: el.tagName,
+                  type: el.getAttribute('type') || '',
+                  name: el.getAttribute('name') || '',
+                  id: el.id || '',
+                  placeholder: el.getAttribute('placeholder') || '',
+                  label: el.getAttribute('aria-label') || '',
+                  value: el.value ? el.value.substring(0, 30) : '',
+                  classes: el.className ? el.className.substring(0, 60) : '',
+                  visible: el.offsetParent !== null
+                };
+              }),
+              buttonCount: buttons.length,
+              buttons: buttons.slice(0, 15).map(function(el) {
+                return {
+                  tag: el.tagName,
+                  type: el.getAttribute('type') || '',
+                  text: (el.textContent || '').trim().substring(0, 50),
+                  id: el.id || '',
+                  classes: el.className ? el.className.substring(0, 60) : '',
+                  visible: el.offsetParent !== null
+                };
+              }),
+              formCount: forms.length,
+              forms: forms.map(function(f) {
+                return { action: f.action || '', method: f.method || '', id: f.id || '' };
+              }),
+              bodyText: document.body ? document.body.innerText.substring(0, 1500) : ''
+            };
+          })()`) as any;
+
+          console.log("[Draw-Gigya] Page analysis: " + JSON.stringify({
+            url: pageInfo.url,
+            title: pageInfo.title,
+            inputs: pageInfo.inputCount,
+            buttons: pageInfo.buttonCount,
+            forms: pageInfo.formCount
+          }));
+          console.log("[Draw-Gigya] Inputs: " + JSON.stringify(pageInfo.inputs));
+          console.log("[Draw-Gigya] Buttons: " + JSON.stringify(pageInfo.buttons));
+          console.log("[Draw-Gigya] Body text preview: " + pageInfo.bodyText.substring(0, 500));
+
+          if (pageInfo.inputCount > 0) {
+            log("Found " + pageInfo.inputCount + " form fields on tickets.la28.org. Filling form in browser...");
+
             const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
             const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
             const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
+            const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
 
-            log("Attempting tickets.la28.org form fill with browser session...");
-            const curlResult = await ticketsFormFillWithCookies(
-              email, firstName, lastName, usedZip, browserCookies, log
-            );
-            formSubmitted = curlResult.formSubmitted;
-            if (formSubmitted) {
-              log("tickets.la28.org form submitted successfully!");
+            const fieldMap: Record<string, string> = {
+              email: email,
+              firstname: firstName, first_name: firstName, fname: firstName, givenname: firstName,
+              lastname: lastName, last_name: lastName, lname: lastName, surname: lastName, familyname: lastName,
+              country: "US",
+              zip: usedZip, zipcode: usedZip, postalcode: usedZip, postal_code: usedZip, postal: usedZip,
+              city: "Los Angeles",
+              street: "123 Olympic Blvd", address: "123 Olympic Blvd", streetandno: "123 Olympic Blvd",
+              state: "CA", province: "CA", region: "CA",
+              phone: phone, telephone: phone, mobile: phone, phonenumber: phone,
+            };
+
+            const fillResult = await oidcPage.evaluate(`((fieldMap) => {
+              var filled = [];
+              var skipped = [];
+              var inputs = document.querySelectorAll('input, select, textarea');
+
+              for (var i = 0; i < inputs.length; i++) {
+                var el = inputs[i];
+                var name = (el.getAttribute('name') || '').toLowerCase().replace(/[^a-z]/g, '');
+                var id = (el.id || '').toLowerCase().replace(/[^a-z]/g, '');
+                var placeholder = (el.getAttribute('placeholder') || '').toLowerCase().replace(/[^a-z]/g, '');
+                var ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase().replace(/[^a-z]/g, '');
+                var type = (el.getAttribute('type') || '').toLowerCase();
+
+                if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'checkbox' || type === 'radio') continue;
+                if (el.offsetParent === null) continue;
+
+                var matched = false;
+                var identifiers = [name, id, placeholder, ariaLabel];
+                for (var fi = 0; fi < identifiers.length && !matched; fi++) {
+                  var ident = identifiers[fi];
+                  if (!ident) continue;
+                  for (var key in fieldMap) {
+                    if (ident.includes(key)) {
+                      var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                      nativeInputValueSetter.call(el, fieldMap[key]);
+                      el.dispatchEvent(new Event('input', { bubbles: true }));
+                      el.dispatchEvent(new Event('change', { bubbles: true }));
+                      el.dispatchEvent(new Event('blur', { bubbles: true }));
+                      filled.push({ name: el.getAttribute('name') || el.id, key: key, value: fieldMap[key] });
+                      matched = true;
+                      break;
+                    }
+                  }
+                }
+                if (!matched) {
+                  skipped.push({ name: el.getAttribute('name') || el.id || ('input-' + i), type: type });
+                }
+              }
+
+              return { filled: filled, skipped: skipped };
+            })(${JSON.stringify(fieldMap)})`) as any;
+
+            console.log("[Draw-Gigya] Fill result: filled=" + JSON.stringify(fillResult.filled) + " skipped=" + JSON.stringify(fillResult.skipped));
+            log("Filled " + fillResult.filled.length + " fields. Skipped: " + fillResult.skipped.length);
+
+            if (fillResult.filled.length > 0) {
+              await oidcPage.waitForTimeout(1000);
+
+              for (const sel of pageInfo.inputs) {
+                if (sel.tag === 'SELECT' && sel.visible) {
+                  const selName = (sel.name || sel.id || '').toLowerCase();
+                  if (selName.includes('country')) {
+                    try {
+                      const selector = sel.id ? '#' + sel.id : (sel.name ? 'select[name="' + sel.name + '"]' : null);
+                      if (selector) {
+                        await oidcPage.selectOption(selector, { value: 'US' }).catch(() => oidcPage.selectOption(selector, { label: 'United States' }).catch(() => {}));
+                      }
+                    } catch {}
+                  }
+                  if (selName.includes('state') || selName.includes('province')) {
+                    try {
+                      const selector = sel.id ? '#' + sel.id : (sel.name ? 'select[name="' + sel.name + '"]' : null);
+                      if (selector) {
+                        await oidcPage.selectOption(selector, { value: 'CA' }).catch(() => oidcPage.selectOption(selector, { label: 'California' }).catch(() => {}));
+                      }
+                    } catch {}
+                  }
+                }
+              }
+
+              const checkboxes = await oidcPage.evaluate(`(() => {
+                var cbs = document.querySelectorAll('input[type="checkbox"]');
+                var results = [];
+                for (var i = 0; i < cbs.length; i++) {
+                  var cb = cbs[i];
+                  if (cb.offsetParent !== null && !cb.checked) {
+                    var label = (cb.getAttribute('name') || cb.id || '').toLowerCase();
+                    var parentText = (cb.parentElement ? cb.parentElement.textContent : '').toLowerCase().substring(0, 100);
+                    if (label.includes('terms') || label.includes('agree') || label.includes('consent') || label.includes('accept') ||
+                        parentText.includes('terms') || parentText.includes('agree') || parentText.includes('consent') || parentText.includes('privacy') || parentText.includes('accept')) {
+                      cb.click();
+                      results.push(label || 'checkbox-' + i);
+                    }
+                  }
+                }
+                return results;
+              })()`) as string[];
+
+              if (checkboxes.length > 0) {
+                log("Checked " + checkboxes.length + " consent checkbox(es)");
+              }
+
+              await oidcPage.waitForTimeout(500);
+
+              log("Looking for Save/Submit button...");
+              const submitResult = await oidcPage.evaluate(`(() => {
+                var buttons = document.querySelectorAll('button, input[type="submit"], a.btn, a.button, [role="button"]');
+                var saveBtn = null;
+                var saveText = '';
+
+                for (var i = 0; i < buttons.length; i++) {
+                  var btn = buttons[i];
+                  if (btn.offsetParent === null) continue;
+                  var text = (btn.textContent || '').trim().toLowerCase();
+                  var type = (btn.getAttribute('type') || '').toLowerCase();
+
+                  if (text.includes('save') || text.includes('submit') || text.includes('register') ||
+                      text.includes('confirm') || text.includes('continue') || text.includes('next') ||
+                      text.includes('complete') || type === 'submit') {
+                    saveBtn = btn;
+                    saveText = (btn.textContent || '').trim();
+                    break;
+                  }
+                }
+
+                if (!saveBtn) {
+                  var allBtns = [];
+                  for (var j = 0; j < buttons.length; j++) {
+                    if (buttons[j].offsetParent !== null) {
+                      allBtns.push((buttons[j].textContent || '').trim().substring(0, 40));
+                    }
+                  }
+                  return { clicked: false, error: 'No save/submit button found', visibleButtons: allBtns };
+                }
+
+                saveBtn.click();
+                return { clicked: true, buttonText: saveText };
+              })()`) as any;
+
+              console.log("[Draw-Gigya] Submit result: " + JSON.stringify(submitResult));
+
+              if (submitResult.clicked) {
+                log("Clicked '" + submitResult.buttonText + "' button on tickets.la28.org!");
+                formSubmitted = true;
+
+                await oidcPage.waitForTimeout(5000);
+
+                const afterSubmit = await oidcPage.evaluate(`(() => {
+                  return {
+                    url: window.location.href,
+                    title: document.title,
+                    bodySnippet: document.body ? document.body.innerText.substring(0, 500) : '',
+                    hasSuccess: document.body ? (document.body.innerText.toLowerCase().includes('success') || 
+                                document.body.innerText.toLowerCase().includes('thank') || 
+                                document.body.innerText.toLowerCase().includes('confirmed') ||
+                                document.body.innerText.toLowerCase().includes('saved') ||
+                                document.body.innerText.toLowerCase().includes('registered')) : false
+                  };
+                })()`) as any;
+
+                console.log("[Draw-Gigya] After submit: url=" + afterSubmit.url + " hasSuccess=" + afterSubmit.hasSuccess);
+                console.log("[Draw-Gigya] After submit body: " + afterSubmit.bodySnippet);
+
+                if (afterSubmit.hasSuccess) {
+                  log("Form submission confirmed! Page shows success message.");
+                } else {
+                  log("Button clicked. Page after submit: " + afterSubmit.bodySnippet.substring(0, 100));
+                }
+              } else {
+                log("Could not find Save/Submit button. Visible buttons: " + (submitResult.visibleButtons || []).join(', '));
+                console.log("[Draw-Gigya] No submit button. Attempting form.submit() fallback...");
+
+                const formSubmitResult = await oidcPage.evaluate(`(() => {
+                  var forms = document.querySelectorAll('form');
+                  if (forms.length > 0) {
+                    try { forms[0].submit(); return { submitted: true, formAction: forms[0].action }; }
+                    catch(e) { return { submitted: false, error: e.message }; }
+                  }
+                  return { submitted: false, error: 'No form elements found' };
+                })()`) as any;
+
+                console.log("[Draw-Gigya] Form.submit() result: " + JSON.stringify(formSubmitResult));
+                if (formSubmitResult.submitted) {
+                  formSubmitted = true;
+                  log("Form submitted via form.submit() fallback!");
+                }
+              }
             } else {
-              log("Form fill attempted but not submitted: " + (curlResult.error || "unknown reason"));
+              log("No form fields matched on tickets.la28.org. Page may require different interaction.");
             }
-          } catch (curlErr: any) {
-            console.log("[Draw-Gigya] Form fill error (non-fatal): " + curlErr.message.substring(0, 100));
-            log("Form fill skipped: " + curlErr.message.substring(0, 60));
+          } else {
+            log("No input fields found on tickets.la28.org. Page may still be loading or is a different layout.");
+            console.log("[Draw-Gigya] Page body: " + pageInfo.bodyText.substring(0, 800));
           }
-        } else {
-          log("No session cookies from tickets.la28.org. OIDC linking done but form fill skipped.");
+        } catch (formErr: any) {
+          console.log("[Draw-Gigya] Browser form fill error (non-fatal): " + formErr.message.substring(0, 150));
+          log("Browser form fill error: " + formErr.message.substring(0, 80));
         }
-      } else {
-        console.log("[Draw-Gigya] OIDC: Queue-it timeout. URL: " + page.url().substring(0, 150));
-        log("OIDC linking attempted but Queue-it timeout. Gigya data is still set correctly.");
       }
     } catch (oidcErr: any) {
       console.log("[Draw-Gigya] OIDC linking error (non-fatal): " + oidcErr.message.substring(0, 100));
