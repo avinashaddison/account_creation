@@ -2261,346 +2261,309 @@ export async function completeDrawViaGigyaBrowser(
 
     let oidcLinked = false;
     try {
-      log("Attempting OIDC linking via Scrapfly Queue-it bypass + Playwright form fill...");
-      console.log("[Draw-Gigya] Starting Scrapfly cookie extraction for " + email);
-
-      let scrapflyKey = "";
-      try {
-        const keyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'scrapfly_api_key' LIMIT 1`);
-        if (keyRow.rows.length > 0 && keyRow.rows[0].value) scrapflyKey = keyRow.rows[0].value as string;
-      } catch {}
-      if (!scrapflyKey) scrapflyKey = "scp-live-586b4b4ff17c4e978ebcbaa4bfe3de48";
+      log("Attempting OIDC linking via browser token extraction + HTTP...");
+      console.log("[OIDC-HTTP] Starting OIDC flow for " + email);
 
       const https = await import("https");
-      const fetchScrapfly = (url: string): Promise<any> => {
+      const http = await import("http");
+      const { URL: NodeURL } = await import("url");
+
+      const httpRequest = (urlStr: string, options: any = {}): Promise<{status: number; headers: any; body: string; location?: string}> => {
         return new Promise((resolve, reject) => {
-          const req = https.get(url, { timeout: 130000 }, (res: any) => {
+          const parsedUrl = new NodeURL(urlStr);
+          const isHttps = parsedUrl.protocol === 'https:';
+          const lib = isHttps ? https : http;
+          const reqOptions: any = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (isHttps ? 443 : 80),
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            timeout: 30000
+          };
+          const req = lib.request(reqOptions, (res: any) => {
             let data = "";
             res.on("data", (chunk: string) => { data += chunk; });
             res.on("end", () => {
-              try { resolve(JSON.parse(data)); }
-              catch { resolve({ error: "parse_error", raw: data.substring(0, 500) }); }
+              resolve({
+                status: res.statusCode,
+                headers: res.headers,
+                body: data,
+                location: res.headers.location || res.headers.Location
+              });
             });
           });
           req.on("error", reject);
-          req.on("timeout", () => { req.destroy(); reject(new Error("Scrapfly request timeout")); });
+          req.on("timeout", () => { req.destroy(); reject(new Error("HTTP timeout")); });
+          if (options.body) req.write(options.body);
+          req.end();
         });
       };
 
-      log("Step 1: Getting Queue-it cookies via Scrapfly for /mycustomerdata/...");
-      const sessionId = "la28_oidc_" + Date.now() + "_" + Math.random().toString(36).substring(7);
+      log("Step 1: Extracting Gigya session from browser...");
+      const browserSession = await page.evaluate(`(() => {
+        return new Promise(function(resolve) {
+          if (typeof gigya === 'undefined') { resolve({ error: 'no_gigya' }); return; }
+          gigya.accounts.getAccountInfo({
+            callback: function(resp) {
+              var cookies = document.cookie.split(';').map(function(c) { return c.trim(); });
+              var loginToken = '';
+              for (var i = 0; i < cookies.length; i++) {
+                if (cookies[i].indexOf('glt_') === 0) { loginToken = cookies[i].split('=')[1] || ''; break; }
+              }
+              var apiDomain = '';
+              try { apiDomain = gigya.thisScript.APIKey || ''; } catch(e) {}
+              resolve({
+                uid: resp.UID || '',
+                loginToken: loginToken,
+                apiDomain: apiDomain,
+                errorCode: resp.errorCode,
+                allCookies: cookies.filter(function(c) { return c.indexOf('gig') === 0 || c.indexOf('glt') === 0 || c.indexOf('gst') === 0 || c.indexOf('ucid') === 0; })
+              });
+            }
+          });
+          setTimeout(function() { resolve({ error: 'timeout' }); }, 10000);
+        });
+      })()`) as any;
 
-      const targetUrls = [
-        "https://tickets.la28.org/mycustomerdata/",
-        "https://tickets.la28.org/"
-      ];
+      console.log("[OIDC-HTTP] Browser session: uid=" + (browserSession.uid || "none").substring(0, 12) + " loginToken=" + (browserSession.loginToken ? browserSession.loginToken.substring(0, 20) + "..." : "none") + " cookies=" + (browserSession.allCookies || []).length);
 
-      let allCookies: any[] = [];
+      const loginToken = browserSession.loginToken || "";
+      if (!loginToken) {
+        log("No Gigya login token found in browser. OIDC skipped.");
+        throw new Error("No login token in browser cookies");
+      }
 
-      for (const targetUrl of targetUrls) {
-        const scrapflyUrl = new URL("https://api.scrapfly.io/scrape");
-        scrapflyUrl.searchParams.set("key", scrapflyKey);
-        scrapflyUrl.searchParams.set("url", targetUrl);
-        scrapflyUrl.searchParams.set("render_js", "true");
-        scrapflyUrl.searchParams.set("asp", "true");
-        scrapflyUrl.searchParams.set("retry", "false");
-        scrapflyUrl.searchParams.set("rendering_wait", "5000");
-        scrapflyUrl.searchParams.set("timeout", "90000");
-        scrapflyUrl.searchParams.set("session", sessionId);
-        scrapflyUrl.searchParams.set("tags", "player,project:default");
-        scrapflyUrl.searchParams.set("country", "us");
+      log("Got Gigya login token from browser. Extracting browser cookies...");
+      const browserCookies = await context.cookies();
+      const gigyaCookieNames = browserCookies.filter(c =>
+        c.name.startsWith("gig") || c.name.startsWith("glt_") || c.name.startsWith("gst_") || c.name.startsWith("ucid")
+      );
+      console.log("[OIDC-HTTP] Browser cookies: total=" + browserCookies.length + " gigya=" + gigyaCookieNames.length);
+      for (const c of gigyaCookieNames) {
+        console.log("[OIDC-HTTP] Cookie: " + c.name + "=" + (c.value || "").substring(0, 30) + " domain=" + c.domain);
+      }
 
-        const result = await fetchScrapfly(scrapflyUrl.toString());
+      log("Starting OIDC redirect chain...");
+      const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+        response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
+        kc_idp_hint: 'gigya', ui_locales: 'en',
+        redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+      }).toString();
 
-        if (result.code || result.error_id) {
-          console.log("[Scrapfly] Error for " + targetUrl + ": " + (result.message || result.code));
+      let currentUrl = oidcAuthUrl;
+      let cookieJar: Record<string, string> = {};
+      let redirectCount = 0;
+      const maxRedirects = 25;
+      let finalBody = "";
+      let queueItBypassed = false;
+
+      for (let ri = 0; ri < maxRedirects; ri++) {
+        const cookieHeader = Object.entries(cookieJar).map(([k, v]) => k + "=" + v).join("; ");
+        const headers: any = {};
+        if (cookieHeader) headers["Cookie"] = cookieHeader;
+        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+        headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+        console.log("[OIDC-HTTP] Redirect " + ri + ": " + currentUrl.substring(0, 120));
+
+        const res = await httpRequest(currentUrl, { headers });
+
+        if (res.headers["set-cookie"]) {
+          const setCookies = Array.isArray(res.headers["set-cookie"]) ? res.headers["set-cookie"] : [res.headers["set-cookie"]];
+          for (const sc of setCookies) {
+            const match = sc.match(/^([^=]+)=([^;]*)/);
+            if (match) cookieJar[match[1]] = match[2];
+          }
+        }
+
+        if (res.status >= 300 && res.status < 400 && res.location) {
+          let nextUrl = res.location;
+          if (nextUrl.startsWith("/")) {
+            const base = new NodeURL(currentUrl);
+            nextUrl = base.protocol + "//" + base.host + nextUrl;
+          }
+
+          if (nextUrl.includes("fidm.gigya.com") || nextUrl.includes("socialize.gigya") || nextUrl.includes("login.gigya")) {
+            const sep = nextUrl.includes("?") ? "&" : "?";
+            nextUrl += sep + "login_token=" + encodeURIComponent(loginToken);
+            console.log("[OIDC-HTTP] Injecting Gigya session token into broker redirect");
+          }
+
+          currentUrl = nextUrl;
+          redirectCount++;
           continue;
         }
 
-        const ctx = result.context || {};
-        const res = result.result || {};
-        const cookies = ctx.session?.cookie_jar || [];
-        console.log("[Scrapfly] " + targetUrl.substring(25) + ": status=" + res.status_code + " redirects=" + (ctx.redirects || []).length + " cookies=" + cookies.length);
+        if (res.body.includes("proxy.html") || res.body.includes("gigya.accounts")) {
+          console.log("[OIDC-HTTP] Hit Gigya broker page. Body: " + res.body.substring(0, 200));
 
-        for (const c of cookies) {
-          if (!allCookies.find((e: any) => e.name === c.name && e.domain === c.domain)) {
-            allCookies.push(c);
+          const contextMatch = res.body.match(/context['"]\s*[:=]\s*['"]([^'"]+)/);
+          const modeMatch = res.body.match(/mode['"]\s*[:=]\s*['"]([^'"]+)/);
+          log("On Gigya broker page" + (contextMatch ? " (has context)" : "") + (modeMatch ? " mode=" + modeMatch[1] : ""));
+
+          const loginTokenUrl = currentUrl + (currentUrl.includes("?") ? "&" : "?") + "login_token=" + encodeURIComponent(loginToken);
+          const brokerRes = await httpRequest(loginTokenUrl, { headers });
+          if (brokerRes.status >= 300 && brokerRes.status < 400 && brokerRes.location) {
+            currentUrl = brokerRes.location;
+            if (currentUrl.startsWith("/")) {
+              const base = new NodeURL(loginTokenUrl);
+              currentUrl = base.protocol + "//" + base.host + currentUrl;
+            }
+            continue;
+          }
+
+          const oidcCallbackMatch = res.body.match(/(https:\/\/public-api\.eventim\.com\/identity\/auth\/realms\/la28-org\/broker\/gigya\/endpoint[^'"]*)/);
+          if (oidcCallbackMatch) {
+            currentUrl = oidcCallbackMatch[1].replace(/&amp;/g, "&");
+            console.log("[OIDC-HTTP] Found Keycloak callback in broker page: " + currentUrl.substring(0, 100));
+            continue;
           }
         }
-      }
 
-      const sessionCookies = allCookies;
-      console.log("[Scrapfly] Total unique cookies collected: " + sessionCookies.length);
+        if ((res.body.includes("queue-it") || res.body.includes("QueueITAccepted") || currentUrl.includes("next.tickets.la28.org")) && !queueItBypassed) {
+          queueItBypassed = true;
+          console.log("[OIDC-HTTP] Hit Queue-it page. Using Scrapfly to bypass...");
+          log("Hit Queue-it. Bypassing via Scrapfly for cookies only...");
 
-      const queueItCookies: Array<{name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean}> = [];
-      for (const c of sessionCookies) {
-        console.log("[Scrapfly] Cookie: " + c.name + " domain=" + c.domain + " val=" + (c.value || "").substring(0, 30));
-        queueItCookies.push({
-          name: c.name,
-          value: c.value,
-          domain: c.domain || ".la28.org",
-          path: c.path || "/",
-          secure: c.secure !== false,
-          httpOnly: c.http_only || false
-        });
-      }
-
-      if (queueItCookies.length > 0) {
-        log("Got " + queueItCookies.length + " cookies from Scrapfly. Injecting into browser...");
-
-        for (const cookie of queueItCookies) {
+          let scrapflyKey = "";
           try {
-            await context.addCookies([{
-              name: cookie.name,
-              value: cookie.value,
-              domain: cookie.domain,
-              path: cookie.path,
-              secure: cookie.secure,
-              httpOnly: cookie.httpOnly
-            }]);
-          } catch (cookieErr: any) {
-            console.log("[Scrapfly] Cookie inject error for " + cookie.name + ": " + cookieErr.message.substring(0, 60));
+            const keyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'scrapfly_api_key' LIMIT 1`);
+            if (keyRow.rows.length > 0 && keyRow.rows[0].value) scrapflyKey = keyRow.rows[0].value as string;
+          } catch {}
+          if (!scrapflyKey) scrapflyKey = "scp-live-586b4b4ff17c4e978ebcbaa4bfe3de48";
+
+          const scrapflyUrl = new NodeURL("https://api.scrapfly.io/scrape");
+          scrapflyUrl.searchParams.set("key", scrapflyKey);
+          scrapflyUrl.searchParams.set("url", currentUrl);
+          scrapflyUrl.searchParams.set("render_js", "true");
+          scrapflyUrl.searchParams.set("asp", "true");
+          scrapflyUrl.searchParams.set("retry", "false");
+          scrapflyUrl.searchParams.set("rendering_wait", "8000");
+          scrapflyUrl.searchParams.set("timeout", "90000");
+          scrapflyUrl.searchParams.set("country", "us");
+
+          const scrapRes = await httpRequest(scrapflyUrl.toString());
+          let scrapData: any = {};
+          try { scrapData = JSON.parse(scrapRes.body); } catch {}
+
+          if (scrapData.result || scrapData.context) {
+            const scrapCookies = (scrapData.context?.session?.cookie_jar || scrapData.context?.cookies || []);
+            const queueItCookieCount = scrapCookies.filter((c: any) => c.name && (c.name.includes("QueueIT") || c.name.includes("queue-it"))).length;
+            console.log("[OIDC-HTTP] Scrapfly cookies: " + scrapCookies.length + " total, " + queueItCookieCount + " Queue-it");
+
+            for (const c of scrapCookies) {
+              if (c.name) cookieJar[c.name] = c.value || "";
+              console.log("[OIDC-HTTP] Scrapfly cookie: " + (c.name || "?") + "=" + ((c.value || "").substring(0, 30)) + " domain=" + (c.domain || ""));
+            }
+
+            cookieJar["glt_4_w4CcQ6tKu4jTeDPirnKxnA"] = loginToken;
+            console.log("[OIDC-HTTP] Injected Gigya login token cookie. Re-requesting OIDC auth URL...");
+            log("Got Queue-it cookies from Scrapfly. Re-requesting OIDC with Gigya token...");
+
+            currentUrl = oidcAuthUrl;
+            continue;
           }
+
+          log("Scrapfly failed to get Queue-it cookies.");
+          break;
         }
 
-        log("Step 2: Navigating to tickets.la28.org with Queue-it cookies...");
-        const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
-          response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
-          kc_idp_hint: 'gigya', ui_locales: 'en',
-          redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
-        }).toString();
+        if (currentUrl.includes("tickets.la28.org") && !currentUrl.includes("next.tickets")) {
+          finalBody = res.body;
+          console.log("[OIDC-HTTP] Reached tickets.la28.org! Status: " + res.status);
+          log("Reached tickets.la28.org! Status: " + res.status);
+          break;
+        }
 
-        let oidcPage = page;
+        finalBody = res.body;
+        console.log("[OIDC-HTTP] Non-redirect response at " + currentUrl.substring(0, 80) + " status=" + res.status);
+        break;
+      }
+
+      console.log("[OIDC-HTTP] Final URL: " + currentUrl.substring(0, 120) + " redirects=" + redirectCount);
+      console.log("[OIDC-HTTP] Body length: " + finalBody.length + " preview: " + finalBody.substring(0, 200));
+
+      if (currentUrl.includes("tickets.la28.org") || finalBody.includes("mycustomerdata")) {
+        oidcLinked = true;
+        log("OIDC linked! Now submitting customer data form...");
+
+        const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
+        const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
+        const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
+        const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
+
+        const formTokenMatch = finalBody.match(/name="csrf[_-]?token"[^>]*value="([^"]+)"/i) ||
+                               finalBody.match(/name="_token"[^>]*value="([^"]+)"/i) ||
+                               finalBody.match(/csrfToken['"]\s*:\s*['"]([^'"]+)/);
+        const csrfToken = formTokenMatch ? formTokenMatch[1] : "";
+        const actionMatch = finalBody.match(/<form[^>]*action="([^"]+)"/i);
+        const formAction = actionMatch ? actionMatch[1].replace(/&amp;/g, "&") : currentUrl;
+
+        console.log("[OIDC-HTTP] Form action: " + formAction.substring(0, 80) + " csrf: " + (csrfToken ? "yes" : "no"));
+
+        const formData: Record<string, string> = {
+          email: email,
+          firstName: firstName,
+          first_name: firstName,
+          lastname: lastName,
+          last_name: lastName,
+          country: "US",
+          zipCode: usedZip,
+          zip: usedZip,
+          postalCode: usedZip,
+          city: "Los Angeles",
+          state: "CA",
+          street: "123 Olympic Blvd",
+          phone: phone,
+          acceptTerms: "true",
+          consent: "true",
+          termsAccepted: "true"
+        };
+        if (csrfToken) formData["_token"] = csrfToken;
+
+        const formBody = new URLSearchParams(formData).toString();
+        const cookieHeader = Object.entries(cookieJar).map(([k, v]) => k + "=" + v).join("; ");
+        let submitUrl = formAction;
+        if (submitUrl.startsWith("/")) {
+          const base = new NodeURL(currentUrl);
+          submitUrl = base.protocol + "//" + base.host + submitUrl;
+        }
+
         try {
-          await page.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        } catch (navErr: any) {
-          console.log("[Draw-Gigya] OIDC nav error: " + (navErr.message || '').substring(0, 100));
-          const curUrl = page.url();
-          if (curUrl.includes('chrome-error') || curUrl === 'about:blank') {
-            log("Browser crashed. Trying direct customer data URL...");
-            try {
-              const newPage = await context.newPage();
-              newPage.setDefaultTimeout(30000);
-              await newPage.route("**/*", (route) => {
-                const rt = route.request().resourceType();
-                if (["image", "media", "font"].includes(rt)) return route.abort();
-                return route.continue();
-              });
-              await newPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-              oidcPage = newPage;
-            } catch (retryErr: any) {
-              console.log("[Draw-Gigya] Retry nav also failed: " + (retryErr.message || '').substring(0, 100));
-            }
+          const submitRes = await httpRequest(submitUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Cookie": cookieHeader,
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": currentUrl,
+              "Origin": new NodeURL(currentUrl).origin
+            },
+            body: formBody
+          });
+
+          console.log("[OIDC-HTTP] Form submit: status=" + submitRes.status + " location=" + (submitRes.location || "none").substring(0, 80));
+          console.log("[OIDC-HTTP] Submit body: " + submitRes.body.substring(0, 300));
+
+          if (submitRes.status < 400) {
+            formSubmitted = true;
+            log("Customer data form submitted! Status: " + submitRes.status);
+          } else {
+            log("Form submit returned " + submitRes.status);
           }
+        } catch (submitErr: any) {
+          console.log("[OIDC-HTTP] Form submit error: " + submitErr.message.substring(0, 80));
+          log("Form submit error: " + submitErr.message.substring(0, 60));
         }
-
-        await oidcPage.waitForTimeout(5000);
-        const currentUrl = oidcPage.url();
-        console.log("[Draw-Gigya] After OIDC nav URL: " + currentUrl.substring(0, 120));
-
-        const isOnTickets = currentUrl.includes('tickets.la28.org') && !currentUrl.includes('next.tickets') && !currentUrl.includes('chrome-error');
-        const isOnProxy = currentUrl.includes('la28id.la28.org/proxy.html') || currentUrl.includes('la28id.la28.org/login') || currentUrl.includes('la28id.la28.org/consent');
-        const isOnQueueIt = currentUrl.includes('next.tickets.la28.org');
-
-        if (isOnQueueIt) {
-          log("Hit Queue-it waiting room after OIDC nav. Waiting for pass-through...");
-          for (let qi = 0; qi < 20; qi++) {
-            await oidcPage.waitForTimeout(5000);
-            const qUrl = oidcPage.url();
-            console.log("[Draw-Gigya] Queue-it wait " + qi + ": " + qUrl.substring(0, 100));
-            if (qUrl.includes('tickets.la28.org') && !qUrl.includes('next.tickets')) {
-              log("Queue-it passed! Now on tickets.la28.org");
-              break;
-            }
-            if (qUrl.includes('chrome-error') || qUrl === 'about:blank') {
-              log("Browser crashed in Queue-it.");
-              break;
-            }
-          }
-        }
-
-        const afterQueueUrl = oidcPage.url();
-        const isNowOnTickets = afterQueueUrl.includes('tickets.la28.org') && !afterQueueUrl.includes('next.tickets');
-        const isNowOnProxy = afterQueueUrl.includes('la28id.la28.org');
-
-        if (isOnTickets || isOnProxy || isNowOnTickets || isNowOnProxy) {
-          oidcLinked = true;
-
-          if (isOnProxy || isNowOnProxy) {
-            log("On Gigya login page. Logging in via OIDC broker...");
-            try {
-              await oidcPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined', { timeout: 15000 });
-
-              oidcPage.evaluate(`
-                gigya.accounts.login({
-                  loginID: '${email.replace(/'/g, "\\'")}',
-                  password: '${password.replace(/'/g, "\\'")}',
-                  callback: function(resp) {
-                    window.__gigyaLoginResult = { errorCode: resp.errorCode, uid: resp.UID || null };
-                  }
-                });
-              `).catch(() => {});
-
-              for (let wi = 0; wi < 30; wi++) {
-                await oidcPage.waitForTimeout(3000);
-                const navUrl = oidcPage.url();
-                console.log("[Draw-Gigya] Proxy login wait " + (wi * 3) + "s URL: " + navUrl.substring(0, 120));
-
-                if (navUrl.includes('tickets.la28.org') && !navUrl.includes('next.tickets')) {
-                  log("OIDC redirected to tickets.la28.org!");
-                  break;
-                }
-                if (navUrl.includes('chrome-error') || navUrl === 'about:blank') {
-                  log("Browser crashed during OIDC redirect.");
-                  break;
-                }
-                if (navUrl.includes('next.tickets.la28.org')) {
-                  log("Hit Queue-it waiting room. Waiting for pass-through (attempt " + wi + ")...");
-                  continue;
-                }
-                if (!navUrl.includes('la28id.la28.org') && !navUrl.includes('next.tickets') && !navUrl.includes('eventim.com')) {
-                  log("Navigated to: " + navUrl.substring(0, 80));
-                  break;
-                }
-              }
-            } catch (loginErr: any) {
-              console.log("[Draw-Gigya] Proxy login error: " + (loginErr.message || '').substring(0, 80));
-            }
-          }
-
-          const finalUrl = oidcPage.url();
-          if (finalUrl.includes('/mycustomerdata') || finalUrl.includes('tickets.la28.org')) {
-            log("On tickets.la28.org! Analyzing page for form...");
-
-            const pageInfo = await oidcPage.evaluate(`(() => {
-              var inputs = Array.from(document.querySelectorAll('input, select, textarea'));
-              var buttons = Array.from(document.querySelectorAll('button, [type="submit"], input[type="submit"]'));
-              return {
-                url: window.location.href,
-                title: document.title,
-                inputCount: inputs.length,
-                inputs: inputs.slice(0, 20).map(function(el) {
-                  return { tag: el.tagName, type: el.getAttribute('type') || '', name: el.getAttribute('name') || '', id: el.id || '', visible: el.offsetParent !== null };
-                }),
-                buttonCount: buttons.length,
-                buttons: buttons.slice(0, 10).map(function(el) {
-                  return { text: (el.textContent || '').trim().substring(0, 40), visible: el.offsetParent !== null };
-                }),
-                bodyText: document.body ? document.body.innerText.substring(0, 800) : ''
-              };
-            })()`) as any;
-
-            console.log("[Draw-Gigya] Page: url=" + pageInfo.url.substring(0, 100) + " inputs=" + pageInfo.inputCount + " buttons=" + pageInfo.buttonCount);
-            console.log("[Draw-Gigya] Body: " + pageInfo.bodyText.substring(0, 300));
-
-            if (pageInfo.inputCount > 0) {
-              log("Found " + pageInfo.inputCount + " form fields. Filling...");
-
-              const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
-              const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
-              const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
-              const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
-
-              const fieldMap: Record<string, string> = {
-                email: email, firstname: firstName, first_name: firstName,
-                lastname: lastName, last_name: lastName,
-                country: "US", zip: usedZip, zipcode: usedZip, postalcode: usedZip,
-                city: "Los Angeles", street: "123 Olympic Blvd", address: "123 Olympic Blvd",
-                state: "CA", province: "CA",
-                phone: phone, telephone: phone
-              };
-
-              const fillResult = await oidcPage.evaluate(`((fieldMap) => {
-                var filled = [], skipped = [];
-                var inputs = document.querySelectorAll('input, select, textarea');
-                for (var i = 0; i < inputs.length; i++) {
-                  var el = inputs[i];
-                  var type = (el.getAttribute('type') || '').toLowerCase();
-                  if (type === 'hidden' || type === 'submit' || type === 'button') continue;
-                  if (el.offsetParent === null) continue;
-                  if (type === 'checkbox' && !el.checked) {
-                    var lbl = (el.getAttribute('name') || el.id || '').toLowerCase();
-                    var pt = (el.parentElement ? el.parentElement.textContent : '').toLowerCase().substring(0, 100);
-                    if (lbl.includes('terms') || lbl.includes('consent') || lbl.includes('agree') || pt.includes('terms') || pt.includes('consent') || pt.includes('privacy')) {
-                      el.click(); filled.push('cb:' + (lbl || i));
-                    }
-                    continue;
-                  }
-                  var name = (el.getAttribute('name') || '').toLowerCase().replace(/[^a-z]/g, '');
-                  var id = (el.id || '').toLowerCase().replace(/[^a-z]/g, '');
-                  var matched = false;
-                  for (var ident of [name, id]) {
-                    if (!ident) continue;
-                    for (var key in fieldMap) {
-                      if (ident.includes(key)) {
-                        if (el.tagName === 'SELECT') {
-                          for (var oi = 0; oi < el.options.length; oi++) {
-                            if (el.options[oi].value === fieldMap[key] || el.options[oi].text.toLowerCase().includes(fieldMap[key].toLowerCase())) {
-                              el.selectedIndex = oi; el.dispatchEvent(new Event('change', {bubbles: true}));
-                              filled.push('sel:' + key); break;
-                            }
-                          }
-                        } else {
-                          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-                          if (setter && setter.set) setter.set.call(el, fieldMap[key]);
-                          else el.value = fieldMap[key];
-                          el.dispatchEvent(new Event('input', {bubbles: true}));
-                          el.dispatchEvent(new Event('change', {bubbles: true}));
-                          filled.push('inp:' + key);
-                        }
-                        matched = true; break;
-                      }
-                    }
-                    if (matched) break;
-                  }
-                  if (!matched) skipped.push(name || id || 'field-' + i);
-                }
-                return { filled: filled, skipped: skipped };
-              })(${JSON.stringify(fieldMap)})`) as any;
-
-              log("Filled " + fillResult.filled.length + " fields, skipped " + fillResult.skipped.length);
-              console.log("[Draw-Gigya] Fill: " + JSON.stringify(fillResult.filled) + " skip: " + JSON.stringify(fillResult.skipped));
-
-              if (fillResult.filled.length > 0) {
-                await oidcPage.waitForTimeout(1000);
-
-                const submitResult = await oidcPage.evaluate(`(() => {
-                  var buttons = document.querySelectorAll('button, input[type="submit"], [role="button"]');
-                  for (var i = 0; i < buttons.length; i++) {
-                    var btn = buttons[i];
-                    if (btn.offsetParent === null) continue;
-                    var text = (btn.textContent || '').trim().toLowerCase();
-                    if (text.includes('save') || text.includes('submit') || text.includes('register') ||
-                        text.includes('confirm') || text.includes('continue') || text.includes('complete') ||
-                        (btn.getAttribute('type') || '').toLowerCase() === 'submit') {
-                      btn.click();
-                      return { clicked: true, text: (btn.textContent || '').trim() };
-                    }
-                  }
-                  return { clicked: false, buttons: Array.from(buttons).filter(b => b.offsetParent !== null).map(b => (b.textContent || '').trim().substring(0, 30)) };
-                })()`) as any;
-
-                if (submitResult.clicked) {
-                  formSubmitted = true;
-                  log("Clicked '" + submitResult.text + "' on tickets.la28.org!");
-                  await oidcPage.waitForTimeout(3000);
-                } else {
-                  log("No submit button found. Visible: " + (submitResult.buttons || []).join(", "));
-                }
-              }
-            } else {
-              log("No form inputs on page. Content: " + pageInfo.bodyText.substring(0, 100));
-            }
-          }
-        } else {
-          log("Browser didn't reach tickets site. URL: " + currentUrl.substring(0, 80));
-          console.log("[Draw-Gigya] Not on tickets site after cookie injection. URL: " + currentUrl);
-        }
+      } else if (currentUrl.includes("la28id.la28.org") || currentUrl.includes("gigya")) {
+        log("OIDC stopped at Gigya/broker. Redirect chain didn't complete fully.");
+        console.log("[OIDC-HTTP] Stopped at broker. Cookies: " + Object.keys(cookieJar).join(", "));
       } else {
-        log("Scrapfly returned no cookies. Queue-it bypass may have failed.");
+        log("OIDC didn't reach tickets site. Final URL: " + currentUrl.substring(0, 60));
       }
     } catch (oidcErr: any) {
-      console.log("[Draw-Gigya] OIDC error (non-fatal): " + (oidcErr.message || '').substring(0, 150));
+      console.log("[OIDC-HTTP] OIDC error (non-fatal): " + (oidcErr.message || '').substring(0, 150));
       log("OIDC/form fill skipped: " + (oidcErr.message || '').substring(0, 80));
     }
 
