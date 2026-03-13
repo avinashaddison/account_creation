@@ -1867,7 +1867,8 @@ export async function completeDrawViaGigyaBrowser(
   email: string,
   password: string,
   zipCode: string | undefined,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  onEarlyComplete?: () => void
 ): Promise<{ success: boolean; profileSet: boolean; dataSet: boolean; formSubmitted?: boolean; error?: string }> {
   const usedZip = zipCode || generateUSZip();
   const birthYear = generateRandomBirthYear();
@@ -2239,6 +2240,11 @@ export async function completeDrawViaGigyaBrowser(
     console.log("[Draw-Gigya] Verify result: " + JSON.stringify(verifyResult));
     if (verifyResult.ticketing === "true" || verifyResult.ticketing === true) {
       log("Verified: l2028_ticketing=" + verifyResult.ticketing + " fan28=" + verifyResult.fan28 + " birthYear=" + verifyResult.birthYear + " zip=" + verifyResult.zip);
+    }
+
+    if (profileSet && dataSet && onEarlyComplete) {
+      console.log("[Draw-Gigya] Profile+Data confirmed set, marking completed early before OIDC step");
+      onEarlyComplete();
     }
 
     let oidcLinked = false;
@@ -3069,21 +3075,30 @@ async function doRegistration(
     log("Setting draw registration via Gigya browser (no proxy needed)...");
     let drawSuccess = false;
     try {
-      const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log);
-      if (gigyaResult.success) {
+      const earlyComplete = () => {
+        if (!drawSuccess) {
+          drawSuccess = true;
+          onStatusUpdate("completed");
+          log("Draw registration confirmed (profile+data set). Marked completed.");
+        }
+      };
+      const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log, earlyComplete);
+      if (gigyaResult.success && !drawSuccess) {
         onStatusUpdate("completed");
         log("Full flow complete! Draw registration set via Gigya browser.");
         drawSuccess = true;
-      } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
+      } else if ((gigyaResult.profileSet || gigyaResult.dataSet) && !drawSuccess) {
         onStatusUpdate("completed");
         log("Draw registration partially set (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
         drawSuccess = true;
-      } else {
+      } else if (!drawSuccess) {
         log("Gigya browser draw failed: " + (gigyaResult.error || "unknown") + ". Falling back to REST API...");
       }
     } catch (drawErr: any) {
       console.log("[Playwright] Draw error:", drawErr.message);
-      log("Draw error (" + drawErr.message.substring(0, 80) + "). Falling back to REST API...");
+      if (!drawSuccess) {
+        log("Draw error (" + drawErr.message.substring(0, 80) + "). Falling back to REST API...");
+      }
     }
 
     if (!drawSuccess) {
