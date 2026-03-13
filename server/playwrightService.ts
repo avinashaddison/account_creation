@@ -181,6 +181,151 @@ async function navigateQueueIt(
   return false;
 }
 
+export async function ticketsFormFillWithCookies(
+  email: string,
+  firstName: string,
+  lastName: string,
+  zipCode: string,
+  browserCookies: Array<{ name: string; value: string; domain?: string; path?: string }>,
+  log: (msg: string) => void
+): Promise<{ success: boolean; formSubmitted: boolean; error?: string }> {
+  const available = await ensureCurlImpersonate();
+  if (!available) {
+    log("curl-impersonate not available, skipping form fill");
+    return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
+  }
+
+  let proxyUrl = "";
+  try {
+    const proxyRows = await db.execute(sql`SELECT value FROM settings WHERE key = 'iproyal_proxy_url' LIMIT 1`);
+    const rows = proxyRows.rows as any[];
+    if (rows.length > 0 && rows[0].value) proxyUrl = rows[0].value;
+  } catch {}
+  if (!proxyUrl) proxyUrl = "http://jRSA9eevoPMBKCs2:MTDugb6mPndnM5VJ@geo.iproyal.com:12321";
+
+  const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
+
+  try {
+    log("Starting tickets.la28.org form fill with browser cookies...");
+    console.log("[CurlCookie] Session: " + sessionId + " cookies: " + browserCookies.length);
+
+    const cookieLines = ["# Netscape HTTP Cookie File"];
+    for (const c of browserCookies) {
+      const domain = c.domain || ".tickets.la28.org";
+      const domainFlag = domain.startsWith(".") ? "TRUE" : "FALSE";
+      const cookiePath = c.path || "/";
+      const secure = "TRUE";
+      const expiry = Math.floor(Date.now() / 1000) + 86400;
+      cookieLines.push(`${domain}\t${domainFlag}\t${cookiePath}\t${secure}\t${expiry}\t${c.name}\t${c.value}`);
+    }
+    fs.writeFileSync(cookieFile, cookieLines.join("\n") + "\n");
+    console.log("[CurlCookie] Wrote " + browserCookies.length + " cookies to " + cookieFile);
+
+    const regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+      cookieFile,
+      proxy: proxyUrl,
+      headers: {
+        "Accept": "application/json",
+        "Referer": "https://tickets.la28.org/mycustomerdata/",
+      },
+    });
+
+    console.log("[CurlCookie] Registration form: " + regResp.statusCode + " size=" + regResp.body.length);
+
+    if (regResp.statusCode === 403) {
+      log("Akamai blocked API call (403). Browser cookies may not transfer to curl.");
+      return { success: false, formSubmitted: false, error: "Akamai blocked (403)" };
+    }
+
+    let xsrfToken = "";
+    let formFields: any = null;
+    try {
+      const regData = JSON.parse(regResp.body);
+      xsrfToken = regData.xsrfToken || "";
+      formFields = regData.registrationForm || regData;
+      console.log("[CurlCookie] XSRF: " + xsrfToken + ", form keys: " + Object.keys(formFields).join(","));
+    } catch {
+      console.log("[CurlCookie] Could not parse registration response: " + regResp.body.substring(0, 200));
+      return { success: false, formSubmitted: false, error: "Could not parse form response" };
+    }
+
+    const contactFields = formFields?.contactData || formFields?.myDataData || [];
+    const fieldNames = Array.isArray(contactFields)
+      ? contactFields.map((f: any) => f.fieldName)
+      : [];
+
+    console.log("[CurlCookie] Form field names: " + fieldNames.join(", "));
+
+    const formData: Record<string, string> = {};
+    for (const f of fieldNames) {
+      switch (f) {
+        case "customerEmail": formData[f] = email; break;
+        case "customerFirstName": formData[f] = firstName; break;
+        case "customerLastName": formData[f] = lastName; break;
+        case "customerCountry": formData[f] = "US"; break;
+        case "customerPostalCode": formData[f] = zipCode; break;
+        case "customerCity": formData[f] = "Los Angeles"; break;
+        case "customerStreetAndNo": formData[f] = "123 Olympic Blvd"; break;
+        case "customerProvince": formData[f] = "CA"; break;
+        case "customerPhone": formData[f] = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString(); break;
+      }
+    }
+
+    log("Submitting customer data on tickets.la28.org...");
+    console.log("[CurlCookie] Submitting form data: " + JSON.stringify(formData));
+
+    const submitHeaders: Record<string, string> = {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      "Referer": "https://tickets.la28.org/mycustomerdata/",
+    };
+    if (xsrfToken) submitHeaders["X-XSRF-TOKEN"] = xsrfToken;
+
+    const payloads = [
+      { url: "https://tickets.la28.org/api/login/mydata", method: "PUT", body: JSON.stringify({ contactData: formData }) },
+      { url: "https://tickets.la28.org/api/login/mydata", method: "POST", body: JSON.stringify({ contactData: formData }) },
+      { url: "https://tickets.la28.org/api/login/registration", method: "PUT", body: JSON.stringify({ contactData: formData, page: "registration" }) },
+      { url: "https://tickets.la28.org/api/login/registration", method: "POST", body: JSON.stringify({ contactData: formData, page: "registration" }) },
+      { url: "https://tickets.la28.org/api/login/registration", method: "PATCH", body: JSON.stringify({ contactData: formData }) },
+    ];
+
+    for (const p of payloads) {
+      const submitResp = await curlImpersonate(p.url, {
+        method: p.method,
+        cookieFile,
+        proxy: proxyUrl,
+        headers: submitHeaders,
+        body: p.body,
+      });
+
+      console.log("[CurlCookie] Submit " + p.method + " " + p.url.split("/api/")[1] + ": " + submitResp.statusCode + " body: " + submitResp.body.substring(0, 200));
+
+      if (submitResp.statusCode >= 200 && submitResp.statusCode < 300) {
+        log("Form submitted on tickets.la28.org via " + p.method + " " + p.url.split("/api/")[1] + "!");
+        return { success: true, formSubmitted: true };
+      } else if (submitResp.statusCode === 405 || submitResp.statusCode === 404) {
+        continue;
+      } else if (submitResp.statusCode === 403) {
+        log("Akamai blocked form submission (403).");
+        return { success: false, formSubmitted: false, error: "Akamai blocked form submit" };
+      } else if (submitResp.statusCode >= 400) {
+        console.log("[CurlCookie] " + p.method + " failed with " + submitResp.statusCode + ", trying next...");
+        continue;
+      }
+    }
+
+    log("OIDC linking done! Form submission endpoint not found but Gigya data is set.");
+    return { success: true, formSubmitted: false, error: "Form endpoint 405/404 for all methods" };
+  } catch (err: any) {
+    console.log("[CurlCookie] Error: " + err.message.substring(0, 200));
+    log("Form fill error: " + err.message.substring(0, 80));
+    return { success: false, formSubmitted: false, error: err.message.substring(0, 100) };
+  } finally {
+    try { if (fs.existsSync(cookieFile)) fs.unlinkSync(cookieFile); } catch {}
+  }
+}
+
 export async function ticketsFormFillViaCurl(
   email: string,
   password: string,
@@ -1805,6 +1950,7 @@ export async function completeDrawViaGigyaBrowser(
       }));
       console.log("[Draw-Gigya] Gigya SDK not available. Debug: " + JSON.stringify(retryInfo));
       log("Gigya SDK did not load. Debug: gigyaType=" + retryInfo.gigyaType);
+      try { await browser.close(); } catch {}
       return { success: false, profileSet: false, dataSet: false, error: "Gigya SDK not loaded" };
     }
 
@@ -1812,99 +1958,103 @@ export async function completeDrawViaGigyaBrowser(
     console.log("[Draw-Gigya] Gigya SDK loaded, logging in via ScreenSet form...");
 
     let loginOk = false;
+
+    // Try direct Gigya API login first (faster, no ScreenSet dependency)
+    console.log("[Draw-Gigya] Attempting direct gigya.accounts.login API...");
+    log("Logging in via Gigya API...");
     try {
-      // Wait for the ScreenSet login form to render inside #container
-      console.log("[Draw-Gigya] Waiting for ScreenSet form to render...");
-      await page.waitForSelector('#container input[name="loginID"], #container input[name="username"]', { timeout: 15000 });
-      await page.waitForTimeout(1000);
-
-      // Detect form field selectors
-      const formInfo = await page.evaluate(() => {
-        const container = document.getElementById('container');
-        if (!container) return { found: false, html: '' };
-        const inputs = container.querySelectorAll('input');
-        const inputDetails: { name: string; type: string; id: string }[] = [];
-        inputs.forEach(inp => inputDetails.push({ name: inp.name, type: inp.type, id: inp.id }));
-        const buttons = container.querySelectorAll('input[type="submit"], button[type="submit"], .gigya-input-submit');
-        return { found: true, inputs: inputDetails, buttonCount: buttons.length };
-      });
-      console.log("[Draw-Gigya] ScreenSet form info: " + JSON.stringify(formInfo));
-
-      // Fill the login form
-      const loginIDInput = page.locator('#container input[name="loginID"], #container input[name="username"]').first();
-      const passwordInput = page.locator('#container input[name="password"]').first();
-
-      await loginIDInput.fill(email);
-      await page.waitForTimeout(500);
-      await passwordInput.fill(password);
-      await page.waitForTimeout(500);
-
-      console.log("[Draw-Gigya] Form filled, clicking submit...");
-
-      // Click the submit button
-      const submitBtn = page.locator('#container input[type="submit"], #container .gigya-input-submit').first();
-
-      // Set up navigation listener BEFORE clicking - only match proxy.html or consent.html, NOT login
-      const navPromise = page.waitForURL(/proxy\.html|consent\.html/, { timeout: 30000 }).catch(() => null);
-
-      await submitBtn.click();
-
-      // Wait for navigation or timeout
-      await navPromise;
-      await page.waitForTimeout(5000);
-
-      const postLoginUrl = page.url();
-      console.log("[Draw-Gigya] Post form-submit URL: " + postLoginUrl);
-
-      if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
-        loginOk = true;
-        log("Login successful via form (redirected to " + (postLoginUrl.includes("proxy") ? "proxy" : "consent") + ").");
-      } else {
-        // Check if we're still on login page - might have an error or CAPTCHA
-        const pageState = await page.evaluate(() => {
-          const err = document.querySelector('.gigya-error-msg, .gigya-error-msg-active, .gigya-form-error-msg');
-          const errorText = err ? (err as HTMLElement).innerText : '';
-          const captchaFrame = document.querySelector('iframe[src*="recaptcha"], iframe[title*="reCAPTCHA"]');
-          return { errorText, hasCaptcha: !!captchaFrame, bodySnippet: document.body?.innerText?.substring(0, 200) || '' };
-        });
-        console.log("[Draw-Gigya] Page state after submit: " + JSON.stringify(pageState));
-
-        if (pageState.errorText) {
-          log("Login form error: " + pageState.errorText);
-        }
-        if (pageState.hasCaptcha) {
-          log("CAPTCHA detected on login page. Trying direct API login as fallback...");
-          console.log("[Draw-Gigya] CAPTCHA detected, trying direct gigya.accounts.login...");
-        }
-
-        // Try checking if logged in via Gigya
-        const isLoggedIn = await page.evaluate(`(function() {
-          return new Promise(function(resolve) {
-            if (typeof gigya === 'undefined' || !gigya.accounts) { resolve(false); return; }
-            gigya.accounts.getAccountInfo({ callback: function(resp) { resolve(resp.errorCode === 0); } });
-            setTimeout(function() { resolve(false); }, 8000);
+      const apiLoginResult = await page.evaluate(`(function() {
+        return new Promise(function(resolve) {
+          if (typeof gigya === 'undefined' || !gigya.accounts) {
+            resolve({ success: false, error: 'gigya not available' });
+            return;
+          }
+          gigya.accounts.login({
+            loginID: ${JSON.stringify(email)},
+            password: ${JSON.stringify(password)},
+            callback: function(resp) {
+              resolve({
+                success: resp.errorCode === 0,
+                errorCode: resp.errorCode,
+                errorMessage: resp.errorMessage || '',
+                uid: resp.UID || null
+              });
+            }
           });
-        })`) as boolean;
-        console.log("[Draw-Gigya] getAccountInfo check: " + isLoggedIn);
-        if (isLoggedIn) {
-          loginOk = true;
-          log("Login confirmed via getAccountInfo after form submit.");
-        } else {
-          log("Form login did not result in redirect or confirmed session.");
-        }
+          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
+        });
+      })()`);
+      console.log("[Draw-Gigya] API login result: " + JSON.stringify(apiLoginResult));
+      if ((apiLoginResult as any).success) {
+        loginOk = true;
+        log("Login successful via Gigya API. UID: " + ((apiLoginResult as any).uid || "unknown"));
+      } else {
+        log("Gigya API login failed: " + ((apiLoginResult as any).errorMessage || (apiLoginResult as any).error || "unknown"));
       }
-    } catch (loginErr: any) {
-      if (loginErr.message.includes("context was destroyed") || loginErr.message.includes("navigation")) {
-        console.log("[Draw-Gigya] Login form caused page navigation (expected for successful login)");
+    } catch (apiLoginErr: any) {
+      console.log("[Draw-Gigya] API login error: " + apiLoginErr.message.substring(0, 150));
+      if (apiLoginErr.message.includes("context was destroyed") || apiLoginErr.message.includes("navigation")) {
         loginOk = true;
         log("Login triggered redirect (likely successful).");
       } else {
-        console.log("[Draw-Gigya] Login form error: " + loginErr.message.substring(0, 150));
-        return { success: false, profileSet: false, dataSet: false, error: "Login error: " + loginErr.message.substring(0, 80) };
+        log("API login error: " + apiLoginErr.message.substring(0, 80));
+      }
+    }
+
+    // Fallback: try ScreenSet form if API login didn't work
+    if (!loginOk) {
+      try {
+        console.log("[Draw-Gigya] API login failed, trying ScreenSet form...");
+        log("Trying ScreenSet form login...");
+        await page.waitForSelector('#container input[name="loginID"], #container input[name="username"]', { timeout: 15000 });
+        await page.waitForTimeout(1000);
+
+        const loginIDInput = page.locator('#container input[name="loginID"], #container input[name="username"]').first();
+        const passwordInput = page.locator('#container input[name="password"]').first();
+
+        await loginIDInput.fill(email);
+        await page.waitForTimeout(500);
+        await passwordInput.fill(password);
+        await page.waitForTimeout(500);
+
+        console.log("[Draw-Gigya] Form filled, clicking submit...");
+        const submitBtn = page.locator('#container input[type="submit"], #container .gigya-input-submit').first();
+        const navPromise = page.waitForURL(/proxy\.html|consent\.html/, { timeout: 30000 }).catch(() => null);
+        await submitBtn.click();
+        await navPromise;
+        await page.waitForTimeout(5000);
+
+        const postLoginUrl = page.url();
+        console.log("[Draw-Gigya] Post form-submit URL: " + postLoginUrl);
+        if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
+          loginOk = true;
+          log("Login successful via form.");
+        } else {
+          const isLoggedIn = await page.evaluate(`(function() {
+            return new Promise(function(resolve) {
+              if (typeof gigya === 'undefined' || !gigya.accounts) { resolve(false); return; }
+              gigya.accounts.getAccountInfo({ callback: function(resp) { resolve(resp.errorCode === 0); } });
+              setTimeout(function() { resolve(false); }, 8000);
+            });
+          })`) as boolean;
+          if (isLoggedIn) {
+            loginOk = true;
+            log("Login confirmed via getAccountInfo after form submit.");
+          }
+        }
+      } catch (loginErr: any) {
+        if (loginErr.message.includes("context was destroyed") || loginErr.message.includes("navigation")) {
+          loginOk = true;
+          log("Login triggered redirect (likely successful).");
+        } else {
+          console.log("[Draw-Gigya] ScreenSet form also failed: " + loginErr.message.substring(0, 150));
+          log("Both login methods failed.");
+        }
       }
     }
 
     if (!loginOk) {
+      try { await browser.close(); } catch {}
       return { success: false, profileSet: false, dataSet: false, error: "Login did not succeed" };
     }
 
@@ -1953,6 +2103,7 @@ export async function completeDrawViaGigyaBrowser(
       try {
         await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 20000 });
       } catch {
+        try { await browser.close(); } catch {}
         return { success: false, profileSet: false, dataSet: false, error: "Gigya SDK lost after login" };
       }
     }
@@ -1971,6 +2122,7 @@ export async function completeDrawViaGigyaBrowser(
 
     if (!isLoggedIn.loggedIn) {
       log("Not logged in after redirect. Login may have failed.");
+      try { await browser.close(); } catch {}
       return { success: false, profileSet: false, dataSet: false, error: "Not authenticated after login redirect" };
     }
 
@@ -2058,6 +2210,7 @@ export async function completeDrawViaGigyaBrowser(
 
       if (fallbackResult.success) {
         log("Draw flags set via individual updates!");
+        try { if (browser) await browser.close(); } catch {}
         return { success: true, profileSet, dataSet: true };
       }
     }
@@ -2093,14 +2246,6 @@ export async function completeDrawViaGigyaBrowser(
       log("Attempting OIDC account linking with Eventim/Keycloak...");
       console.log("[Draw-Gigya] Starting OIDC flow for Keycloak account linking...");
 
-      let capturedRedirectUrl: string | null = null;
-      page.on('response', (resp: any) => {
-        const loc = resp.headers()['location'] || '';
-        if (loc.includes('tickets.la28.org') && loc.includes('code=')) {
-          capturedRedirectUrl = loc;
-        }
-      });
-
       const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
         response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
         kc_idp_hint: 'gigya', ui_locales: 'en',
@@ -2108,32 +2253,53 @@ export async function completeDrawViaGigyaBrowser(
       }).toString();
 
       try {
-        await page.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       } catch {}
 
-      for (let qi = 0; qi < 30 && !capturedRedirectUrl; qi++) {
+      let onTicketsSite = false;
+      for (let qi = 0; qi < 30 && !onTicketsSite; qi++) {
         await page.waitForTimeout(3000);
+        const currentUrl = page.url();
+        if (currentUrl.includes('tickets.la28.org')) {
+          onTicketsSite = true;
+          console.log("[Draw-Gigya] OIDC: Browser landed on tickets.la28.org: " + currentUrl.substring(0, 100));
+          break;
+        }
         if (qi % 10 === 0 && qi > 0) {
-          console.log("[Draw-Gigya] Waiting for Queue-it... " + (qi * 3) + "s");
+          console.log("[Draw-Gigya] Waiting for Queue-it... " + (qi * 3) + "s, URL: " + currentUrl.substring(0, 80));
         }
       }
 
-      if (capturedRedirectUrl) {
+      if (onTicketsSite) {
         oidcLinked = true;
-        const codeUrl = new URL(capturedRedirectUrl);
-        const authCode = codeUrl.searchParams.get('code');
-        console.log("[Draw-Gigya] OIDC account linked! Auth code: " + (authCode?.substring(0, 20) || "unknown"));
         log("OIDC account linked with Eventim/Keycloak successfully!");
 
-        if (authCode) {
+        await page.waitForTimeout(5000);
+
+        const browserCookies = await page.context().cookies(['https://tickets.la28.org']);
+        console.log("[Draw-Gigya] OIDC: Extracted " + browserCookies.length + " cookies from tickets.la28.org");
+
+        const sessionCookies = browserCookies.filter((c: any) =>
+          c.name.toLowerCase().includes('session') ||
+          c.name.toLowerCase().includes('auth') ||
+          c.name.toLowerCase().includes('jsessionid') ||
+          c.name.includes('FESESSIONID') ||
+          c.name.includes('__Host') ||
+          c.name.includes('_abck') ||
+          c.name.includes('ak_bmsc') ||
+          c.name.includes('bm_')
+        );
+        console.log("[Draw-Gigya] OIDC: Session cookies: " + browserCookies.map((c: any) => c.name + "=" + c.value.substring(0, 15)).join(", "));
+
+        if (browserCookies.length > 0) {
           try {
             const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
             const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
             const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
 
-            log("Attempting tickets.la28.org form fill via curl-impersonate...");
-            const curlResult = await ticketsFormFillViaCurl(
-              email, password, firstName, lastName, authCode, usedZip, log
+            log("Attempting tickets.la28.org form fill with browser session...");
+            const curlResult = await ticketsFormFillWithCookies(
+              email, firstName, lastName, usedZip, browserCookies, log
             );
             formSubmitted = curlResult.formSubmitted;
             if (formSubmitted) {
@@ -2142,12 +2308,14 @@ export async function completeDrawViaGigyaBrowser(
               log("Form fill attempted but not submitted: " + (curlResult.error || "unknown reason"));
             }
           } catch (curlErr: any) {
-            console.log("[Draw-Gigya] Curl form fill error (non-fatal): " + curlErr.message.substring(0, 100));
-            log("Form fill via curl skipped: " + curlErr.message.substring(0, 60));
+            console.log("[Draw-Gigya] Form fill error (non-fatal): " + curlErr.message.substring(0, 100));
+            log("Form fill skipped: " + curlErr.message.substring(0, 60));
           }
+        } else {
+          log("No session cookies from tickets.la28.org. OIDC linking done but form fill skipped.");
         }
       } else {
-        console.log("[Draw-Gigya] OIDC linking: Queue-it timeout or no redirect captured. URL: " + page.url().substring(0, 150));
+        console.log("[Draw-Gigya] OIDC: Queue-it timeout. URL: " + page.url().substring(0, 150));
         log("OIDC linking attempted but Queue-it timeout. Gigya data is still set correctly.");
       }
     } catch (oidcErr: any) {
@@ -2899,22 +3067,44 @@ async function doRegistration(
 
     onStatusUpdate("draw_registering");
     log("Setting draw registration via Gigya browser (no proxy needed)...");
+    let drawSuccess = false;
     try {
       const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log);
       if (gigyaResult.success) {
         onStatusUpdate("completed");
         log("Full flow complete! Draw registration set via Gigya browser.");
+        drawSuccess = true;
       } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
         onStatusUpdate("completed");
         log("Draw registration partially set (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
+        drawSuccess = true;
       } else {
-        log("Gigya browser draw failed: " + (gigyaResult.error || "unknown") + ". Keeping as draw_registering for retry.");
-        onStatusUpdate("draw_registering");
+        log("Gigya browser draw failed: " + (gigyaResult.error || "unknown") + ". Falling back to REST API...");
       }
     } catch (drawErr: any) {
       console.log("[Playwright] Draw error:", drawErr.message);
-      log("Draw error (" + drawErr.message.substring(0, 80) + "). Status kept as draw_registering for retry.");
-      onStatusUpdate("draw_registering");
+      log("Draw error (" + drawErr.message.substring(0, 80) + "). Falling back to REST API...");
+    }
+
+    if (!drawSuccess) {
+      try {
+        log("Attempting draw registration via REST API fallback...");
+        const apiResult = await completeDrawRegistrationViaApi(email, password, usedZipCode, log);
+        if (apiResult.success) {
+          onStatusUpdate("completed");
+          log("Draw registration set via REST API fallback!");
+        } else if (apiResult.profileSet || apiResult.dataSet) {
+          onStatusUpdate("completed");
+          log("REST API partial: profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + ". Marked completed.");
+        } else {
+          log("REST API fallback also failed: " + (apiResult.error || "unknown") + ". Keeping as draw_registering.");
+          onStatusUpdate("draw_registering");
+        }
+      } catch (apiErr: any) {
+        console.log("[Playwright] REST API fallback error:", apiErr.message);
+        log("REST API fallback error: " + apiErr.message.substring(0, 60) + ". Status kept as draw_registering.");
+        onStatusUpdate("draw_registering");
+      }
     }
 
     await context.close();
