@@ -1960,33 +1960,45 @@ export async function completeDrawViaGigyaBrowser(
 
     let loginOk = false;
 
-    // Try direct Gigya API login first (faster, no ScreenSet dependency)
     console.log("[Draw-Gigya] Attempting direct gigya.accounts.login API...");
     log("Logging in via Gigya API...");
-    try {
-      const apiLoginResult = await page.evaluate(`(function() {
-        return new Promise(function(resolve) {
-          if (typeof gigya === 'undefined' || !gigya.accounts) {
-            resolve({ success: false, error: 'gigya not available' });
-            return;
-          }
-          gigya.accounts.login({
-            loginID: ${JSON.stringify(email)},
-            password: ${JSON.stringify(password)},
-            callback: function(resp) {
-              resolve({
-                success: resp.errorCode === 0,
-                errorCode: resp.errorCode,
-                errorMessage: resp.errorMessage || '',
-                uid: resp.UID || null
-              });
+    let apiLoginResult: any = null;
+    for (let loginAttempt = 0; loginAttempt < 3; loginAttempt++) {
+      if (loginAttempt > 0) {
+        log("Retrying Gigya login (attempt " + (loginAttempt + 1) + ")...");
+        await page.waitForTimeout(5000);
+      }
+      try {
+        apiLoginResult = await page.evaluate(`(function() {
+          return new Promise(function(resolve) {
+            if (typeof gigya === 'undefined' || !gigya.accounts) {
+              resolve({ success: false, error: 'gigya not available' });
+              return;
             }
+            gigya.accounts.login({
+              loginID: ${JSON.stringify(email)},
+              password: ${JSON.stringify(password)},
+              callback: function(resp) {
+                resolve({
+                  success: resp.errorCode === 0,
+                  errorCode: resp.errorCode,
+                  errorMessage: resp.errorMessage || '',
+                  uid: resp.UID || null
+                });
+              }
+            });
+            setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
           });
-          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
-        });
-      })()`);
-      console.log("[Draw-Gigya] API login result: " + JSON.stringify(apiLoginResult));
-      if ((apiLoginResult as any).success) {
+        })()`);
+        console.log("[Draw-Gigya] API login result (attempt " + (loginAttempt + 1) + "): " + JSON.stringify(apiLoginResult));
+        if ((apiLoginResult as any)?.success) break;
+        if ((apiLoginResult as any)?.errorCode !== 400006) break;
+      } catch (apiErr: any) {
+        console.log("[Draw-Gigya] API login attempt error: " + apiErr.message.substring(0, 80));
+      }
+    }
+    try {
+      if ((apiLoginResult as any)?.success) {
         loginOk = true;
         log("Login successful via Gigya API. UID: " + ((apiLoginResult as any).uid || "unknown"));
       } else {
@@ -2249,8 +2261,8 @@ export async function completeDrawViaGigyaBrowser(
 
     let oidcLinked = false;
     try {
-      log("Attempting OIDC linking + form fill via Scrapfly (Queue-it bypass)...");
-      console.log("[Draw-Gigya] Starting Scrapfly OIDC flow for " + email);
+      log("Attempting OIDC linking via Scrapfly Queue-it bypass + Playwright form fill...");
+      console.log("[Draw-Gigya] Starting Scrapfly cookie extraction for " + email);
 
       let scrapflyKey = "";
       try {
@@ -2258,48 +2270,6 @@ export async function completeDrawViaGigyaBrowser(
         if (keyRow.rows.length > 0 && keyRow.rows[0].value) scrapflyKey = keyRow.rows[0].value as string;
       } catch {}
       if (!scrapflyKey) scrapflyKey = "scp-live-586b4b4ff17c4e978ebcbaa4bfe3de48";
-
-      const sessionId = "la28_draw_" + Date.now() + "_" + Math.random().toString(36).substring(7);
-
-      const gigyaLoginJs = `
-        var loginResult = await new Promise(function(resolve) {
-          if (typeof gigya === 'undefined') { resolve({error: 'no gigya'}); return; }
-          gigya.accounts.login({
-            loginID: '${email.replace(/'/g, "\\'")}',
-            password: '${password.replace(/'/g, "\\'")}',
-            callback: function(resp) {
-              resolve({ errorCode: resp.errorCode, uid: resp.UID || null, error: resp.errorMessage || '' });
-            }
-          });
-          setTimeout(function() { resolve({error: 'timeout'}); }, 15000);
-        });
-        return JSON.stringify(loginResult);
-      `;
-
-      const step1Scenario = JSON.stringify([
-        { type: "wait_for_navigation" },
-        { type: "wait", value: 5000 },
-        { type: "js_return", value: { script: gigyaLoginJs } }
-      ]);
-
-      const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
-        response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
-        kc_idp_hint: 'gigya', ui_locales: 'en',
-        redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
-      }).toString();
-
-      log("Step 1: Scrapfly OIDC auth + Gigya login...");
-      const step1Url = new URL("https://api.scrapfly.io/scrape");
-      step1Url.searchParams.set("key", scrapflyKey);
-      step1Url.searchParams.set("url", oidcAuthUrl);
-      step1Url.searchParams.set("render_js", "true");
-      step1Url.searchParams.set("asp", "true");
-      step1Url.searchParams.set("session", sessionId);
-      step1Url.searchParams.set("rendering_wait", "8000");
-      step1Url.searchParams.set("timeout", "120000");
-      step1Url.searchParams.set("js_scenario", step1Scenario);
-      step1Url.searchParams.set("tags", "player,project:default");
-      step1Url.searchParams.set("country", "us");
 
       const https = await import("https");
       const fetchScrapfly = (url: string): Promise<any> => {
@@ -2317,184 +2287,321 @@ export async function completeDrawViaGigyaBrowser(
         });
       };
 
-      const step1Result = await fetchScrapfly(step1Url.toString());
-      const step1Ctx = step1Result.context || {};
-      const step1Res = step1Result.result || {};
-      const step1JsResult = step1Ctx.js_scenario?.response || step1Res.js_scenario_response || "";
+      log("Step 1: Getting Queue-it cookies via Scrapfly for /mycustomerdata/...");
+      const sessionId = "la28_oidc_" + Date.now() + "_" + Math.random().toString(36).substring(7);
 
-      console.log("[Scrapfly] Step1 status: " + step1Res.status_code + " URL: " + (step1Res.url || "").substring(0, 120));
-      console.log("[Scrapfly] Step1 redirects: " + (step1Ctx.redirects || []).length);
-      console.log("[Scrapfly] Step1 JS result: " + (typeof step1JsResult === 'string' ? step1JsResult.substring(0, 200) : JSON.stringify(step1JsResult).substring(0, 200)));
-      console.log("[Scrapfly] Step1 ASP: " + JSON.stringify(step1Ctx.asp));
+      const targetUrls = [
+        "https://tickets.la28.org/mycustomerdata/",
+        "https://tickets.la28.org/"
+      ];
 
-      let gigyaLoginOk = false;
-      try {
-        const loginData = typeof step1JsResult === 'string' ? JSON.parse(step1JsResult) : step1JsResult;
-        if (loginData && loginData.errorCode === 0) {
-          gigyaLoginOk = true;
-          log("Scrapfly: Gigya login succeeded! UID=" + (loginData.uid || "").substring(0, 10));
-        } else {
-          log("Scrapfly: Gigya login returned code " + (loginData?.errorCode || "unknown") + ": " + (loginData?.error || ""));
+      let allCookies: any[] = [];
+
+      for (const targetUrl of targetUrls) {
+        const scrapflyUrl = new URL("https://api.scrapfly.io/scrape");
+        scrapflyUrl.searchParams.set("key", scrapflyKey);
+        scrapflyUrl.searchParams.set("url", targetUrl);
+        scrapflyUrl.searchParams.set("render_js", "true");
+        scrapflyUrl.searchParams.set("asp", "true");
+        scrapflyUrl.searchParams.set("retry", "false");
+        scrapflyUrl.searchParams.set("rendering_wait", "5000");
+        scrapflyUrl.searchParams.set("timeout", "90000");
+        scrapflyUrl.searchParams.set("session", sessionId);
+        scrapflyUrl.searchParams.set("tags", "player,project:default");
+        scrapflyUrl.searchParams.set("country", "us");
+
+        const result = await fetchScrapfly(scrapflyUrl.toString());
+
+        if (result.code || result.error_id) {
+          console.log("[Scrapfly] Error for " + targetUrl + ": " + (result.message || result.code));
+          continue;
         }
-      } catch {
-        log("Scrapfly: Gigya login result could not be parsed");
+
+        const ctx = result.context || {};
+        const res = result.result || {};
+        const cookies = ctx.session?.cookie_jar || [];
+        console.log("[Scrapfly] " + targetUrl.substring(25) + ": status=" + res.status_code + " redirects=" + (ctx.redirects || []).length + " cookies=" + cookies.length);
+
+        for (const c of cookies) {
+          if (!allCookies.find((e: any) => e.name === c.name && e.domain === c.domain)) {
+            allCookies.push(c);
+          }
+        }
       }
 
-      if (gigyaLoginOk || step1Res.status_code === 200) {
-        oidcLinked = true;
+      const sessionCookies = allCookies;
+      console.log("[Scrapfly] Total unique cookies collected: " + sessionCookies.length);
 
-        log("Step 2: Navigating to customer data form...");
-        const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
-        const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
-        const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
-        const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
+      const queueItCookies: Array<{name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean}> = [];
+      for (const c of sessionCookies) {
+        console.log("[Scrapfly] Cookie: " + c.name + " domain=" + c.domain + " val=" + (c.value || "").substring(0, 30));
+        queueItCookies.push({
+          name: c.name,
+          value: c.value,
+          domain: c.domain || ".la28.org",
+          path: c.path || "/",
+          secure: c.secure !== false,
+          httpOnly: c.http_only || false
+        });
+      }
 
-        const formFillJs = `
-          var result = { inputs: 0, filled: [], buttons: [], bodyText: '' };
-          await new Promise(r => setTimeout(r, 3000));
+      if (queueItCookies.length > 0) {
+        log("Got " + queueItCookies.length + " cookies from Scrapfly. Injecting into browser...");
 
-          var inputs = document.querySelectorAll('input, select, textarea');
-          result.inputs = inputs.length;
-          result.bodyText = (document.body ? document.body.innerText : '').substring(0, 1000);
+        for (const cookie of queueItCookies) {
+          try {
+            await context.addCookies([{
+              name: cookie.name,
+              value: cookie.value,
+              domain: cookie.domain,
+              path: cookie.path,
+              secure: cookie.secure,
+              httpOnly: cookie.httpOnly
+            }]);
+          } catch (cookieErr: any) {
+            console.log("[Scrapfly] Cookie inject error for " + cookie.name + ": " + cookieErr.message.substring(0, 60));
+          }
+        }
 
-          var fieldMap = {
-            email: '${email.replace(/'/g, "\\'")}',
-            firstname: '${firstName.replace(/'/g, "\\'")}', first_name: '${firstName.replace(/'/g, "\\'")}',
-            lastname: '${lastName.replace(/'/g, "\\'")}', last_name: '${lastName.replace(/'/g, "\\'")}',
-            country: 'US',
-            zip: '${usedZip}', zipcode: '${usedZip}', postalcode: '${usedZip}', postal: '${usedZip}',
-            city: 'Los Angeles',
-            street: '123 Olympic Blvd', address: '123 Olympic Blvd',
-            state: 'CA', province: 'CA',
-            phone: '${phone}', telephone: '${phone}'
-          };
+        log("Step 2: Navigating to tickets.la28.org with Queue-it cookies...");
+        const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+          response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
+          kc_idp_hint: 'gigya', ui_locales: 'en',
+          redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+        }).toString();
 
-          for (var i = 0; i < inputs.length; i++) {
-            var el = inputs[i];
-            var type = (el.getAttribute('type') || '').toLowerCase();
-            if (type === 'hidden' || type === 'submit' || type === 'button') continue;
-            if (el.offsetParent === null) continue;
-
-            if (type === 'checkbox' && !el.checked) {
-              var label = (el.getAttribute('name') || el.id || '').toLowerCase();
-              var pt = (el.parentElement ? el.parentElement.textContent : '').toLowerCase().substring(0, 100);
-              if (label.includes('terms') || label.includes('consent') || label.includes('agree') || label.includes('accept') ||
-                  pt.includes('terms') || pt.includes('consent') || pt.includes('privacy') || pt.includes('agree')) {
-                el.click();
-                result.filled.push('checkbox:' + (label || 'cb-' + i));
-              }
-              continue;
-            }
-
-            var name = (el.getAttribute('name') || '').toLowerCase().replace(/[^a-z]/g, '');
-            var id = (el.id || '').toLowerCase().replace(/[^a-z]/g, '');
-            var idents = [name, id];
-            for (var fi = 0; fi < idents.length; fi++) {
-              var ident = idents[fi];
-              if (!ident) continue;
-              for (var key in fieldMap) {
-                if (ident.includes(key)) {
-                  if (el.tagName === 'SELECT') {
-                    for (var oi = 0; oi < el.options.length; oi++) {
-                      if (el.options[oi].value === fieldMap[key] || el.options[oi].text.toLowerCase().includes(fieldMap[key].toLowerCase())) {
-                        el.selectedIndex = oi;
-                        el.dispatchEvent(new Event('change', {bubbles: true}));
-                        result.filled.push('select:' + key);
-                        break;
-                      }
-                    }
-                  } else {
-                    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-                    if (setter && setter.set) setter.set.call(el, fieldMap[key]);
-                    else el.value = fieldMap[key];
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                    result.filled.push('input:' + key);
-                  }
-                  break;
-                }
-              }
+        let oidcPage = page;
+        try {
+          await page.goto(oidcAuthUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        } catch (navErr: any) {
+          console.log("[Draw-Gigya] OIDC nav error: " + (navErr.message || '').substring(0, 100));
+          const curUrl = page.url();
+          if (curUrl.includes('chrome-error') || curUrl === 'about:blank') {
+            log("Browser crashed. Trying direct customer data URL...");
+            try {
+              const newPage = await context.newPage();
+              newPage.setDefaultTimeout(30000);
+              await newPage.route("**/*", (route) => {
+                const rt = route.request().resourceType();
+                if (["image", "media", "font"].includes(rt)) return route.abort();
+                return route.continue();
+              });
+              await newPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              oidcPage = newPage;
+            } catch (retryErr: any) {
+              console.log("[Draw-Gigya] Retry nav also failed: " + (retryErr.message || '').substring(0, 100));
             }
           }
+        }
 
-          await new Promise(r => setTimeout(r, 1000));
+        await oidcPage.waitForTimeout(5000);
+        const currentUrl = oidcPage.url();
+        console.log("[Draw-Gigya] After OIDC nav URL: " + currentUrl.substring(0, 120));
 
-          var buttons = document.querySelectorAll('button, input[type="submit"], a.btn, [role="button"]');
-          for (var bi = 0; bi < buttons.length; bi++) {
-            var btn = buttons[bi];
-            if (btn.offsetParent === null) continue;
-            var text = (btn.textContent || '').trim();
-            result.buttons.push(text.substring(0, 40));
-            var textLower = text.toLowerCase();
-            if (textLower.includes('save') || textLower.includes('submit') || textLower.includes('register') ||
-                textLower.includes('confirm') || textLower.includes('continue') || textLower.includes('next') ||
-                textLower.includes('complete') || (btn.getAttribute('type') || '').toLowerCase() === 'submit') {
-              btn.click();
-              result.clicked = text;
+        const isOnTickets = currentUrl.includes('tickets.la28.org') && !currentUrl.includes('next.tickets') && !currentUrl.includes('chrome-error');
+        const isOnProxy = currentUrl.includes('la28id.la28.org/proxy.html') || currentUrl.includes('la28id.la28.org/login') || currentUrl.includes('la28id.la28.org/consent');
+        const isOnQueueIt = currentUrl.includes('next.tickets.la28.org');
+
+        if (isOnQueueIt) {
+          log("Hit Queue-it waiting room after OIDC nav. Waiting for pass-through...");
+          for (let qi = 0; qi < 20; qi++) {
+            await oidcPage.waitForTimeout(5000);
+            const qUrl = oidcPage.url();
+            console.log("[Draw-Gigya] Queue-it wait " + qi + ": " + qUrl.substring(0, 100));
+            if (qUrl.includes('tickets.la28.org') && !qUrl.includes('next.tickets')) {
+              log("Queue-it passed! Now on tickets.la28.org");
+              break;
+            }
+            if (qUrl.includes('chrome-error') || qUrl === 'about:blank') {
+              log("Browser crashed in Queue-it.");
               break;
             }
           }
+        }
 
-          await new Promise(r => setTimeout(r, 3000));
-          result.afterUrl = window.location.href;
-          result.afterBody = (document.body ? document.body.innerText : '').substring(0, 500);
-          return JSON.stringify(result);
-        `;
+        const afterQueueUrl = oidcPage.url();
+        const isNowOnTickets = afterQueueUrl.includes('tickets.la28.org') && !afterQueueUrl.includes('next.tickets');
+        const isNowOnProxy = afterQueueUrl.includes('la28id.la28.org');
 
-        const step2Scenario = JSON.stringify([
-          { type: "wait_for_navigation" },
-          { type: "wait", value: 5000 },
-          { type: "js_return", value: { script: formFillJs } }
-        ]);
+        if (isOnTickets || isOnProxy || isNowOnTickets || isNowOnProxy) {
+          oidcLinked = true;
 
-        const step2Url = new URL("https://api.scrapfly.io/scrape");
-        step2Url.searchParams.set("key", scrapflyKey);
-        step2Url.searchParams.set("url", "https://tickets.la28.org/mycustomerdata/");
-        step2Url.searchParams.set("render_js", "true");
-        step2Url.searchParams.set("asp", "true");
-        step2Url.searchParams.set("session", sessionId);
-        step2Url.searchParams.set("rendering_wait", "8000");
-        step2Url.searchParams.set("timeout", "120000");
-        step2Url.searchParams.set("js_scenario", step2Scenario);
-        step2Url.searchParams.set("tags", "player,project:default");
-        step2Url.searchParams.set("country", "us");
+          if (isOnProxy || isNowOnProxy) {
+            log("On Gigya login page. Logging in via OIDC broker...");
+            try {
+              await oidcPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined', { timeout: 15000 });
 
-        const step2Result = await fetchScrapfly(step2Url.toString());
-        const step2Ctx = step2Result.context || {};
-        const step2Res = step2Result.result || {};
-        const step2JsResult = step2Ctx.js_scenario?.response || step2Res.js_scenario_response || "";
+              oidcPage.evaluate(`
+                gigya.accounts.login({
+                  loginID: '${email.replace(/'/g, "\\'")}',
+                  password: '${password.replace(/'/g, "\\'")}',
+                  callback: function(resp) {
+                    window.__gigyaLoginResult = { errorCode: resp.errorCode, uid: resp.UID || null };
+                  }
+                });
+              `).catch(() => {});
 
-        console.log("[Scrapfly] Step2 status: " + step2Res.status_code + " URL: " + (step2Res.url || "").substring(0, 120));
-        console.log("[Scrapfly] Step2 JS result: " + (typeof step2JsResult === 'string' ? step2JsResult.substring(0, 500) : JSON.stringify(step2JsResult).substring(0, 500)));
+              for (let wi = 0; wi < 30; wi++) {
+                await oidcPage.waitForTimeout(3000);
+                const navUrl = oidcPage.url();
+                console.log("[Draw-Gigya] Proxy login wait " + (wi * 3) + "s URL: " + navUrl.substring(0, 120));
 
-        try {
-          const formResult = typeof step2JsResult === 'string' ? JSON.parse(step2JsResult) : step2JsResult;
-          if (formResult) {
-            console.log("[Scrapfly] Form fill: inputs=" + formResult.inputs + " filled=" + JSON.stringify(formResult.filled) + " clicked=" + formResult.clicked);
-            log("Form: " + (formResult.filled || []).length + " fields filled" + (formResult.clicked ? ", clicked '" + formResult.clicked + "'" : ""));
-
-            if (formResult.clicked) {
-              formSubmitted = true;
-              log("tickets.la28.org form submitted via Scrapfly!");
-            } else if (formResult.buttons && formResult.buttons.length > 0) {
-              log("Visible buttons: " + formResult.buttons.join(", "));
-            }
-
-            if (formResult.inputs === 0) {
-              log("No form inputs found. Page: " + (formResult.bodyText || "").substring(0, 150));
-              console.log("[Scrapfly] Page body: " + (formResult.bodyText || "").substring(0, 800));
+                if (navUrl.includes('tickets.la28.org') && !navUrl.includes('next.tickets')) {
+                  log("OIDC redirected to tickets.la28.org!");
+                  break;
+                }
+                if (navUrl.includes('chrome-error') || navUrl === 'about:blank') {
+                  log("Browser crashed during OIDC redirect.");
+                  break;
+                }
+                if (navUrl.includes('next.tickets.la28.org')) {
+                  log("Hit Queue-it waiting room. Waiting for pass-through (attempt " + wi + ")...");
+                  continue;
+                }
+                if (!navUrl.includes('la28id.la28.org') && !navUrl.includes('next.tickets') && !navUrl.includes('eventim.com')) {
+                  log("Navigated to: " + navUrl.substring(0, 80));
+                  break;
+                }
+              }
+            } catch (loginErr: any) {
+              console.log("[Draw-Gigya] Proxy login error: " + (loginErr.message || '').substring(0, 80));
             }
           }
-        } catch (parseErr: any) {
-          console.log("[Scrapfly] Step2 JS parse error: " + parseErr.message);
-          log("Form fill result could not be parsed");
+
+          const finalUrl = oidcPage.url();
+          if (finalUrl.includes('/mycustomerdata') || finalUrl.includes('tickets.la28.org')) {
+            log("On tickets.la28.org! Analyzing page for form...");
+
+            const pageInfo = await oidcPage.evaluate(`(() => {
+              var inputs = Array.from(document.querySelectorAll('input, select, textarea'));
+              var buttons = Array.from(document.querySelectorAll('button, [type="submit"], input[type="submit"]'));
+              return {
+                url: window.location.href,
+                title: document.title,
+                inputCount: inputs.length,
+                inputs: inputs.slice(0, 20).map(function(el) {
+                  return { tag: el.tagName, type: el.getAttribute('type') || '', name: el.getAttribute('name') || '', id: el.id || '', visible: el.offsetParent !== null };
+                }),
+                buttonCount: buttons.length,
+                buttons: buttons.slice(0, 10).map(function(el) {
+                  return { text: (el.textContent || '').trim().substring(0, 40), visible: el.offsetParent !== null };
+                }),
+                bodyText: document.body ? document.body.innerText.substring(0, 800) : ''
+              };
+            })()`) as any;
+
+            console.log("[Draw-Gigya] Page: url=" + pageInfo.url.substring(0, 100) + " inputs=" + pageInfo.inputCount + " buttons=" + pageInfo.buttonCount);
+            console.log("[Draw-Gigya] Body: " + pageInfo.bodyText.substring(0, 300));
+
+            if (pageInfo.inputCount > 0) {
+              log("Found " + pageInfo.inputCount + " form fields. Filling...");
+
+              const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
+              const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
+              const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
+              const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
+
+              const fieldMap: Record<string, string> = {
+                email: email, firstname: firstName, first_name: firstName,
+                lastname: lastName, last_name: lastName,
+                country: "US", zip: usedZip, zipcode: usedZip, postalcode: usedZip,
+                city: "Los Angeles", street: "123 Olympic Blvd", address: "123 Olympic Blvd",
+                state: "CA", province: "CA",
+                phone: phone, telephone: phone
+              };
+
+              const fillResult = await oidcPage.evaluate(`((fieldMap) => {
+                var filled = [], skipped = [];
+                var inputs = document.querySelectorAll('input, select, textarea');
+                for (var i = 0; i < inputs.length; i++) {
+                  var el = inputs[i];
+                  var type = (el.getAttribute('type') || '').toLowerCase();
+                  if (type === 'hidden' || type === 'submit' || type === 'button') continue;
+                  if (el.offsetParent === null) continue;
+                  if (type === 'checkbox' && !el.checked) {
+                    var lbl = (el.getAttribute('name') || el.id || '').toLowerCase();
+                    var pt = (el.parentElement ? el.parentElement.textContent : '').toLowerCase().substring(0, 100);
+                    if (lbl.includes('terms') || lbl.includes('consent') || lbl.includes('agree') || pt.includes('terms') || pt.includes('consent') || pt.includes('privacy')) {
+                      el.click(); filled.push('cb:' + (lbl || i));
+                    }
+                    continue;
+                  }
+                  var name = (el.getAttribute('name') || '').toLowerCase().replace(/[^a-z]/g, '');
+                  var id = (el.id || '').toLowerCase().replace(/[^a-z]/g, '');
+                  var matched = false;
+                  for (var ident of [name, id]) {
+                    if (!ident) continue;
+                    for (var key in fieldMap) {
+                      if (ident.includes(key)) {
+                        if (el.tagName === 'SELECT') {
+                          for (var oi = 0; oi < el.options.length; oi++) {
+                            if (el.options[oi].value === fieldMap[key] || el.options[oi].text.toLowerCase().includes(fieldMap[key].toLowerCase())) {
+                              el.selectedIndex = oi; el.dispatchEvent(new Event('change', {bubbles: true}));
+                              filled.push('sel:' + key); break;
+                            }
+                          }
+                        } else {
+                          var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                          if (setter && setter.set) setter.set.call(el, fieldMap[key]);
+                          else el.value = fieldMap[key];
+                          el.dispatchEvent(new Event('input', {bubbles: true}));
+                          el.dispatchEvent(new Event('change', {bubbles: true}));
+                          filled.push('inp:' + key);
+                        }
+                        matched = true; break;
+                      }
+                    }
+                    if (matched) break;
+                  }
+                  if (!matched) skipped.push(name || id || 'field-' + i);
+                }
+                return { filled: filled, skipped: skipped };
+              })(${JSON.stringify(fieldMap)})`) as any;
+
+              log("Filled " + fillResult.filled.length + " fields, skipped " + fillResult.skipped.length);
+              console.log("[Draw-Gigya] Fill: " + JSON.stringify(fillResult.filled) + " skip: " + JSON.stringify(fillResult.skipped));
+
+              if (fillResult.filled.length > 0) {
+                await oidcPage.waitForTimeout(1000);
+
+                const submitResult = await oidcPage.evaluate(`(() => {
+                  var buttons = document.querySelectorAll('button, input[type="submit"], [role="button"]');
+                  for (var i = 0; i < buttons.length; i++) {
+                    var btn = buttons[i];
+                    if (btn.offsetParent === null) continue;
+                    var text = (btn.textContent || '').trim().toLowerCase();
+                    if (text.includes('save') || text.includes('submit') || text.includes('register') ||
+                        text.includes('confirm') || text.includes('continue') || text.includes('complete') ||
+                        (btn.getAttribute('type') || '').toLowerCase() === 'submit') {
+                      btn.click();
+                      return { clicked: true, text: (btn.textContent || '').trim() };
+                    }
+                  }
+                  return { clicked: false, buttons: Array.from(buttons).filter(b => b.offsetParent !== null).map(b => (b.textContent || '').trim().substring(0, 30)) };
+                })()`) as any;
+
+                if (submitResult.clicked) {
+                  formSubmitted = true;
+                  log("Clicked '" + submitResult.text + "' on tickets.la28.org!");
+                  await oidcPage.waitForTimeout(3000);
+                } else {
+                  log("No submit button found. Visible: " + (submitResult.buttons || []).join(", "));
+                }
+              }
+            } else {
+              log("No form inputs on page. Content: " + pageInfo.bodyText.substring(0, 100));
+            }
+          }
+        } else {
+          log("Browser didn't reach tickets site. URL: " + currentUrl.substring(0, 80));
+          console.log("[Draw-Gigya] Not on tickets site after cookie injection. URL: " + currentUrl);
         }
       } else {
-        log("Scrapfly OIDC step did not reach login page. Status: " + step1Res.status_code);
+        log("Scrapfly returned no cookies. Queue-it bypass may have failed.");
       }
     } catch (oidcErr: any) {
-      console.log("[Draw-Gigya] Scrapfly OIDC error (non-fatal): " + oidcErr.message.substring(0, 150));
-      log("OIDC/form fill via Scrapfly skipped: " + oidcErr.message.substring(0, 80));
+      console.log("[Draw-Gigya] OIDC error (non-fatal): " + (oidcErr.message || '').substring(0, 150));
+      log("OIDC/form fill skipped: " + (oidcErr.message || '').substring(0, 80));
     }
 
     if (browser) {
