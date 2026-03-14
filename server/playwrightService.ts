@@ -1969,13 +1969,17 @@ export async function completeDrawViaGigyaBrowser(
     console.log("[Draw-Gigya] Attempting direct gigya.accounts.login API...");
     log("Logging in via Gigya API...");
     let apiLoginResult: any = null;
-    for (let loginAttempt = 0; loginAttempt < 3; loginAttempt++) {
+    const MAX_LOGIN_ATTEMPTS = 6;
+    for (let loginAttempt = 0; loginAttempt < MAX_LOGIN_ATTEMPTS; loginAttempt++) {
       if (loginAttempt > 0) {
-        log("Retrying Gigya login (attempt " + (loginAttempt + 1) + ")...");
-        await page.waitForTimeout(5000);
+        const isGeoBlock = (apiLoginResult as any)?.errorCode === 451002;
+        const delaySec = isGeoBlock ? (30 + loginAttempt * 15) : 5;
+        log("Retrying Gigya login (attempt " + (loginAttempt + 1) + "/" + MAX_LOGIN_ATTEMPTS + ")" + (isGeoBlock ? " — geo-block, waiting " + delaySec + "s" : "") + "...");
+        console.log("[Draw-Gigya] Retry " + (loginAttempt + 1) + "/" + MAX_LOGIN_ATTEMPTS + (isGeoBlock ? " (geo-block backoff " + delaySec + "s)" : ""));
+        await page!.waitForTimeout(delaySec * 1000);
       }
       try {
-        apiLoginResult = await page.evaluate(`(function() {
+        apiLoginResult = await page!.evaluate(`(function() {
           return new Promise(function(resolve) {
             if (typeof gigya === 'undefined' || !gigya.accounts) {
               resolve({ success: false, error: 'gigya not available' });
@@ -1998,6 +2002,7 @@ export async function completeDrawViaGigyaBrowser(
         })()`);
         console.log("[Draw-Gigya] API login result (attempt " + (loginAttempt + 1) + "): " + JSON.stringify(apiLoginResult));
         if ((apiLoginResult as any)?.success) break;
+        if ((apiLoginResult as any)?.errorCode === 451002) continue;
         if ((apiLoginResult as any)?.errorCode !== 400006) break;
       } catch (apiErr: any) {
         console.log("[Draw-Gigya] API login attempt error: " + apiErr.message.substring(0, 80));
@@ -2438,121 +2443,148 @@ export async function completeDrawViaGigyaBrowser(
         log("Draw form: Page closed, launching fresh local browser for OIDC...");
         console.log("[Draw-OIDC] Page closed, launching fresh local browser for " + email);
 
-        try {
-          const freshBrowser = await chromium.launch({
-            headless: true,
-            args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--ignore-certificate-errors'],
-          });
-          browser = freshBrowser;
-          const freshCtx = await freshBrowser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            viewport: { width: 1280, height: 900 },
-            ignoreHTTPSErrors: true,
-          });
-          page = await freshCtx.newPage();
-          page.setDefaultTimeout(30000);
+        const MAX_GEO_RETRIES = 5;
+        let geoRetryCount = 0;
+        let freshLoginSuccess = false;
 
-          console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
-          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
-          try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-          await page.waitForTimeout(2000);
-
-          await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", undefined, { timeout: 20000 });
-          console.log("[Draw-OIDC] Fresh browser: Gigya SDK loaded, logging in...");
-
-          const freshLogin = await page.evaluate(`(function(email, pwd) {
-            return new Promise(function(resolve) {
-              gigya.accounts.login({
-                loginID: email, password: pwd,
-                callback: function(resp) {
-                  resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
-                }
-              });
-              setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 20000);
-            });
-          })(${JSON.stringify(email)}, ${JSON.stringify(password)})`) as any;
-          console.log("[Draw-OIDC] Fresh browser Gigya login: " + JSON.stringify(freshLogin));
-
-          if (!freshLogin.success) {
-            throw new Error("Fresh browser Gigya login failed: " + freshLogin.errorMessage);
+        while (geoRetryCount < MAX_GEO_RETRIES && !freshLoginSuccess) {
+          if (geoRetryCount > 0) {
+            const backoffSec = 30 + geoRetryCount * 15;
+            console.log("[Draw-OIDC] Geo-block retry " + (geoRetryCount + 1) + "/" + MAX_GEO_RETRIES + " — waiting " + backoffSec + "s...");
+            log("Geo-blocked (451002). Retrying in " + backoffSec + "s (attempt " + (geoRetryCount + 1) + "/" + MAX_GEO_RETRIES + ")...");
+            await new Promise(r => setTimeout(r, backoffSec * 1000));
+            try { if (browser) await browser.close(); } catch {}
+            browser = null;
+            page = null;
           }
 
-          await page.waitForTimeout(3000);
-          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+          try {
+            const freshBrowser = await chromium.launch({
+              headless: true,
+              args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--ignore-certificate-errors'],
+            });
+            browser = freshBrowser;
+            const freshCtx = await freshBrowser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              viewport: { width: 1280, height: 900 },
+              ignoreHTTPSErrors: true,
+            });
+            page = await freshCtx.newPage();
+            page.setDefaultTimeout(30000);
 
-          let freshUrl = page.url();
-          if (freshUrl.includes("proxy.html") || freshUrl.includes("consent.html")) {
-            console.log("[Draw-OIDC] Fresh browser: on intermediate page, navigating back to login...");
-            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+            console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
+            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
+            try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
             await page.waitForTimeout(2000);
-          }
 
-          const freshAuth = await page.evaluate(`(function() {
-            return new Promise(function(resolve) {
-              gigya.accounts.getAccountInfo({
-                callback: function(resp) {
-                  resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' });
-                }
+            await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", undefined, { timeout: 20000 });
+            console.log("[Draw-OIDC] Fresh browser: Gigya SDK loaded, logging in...");
+
+            const freshLogin = await page.evaluate(`(function(email, pwd) {
+              return new Promise(function(resolve) {
+                gigya.accounts.login({
+                  loginID: email, password: pwd,
+                  callback: function(resp) {
+                    resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
+                  }
+                });
+                setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 20000);
               });
-              setTimeout(function() { resolve({ loggedIn: false, uid: '' }); }, 15000);
-            });
-          })()`) as any;
-          console.log("[Draw-OIDC] Fresh browser auth check: " + JSON.stringify(freshAuth));
+            })(${JSON.stringify(email)}, ${JSON.stringify(password)})`) as any;
+            console.log("[Draw-OIDC] Fresh browser Gigya login: " + JSON.stringify(freshLogin));
 
-          if (!freshAuth.loggedIn) {
-            throw new Error("Fresh browser: Not logged in after Gigya login");
-          }
+            if (!freshLogin.success) {
+              if (freshLogin.errorCode === 451002) {
+                geoRetryCount++;
+                continue;
+              }
+              throw new Error("Fresh browser Gigya login failed: " + freshLogin.errorMessage);
+            }
 
-          console.log("[Draw-OIDC] Fresh browser: setting profile + data via Gigya JS SDK...");
-          const freshProfileResult = await page.evaluate(`(function(birthYr, zip) {
-            return new Promise(function(resolve) {
-              gigya.accounts.setAccountInfo({
-                profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
-                callback: function(resp) {
-                  resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
-                }
+            freshLoginSuccess = true;
+
+            await page.waitForTimeout(3000);
+            try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+            let freshUrl = page.url();
+            if (freshUrl.includes("proxy.html") || freshUrl.includes("consent.html")) {
+              console.log("[Draw-OIDC] Fresh browser: on intermediate page, navigating back to login...");
+              await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await page.waitForTimeout(2000);
+            }
+
+            const freshAuth = await page.evaluate(`(function() {
+              return new Promise(function(resolve) {
+                gigya.accounts.getAccountInfo({
+                  callback: function(resp) {
+                    resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' });
+                  }
+                });
+                setTimeout(function() { resolve({ loggedIn: false, uid: '' }); }, 15000);
               });
-              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-            });
-          })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
-          console.log("[Draw-OIDC] Fresh browser profile result: " + JSON.stringify(freshProfileResult));
-          if (freshProfileResult.success) profileSet = true;
+            })()`) as any;
+            console.log("[Draw-OIDC] Fresh browser auth check: " + JSON.stringify(freshAuth));
 
-          const allSportsFresh = [
-            ...favOlympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
-            ...favParalympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
-          ];
-          const teamObjsFresh = favTeams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
+            if (!freshAuth.loggedIn) {
+              throw new Error("Fresh browser: Not logged in after Gigya login");
+            }
 
-          const freshDataResult = await page.evaluate(`(function(sportsStr, teamsStr) {
-            return new Promise(function(resolve) {
-              var sports = JSON.parse(sportsStr);
-              var teams = JSON.parse(teamsStr);
-              gigya.accounts.setAccountInfo({
-                data: {
-                  personalization: { favoritesDisciplines: sports, favoritesCountries: teams, siteLanguage: 'en' },
-                  entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
-                },
-                callback: function(resp) {
-                  resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
-                }
+            console.log("[Draw-OIDC] Fresh browser: setting profile + data via Gigya JS SDK...");
+            const freshProfileResult = await page.evaluate(`(function(birthYr, zip) {
+              return new Promise(function(resolve) {
+                gigya.accounts.setAccountInfo({
+                  profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
+                  callback: function(resp) {
+                    resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+                  }
+                });
+                setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
               });
-              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-            });
-          })(${JSON.stringify(JSON.stringify(allSportsFresh))}, ${JSON.stringify(JSON.stringify(teamObjsFresh))})`) as { success: boolean; error?: string | null };
-          console.log("[Draw-OIDC] Fresh browser data result: " + JSON.stringify(freshDataResult));
-          if (freshDataResult.success) dataSet = true;
+            })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
+            console.log("[Draw-OIDC] Fresh browser profile result: " + JSON.stringify(freshProfileResult));
+            if (freshProfileResult.success) profileSet = true;
 
-          if (profileSet && dataSet && onEarlyComplete) {
-            console.log("[Draw-OIDC] Fresh browser: profile+data set, marking completed early");
-            onEarlyComplete();
+            const allSportsFresh = [
+              ...favOlympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+              ...favParalympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+            ];
+            const teamObjsFresh = favTeams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
+
+            const freshDataResult = await page.evaluate(`(function(sportsStr, teamsStr) {
+              return new Promise(function(resolve) {
+                var sports = JSON.parse(sportsStr);
+                var teams = JSON.parse(teamsStr);
+                gigya.accounts.setAccountInfo({
+                  data: {
+                    personalization: { favoritesDisciplines: sports, favoritesCountries: teams, siteLanguage: 'en' },
+                    entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
+                  },
+                  callback: function(resp) {
+                    resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+                  }
+                });
+                setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+              });
+            })(${JSON.stringify(JSON.stringify(allSportsFresh))}, ${JSON.stringify(JSON.stringify(teamObjsFresh))})`) as { success: boolean; error?: string | null };
+            console.log("[Draw-OIDC] Fresh browser data result: " + JSON.stringify(freshDataResult));
+            if (freshDataResult.success) dataSet = true;
+
+            if (profileSet && dataSet && onEarlyComplete) {
+              console.log("[Draw-OIDC] Fresh browser: profile+data set, marking completed early");
+              onEarlyComplete();
+            }
+
+            console.log("[Draw-OIDC] Fresh browser ready for OIDC!");
+            log("Fresh local browser logged in, profile=" + profileSet + " data=" + dataSet + ". Proceeding to OIDC...");
+          } catch (freshErr: any) {
+            console.log("[Draw-OIDC] Fresh browser failed: " + (freshErr.message || '').substring(0, 200));
+            log("Fresh browser OIDC failed: " + (freshErr.message || '').substring(0, 80));
           }
+        }
 
-          console.log("[Draw-OIDC] Fresh browser ready for OIDC!");
-          log("Fresh local browser logged in, profile=" + profileSet + " data=" + dataSet + ". Proceeding to OIDC...");
-        } catch (freshErr: any) {
-          console.log("[Draw-OIDC] Fresh browser failed: " + (freshErr.message || '').substring(0, 200));
-          log("Fresh browser OIDC failed: " + (freshErr.message || '').substring(0, 80));
+        if (!freshLoginSuccess && geoRetryCount >= MAX_GEO_RETRIES) {
+          console.log("[Draw-OIDC] All " + MAX_GEO_RETRIES + " geo-block retries exhausted");
+          log("Geo-block: all " + MAX_GEO_RETRIES + " retry attempts failed. Will try ZenRows fallback...");
         }
       } else {
         log("Draw form: Navigating OIDC in local browser (same session)...");
@@ -3431,8 +3463,17 @@ export async function completeDrawViaGigyaBrowser(
           await bdPg2.waitForTimeout(5000);
 
           var gigyaLogin2 = false;
-          for (let att = 0; att < 3; att++) {
-            console.log("[ZenRows-Full] Gigya login attempt " + (att + 1) + "...");
+          var lastZrError = '';
+          const ZR_MAX_ATTEMPTS = 6;
+          for (let att = 0; att < ZR_MAX_ATTEMPTS; att++) {
+            if (att > 0) {
+              const isGeo = !!(lastZrError && lastZrError.includes('451002'));
+              const delaySec = isGeo ? (30 + att * 15) : 5;
+              console.log("[ZenRows-Full] Retry " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + (isGeo ? " (geo-block backoff " + delaySec + "s)" : ""));
+              await bdPg2.waitForTimeout(delaySec * 1000);
+            }
+            lastZrError = '';
+            console.log("[ZenRows-Full] Gigya login attempt " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + "...");
             try {
               const loginRes2 = await bdPg2.evaluate(`
                 new Promise(function(resolve) {
@@ -3450,25 +3491,41 @@ export async function completeDrawViaGigyaBrowser(
                 })
               `) as any;
               console.log("[ZenRows-Full] Login attempt " + (att + 1) + ": " + JSON.stringify(loginRes2));
+              lastZrError = loginRes2?.error || '';
               if (loginRes2 && loginRes2.success) { gigyaLogin2 = true; break; }
+              if (lastZrError.includes('451002')) continue;
             } catch (loginErr2: any) {
               console.log("[ZenRows-Full] Login error: " + (loginErr2.message || '').substring(0, 100));
+              lastZrError = loginErr2.message || '';
             }
-            await bdPg2.waitForTimeout(3000);
           }
 
           if (!gigyaLogin2) {
-            console.log("[ZenRows-Full] SDK login failed. Trying form-based login...");
+            console.log("[ZenRows-Full] SDK login failed after " + ZR_MAX_ATTEMPTS + " attempts. Trying form-based login...");
             try {
-              const emailInput = await bdPg2.$('input[name="username"], input[name="loginID"], input[type="email"], input[name="email"], .gigya-input-text[name*="login"]');
-              const passInput = await bdPg2.$('input[name="password"], input[type="password"], .gigya-input-password');
+              await bdPg2.waitForTimeout(3000);
+              const formContainer = await bdPg2.$('#container, .gigya-screen, [data-screenset-element-id]');
+              let targetFrame: any = bdPg2;
+              if (!formContainer) {
+                const frames = bdPg2.frames();
+                for (const f of frames) {
+                  const fi = await f.$('input[name="loginID"], input[name="username"], input[type="email"]');
+                  if (fi) { targetFrame = f; console.log("[ZenRows-Full] Found login form in iframe"); break; }
+                }
+              }
+              const emailInput = await targetFrame.$('input[name="loginID"], input[name="username"], input[type="email"], input[name="email"]');
+              const passInput = await targetFrame.$('input[name="password"], input[type="password"]');
               if (emailInput && passInput) {
-                await emailInput.fill(email);
-                await passInput.fill(password);
-                const submitBtn = await bdPg2.$('input[type="submit"], button[type="submit"], .gigya-input-submit, button:has-text("Log in"), button:has-text("Sign in")');
+                await emailInput.click();
+                await bdPg2.waitForTimeout(300);
+                await emailInput.type(email, { delay: 50 });
+                await passInput.click();
+                await bdPg2.waitForTimeout(300);
+                await passInput.type(password, { delay: 50 });
+                const submitBtn = await targetFrame.$('input[type="submit"], button[type="submit"], .gigya-input-submit');
                 if (submitBtn) {
                   await submitBtn.click();
-                  await bdPg2.waitForTimeout(8000);
+                  await bdPg2.waitForTimeout(10000);
                   const afterLogin = bdPg2.url();
                   console.log("[ZenRows-Full] After form login: " + afterLogin.substring(0, 120));
                   if (!afterLogin.includes('/login') || afterLogin.includes('proxy.html') || afterLogin.includes('mycustomerdata')) {
