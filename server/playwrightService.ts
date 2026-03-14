@@ -2690,8 +2690,225 @@ export async function completeDrawViaGigyaBrowser(
         oidcLinked = true;
         console.log("[Draw-OIDC] OIDC identity linking confirmed via auth code redirect chain");
         console.log("[Draw-OIDC] Auth code URL captured: " + ticketsAuthUrl.substring(0, 150));
-        log("OIDC identity linking confirmed. Keycloak-Gigya link established.");
-        log("tickets.la28.org protected by Queue-it + captcha. Draw form submission skipped.");
+        log("OIDC linked. Opening full flow via Bright Data Scraping Browser...");
+
+        let bdBrowser: any = null;
+        try {
+          const bdWsEndpoint = "wss://brd-customer-hl_86b34e68-zone-scraping_browser2:nbjah5b6b1nt@brd.superproxy.io:9222";
+          console.log("[Draw-OIDC] Connecting to Bright Data Scraping Browser...");
+          bdBrowser = await chromium.connectOverCDP(bdWsEndpoint, { timeout: 60000 });
+          console.log("[Draw-OIDC] BD browser connected! Contexts: " + bdBrowser.contexts().length);
+
+          const bdContext = bdBrowser.contexts()[0] || await bdBrowser.newContext();
+          const bdPage = await bdContext.newPage();
+          await bdPage.setDefaultNavigationTimeout(120000);
+          await bdPage.setDefaultTimeout(60000);
+
+          console.log("[Draw-OIDC] Step 1: BD login to Gigya on la28id.la28.org...");
+          log("Logging into Gigya via BD browser...");
+          await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+          console.log("[Draw-OIDC] BD login page URL: " + bdPage.url().substring(0, 100));
+
+          await bdPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 30000 });
+          console.log("[Draw-OIDC] BD Gigya SDK loaded");
+
+          const bdLoginResult = await bdPage.evaluate(async (creds: any) => {
+            return new Promise((resolve) => {
+              (window as any).gigya.accounts.login({
+                loginID: creds.email,
+                password: creds.password,
+                callback: (resp: any) => resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || null })
+              });
+            });
+          }, { email, password });
+          console.log("[Draw-OIDC] BD Gigya login: " + JSON.stringify(bdLoginResult));
+
+          await bdPage.waitForTimeout(3000);
+          const bdPostLoginUrl = bdPage.url();
+          console.log("[Draw-OIDC] BD post-login URL: " + bdPostLoginUrl.substring(0, 100));
+
+          if (bdPostLoginUrl.includes('proxy.html') || bdPostLoginUrl.includes('consent.html')) {
+            console.log("[Draw-OIDC] BD on intermediate page, navigating back to login...");
+            await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await bdPage.waitForTimeout(2000);
+          }
+
+          const bdAuth = await bdPage.evaluate(() => {
+            try {
+              return new Promise((resolve) => {
+                (window as any).gigya.accounts.getAccountInfo({
+                  callback: (resp: any) => resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || null })
+                });
+              });
+            } catch { return { loggedIn: false, uid: null }; }
+          });
+          console.log("[Draw-OIDC] BD auth check: " + JSON.stringify(bdAuth));
+
+          console.log("[Draw-OIDC] Step 2: BD navigating to tickets.la28.org/mycustomerdata/ (fresh OIDC flow)...");
+          log("Navigating to tickets.la28.org (BD handles Queue-it + OIDC)...");
+
+          const bdNavStart = Date.now();
+          await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+          const bdNavTime = Date.now() - bdNavStart;
+          console.log("[Draw-OIDC] BD nav in " + bdNavTime + "ms, URL: " + bdPage.url().substring(0, 150));
+
+          if (bdPage.url().includes('proxy.html') || bdPage.url().includes('la28id.la28.org')) {
+            console.log("[Draw-OIDC] BD on Gigya proxy/OIDC page, waiting for JS redirect...");
+            try {
+              await bdPage.waitForURL(url => {
+                const u = url.toString();
+                return !u.includes('proxy.html') && !u.includes('la28id.la28.org');
+              }, { timeout: 30000 });
+              console.log("[Draw-OIDC] BD redirected to: " + bdPage.url().substring(0, 150));
+            } catch {
+              console.log("[Draw-OIDC] BD proxy didn't redirect. Current: " + bdPage.url().substring(0, 100));
+            }
+          }
+
+          if (bdPage.url().includes('next.tickets.la28.org') || bdPage.url().includes('queue-it')) {
+            console.log("[Draw-OIDC] BD in Queue-it, waiting up to 4 min...");
+            log("In Queue-it queue, waiting...");
+            try {
+              await bdPage.waitForURL(url => {
+                const u = url.toString();
+                return !u.includes('next.tickets.la28.org') && !u.includes('queue-it');
+              }, { timeout: 240000 });
+              console.log("[Draw-OIDC] BD Queue-it passed! URL: " + bdPage.url().substring(0, 150));
+            } catch {
+              console.log("[Draw-OIDC] BD Queue-it timeout. URL: " + bdPage.url().substring(0, 150));
+            }
+          }
+
+          if (bdPage.url().includes('proxy.html') || bdPage.url().includes('la28id.la28.org')) {
+            console.log("[Draw-OIDC] BD back on Gigya proxy after Queue-it, waiting for redirect...");
+            try {
+              await bdPage.waitForURL(url => {
+                const u = url.toString();
+                return !u.includes('proxy.html') && !u.includes('la28id.la28.org');
+              }, { timeout: 30000 });
+              console.log("[Draw-OIDC] BD final redirect to: " + bdPage.url().substring(0, 150));
+            } catch {
+              console.log("[Draw-OIDC] BD still on proxy. Trying direct nav to mycustomerdata...");
+              await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            }
+          }
+
+          await bdPage.waitForTimeout(5000);
+          const bdUrl = bdPage.url();
+          const bdContent = await bdPage.content();
+          console.log("[Draw-OIDC] BD final URL: " + bdUrl.substring(0, 150));
+          console.log("[Draw-OIDC] BD page content length: " + bdContent.length);
+          console.log("[Draw-OIDC] BD page title: " + await bdPage.title());
+          console.log("[Draw-OIDC] BD body preview: " + bdContent.substring(0, 800).replace(/\s+/g, ' '));
+
+          const bdText = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 2000) || '');
+          console.log("[Draw-OIDC] BD visible text: " + bdText.substring(0, 800));
+
+          const isCustomerPage = bdUrl.includes('mycustomerdata') || (bdUrl.includes('tickets.la28.org') && !bdUrl.includes('next.tickets'));
+          const hasForm = bdContent.includes('firstName') || bdContent.includes('first_name') ||
+            bdContent.includes('Personal') || bdContent.includes('My Data') ||
+            bdText.includes('First') || bdText.includes('Last') || bdText.includes('draw');
+
+          if (isCustomerPage && hasForm) {
+            console.log("[Draw-OIDC] BD on customer data page with form! Filling...");
+            log("On tickets.la28.org customer data page. Filling draw form...");
+
+            const inputFields = await bdPage.evaluate(() => {
+              const inputs = Array.from(document.querySelectorAll('input, select, textarea'));
+              return inputs.map(el => ({
+                tag: el.tagName,
+                type: (el as HTMLInputElement).type || '',
+                name: (el as HTMLInputElement).name || '',
+                id: el.id || '',
+                placeholder: (el as HTMLInputElement).placeholder || '',
+                visible: el.getBoundingClientRect().width > 0
+              }));
+            });
+            console.log("[Draw-OIDC] BD form fields: " + JSON.stringify(inputFields));
+
+            const phone3 = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
+            await bdPage.evaluate((data: any) => {
+              const inputs = document.querySelectorAll('input');
+              inputs.forEach((inp: HTMLInputElement) => {
+                const name = (inp.name || inp.id || inp.placeholder || '').toLowerCase();
+                if (name.includes('email')) inp.value = data.email;
+                else if (name.includes('firstname') || name.includes('first_name') || name.includes('first name')) inp.value = data.firstName;
+                else if (name.includes('lastname') || name.includes('last_name') || name.includes('last name')) inp.value = data.lastName;
+                else if (name.includes('zip') || name.includes('postal')) inp.value = data.zip;
+                else if (name.includes('phone') || name.includes('tel') || name.includes('mobile')) inp.value = data.phone;
+                else if (name.includes('city')) inp.value = 'Los Angeles';
+                else if (name.includes('street') || name.includes('address')) inp.value = '123 Olympic Blvd';
+                else if (name.includes('state') || name.includes('region')) inp.value = 'CA';
+                if (inp.type === 'checkbox') {
+                  const cn = (inp.name || inp.id || '').toLowerCase();
+                  if (cn.includes('term') || cn.includes('consent') || cn.includes('agree') || cn.includes('privacy') || cn.includes('accept')) {
+                    inp.checked = true;
+                  }
+                }
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+              const selects = document.querySelectorAll('select');
+              selects.forEach((sel: HTMLSelectElement) => {
+                const name = (sel.name || sel.id || '').toLowerCase();
+                if (name.includes('country')) {
+                  const usOpt = Array.from(sel.options).find(o => o.value === 'US' || o.value === 'USA' || o.text.includes('United States'));
+                  if (usOpt) sel.value = usOpt.value;
+                } else if (name.includes('state')) {
+                  const caOpt = Array.from(sel.options).find(o => o.value === 'CA' || o.text.includes('California'));
+                  if (caOpt) sel.value = caOpt.value;
+                }
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+            }, { email, firstName: 'Fan', lastName: 'User', zip: usedZip, phone: phone3 });
+
+            console.log("[Draw-OIDC] BD form filled. Looking for submit button...");
+
+            const submitResult = await bdPage.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
+              const submitBtn = buttons.find(b => {
+                const text = (b.textContent || '').toLowerCase();
+                return text.includes('submit') || text.includes('register') || text.includes('enter') ||
+                  text.includes('save') || text.includes('confirm') || text.includes('draw') || text.includes('apply');
+              });
+              if (submitBtn) { (submitBtn as HTMLElement).click(); return 'clicked: ' + (submitBtn.textContent || '').trim().substring(0, 50); }
+              const forms = document.querySelectorAll('form');
+              if (forms.length > 0) { forms[0].submit(); return 'form.submit()'; }
+              return 'no submit found';
+            });
+
+            console.log("[Draw-OIDC] BD submit result: " + submitResult);
+
+            if (submitResult !== 'no submit found') {
+              await bdPage.waitForTimeout(8000);
+              const afterSubmitUrl = bdPage.url();
+              const afterSubmitText = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
+              console.log("[Draw-OIDC] BD after submit URL: " + afterSubmitUrl.substring(0, 150));
+              console.log("[Draw-OIDC] BD after submit text: " + afterSubmitText.substring(0, 300));
+              formSubmitted = true;
+              log("Draw form submitted on tickets.la28.org!");
+            } else {
+              log("Customer page loaded but no submit button found.");
+            }
+          } else if (isCustomerPage) {
+            console.log("[Draw-OIDC] BD on customer page but no form detected.");
+            log("On tickets page but form not detected. Page may be SPA.");
+
+            await bdPage.waitForTimeout(10000);
+            const afterWait = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 1000) || '');
+            console.log("[Draw-OIDC] BD after extra wait text: " + afterWait.substring(0, 500));
+          } else {
+            console.log("[Draw-OIDC] BD not on customer page. URL: " + bdUrl.substring(0, 150));
+            log("BD browser: didn't reach customer data page.");
+          }
+
+          try { await bdPage.close(); } catch {}
+        } catch (bdErr: any) {
+          console.log("[Draw-OIDC] BD Scraping Browser error: " + (bdErr.message || '').substring(0, 300));
+          log("BD browser error: " + (bdErr.message || '').substring(0, 100));
+        } finally {
+          if (bdBrowser) { try { await bdBrowser.close(); } catch {} }
+        }
       } else if (hasBrokerEndpoint) {
         oidcLinked = true;
         console.log("[Draw-OIDC] Broker endpoint was hit but no auth code URL captured. OIDC linking likely completed.");
