@@ -2449,331 +2449,256 @@ export async function completeDrawViaGigyaBrowser(
       }).toString();
 
       let capturedRedirectUrls: string[] = [];
+      let interceptedTicketsUrl = "";
+      let keycloakSessionCookies: string[] = [];
+
+      await page.route(/tickets\.la28\.org\/mycustomerdata/, async (route) => {
+        const reqUrl = route.request().url();
+        console.log("[Draw-OIDC] ROUTE HANDLER FIRED for: " + reqUrl.substring(0, 120));
+        capturedRedirectUrls.push(reqUrl);
+        if (!interceptedTicketsUrl && (reqUrl.includes('code=') || reqUrl.includes('iss='))) {
+          interceptedTicketsUrl = reqUrl;
+          console.log("[Draw-OIDC] INTERCEPTED tickets auth URL via route handler - fulfilling with dummy page to preserve code");
+          try {
+            await route.fulfill({
+              status: 200,
+              contentType: 'text/html',
+              body: '<html><head><title>Code Captured</title></head><body><h1>Auth code captured successfully</h1></body></html>',
+            });
+          } catch (e: any) {
+            console.log("[Draw-OIDC] Route fulfill error: " + (e.message || '').substring(0, 100));
+            try { await route.abort(); } catch {}
+          }
+        } else {
+          try { await route.continue(); } catch {}
+        }
+      });
+
       page.on('request', (req) => {
         const reqUrl = req.url();
-        if (reqUrl.includes('eventim.com') || reqUrl.includes('tickets.la28.org') || reqUrl.includes('keycloak') || reqUrl.includes('broker/gigya')) {
+        if (reqUrl.includes('eventim.com') || reqUrl.includes('tickets.la28.org') || reqUrl.includes('broker/gigya')) {
           capturedRedirectUrls.push(reqUrl);
         }
       });
 
-      for (let oidcAttempt = 0; oidcAttempt < 5; oidcAttempt++) {
-        try {
-          await page.goto(oidcAuthUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-        } catch (gotoErr: any) {
-          console.log("[Draw-OIDC] OIDC goto error attempt " + (oidcAttempt + 1) + ": " + gotoErr.message.substring(0, 120));
-        }
-        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-        await page.waitForTimeout(3000);
-
-        let checkUrl = page.url();
-        console.log("[Draw-OIDC] Attempt " + (oidcAttempt + 1) + " URL: " + checkUrl.substring(0, 120));
-
-        if (checkUrl.includes("proxy.html")) {
-          console.log("[Draw-OIDC] On Gigya proxy.html, waiting for JS redirect...");
-          for (let pw = 0; pw < 10; pw++) {
-            await page.waitForTimeout(2000);
-            checkUrl = page.url();
-            if (!checkUrl.includes("proxy.html")) {
-              console.log("[Draw-OIDC] proxy.html redirected to: " + checkUrl.substring(0, 120));
-              break;
-            }
+      page.on('response', (resp) => {
+        const respUrl = resp.url();
+        if (respUrl.includes('eventim.com') && resp.status() >= 300 && resp.status() < 400) {
+          const location = resp.headers()['location'] || '';
+          console.log("[Draw-OIDC] Redirect " + resp.status() + " from " + respUrl.substring(0, 80) + " → " + location.substring(0, 120));
+          if (location.includes('client_id=')) {
+            const match = location.match(/client_id=([^&]*)/);
+            if (match) console.log("[Draw-OIDC] Discovered client_id: " + match[1]);
           }
         }
-
-        checkUrl = page.url();
-        if (checkUrl.includes("tickets.la28.org") && !checkUrl.includes("next.tickets.la28.org")) break;
-        if (checkUrl.includes("next.tickets.la28.org")) {
-          console.log("[Draw-OIDC] Reached queue at next.tickets.la28.org");
-          try {
-            const queueUrl = new URL(checkUrl);
-            const targetUrl = queueUrl.searchParams.get('t');
-            if (targetUrl) {
-              console.log("[Draw-OIDC] Queue target URL: " + targetUrl.substring(0, 100));
-              capturedRedirectUrls.push(targetUrl);
-
-              const earlyEvidence = capturedRedirectUrls.some(u => u.includes('after-first-broker-login')) ||
-                capturedRedirectUrls.some(u => u.includes('tickets.la28.org/mycustomerdata')) ||
-                (capturedRedirectUrls.some(u => u.includes('broker/gigya/endpoint')) && capturedRedirectUrls.some(u => u.includes('login-actions')));
-
-              if (earlyEvidence) {
-                console.log("[Draw-OIDC] OIDC linking evidence found in redirect chain before queue - skipping queue navigation");
-                break;
-              }
-
-              console.log("[Draw-OIDC] No early evidence, trying queue target URL...");
-              try {
-                await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-                try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
-                await page.waitForTimeout(3000);
-                checkUrl = page.url();
-                console.log("[Draw-OIDC] After queue target nav: " + checkUrl.substring(0, 120));
-
-                const pageText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
-                if (pageText.includes("Page has expired") || pageText.includes("Unexpected error")) {
-                  console.log("[Draw-OIDC] Broker returned expired error - auth code was consumed during redirect chain");
-                  console.log("[Draw-OIDC] This indicates OIDC linking likely completed during the redirect chain");
-                  capturedRedirectUrls.push("broker-expired-consumed");
-                }
-              } catch (tErr: any) {
-                console.log("[Draw-OIDC] Queue target nav error: " + tErr.message.substring(0, 80));
-              }
-            }
-          } catch {}
-          if (checkUrl.includes("tickets.la28.org") && !checkUrl.includes("next.tickets.la28.org")) break;
+        if (respUrl.includes('eventim.com')) {
+          const setCookies = resp.headers()['set-cookie'] || '';
+          if (setCookies) {
+            keycloakSessionCookies.push(setCookies);
+          }
         }
+      });
 
-        if (checkUrl.includes("chrome-error") || checkUrl.includes("about:blank")) {
-          console.log("[Draw-OIDC] chrome-error, captured URLs: " + capturedRedirectUrls.length + ". Retrying in 5s...");
+      try {
+        await page.goto(oidcAuthUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      } catch (gotoErr: any) {
+        console.log("[Draw-OIDC] OIDC goto error: " + gotoErr.message.substring(0, 120));
+      }
+      try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+      await page.waitForTimeout(3000);
+
+      let checkUrl = page.url();
+      console.log("[Draw-OIDC] After initial nav: " + checkUrl.substring(0, 120));
+
+      if (checkUrl.includes("proxy.html")) {
+        console.log("[Draw-OIDC] On Gigya proxy.html, waiting for JS redirect...");
+        for (let pw = 0; pw < 15; pw++) {
+          await page.waitForTimeout(2000);
+          checkUrl = page.url();
+          if (!checkUrl.includes("proxy.html")) {
+            console.log("[Draw-OIDC] proxy.html redirected to: " + checkUrl.substring(0, 120));
+            break;
+          }
+        }
+      }
+
+      checkUrl = page.url();
+      if (checkUrl.includes("next.tickets.la28.org")) {
+        console.log("[Draw-OIDC] In Queue-it queue. Waiting up to 4 minutes for queue to pass...");
+        const queueStart = Date.now();
+        const maxQueueWait = 240000;
+        while (Date.now() - queueStart < maxQueueWait) {
           await page.waitForTimeout(5000);
-          continue;
+          checkUrl = page.url();
+          const elapsed = Math.round((Date.now() - queueStart) / 1000);
+          if (!checkUrl.includes("next.tickets.la28.org")) {
+            console.log("[Draw-OIDC] Queue passed after " + elapsed + "s! Now at: " + checkUrl.substring(0, 120));
+            break;
+          }
+          if (elapsed % 30 === 0) {
+            console.log("[Draw-OIDC] Still in queue (" + elapsed + "s)...");
+          }
         }
-        break;
       }
 
-      let finalUrl = "";
-      try { finalUrl = page.url(); } catch { finalUrl = "unknown"; }
-      console.log("[Draw-OIDC] After OIDC flow: " + finalUrl.substring(0, 120));
-      if (capturedRedirectUrls.length > 0) {
-        console.log("[Draw-OIDC] Captured " + capturedRedirectUrls.length + " redirect URLs:");
-        const uniqueUrls = [...new Set(capturedRedirectUrls.map(u => u.substring(0, 100)))];
-        uniqueUrls.forEach((u, i) => console.log("[Draw-OIDC]   " + (i+1) + ": " + u));
+      checkUrl = page.url();
+      if (checkUrl.includes("proxy.html")) {
+        console.log("[Draw-OIDC] On proxy.html after queue, waiting for redirect...");
+        for (let pw = 0; pw < 15; pw++) {
+          await page.waitForTimeout(2000);
+          checkUrl = page.url();
+          if (!checkUrl.includes("proxy.html")) {
+            console.log("[Draw-OIDC] Redirected to: " + checkUrl.substring(0, 120));
+            break;
+          }
+        }
       }
+
+      if (checkUrl.includes("next.tickets.la28.org")) {
+        console.log("[Draw-OIDC] Second Queue-it queue detected. Waiting up to 3 minutes...");
+        const q2Start = Date.now();
+        while (Date.now() - q2Start < 180000) {
+          await page.waitForTimeout(5000);
+          checkUrl = page.url();
+          if (!checkUrl.includes("next.tickets.la28.org")) {
+            console.log("[Draw-OIDC] Second queue passed! Now at: " + checkUrl.substring(0, 120));
+            break;
+          }
+        }
+      }
+
+      checkUrl = page.url();
+      interceptedTicketsUrl = capturedRedirectUrls.find(u =>
+        u.includes('tickets.la28.org/mycustomerdata') && (u.includes('code=') || u.includes('iss='))
+      ) || "";
+      console.log("[Draw-OIDC] Final URL: " + checkUrl.substring(0, 120));
+      console.log("[Draw-OIDC] Intercepted tickets auth URL: " + (interceptedTicketsUrl ? interceptedTicketsUrl.substring(0, 150) : "none"));
 
       const hasAfterFirstBrokerLogin = capturedRedirectUrls.some(u => u.includes('after-first-broker-login'));
-      const hasFirstBrokerLogin = capturedRedirectUrls.some(u => u.includes('first-broker-login'));
       const hasTicketsRedirect = capturedRedirectUrls.some(u => u.includes('tickets.la28.org/mycustomerdata'));
       const hasBrokerEndpoint = capturedRedirectUrls.some(u => u.includes('broker/gigya/endpoint'));
-      const hasLoginActions = capturedRedirectUrls.some(u => u.includes('login-actions'));
-      const hasBrokerExpiredConsumed = capturedRedirectUrls.some(u => u.includes('broker-expired-consumed'));
-      const oidcLinkingEvidence = hasAfterFirstBrokerLogin || hasTicketsRedirect || (hasBrokerEndpoint && hasLoginActions) || (hasBrokerEndpoint && hasBrokerExpiredConsumed);
 
-      console.log("[Draw-OIDC] Evidence: afterBroker=" + hasAfterFirstBrokerLogin + " firstBroker=" + hasFirstBrokerLogin + " tickets=" + hasTicketsRedirect + " brokerEndpoint=" + hasBrokerEndpoint + " loginActions=" + hasLoginActions);
-
-      if (oidcLinkingEvidence) {
-        console.log("[Draw-OIDC] OIDC linking completed! Evidence: afterFirstBrokerLogin=" + hasAfterFirstBrokerLogin + " ticketsRedirect=" + hasTicketsRedirect);
-        log("OIDC identity linking confirmed via redirect chain");
-        if (!finalUrl.includes("tickets.la28.org")) finalUrl = "https://tickets.la28.org/mycustomerdata/";
+      if (capturedRedirectUrls.length > 0) {
+        const uniqueUrls = [...new Set(capturedRedirectUrls.map(u => u.substring(0, 100)))];
+        console.log("[Draw-OIDC] Captured " + uniqueUrls.length + " unique URLs. afterBroker=" + hasAfterFirstBrokerLogin + " tickets=" + hasTicketsRedirect + " broker=" + hasBrokerEndpoint);
       }
 
-      if (!oidcLinkingEvidence && !finalUrl.includes("tickets.la28.org")) {
-        try { finalUrl = page.url(); } catch { finalUrl = "unknown"; }
-      }
-      console.log("[Draw-OIDC] Final URL: " + finalUrl);
-      log("OIDC result: " + (finalUrl.includes("tickets.la28.org") ? "on tickets.la28.org!" : "URL=" + finalUrl.substring(0, 60)));
+      const onTicketsPage = checkUrl.includes("tickets.la28.org") && !checkUrl.includes("next.tickets.la28.org");
 
-      if (finalUrl.includes("tickets.la28.org") || oidcLinkingEvidence) {
+      if (onTicketsPage || hasAfterFirstBrokerLogin || hasTicketsRedirect || interceptedTicketsUrl) {
         oidcLinked = true;
+        console.log("[Draw-OIDC] OIDC linking confirmed! onTickets=" + onTicketsPage + " intercepted=" + !!interceptedTicketsUrl);
+        log("OIDC identity linking confirmed");
+      } else if (hasBrokerEndpoint) {
+        oidcLinked = true;
+        console.log("[Draw-OIDC] Broker endpoint hit. OIDC linking likely completed server-side.");
+        log("OIDC linking likely completed (broker endpoint reached)");
+      }
 
-        let actualPageUrl = "";
-        try { actualPageUrl = page.url(); } catch {}
-        const pageActuallyLoaded = actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error") && !actualPageUrl.includes("next.tickets");
+      const ticketsAuthUrl = interceptedTicketsUrl;
+      const brightDataToken = "5a312bdf-37e2-427b-9504-f357d091aca9";
 
-        if (!pageActuallyLoaded) {
-          log("OIDC linked. Attempting to load tickets.la28.org for form fill...");
-          console.log("[Draw-OIDC] Page not loaded, attempting direct nav to tickets.la28.org...");
-          for (let loadAttempt = 0; loadAttempt < 3; loadAttempt++) {
-            try {
-              await page.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 30000 });
-              await page.waitForTimeout(3000);
-              actualPageUrl = page.url();
-              if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error") && !actualPageUrl.includes("next.tickets")) {
-                console.log("[Draw-OIDC] tickets.la28.org loaded on attempt " + (loadAttempt + 1));
-                break;
-              }
-              if (actualPageUrl.includes("next.tickets.la28.org")) {
-                try {
-                  const qUrl = new URL(actualPageUrl);
-                  const tUrl = qUrl.searchParams.get('t');
-                  if (tUrl) {
-                    await page.goto(tUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-                    await page.waitForTimeout(3000);
-                    actualPageUrl = page.url();
-                    if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("next.tickets") && !actualPageUrl.includes("chrome-error")) break;
+      if (onTicketsPage) {
+        console.log("[Draw-OIDC] Browser is on tickets.la28.org! Attempting direct form fill...");
+        log("On tickets.la28.org - attempting direct form fill...");
+
+        try {
+          await page.waitForTimeout(5000);
+          const pageContent = await page.content();
+          console.log("[Draw-OIDC] Page content length: " + pageContent.length);
+
+          const formMatch = pageContent.match(/<form[^>]*action="([^"]*)"[^>]*method="([^"]*)"[^>]*/i);
+          const inputMatches = [...pageContent.matchAll(/<input[^>]*name="([^"]*)"[^>]*/gi)];
+          console.log("[Draw-OIDC] Form action: " + (formMatch ? formMatch[1] : 'none'));
+          console.log("[Draw-OIDC] Input fields: " + inputMatches.map(m => m[1]).join(', '));
+
+          const hasCustomerForm = pageContent.includes('customerdata') || pageContent.includes('customer-data') ||
+            pageContent.includes('firstname') || pageContent.includes('firstName') ||
+            pageContent.includes('My Data') || pageContent.includes('Personal');
+
+          if (hasCustomerForm) {
+            console.log("[Draw-OIDC] Draw form found on page! Filling...");
+            log("Draw form found! Filling directly in browser...");
+
+            const nameParts2 = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
+            const fn2 = nameParts2[0] ? nameParts2[0].charAt(0).toUpperCase() + nameParts2[0].slice(1).toLowerCase() : "Fan";
+            const ln2 = nameParts2.length > 1 ? nameParts2[nameParts2.length - 1].charAt(0).toUpperCase() + nameParts2[nameParts2.length - 1].slice(1).toLowerCase() : "User";
+            const phone2 = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
+
+            await page.evaluate((data) => {
+              const fillInput = (selector: string, value: string) => {
+                const el = document.querySelector(selector) as HTMLInputElement;
+                if (el) { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return true; }
+                return false;
+              };
+              const inputs = document.querySelectorAll('input');
+              inputs.forEach(inp => {
+                const name = (inp.name || inp.id || '').toLowerCase();
+                if (name.includes('email')) inp.value = data.email;
+                else if (name.includes('firstname') || name.includes('first_name')) inp.value = data.fn;
+                else if (name.includes('lastname') || name.includes('last_name')) inp.value = data.ln;
+                else if (name.includes('zip') || name.includes('postal')) inp.value = data.zip;
+                else if (name.includes('phone') || name.includes('tel')) inp.value = data.phone;
+                else if (name.includes('city')) inp.value = 'Los Angeles';
+                else if (name.includes('street') || name.includes('address')) inp.value = '123 Olympic Blvd';
+                if (inp.type === 'checkbox') {
+                  const checkName = name;
+                  if (checkName.includes('term') || checkName.includes('consent') || checkName.includes('agree') || checkName.includes('privacy')) {
+                    inp.checked = true;
                   }
-                } catch {}
-              }
-            } catch {}
-            await page.waitForTimeout(5000);
-          }
-          actualPageUrl = "";
-          try { actualPageUrl = page.url(); } catch {}
-        }
-
-        if (actualPageUrl.includes("chrome-error") || !actualPageUrl.includes("tickets.la28.org") || actualPageUrl.includes("next.tickets")) {
-          console.log("[Draw-OIDC] Cannot load tickets.la28.org page. OIDC linking done but form fill skipped.");
-          log("Draw form: OIDC linked but tickets.la28.org page unreachable. Form not filled.");
-        } else {
-        log("Step 3: On tickets.la28.org! Navigating to customer data form...");
-        console.log("[Draw-OIDC] Step 3: On tickets page");
-
-        await page.waitForTimeout(3000);
-        try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
-
-        let currentTitle = await page.title();
-        console.log("[Draw-OIDC] Page title: " + currentTitle);
-
-        if (currentTitle.toLowerCase().includes("challenge") || currentTitle.toLowerCase().includes("access denied")) {
-          console.log("[Draw-OIDC] Challenge/blocked page detected, waiting...");
-          for (let c = 0; c < 15; c++) {
-            await page.waitForTimeout(2000);
-            currentTitle = await page.title();
-            console.log("[Draw-OIDC] Wait " + (c+1) + ": title=" + currentTitle);
-            if (!currentTitle.toLowerCase().includes("challenge") && !currentTitle.toLowerCase().includes("access denied")) {
-              console.log("[Draw-OIDC] Challenge resolved!");
-              break;
-            }
-          }
-        }
-
-        if (!page.url().includes("/mycustomerdata")) {
-          console.log("[Draw-OIDC] Navigating to /mycustomerdata/...");
-          try {
-            await page.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 30000 });
-          } catch (navErr: any) {
-            console.log("[Draw-OIDC] Nav to /mycustomerdata/ error: " + navErr.message.substring(0, 100));
-          }
-          await page.waitForTimeout(3000);
-          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
-
-          currentTitle = await page.title();
-          if (currentTitle.toLowerCase().includes("challenge") || currentTitle.toLowerCase().includes("access denied")) {
-            console.log("[Draw-OIDC] Challenge on /mycustomerdata/, waiting...");
-            for (let c = 0; c < 10; c++) {
-              await page.waitForTimeout(2000);
-              currentTitle = await page.title();
-              if (!currentTitle.toLowerCase().includes("challenge") && !currentTitle.toLowerCase().includes("access denied")) break;
-            }
-          }
-        }
-
-        console.log("[Draw-OIDC] Customer data URL: " + page.url());
-        const pageContent = await page.content();
-        const actualTitle = await page.title();
-        console.log("[Draw-OIDC] Page content length: " + pageContent.length + " title: " + actualTitle);
-        console.log("[Draw-OIDC] Body preview: " + pageContent.substring(0, 500));
-
-        const formInfo = await page.evaluate(() => {
-          const forms = document.querySelectorAll('form');
-          const inputs = document.querySelectorAll('input, select, textarea');
-          const fields: Array<{tag: string; name: string; type: string; id: string; value: string; visible: boolean}> = [];
-          inputs.forEach(el => {
-            const inp = el as HTMLInputElement;
-            const rect = inp.getBoundingClientRect();
-            fields.push({
-              tag: el.tagName, name: inp.name || '', type: inp.type || '',
-              id: inp.id || '', value: inp.value || '',
-              visible: rect.width > 0 && rect.height > 0
-            });
-          });
-          return { formCount: forms.length, fieldCount: fields.length, fields: fields.slice(0, 50) };
-        });
-
-        console.log("[Draw-OIDC] Forms: " + formInfo.formCount + " Fields: " + formInfo.fieldCount);
-        for (const f of formInfo.fields) {
-          console.log("[Draw-OIDC]   " + f.tag + " name=" + f.name + " type=" + f.type + " id=" + f.id + " visible=" + f.visible + " val=" + f.value.substring(0, 30));
-        }
-
-        if (formInfo.fields.length > 0) {
-          log("Found " + formInfo.fieldCount + " form fields. Filling...");
-
-          const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
-          const fn = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
-          const ln = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
-          const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
-
-          const fillResult = await page.evaluate(`((data) => {
-            const inputs = document.querySelectorAll('input, select, textarea');
-            let filled = 0;
-            inputs.forEach(function(el) {
-              const inp = el;
-              const name = (inp.name || inp.id || '').toLowerCase();
-              const type = inp.type || '';
-              if (type === 'hidden' || type === 'submit') return;
-              let val = '';
-              if (name.includes('email')) val = data.email;
-              else if (name.includes('firstname') || name.includes('first_name') || name.includes('first-name')) val = data.firstName;
-              else if (name.includes('lastname') || name.includes('last_name') || name.includes('last-name')) val = data.lastName;
-              else if (name.includes('country')) val = 'US';
-              else if (name.includes('zip') || name.includes('postal')) val = data.zip;
-              else if (name.includes('city')) val = 'Los Angeles';
-              else if (name.includes('state') || name.includes('province')) val = 'CA';
-              else if (name.includes('street') || name.includes('address')) val = '123 Olympic Blvd';
-              else if (name.includes('phone') || name.includes('tel')) val = data.phone;
-              if (type === 'checkbox') {
-                if (name.includes('term') || name.includes('consent') || name.includes('agree') || name.includes('privacy') || name.includes('opt')) {
-                  inp.checked = true;
-                  inp.dispatchEvent(new Event('change', { bubbles: true }));
-                  filled++;
                 }
-                return;
-              }
-              if (el.tagName === 'SELECT' && val) {
-                inp.value = val;
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-                filled++;
-                return;
-              }
-              if (val && type !== 'hidden') {
-                inp.value = val;
                 inp.dispatchEvent(new Event('input', { bubbles: true }));
                 inp.dispatchEvent(new Event('change', { bubbles: true }));
-                filled++;
-              }
-            });
-            return { filled: filled };
-          })(${JSON.stringify({ email, firstName: fn, lastName: ln, zip: usedZip, phone })})`) as { filled: number };
-
-          console.log("[Draw-OIDC] Filled " + fillResult.filled + " fields");
-          log("Filled " + fillResult.filled + " fields. Submitting...");
-
-          await page.waitForTimeout(2000);
-
-          let submitted = false;
-          try {
-            const submitBtn = page.locator('button[type="submit"], input[type="submit"], form button').first();
-            const hasSubmit = await submitBtn.count();
-            if (hasSubmit > 0) {
-              await submitBtn.click({ timeout: 10000 });
-              submitted = true;
-            } else {
-              await page.evaluate(() => {
-                const form = document.querySelector('form');
-                if (form) { form.submit(); return true; }
-                return false;
               });
-              submitted = true;
-            }
-          } catch (clickErr: any) {
-            console.log("[Draw-OIDC] Submit click error: " + clickErr.message.substring(0, 80));
-            try {
-              await page.evaluate(() => { const f = document.querySelector('form'); if (f) f.submit(); });
-              submitted = true;
-            } catch {}
-          }
+              const selects = document.querySelectorAll('select');
+              selects.forEach(sel => {
+                const name = (sel.name || sel.id || '').toLowerCase();
+                if (name.includes('country')) sel.value = 'US';
+                else if (name.includes('state')) sel.value = 'CA';
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+            }, { email, fn: fn2, ln: ln2, zip: usedZip, phone: phone2 });
 
-          if (submitted) {
-            await page.waitForTimeout(5000);
-            try { await page.waitForLoadState("domcontentloaded", { timeout: 15000 }); } catch {}
-            const afterSubmitUrl = page.url();
-            const afterSubmitContent = await page.content();
-            console.log("[Draw-OIDC] After submit URL: " + afterSubmitUrl);
-            console.log("[Draw-OIDC] After submit content: " + afterSubmitContent.substring(0, 500));
-            formSubmitted = true;
-            log("Draw form submitted! Post-submit URL: " + afterSubmitUrl.substring(0, 60));
+            console.log("[Draw-OIDC] Form filled. Looking for submit button...");
+
+            const submitClicked = await page.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+              const submitBtn = buttons.find(b => {
+                const text = (b.textContent || '').toLowerCase();
+                return text.includes('submit') || text.includes('register') || text.includes('enter') || text.includes('save');
+              });
+              if (submitBtn) { (submitBtn as HTMLElement).click(); return true; }
+              const forms = document.querySelectorAll('form');
+              if (forms.length > 0) { forms[0].submit(); return true; }
+              return false;
+            });
+
+            if (submitClicked) {
+              await page.waitForTimeout(5000);
+              console.log("[Draw-OIDC] Form submitted! Page URL: " + page.url().substring(0, 100));
+              formSubmitted = true;
+              log("Draw form submitted directly in browser!");
+            }
           } else {
-            log("Could not find submit button on form");
+            console.log("[Draw-OIDC] Page loaded but no form content found. May be SPA that needs more time.");
+            log("On tickets page but no form content detected.");
           }
-        } else {
-          log("On tickets page but no form fields found. Title: " + actualTitle);
+        } catch (formErr: any) {
+          console.log("[Draw-OIDC] Form fill error: " + (formErr.message || '').substring(0, 150));
         }
-        }
+      } else if (ticketsAuthUrl) {
+        oidcLinked = true;
+        console.log("[Draw-OIDC] OIDC identity linking confirmed via auth code redirect chain");
+        console.log("[Draw-OIDC] Auth code URL captured: " + ticketsAuthUrl.substring(0, 150));
+        log("OIDC identity linking confirmed. Keycloak-Gigya link established.");
+        log("tickets.la28.org protected by Queue-it + captcha. Draw form submission skipped.");
+      } else if (hasBrokerEndpoint) {
+        oidcLinked = true;
+        console.log("[Draw-OIDC] Broker endpoint was hit but no auth code URL captured. OIDC linking likely completed.");
+        log("OIDC linking evidence found (broker endpoint hit). Draw form not accessible.");
       } else {
-        console.log("[Draw-OIDC] Did not reach tickets.la28.org after OIDC");
-        console.log("[Draw-OIDC] Final URL: " + finalUrl);
-        console.log("[Draw-OIDC] Title: " + pageTitle);
-        const bodySnippet = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
-        console.log("[Draw-OIDC] Body text: " + bodySnippet);
-        log("Browser didn't reach tickets site. URL: " + finalUrl.substring(0, 60));
+        console.log("[Draw-OIDC] No broker URL captured. OIDC flow may not have completed.");
+        log("OIDC flow incomplete - no broker endpoint detected.");
       }
     } catch (oidcErr: any) {
       console.log("[Draw-OIDC] Error (non-fatal): " + (oidcErr.message || '').substring(0, 200));
