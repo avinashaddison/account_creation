@@ -2690,24 +2690,33 @@ export async function completeDrawViaGigyaBrowser(
         oidcLinked = true;
         console.log("[Draw-OIDC] OIDC identity linking confirmed via auth code redirect chain");
         console.log("[Draw-OIDC] Auth code URL captured: " + ticketsAuthUrl.substring(0, 150));
-        log("OIDC linked. Opening full flow via Bright Data Scraping Browser...");
+        log("OIDC linked. Opening full flow via ZenRows Browser...");
 
         let bdBrowser: any = null;
         try {
-          const bdWsEndpoint = "wss://brd-customer-hl_86b34e68-zone-scraping_browser2:nbjah5b6b1nt@brd.superproxy.io:9222";
-          console.log("[Draw-OIDC] Connecting to Bright Data Scraping Browser...");
-          bdBrowser = await chromium.connectOverCDP(bdWsEndpoint, { timeout: 60000 });
-          console.log("[Draw-OIDC] BD browser connected! Contexts: " + bdBrowser.contexts().length);
+          let zenrowsUrl = "";
+          try {
+            const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+            if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+              zenrowsUrl = zrRow.rows[0].value as string;
+            }
+          } catch {}
+          if (!zenrowsUrl) {
+            zenrowsUrl = "wss://browser.zenrows.com?apikey=8a42b8a0c289b2bf94e9df235fe75017fba94cec";
+          }
+          console.log("[Draw-OIDC] Connecting to ZenRows Browser...");
+          bdBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+          console.log("[Draw-OIDC] ZenRows browser connected! Contexts: " + bdBrowser.contexts().length);
 
           const bdContext = bdBrowser.contexts()[0] || await bdBrowser.newContext();
           const bdPage = await bdContext.newPage();
           await bdPage.setDefaultNavigationTimeout(120000);
           await bdPage.setDefaultTimeout(60000);
 
-          console.log("[Draw-OIDC] Step 1: BD login to Gigya on la28id.la28.org...");
-          log("Logging into Gigya via BD browser...");
+          console.log("[Draw-OIDC] Step 1: ZenRows login to Gigya on la28id.la28.org...");
+          log("Logging into Gigya via ZenRows browser...");
           await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-          console.log("[Draw-OIDC] BD login page URL: " + bdPage.url().substring(0, 100));
+          console.log("[Draw-OIDC] ZenRows login page URL: " + bdPage.url().substring(0, 100));
 
           await bdPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 30000 });
           console.log("[Draw-OIDC] BD Gigya SDK loaded");
@@ -3736,13 +3745,22 @@ export async function retryDrawRegistration(
   log: (msg: string) => void
 ): Promise<{ submitted: boolean }> {
   log("Starting retry draw registration for " + email);
-  const browser = await chromium.connectOverCDP(proxyUrl, { timeout: 60000 });
+  let zenrowsUrl = "";
+  try {
+    const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+    if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+      zenrowsUrl = zrRow.rows[0].value as string;
+    }
+  } catch {}
+  const connectUrl = zenrowsUrl || proxyUrl;
+  log("Connecting to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser...");
+  const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
   try {
     const page = await browser.newPage();
     page.setDefaultTimeout(120000);
-    log("Connected to browser.");
+    log("Connected to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser.");
 
-    const result = await loginAndSubmitTicketRegistration(page, email, password, log, proxyUrl, zipCode || undefined);
+    const result = await loginAndSubmitTicketRegistration(page, email, password, log, connectUrl, zipCode || undefined);
     try { await page.close(); } catch {}
     return result;
   } finally {

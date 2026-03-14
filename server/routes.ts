@@ -608,6 +608,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/zenrows-proxy", requireAuth, async (_req, res) => {
+    try {
+      const url = await storage.getSetting("zenrows_api_url");
+      res.json({ url: url || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/zenrows-proxy", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string" || url.trim().length < 5) {
+        return res.status(400).json({ error: "Valid ZenRows URL is required" });
+      }
+      await storage.setSetting("zenrows_api_url", url.trim());
+      res.json({ success: true, url: url.trim() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/smspool/balance", requireAuth, async (_req, res) => {
     try {
       const result = await getSMSPoolBalance();
