@@ -1890,7 +1890,7 @@ export async function completeDrawViaGigyaBrowser(
 
   let browser: Browser | null = null;
   try {
-    const launchArgs = ['--disable-blink-features=AutomationControlled'];
+    const launchArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors'];
     const launchOpts: any = { headless: true, args: launchArgs };
     if (iproyalProxy) {
       const proxyUrl = new URL(iproyalProxy);
@@ -1904,6 +1904,7 @@ export async function completeDrawViaGigyaBrowser(
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 900 },
+      ignoreHTTPSErrors: true,
     });
     const page = await context.newPage();
     page.setDefaultTimeout(30000);
@@ -2261,269 +2262,399 @@ export async function completeDrawViaGigyaBrowser(
 
     let oidcLinked = false;
     try {
-      log("Step 1: Extracting cookies from browser for draw form...");
-      console.log("[Draw-Form] Starting cookie extraction for " + email);
+      log("Draw form: Navigating OIDC in local browser (same session)...");
+      console.log("[Draw-OIDC] Starting OIDC+form flow in local browser for " + email);
 
-      const https = await import("https");
-      const http = await import("http");
-      const { URL: NodeURL } = await import("url");
+      if (!page || page.isClosed()) {
+        throw new Error("Local browser page is closed, cannot proceed with OIDC");
+      }
 
-      const httpRequest = (urlStr: string, options: any = {}): Promise<{status: number; headers: any; body: string; location?: string}> => {
-        return new Promise((resolve, reject) => {
-          const parsedUrl = new NodeURL(urlStr);
-          const isHttps = parsedUrl.protocol === 'https:';
-          const lib = isHttps ? https : http;
-          const reqOptions: any = {
-            hostname: parsedUrl.hostname,
-            port: parsedUrl.port || (isHttps ? 443 : 80),
-            path: parsedUrl.pathname + parsedUrl.search,
-            method: options.method || 'GET',
-            headers: options.headers || {},
-            timeout: 30000
-          };
-          const req = lib.request(reqOptions, (res: any) => {
-            let data = "";
-            res.on("data", (chunk: string) => { data += chunk; });
-            res.on("end", () => {
-              resolve({
-                status: res.statusCode,
-                headers: res.headers,
-                body: data,
-                location: res.headers.location || res.headers.Location
+      log("Step 2: Navigating to OIDC auth URL (Keycloak → tickets.la28.org)...");
+      console.log("[Draw-OIDC] Step 2: OIDC navigation (local browser, already logged in)");
+
+      const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+        response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
+        kc_idp_hint: 'gigya', ui_locales: 'en',
+        redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+      }).toString();
+
+      let capturedRedirectUrls: string[] = [];
+      page.on('request', (req) => {
+        const reqUrl = req.url();
+        if (reqUrl.includes('eventim.com') || reqUrl.includes('tickets.la28.org') || reqUrl.includes('keycloak') || reqUrl.includes('broker/gigya')) {
+          capturedRedirectUrls.push(reqUrl);
+        }
+      });
+
+      for (let oidcAttempt = 0; oidcAttempt < 5; oidcAttempt++) {
+        try {
+          await page.goto(oidcAuthUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        } catch (gotoErr: any) {
+          console.log("[Draw-OIDC] OIDC goto error attempt " + (oidcAttempt + 1) + ": " + gotoErr.message.substring(0, 120));
+        }
+        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        await page.waitForTimeout(3000);
+
+        let checkUrl = page.url();
+        console.log("[Draw-OIDC] Attempt " + (oidcAttempt + 1) + " URL: " + checkUrl.substring(0, 120));
+
+        if (checkUrl.includes("proxy.html")) {
+          console.log("[Draw-OIDC] On Gigya proxy.html, waiting for JS redirect...");
+          for (let pw = 0; pw < 10; pw++) {
+            await page.waitForTimeout(2000);
+            checkUrl = page.url();
+            if (!checkUrl.includes("proxy.html")) {
+              console.log("[Draw-OIDC] proxy.html redirected to: " + checkUrl.substring(0, 120));
+              break;
+            }
+          }
+          if (checkUrl.includes("proxy.html")) {
+            console.log("[Draw-OIDC] proxy.html did not redirect, trying to extract redirect from page...");
+            try {
+              const pageRedirect = await page.evaluate(() => {
+                const metaRefresh = document.querySelector('meta[http-equiv="refresh"]');
+                if (metaRefresh) {
+                  const content = metaRefresh.getAttribute('content') || '';
+                  const urlMatch = content.match(/url=(.+)/i);
+                  if (urlMatch) return urlMatch[1];
+                }
+                const scripts = Array.from(document.querySelectorAll('script'));
+                for (const s of scripts) {
+                  const text = s.textContent || '';
+                  const locMatch = text.match(/(?:window\.location|location\.href)\s*=\s*['"]([^'"]+)['"]/);
+                  if (locMatch) return locMatch[1];
+                  const replaceMatch = text.match(/location\.replace\s*\(\s*['"]([^'"]+)['"]/);
+                  if (replaceMatch) return replaceMatch[1];
+                }
+                return null;
               });
+              if (pageRedirect) {
+                console.log("[Draw-OIDC] Found redirect URL from proxy.html: " + pageRedirect.substring(0, 100));
+                capturedRedirectUrls.push(pageRedirect);
+              }
+            } catch {}
+          }
+        }
+
+        checkUrl = page.url();
+        if (checkUrl.includes("tickets.la28.org") && !checkUrl.includes("next.tickets.la28.org")) break;
+        if (checkUrl.includes("next.tickets.la28.org")) {
+          console.log("[Draw-OIDC] Reached queue at next.tickets.la28.org");
+          try {
+            const queueUrl = new URL(checkUrl);
+            const targetUrl = queueUrl.searchParams.get('t');
+            if (targetUrl) {
+              console.log("[Draw-OIDC] Queue target URL: " + targetUrl.substring(0, 100));
+              capturedRedirectUrls.push(targetUrl);
+              try {
+                await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+                await page.waitForTimeout(2000);
+                checkUrl = page.url();
+                console.log("[Draw-OIDC] After direct target nav: " + checkUrl.substring(0, 120));
+              } catch (tErr: any) {
+                console.log("[Draw-OIDC] Direct target nav error: " + tErr.message.substring(0, 80));
+              }
+            }
+          } catch {}
+          break;
+        }
+
+        if (checkUrl.includes("chrome-error") || checkUrl.includes("about:blank")) {
+          console.log("[Draw-OIDC] chrome-error, captured URLs so far: " + capturedRedirectUrls.length);
+          if (capturedRedirectUrls.length > 0) {
+            const brokerUrl = capturedRedirectUrls.find(u => u.includes('broker/gigya/endpoint'));
+            const ticketsUrl = capturedRedirectUrls.find(u => u.includes('tickets.la28.org'));
+            const tryUrl = brokerUrl || ticketsUrl || capturedRedirectUrls[capturedRedirectUrls.length - 1];
+            console.log("[Draw-OIDC] Retrying with captured URL: " + tryUrl.substring(0, 100));
+            try {
+              await page.goto(tryUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+              await page.waitForTimeout(3000);
+              checkUrl = page.url();
+              if (!checkUrl.includes("chrome-error")) {
+                console.log("[Draw-OIDC] Recovered to: " + checkUrl.substring(0, 100));
+                break;
+              }
+            } catch {}
+          }
+          console.log("[Draw-OIDC] Retrying full OIDC flow in 5s...");
+          await page.waitForTimeout(5000);
+          continue;
+        }
+        break;
+      }
+
+      let finalUrl = "";
+      try { finalUrl = page.url(); } catch { finalUrl = "unknown"; }
+      console.log("[Draw-OIDC] After OIDC flow: " + finalUrl.substring(0, 120));
+      if (capturedRedirectUrls.length > 0) {
+        console.log("[Draw-OIDC] Captured redirect URLs: " + capturedRedirectUrls.map(u => u.substring(0, 80)).join(" | "));
+      }
+
+      const hasAfterFirstBrokerLogin = capturedRedirectUrls.some(u => u.includes('after-first-broker-login'));
+      const hasFirstBrokerLogin = capturedRedirectUrls.some(u => u.includes('first-broker-login'));
+      const hasTicketsRedirect = capturedRedirectUrls.some(u => u.includes('tickets.la28.org/mycustomerdata'));
+      const oidcLinkingEvidence = hasAfterFirstBrokerLogin || hasTicketsRedirect;
+
+      if (oidcLinkingEvidence) {
+        console.log("[Draw-OIDC] OIDC linking completed! Evidence: afterFirstBrokerLogin=" + hasAfterFirstBrokerLogin + " ticketsRedirect=" + hasTicketsRedirect + " firstBrokerLogin=" + hasFirstBrokerLogin);
+        log("OIDC identity linking confirmed via redirect chain (Keycloak first-broker-login completed)");
+        finalUrl = "https://tickets.la28.org/mycustomerdata/";
+      } else if (finalUrl.includes("chrome-error") && capturedRedirectUrls.length > 0) {
+        console.log("[Draw-OIDC] No OIDC linking evidence found in " + capturedRedirectUrls.length + " captured URLs");
+        const brokerUrl = capturedRedirectUrls.find(u => u.includes('broker/gigya/endpoint'));
+        if (brokerUrl) {
+          console.log("[Draw-OIDC] Final recovery: navigating to broker URL...");
+          for (let r = 0; r < 3; r++) {
+            try {
+              await page.goto(brokerUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+              await page.waitForTimeout(3000);
+              finalUrl = page.url();
+              if (!finalUrl.includes("chrome-error")) {
+                console.log("[Draw-OIDC] Recovered via broker URL: " + finalUrl.substring(0, 100));
+                break;
+              }
+            } catch {}
+            await page.waitForTimeout(3000);
+          }
+        }
+      }
+
+      if (!oidcLinkingEvidence) {
+        try { finalUrl = page.url(); } catch { finalUrl = "unknown"; }
+      }
+      console.log("[Draw-OIDC] Final URL: " + finalUrl);
+      let pageTitle = "";
+      try { pageTitle = await page.title(); } catch { pageTitle = "unknown"; }
+      log("OIDC result: " + (finalUrl.includes("tickets.la28.org") ? "on tickets.la28.org!" : "URL=" + finalUrl.substring(0, 60)));
+
+      if (finalUrl.includes("tickets.la28.org") || oidcLinkingEvidence) {
+        oidcLinked = true;
+
+        let actualPageUrl = "";
+        try { actualPageUrl = page.url(); } catch {}
+        const pageActuallyLoaded = actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error");
+
+        if (oidcLinkingEvidence && !pageActuallyLoaded) {
+          log("OIDC linking confirmed (Keycloak broker flow completed). Page did not load but identity is linked.");
+          console.log("[Draw-OIDC] OIDC linking confirmed via redirect chain. Skipping form fill (page not loaded).");
+        }
+
+        if (!pageActuallyLoaded && oidcLinkingEvidence) {
+          console.log("[Draw-OIDC] Attempting to load tickets.la28.org/mycustomerdata/ for form...");
+          for (let loadAttempt = 0; loadAttempt < 3; loadAttempt++) {
+            try {
+              await page.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await page.waitForTimeout(3000);
+              actualPageUrl = page.url();
+              if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error")) {
+                console.log("[Draw-OIDC] tickets.la28.org loaded on attempt " + (loadAttempt + 1));
+                break;
+              }
+            } catch {}
+            if (actualPageUrl.includes("next.tickets.la28.org")) {
+              console.log("[Draw-OIDC] Hit queue page, extracting target...");
+              try {
+                const qUrl = new URL(actualPageUrl);
+                const tUrl = qUrl.searchParams.get('t');
+                if (tUrl) {
+                  await page.goto(tUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                  await page.waitForTimeout(3000);
+                  actualPageUrl = page.url();
+                  if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("next.tickets") && !actualPageUrl.includes("chrome-error")) break;
+                }
+              } catch {}
+            }
+            await page.waitForTimeout(5000);
+          }
+        }
+
+        actualPageUrl = "";
+        try { actualPageUrl = page.url(); } catch {}
+        if (actualPageUrl.includes("chrome-error") || !actualPageUrl.includes("tickets.la28.org")) {
+          console.log("[Draw-OIDC] Cannot load tickets.la28.org page. OIDC linking done but form fill skipped.");
+          log("Draw form: OIDC linked but tickets.la28.org page unreachable. Form not filled.");
+        } else {
+        log("Step 3: On tickets.la28.org! Navigating to customer data form...");
+        console.log("[Draw-OIDC] Step 3: On tickets page");
+
+        await page.waitForTimeout(3000);
+        try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+        let currentTitle = await page.title();
+        console.log("[Draw-OIDC] Page title: " + currentTitle);
+
+        if (currentTitle.toLowerCase().includes("challenge") || currentTitle.toLowerCase().includes("access denied")) {
+          console.log("[Draw-OIDC] Challenge/blocked page detected, waiting...");
+          for (let c = 0; c < 15; c++) {
+            await page.waitForTimeout(2000);
+            currentTitle = await page.title();
+            console.log("[Draw-OIDC] Wait " + (c+1) + ": title=" + currentTitle);
+            if (!currentTitle.toLowerCase().includes("challenge") && !currentTitle.toLowerCase().includes("access denied")) {
+              console.log("[Draw-OIDC] Challenge resolved!");
+              break;
+            }
+          }
+        }
+
+        if (!page.url().includes("/mycustomerdata")) {
+          console.log("[Draw-OIDC] Navigating to /mycustomerdata/...");
+          try {
+            await page.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 30000 });
+          } catch (navErr: any) {
+            console.log("[Draw-OIDC] Nav to /mycustomerdata/ error: " + navErr.message.substring(0, 100));
+          }
+          await page.waitForTimeout(3000);
+          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+          currentTitle = await page.title();
+          if (currentTitle.toLowerCase().includes("challenge") || currentTitle.toLowerCase().includes("access denied")) {
+            console.log("[Draw-OIDC] Challenge on /mycustomerdata/, waiting...");
+            for (let c = 0; c < 10; c++) {
+              await page.waitForTimeout(2000);
+              currentTitle = await page.title();
+              if (!currentTitle.toLowerCase().includes("challenge") && !currentTitle.toLowerCase().includes("access denied")) break;
+            }
+          }
+        }
+
+        console.log("[Draw-OIDC] Customer data URL: " + page.url());
+        const pageContent = await page.content();
+        const actualTitle = await page.title();
+        console.log("[Draw-OIDC] Page content length: " + pageContent.length + " title: " + actualTitle);
+        console.log("[Draw-OIDC] Body preview: " + pageContent.substring(0, 500));
+
+        const formInfo = await page.evaluate(() => {
+          const forms = document.querySelectorAll('form');
+          const inputs = document.querySelectorAll('input, select, textarea');
+          const fields: Array<{tag: string; name: string; type: string; id: string; value: string; visible: boolean}> = [];
+          inputs.forEach(el => {
+            const inp = el as HTMLInputElement;
+            const rect = inp.getBoundingClientRect();
+            fields.push({
+              tag: el.tagName, name: inp.name || '', type: inp.type || '',
+              id: inp.id || '', value: inp.value || '',
+              visible: rect.width > 0 && rect.height > 0
             });
           });
-          req.on("error", reject);
-          req.on("timeout", () => { req.destroy(); reject(new Error("HTTP timeout")); });
-          if (options.body) req.write(options.body);
-          req.end();
+          return { formCount: forms.length, fieldCount: fields.length, fields: fields.slice(0, 50) };
         });
-      };
 
-      const browserSession = await page.evaluate(`(() => {
-        return new Promise(function(resolve) {
-          if (typeof gigya === 'undefined') { resolve({ error: 'no_gigya' }); return; }
-          gigya.accounts.getAccountInfo({
-            callback: function(resp) {
-              var cookies = document.cookie.split(';').map(function(c) { return c.trim(); });
-              var loginToken = '';
-              for (var i = 0; i < cookies.length; i++) {
-                if (cookies[i].indexOf('glt_') === 0) { loginToken = cookies[i].split('=')[1] || ''; break; }
-              }
-              resolve({ uid: resp.UID || '', loginToken: loginToken, errorCode: resp.errorCode });
-            }
-          });
-          setTimeout(function() { resolve({ error: 'timeout' }); }, 10000);
-        });
-      })()`) as any;
-
-      const loginToken = browserSession.loginToken || "";
-      console.log("[Draw-Form] Browser: uid=" + (browserSession.uid || "none").substring(0, 12) + " loginToken=" + (loginToken ? loginToken.substring(0, 20) + "..." : "none"));
-
-      if (!loginToken) {
-        log("No Gigya login token in browser. Draw form skipped.");
-        throw new Error("No login token");
-      }
-
-      const browserCookies = await context.cookies();
-      const gigyaCookies = browserCookies.filter(c =>
-        c.name.startsWith("gig") || c.name.startsWith("glt_") || c.name.startsWith("gst_") || c.name.startsWith("ucid")
-      );
-      console.log("[Draw-Form] Extracted " + browserCookies.length + " cookies (" + gigyaCookies.length + " Gigya)");
-
-      log("Step 2: Building cookie string for Scrapfly...");
-      const cookiePairs: string[] = [];
-      for (const c of gigyaCookies) {
-        cookiePairs.push(c.name + "=" + c.value);
-      }
-      cookiePairs.push("glt_4_w4CcQ6tKu4jTeDPirnKxnA=" + loginToken);
-      const cookieString = cookiePairs.join("; ");
-      console.log("[Draw-Form] Cookie string: " + cookiePairs.length + " pairs, length=" + cookieString.length);
-
-      let scrapflyKey = "";
-      try {
-        const keyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'scrapfly_api_key' LIMIT 1`);
-        if (keyRow.rows.length > 0 && keyRow.rows[0].value) scrapflyKey = keyRow.rows[0].value as string;
-      } catch {}
-      if (!scrapflyKey) scrapflyKey = "scp-live-586b4b4ff17c4e978ebcbaa4bfe3de48";
-
-      log("Step 3: Rendering tickets.la28.org/mycustomerdata/ via Scrapfly with injected cookies...");
-
-      const allCookiePairs: string[] = [...cookiePairs];
-      for (const c of browserCookies) {
-        const pair = c.name + "=" + c.value;
-        if (!allCookiePairs.find(p => p.startsWith(c.name + "="))) {
-          allCookiePairs.push(pair);
-        }
-      }
-      const fullCookieString = allCookiePairs.join("; ");
-      console.log("[Draw-Form] Full cookie string: " + allCookiePairs.length + " pairs");
-
-      const sessionId = "draw_" + Date.now() + "_" + Math.random().toString(36).substring(7);
-      const targetUrl = "https://tickets.la28.org/mycustomerdata/";
-
-      const scrapflyUrl = new NodeURL("https://api.scrapfly.io/scrape");
-      scrapflyUrl.searchParams.set("key", scrapflyKey);
-      scrapflyUrl.searchParams.set("url", targetUrl);
-      scrapflyUrl.searchParams.set("render_js", "true");
-      scrapflyUrl.searchParams.set("asp", "true");
-      scrapflyUrl.searchParams.set("retry", "false");
-      scrapflyUrl.searchParams.set("rendering_wait", "12000");
-      scrapflyUrl.searchParams.set("timeout", "120000");
-      scrapflyUrl.searchParams.set("country", "us");
-      scrapflyUrl.searchParams.set("session", sessionId);
-      scrapflyUrl.searchParams.set("cookies", fullCookieString);
-
-      console.log("[Draw-Form] Scrapfly request URL (without key): " + scrapflyUrl.toString().replace(scrapflyKey, "***").substring(0, 200));
-
-      const scrapRes = await httpRequest(scrapflyUrl.toString());
-      let scrapData: any = {};
-      try { scrapData = JSON.parse(scrapRes.body); } catch {
-        console.log("[Draw-Form] Scrapfly parse error. Body: " + scrapRes.body.substring(0, 300));
-      }
-
-      if (scrapData.error_id || scrapData.code) {
-        console.log("[Draw-Form] Scrapfly error: " + (scrapData.message || scrapData.error_id || scrapData.code));
-        log("Scrapfly error: " + (scrapData.message || scrapData.code || "unknown").substring(0, 60));
-        throw new Error("Scrapfly failed: " + (scrapData.message || scrapData.code));
-      }
-
-      const scrapResult = scrapData.result || {};
-      const scrapContext = scrapData.context || {};
-      const finalUrl = scrapResult.url || "";
-      const finalBody = scrapResult.content || "";
-      const scrapStatus = scrapResult.status_code || 0;
-      const scrapRedirects = (scrapContext.redirects || []).length;
-
-      console.log("[Draw-Form] Scrapfly result: status=" + scrapStatus + " url=" + finalUrl.substring(0, 100) + " redirects=" + scrapRedirects + " bodyLen=" + finalBody.length);
-      log("Scrapfly rendered page: status=" + scrapStatus + " url=" + finalUrl.substring(0, 60));
-
-      const isOnTickets = finalUrl.includes("tickets.la28.org") && !finalUrl.includes("next.tickets");
-      const isOnBroker = finalUrl.includes("la28id.la28.org");
-
-      if (isOnTickets) {
-        oidcLinked = true;
-        log("Step 4: On tickets.la28.org! Extracting form...");
-
-        const formFields: Array<{name: string; type: string; value: string}> = [];
-        const inputRegex = /<input[^>]*>/gi;
-        const selectRegex = /<select[^>]*>/gi;
-        let match;
-
-        while ((match = inputRegex.exec(finalBody)) !== null) {
-          const tag = match[0];
-          const nameM = tag.match(/name="([^"]+)"/);
-          const typeM = tag.match(/type="([^"]+)"/);
-          const valueM = tag.match(/value="([^"]+)"/);
-          if (nameM) formFields.push({ name: nameM[1], type: (typeM ? typeM[1] : "text"), value: valueM ? valueM[1] : "" });
-        }
-        while ((match = selectRegex.exec(finalBody)) !== null) {
-          const tag = match[0];
-          const nameM = tag.match(/name="([^"]+)"/);
-          if (nameM) formFields.push({ name: nameM[1], type: "select", value: "" });
+        console.log("[Draw-OIDC] Forms: " + formInfo.formCount + " Fields: " + formInfo.fieldCount);
+        for (const f of formInfo.fields) {
+          console.log("[Draw-OIDC]   " + f.tag + " name=" + f.name + " type=" + f.type + " id=" + f.id + " visible=" + f.visible + " val=" + f.value.substring(0, 30));
         }
 
-        console.log("[Draw-Form] Found " + formFields.length + " form fields:");
-        for (const f of formFields) {
-          console.log("[Draw-Form]   " + f.name + " type=" + f.type + " val=" + (f.value || "").substring(0, 30));
-        }
-
-        const actionMatch = finalBody.match(/<form[^>]*action="([^"]+)"/i);
-        const formAction = actionMatch ? actionMatch[1].replace(/&amp;/g, "&") : finalUrl;
-        console.log("[Draw-Form] Form action: " + formAction.substring(0, 100));
-
-        if (formFields.length > 0) {
-          log("Step 5: Found " + formFields.length + " fields. Building form data...");
+        if (formInfo.fields.length > 0) {
+          log("Found " + formInfo.fieldCount + " form fields. Filling...");
 
           const nameParts = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
-          const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
-          const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
+          const fn = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase() : "Fan";
+          const ln = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].slice(1).toLowerCase() : "User";
           const phone = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
 
-          const fieldValueMap: Record<string, string> = {};
-          for (const f of formFields) {
-            if (f.type === "hidden" && f.value) {
-              fieldValueMap[f.name] = f.value;
-              continue;
-            }
-            const nl = f.name.toLowerCase();
-            if (nl.includes("email")) fieldValueMap[f.name] = email;
-            else if (nl.includes("firstname") || nl.includes("first_name")) fieldValueMap[f.name] = firstName;
-            else if (nl.includes("lastname") || nl.includes("last_name")) fieldValueMap[f.name] = lastName;
-            else if (nl.includes("country")) fieldValueMap[f.name] = "US";
-            else if (nl.includes("zip") || nl.includes("postal")) fieldValueMap[f.name] = usedZip;
-            else if (nl.includes("city")) fieldValueMap[f.name] = "Los Angeles";
-            else if (nl.includes("state") || nl.includes("province")) fieldValueMap[f.name] = "CA";
-            else if (nl.includes("street") || nl.includes("address")) fieldValueMap[f.name] = "123 Olympic Blvd";
-            else if (nl.includes("phone") || nl.includes("tel")) fieldValueMap[f.name] = phone;
-            else if (f.type === "checkbox" && (nl.includes("term") || nl.includes("consent") || nl.includes("agree") || nl.includes("privacy"))) fieldValueMap[f.name] = "true";
-          }
-
-          console.log("[Draw-Form] Form data: " + JSON.stringify(fieldValueMap).substring(0, 300));
-
-          log("Step 6: Submitting form via HTTP POST...");
-          const scrapCookies = scrapContext.session?.cookie_jar || [];
-          const submitCookiePairs: string[] = [...cookiePairs];
-          for (const c of scrapCookies) {
-            if (c.name && !submitCookiePairs.find(p => p.startsWith(c.name + "="))) {
-              submitCookiePairs.push(c.name + "=" + c.value);
-            }
-          }
-          const submitCookieStr = submitCookiePairs.join("; ");
-
-          let submitUrl = formAction;
-          if (submitUrl.startsWith("/")) {
-            const base = new NodeURL(finalUrl);
-            submitUrl = base.protocol + "//" + base.host + submitUrl;
-          }
-
-          const formBody = new URLSearchParams(fieldValueMap).toString();
-          try {
-            const submitRes = await httpRequest(submitUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": submitCookieStr,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": finalUrl,
-                "Origin": new NodeURL(finalUrl).origin
-              },
-              body: formBody
+          const fillResult = await page.evaluate(`((data) => {
+            const inputs = document.querySelectorAll('input, select, textarea');
+            let filled = 0;
+            inputs.forEach(function(el) {
+              const inp = el;
+              const name = (inp.name || inp.id || '').toLowerCase();
+              const type = inp.type || '';
+              if (type === 'hidden' || type === 'submit') return;
+              let val = '';
+              if (name.includes('email')) val = data.email;
+              else if (name.includes('firstname') || name.includes('first_name') || name.includes('first-name')) val = data.firstName;
+              else if (name.includes('lastname') || name.includes('last_name') || name.includes('last-name')) val = data.lastName;
+              else if (name.includes('country')) val = 'US';
+              else if (name.includes('zip') || name.includes('postal')) val = data.zip;
+              else if (name.includes('city')) val = 'Los Angeles';
+              else if (name.includes('state') || name.includes('province')) val = 'CA';
+              else if (name.includes('street') || name.includes('address')) val = '123 Olympic Blvd';
+              else if (name.includes('phone') || name.includes('tel')) val = data.phone;
+              if (type === 'checkbox') {
+                if (name.includes('term') || name.includes('consent') || name.includes('agree') || name.includes('privacy') || name.includes('opt')) {
+                  inp.checked = true;
+                  inp.dispatchEvent(new Event('change', { bubbles: true }));
+                  filled++;
+                }
+                return;
+              }
+              if (el.tagName === 'SELECT' && val) {
+                inp.value = val;
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                filled++;
+                return;
+              }
+              if (val && type !== 'hidden') {
+                inp.value = val;
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                filled++;
+              }
             });
+            return { filled: filled };
+          })(${JSON.stringify({ email, firstName: fn, lastName: ln, zip: usedZip, phone })})`) as { filled: number };
 
-            console.log("[Draw-Form] Submit: status=" + submitRes.status + " location=" + (submitRes.location || "none").substring(0, 80));
-            console.log("[Draw-Form] Response: " + submitRes.body.substring(0, 300));
+          console.log("[Draw-OIDC] Filled " + fillResult.filled + " fields");
+          log("Filled " + fillResult.filled + " fields. Submitting...");
 
-            if (submitRes.status < 400) {
-              formSubmitted = true;
-              log("Draw form submitted! Status: " + submitRes.status);
+          await page.waitForTimeout(2000);
+
+          let submitted = false;
+          try {
+            const submitBtn = page.locator('button[type="submit"], input[type="submit"], form button').first();
+            const hasSubmit = await submitBtn.count();
+            if (hasSubmit > 0) {
+              await submitBtn.click({ timeout: 10000 });
+              submitted = true;
             } else {
-              log("Form submit returned " + submitRes.status);
+              await page.evaluate(() => {
+                const form = document.querySelector('form');
+                if (form) { form.submit(); return true; }
+                return false;
+              });
+              submitted = true;
             }
-          } catch (submitErr: any) {
-            console.log("[Draw-Form] Submit error: " + submitErr.message.substring(0, 100));
-            log("Form submit error: " + submitErr.message.substring(0, 60));
+          } catch (clickErr: any) {
+            console.log("[Draw-OIDC] Submit click error: " + clickErr.message.substring(0, 80));
+            try {
+              await page.evaluate(() => { const f = document.querySelector('form'); if (f) f.submit(); });
+              submitted = true;
+            } catch {}
+          }
+
+          if (submitted) {
+            await page.waitForTimeout(5000);
+            try { await page.waitForLoadState("domcontentloaded", { timeout: 15000 }); } catch {}
+            const afterSubmitUrl = page.url();
+            const afterSubmitContent = await page.content();
+            console.log("[Draw-OIDC] After submit URL: " + afterSubmitUrl);
+            console.log("[Draw-OIDC] After submit content: " + afterSubmitContent.substring(0, 500));
+            formSubmitted = true;
+            log("Draw form submitted! Post-submit URL: " + afterSubmitUrl.substring(0, 60));
+          } else {
+            log("Could not find submit button on form");
           }
         } else {
-          log("No form fields found on page. Body preview: " + finalBody.substring(0, 150));
-          console.log("[Draw-Form] No fields. Full body preview: " + finalBody.substring(0, 500));
+          log("On tickets page but no form fields found. Title: " + actualTitle);
         }
-      } else if (isOnBroker) {
-        log("Scrapfly landed on Gigya broker, not tickets site. Cookies may not have carried through OIDC.");
-        console.log("[Draw-Form] On broker page. URL: " + finalUrl.substring(0, 100));
-        console.log("[Draw-Form] Body preview: " + finalBody.substring(0, 300));
+        }
       } else {
-        log("Scrapfly didn't reach tickets site. URL: " + finalUrl.substring(0, 60));
-        console.log("[Draw-Form] Unexpected URL: " + finalUrl + " body: " + finalBody.substring(0, 300));
+        console.log("[Draw-OIDC] Did not reach tickets.la28.org after OIDC");
+        console.log("[Draw-OIDC] Final URL: " + finalUrl);
+        console.log("[Draw-OIDC] Title: " + pageTitle);
+        const bodySnippet = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
+        console.log("[Draw-OIDC] Body text: " + bodySnippet);
+        log("Browser didn't reach tickets site. URL: " + finalUrl.substring(0, 60));
       }
     } catch (oidcErr: any) {
-      console.log("[Draw-Form] Error (non-fatal): " + (oidcErr.message || '').substring(0, 150));
+      console.log("[Draw-OIDC] Error (non-fatal): " + (oidcErr.message || '').substring(0, 200));
       log("Draw form skipped: " + (oidcErr.message || '').substring(0, 80));
     }
 
     if (browser) {
-      try { await context.close(); } catch {}
       try { await browser.close(); } catch {}
+      browser = null;
     }
 
     const success = profileSet && dataSet;
