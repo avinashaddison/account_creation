@@ -20,7 +20,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Backend**: Express.js (TypeScript) with WebSocket for real-time logs
 - **Database**: PostgreSQL with Drizzle ORM
 - **Sessions**: PostgreSQL-backed via connect-pg-simple (`user_sessions` table)
-- **Browser Automation**: Playwright (Chromium headless, Bright Data Browser API via `connectOverCDP` for both LA28 and Ticketmaster)
+- **Browser Automation**: Playwright (Chromium headless, ZenRows Browser API via `connectOverCDP` for tickets.la28.org form fill, Bright Data for other automation)
 - **Email**: mail.tm API (branded as "Addison Mail")
 - **Auth**: Session-based with SHA-256 password hashing, role-based (superadmin/admin)
 

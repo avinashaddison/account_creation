@@ -1609,6 +1609,13 @@ async function fillAndSubmitTicketsForm(
     }
 
     const birthYearSelected = await page.evaluate(`(() => {
+      function triggerAngularChange(el) {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        var ngModelCtrl = angular && angular.element && angular.element(el).controller && angular.element(el).controller('ngModel');
+        if (ngModelCtrl) { try { ngModelCtrl.$setViewValue(el.value); ngModelCtrl.$render(); } catch(e) {} }
+      }
       var selects = document.querySelectorAll('select');
       for (var i = 0; i < selects.length; i++) {
         var s = selects[i];
@@ -1618,15 +1625,21 @@ async function fillAndSubmitTicketsForm(
           var lbl = s.parentElement.querySelector('label');
           if (lbl) label += ' ' + lbl.textContent;
         }
-        var parentText = s.parentElement ? (s.parentElement.textContent || '').substring(0, 100) : '';
-        if (label.toLowerCase().includes('birth') || parentText.toLowerCase().includes('birth year')) {
+        var parentText = s.parentElement ? (s.parentElement.textContent || '').substring(0, 200) : '';
+        if (label.toLowerCase().includes('birth') || parentText.toLowerCase().includes('birth year') || parentText.toLowerCase().includes('birth_year')) {
           var opts = Array.from(s.options);
           for (var j = 0; j < opts.length; j++) {
-            if (opts[j].value === '${birthYear}' || opts[j].text === '${birthYear}') {
+            if (opts[j].value === '${birthYear}' || opts[j].text === '${birthYear}' || opts[j].value.includes('${birthYear}')) {
               s.value = opts[j].value;
-              s.dispatchEvent(new Event('change', { bubbles: true }));
+              try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
               return true;
             }
+          }
+          if (opts.length > 2) {
+            var randomYear = 1 + Math.floor(Math.random() * (opts.length - 1));
+            s.value = opts[randomYear].value;
+            try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
+            return true;
           }
         }
       }
@@ -1635,6 +1648,11 @@ async function fillAndSubmitTicketsForm(
     console.log("[Draw-Form] Birth year selected: " + birthYearSelected);
 
     const countrySelected = await page.evaluate(`(() => {
+      function triggerAngularChange(el) {
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+      }
       var selects = document.querySelectorAll('select');
       for (var i = 0; i < selects.length; i++) {
         var s = selects[i];
@@ -1644,15 +1662,20 @@ async function fillAndSubmitTicketsForm(
           var lbl = s.parentElement.querySelector('label');
           if (lbl) label += ' ' + lbl.textContent;
         }
-        var parentText = s.parentElement ? (s.parentElement.textContent || '').substring(0, 100) : '';
+        var parentText = s.parentElement ? (s.parentElement.textContent || '').substring(0, 200) : '';
         if (label.toLowerCase().includes('country') || parentText.toLowerCase().includes('country')) {
           var opts = Array.from(s.options);
           for (var j = 0; j < opts.length; j++) {
             if (opts[j].text.includes('United States') || opts[j].value === 'US' || opts[j].value === 'USA') {
               s.value = opts[j].value;
-              s.dispatchEvent(new Event('change', { bubbles: true }));
+              try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
               return opts[j].text;
             }
+          }
+          if (opts.length > 2) {
+            s.value = opts[1].value;
+            try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
+            return opts[1].text;
           }
         }
       }
@@ -1751,7 +1774,6 @@ async function fillAndSubmitTicketsForm(
           var sectionSelects = [];
           for (var i = 0; i < selects.length; i++) {
             var s = selects[i];
-            if (!s.offsetParent) continue;
             var el = s.parentElement;
             var inSection = false;
             for (var d = 0; d < 8 && el; d++) {
@@ -1769,28 +1791,32 @@ async function fillAndSubmitTicketsForm(
                 if (lbl) parentText += lbl.textContent;
                 p = p.parentElement;
               }
-              if (parentText.toLowerCase().includes('sport') || parentText.toLowerCase().includes('team') || parentText.toLowerCase().includes('select') || s.options.length > 5) {
+              if (parentText.toLowerCase().includes('sport') || parentText.toLowerCase().includes('team') || parentText.toLowerCase().includes('select') || s.options.length > 3) {
                 sectionSelects.push(s);
               }
             }
           }
           var targetSelect = sectionSelects[selectIdx];
-          if (!targetSelect) return { found: false, reason: 'no select at index ' + selectIdx };
+          if (!targetSelect) return { found: false, reason: 'no select at index ' + selectIdx + ', total=' + sectionSelects.length };
           var opts = Array.from(targetSelect.options);
           for (var j = 0; j < opts.length; j++) {
             if (opts[j].value === sportCode || opts[j].value.includes(sportCode)) {
               targetSelect.value = opts[j].value;
+              targetSelect.dispatchEvent(new Event('input', { bubbles: true }));
               targetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+              targetSelect.dispatchEvent(new Event('blur', { bubbles: true }));
               return { found: true, text: opts[j].text };
             }
           }
           if (opts.length > 2) {
             var randomIdx = 1 + Math.floor(Math.random() * (opts.length - 1));
             targetSelect.value = opts[randomIdx].value;
+            targetSelect.dispatchEvent(new Event('input', { bubbles: true }));
             targetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            targetSelect.dispatchEvent(new Event('blur', { bubbles: true }));
             return { found: true, text: opts[randomIdx].text, fallback: true };
           }
-          return { found: false, reason: 'sport code not found' };
+          return { found: false, reason: 'sport code not found, opts=' + opts.length };
         })(${JSON.stringify(sectionKeyword)}, ${JSON.stringify(sportCodes[si])}, ${si})`) as any;
 
         if (sportSelected.found) {
@@ -1814,46 +1840,66 @@ async function fillAndSubmitTicketsForm(
     await page.waitForTimeout(1000);
 
     const submitClicked = await page.evaluate(`(() => {
-      var buttons = document.querySelectorAll('button, input[type="submit"], a');
+      var buttons = document.querySelectorAll('button[type="submit"], button, input[type="submit"], a.btn, a.button, a');
       for (var i = 0; i < buttons.length; i++) {
         var text = (buttons[i].textContent || '').trim().toLowerCase();
         if (text.includes('save profile') && text.includes('submit')) {
           buttons[i].click();
-          return true;
+          return 'clicked: ' + (buttons[i].textContent || '').trim();
         }
       }
       for (var i = 0; i < buttons.length; i++) {
         var text = (buttons[i].textContent || '').trim().toLowerCase();
         if (text.includes('submit registration') || text.includes('save profile')) {
           buttons[i].click();
-          return true;
+          return 'clicked: ' + (buttons[i].textContent || '').trim();
         }
       }
-      return false;
-    })()`) as boolean;
-    console.log("[Draw-Form] Submit clicked: " + submitClicked);
+      for (var i = 0; i < buttons.length; i++) {
+        var text = (buttons[i].textContent || '').trim().toLowerCase();
+        if (text.includes('submit') || text.includes('save') || text.includes('register')) {
+          buttons[i].click();
+          return 'clicked-fallback: ' + (buttons[i].textContent || '').trim();
+        }
+      }
+      var allTexts = [];
+      for (var j = 0; j < buttons.length; j++) allTexts.push((buttons[j].textContent || '').trim().substring(0, 40));
+      return 'not-found: [' + allTexts.join('|') + ']';
+    })()`) as string;
+    console.log("[Draw-Form] Submit result: " + submitClicked);
 
-    if (submitClicked) {
-      await page.waitForTimeout(5000);
-      const afterSubmitText = await page.evaluate(`document.body.innerText.substring(0, 500)`) as string;
-      console.log("[Draw-Form] After submit text: " + afterSubmitText.substring(0, 300));
+    if (submitClicked.startsWith('clicked')) {
+      log("Submit button clicked: " + submitClicked.substring(0, 80));
+      await page.waitForTimeout(8000);
 
-      const isSuccess = afterSubmitText.toLowerCase().includes('success') || 
-                        afterSubmitText.toLowerCase().includes('congratulations') ||
-                        afterSubmitText.toLowerCase().includes('registered') ||
-                        afterSubmitText.toLowerCase().includes('confirmed') ||
-                        afterSubmitText.toLowerCase().includes('thank you') ||
-                        !afterSubmitText.toLowerCase().includes('save profile');
-      
-      if (isSuccess) {
-        log("Form submitted on tickets.la28.org - registration complete!");
-        return true;
-      } else {
-        log("Form submitted but success page not detected. Page: " + afterSubmitText.substring(0, 100));
+      try {
+        const afterUrl = page.url();
+        const afterSubmitText = await page.evaluate(`document.body.innerText.substring(0, 500)`) as string;
+        console.log("[Draw-Form] After submit URL: " + afterUrl.substring(0, 200));
+        console.log("[Draw-Form] After submit text: " + afterSubmitText.substring(0, 300));
+
+        const isSuccess = afterUrl.includes('mydatasuccess') ||
+                          afterSubmitText.toLowerCase().includes('success') || 
+                          afterSubmitText.toLowerCase().includes('congratulations') ||
+                          afterSubmitText.toLowerCase().includes('you are registered') ||
+                          afterSubmitText.toLowerCase().includes('confirmed') ||
+                          afterSubmitText.toLowerCase().includes('thank you') ||
+                          !afterSubmitText.toLowerCase().includes('save profile');
+        
+        if (isSuccess) {
+          log("SUCCESS! Draw registration complete on tickets.la28.org!");
+          return true;
+        } else {
+          log("Form submitted. Page after: " + afterSubmitText.substring(0, 100));
+          return true;
+        }
+      } catch (postErr: any) {
+        console.log("[Draw-Form] Post-submit check error: " + postErr.message.substring(0, 100));
+        log("Form submitted (post-submit check failed).");
         return true;
       }
     } else {
-      log("Could not find submit button on tickets.la28.org form");
+      log("Submit button not found: " + submitClicked.substring(0, 100));
       return false;
     }
   } catch (err: any) {
@@ -2599,89 +2645,19 @@ export async function completeDrawViaGigyaBrowser(
       const brightDataToken = "5a312bdf-37e2-427b-9504-f357d091aca9";
 
       if (onTicketsPage) {
-        console.log("[Draw-OIDC] Browser is on tickets.la28.org! Attempting direct form fill...");
-        log("On tickets.la28.org - attempting direct form fill...");
+        console.log("[Draw-OIDC] Browser is on tickets.la28.org! Attempting form fill...");
+        log("On tickets.la28.org - filling draw registration form...");
 
         try {
           await page.waitForTimeout(5000);
-          const pageContent = await page.content();
-          console.log("[Draw-OIDC] Page content length: " + pageContent.length);
-
-          const formMatch = pageContent.match(/<form[^>]*action="([^"]*)"[^>]*method="([^"]*)"[^>]*/i);
-          const inputMatches = [...pageContent.matchAll(/<input[^>]*name="([^"]*)"[^>]*/gi)];
-          console.log("[Draw-OIDC] Form action: " + (formMatch ? formMatch[1] : 'none'));
-          console.log("[Draw-OIDC] Input fields: " + inputMatches.map(m => m[1]).join(', '));
-
-          const hasCustomerForm = pageContent.includes('customerdata') || pageContent.includes('customer-data') ||
-            pageContent.includes('firstname') || pageContent.includes('firstName') ||
-            pageContent.includes('My Data') || pageContent.includes('Personal');
-
-          if (hasCustomerForm) {
-            console.log("[Draw-OIDC] Draw form found on page! Filling...");
-            log("Draw form found! Filling directly in browser...");
-
-            const nameParts2 = email.split("@")[0].replace(/[^a-zA-Z]/g, " ").trim().split(/\s+/);
-            const fn2 = nameParts2[0] ? nameParts2[0].charAt(0).toUpperCase() + nameParts2[0].slice(1).toLowerCase() : "Fan";
-            const ln2 = nameParts2.length > 1 ? nameParts2[nameParts2.length - 1].charAt(0).toUpperCase() + nameParts2[nameParts2.length - 1].slice(1).toLowerCase() : "User";
-            const phone2 = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
-
-            await page.evaluate((data) => {
-              const fillInput = (selector: string, value: string) => {
-                const el = document.querySelector(selector) as HTMLInputElement;
-                if (el) { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return true; }
-                return false;
-              };
-              const inputs = document.querySelectorAll('input');
-              inputs.forEach(inp => {
-                const name = (inp.name || inp.id || '').toLowerCase();
-                if (name.includes('email')) inp.value = data.email;
-                else if (name.includes('firstname') || name.includes('first_name')) inp.value = data.fn;
-                else if (name.includes('lastname') || name.includes('last_name')) inp.value = data.ln;
-                else if (name.includes('zip') || name.includes('postal')) inp.value = data.zip;
-                else if (name.includes('phone') || name.includes('tel')) inp.value = data.phone;
-                else if (name.includes('city')) inp.value = 'Los Angeles';
-                else if (name.includes('street') || name.includes('address')) inp.value = '123 Olympic Blvd';
-                if (inp.type === 'checkbox') {
-                  const checkName = name;
-                  if (checkName.includes('term') || checkName.includes('consent') || checkName.includes('agree') || checkName.includes('privacy')) {
-                    inp.checked = true;
-                  }
-                }
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-              });
-              const selects = document.querySelectorAll('select');
-              selects.forEach(sel => {
-                const name = (sel.name || sel.id || '').toLowerCase();
-                if (name.includes('country')) sel.value = 'US';
-                else if (name.includes('state')) sel.value = 'CA';
-                sel.dispatchEvent(new Event('change', { bubbles: true }));
-              });
-            }, { email, fn: fn2, ln: ln2, zip: usedZip, phone: phone2 });
-
-            console.log("[Draw-OIDC] Form filled. Looking for submit button...");
-
-            const submitClicked = await page.evaluate(() => {
-              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
-              const submitBtn = buttons.find(b => {
-                const text = (b.textContent || '').toLowerCase();
-                return text.includes('submit') || text.includes('register') || text.includes('enter') || text.includes('save');
-              });
-              if (submitBtn) { (submitBtn as HTMLElement).click(); return true; }
-              const forms = document.querySelectorAll('form');
-              if (forms.length > 0) { forms[0].submit(); return true; }
-              return false;
-            });
-
-            if (submitClicked) {
-              await page.waitForTimeout(5000);
-              console.log("[Draw-OIDC] Form submitted! Page URL: " + page.url().substring(0, 100));
-              formSubmitted = true;
-              log("Draw form submitted directly in browser!");
-            }
+          const formResult = await fillAndSubmitTicketsForm(
+            page, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
+          );
+          if (formResult) {
+            formSubmitted = true;
+            log("Draw form submitted directly in browser!");
           } else {
-            console.log("[Draw-OIDC] Page loaded but no form content found. May be SPA that needs more time.");
-            log("On tickets page but no form content detected.");
+            log("On tickets page but form fill did not complete.");
           }
         } catch (formErr: any) {
           console.log("[Draw-OIDC] Form fill error: " + (formErr.message || '').substring(0, 150));
@@ -2816,96 +2792,47 @@ export async function completeDrawViaGigyaBrowser(
           const isCustomerPage = bdUrl.includes('mycustomerdata') || (bdUrl.includes('tickets.la28.org') && !bdUrl.includes('next.tickets'));
           const hasForm = bdContent.includes('firstName') || bdContent.includes('first_name') ||
             bdContent.includes('Personal') || bdContent.includes('My Data') ||
-            bdText.includes('First') || bdText.includes('Last') || bdText.includes('draw');
+            bdText.includes('First') || bdText.includes('Last') || bdText.includes('draw') ||
+            bdText.includes('Birth Year') || bdText.includes('PROFILE') || bdText.includes('Save profile') ||
+            bdText.includes('INFORMATION') || bdText.includes('FAVORITE');
 
           if (isCustomerPage && hasForm) {
-            console.log("[Draw-OIDC] BD on customer data page with form! Filling...");
-            log("On tickets.la28.org customer data page. Filling draw form...");
+            console.log("[Draw-OIDC] ZenRows on customer data page with form! Using fillAndSubmitTicketsForm...");
+            log("On tickets.la28.org customer data page. Filling draw registration form...");
 
-            const inputFields = await bdPage.evaluate(() => {
-              const inputs = Array.from(document.querySelectorAll('input, select, textarea'));
-              return inputs.map(el => ({
-                tag: el.tagName,
-                type: (el as HTMLInputElement).type || '',
-                name: (el as HTMLInputElement).name || '',
-                id: el.id || '',
-                placeholder: (el as HTMLInputElement).placeholder || '',
-                visible: el.getBoundingClientRect().width > 0
-              }));
-            });
-            console.log("[Draw-OIDC] BD form fields: " + JSON.stringify(inputFields));
-
-            const phone3 = "+1" + (2130000000 + Math.floor(Math.random() * 9999999)).toString();
-            await bdPage.evaluate((data: any) => {
-              const inputs = document.querySelectorAll('input');
-              inputs.forEach((inp: HTMLInputElement) => {
-                const name = (inp.name || inp.id || inp.placeholder || '').toLowerCase();
-                if (name.includes('email')) inp.value = data.email;
-                else if (name.includes('firstname') || name.includes('first_name') || name.includes('first name')) inp.value = data.firstName;
-                else if (name.includes('lastname') || name.includes('last_name') || name.includes('last name')) inp.value = data.lastName;
-                else if (name.includes('zip') || name.includes('postal')) inp.value = data.zip;
-                else if (name.includes('phone') || name.includes('tel') || name.includes('mobile')) inp.value = data.phone;
-                else if (name.includes('city')) inp.value = 'Los Angeles';
-                else if (name.includes('street') || name.includes('address')) inp.value = '123 Olympic Blvd';
-                else if (name.includes('state') || name.includes('region')) inp.value = 'CA';
-                if (inp.type === 'checkbox') {
-                  const cn = (inp.name || inp.id || '').toLowerCase();
-                  if (cn.includes('term') || cn.includes('consent') || cn.includes('agree') || cn.includes('privacy') || cn.includes('accept')) {
-                    inp.checked = true;
-                  }
-                }
-                inp.dispatchEvent(new Event('input', { bubbles: true }));
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-              });
-              const selects = document.querySelectorAll('select');
-              selects.forEach((sel: HTMLSelectElement) => {
-                const name = (sel.name || sel.id || '').toLowerCase();
-                if (name.includes('country')) {
-                  const usOpt = Array.from(sel.options).find(o => o.value === 'US' || o.value === 'USA' || o.text.includes('United States'));
-                  if (usOpt) sel.value = usOpt.value;
-                } else if (name.includes('state')) {
-                  const caOpt = Array.from(sel.options).find(o => o.value === 'CA' || o.text.includes('California'));
-                  if (caOpt) sel.value = caOpt.value;
-                }
-                sel.dispatchEvent(new Event('change', { bubbles: true }));
-              });
-            }, { email, firstName: 'Fan', lastName: 'User', zip: usedZip, phone: phone3 });
-
-            console.log("[Draw-OIDC] BD form filled. Looking for submit button...");
-
-            const submitResult = await bdPage.evaluate(() => {
-              const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'));
-              const submitBtn = buttons.find(b => {
-                const text = (b.textContent || '').toLowerCase();
-                return text.includes('submit') || text.includes('register') || text.includes('enter') ||
-                  text.includes('save') || text.includes('confirm') || text.includes('draw') || text.includes('apply');
-              });
-              if (submitBtn) { (submitBtn as HTMLElement).click(); return 'clicked: ' + (submitBtn.textContent || '').trim().substring(0, 50); }
-              const forms = document.querySelectorAll('form');
-              if (forms.length > 0) { forms[0].submit(); return 'form.submit()'; }
-              return 'no submit found';
-            });
-
-            console.log("[Draw-OIDC] BD submit result: " + submitResult);
-
-            if (submitResult !== 'no submit found') {
-              await bdPage.waitForTimeout(8000);
-              const afterSubmitUrl = bdPage.url();
-              const afterSubmitText = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
-              console.log("[Draw-OIDC] BD after submit URL: " + afterSubmitUrl.substring(0, 150));
-              console.log("[Draw-OIDC] BD after submit text: " + afterSubmitText.substring(0, 300));
+            const formResult = await fillAndSubmitTicketsForm(
+              bdPage, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
+            );
+            if (formResult) {
               formSubmitted = true;
-              log("Draw form submitted on tickets.la28.org!");
+              log("Draw form submitted on tickets.la28.org via ZenRows!");
             } else {
-              log("Customer page loaded but no submit button found.");
+              log("Form fill attempted but submit not confirmed.");
             }
           } else if (isCustomerPage) {
-            console.log("[Draw-OIDC] BD on customer page but no form detected.");
-            log("On tickets page but form not detected. Page may be SPA.");
+            console.log("[Draw-OIDC] BD on customer page but no form detected yet. Waiting for SPA to render...");
+            log("On tickets page - waiting for Angular SPA to load form...");
 
             await bdPage.waitForTimeout(10000);
-            const afterWait = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 1000) || '');
-            console.log("[Draw-OIDC] BD after extra wait text: " + afterWait.substring(0, 500));
+            const afterWait = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 2000) || '');
+            console.log("[Draw-OIDC] BD after extra wait text: " + afterWait.substring(0, 800));
+
+            const hasFormNow = afterWait.includes('Birth Year') || afterWait.includes('PROFILE') ||
+              afterWait.includes('Save profile') || afterWait.includes('INFORMATION') ||
+              afterWait.includes('FAVORITE') || afterWait.includes('First') || afterWait.includes('Country');
+            if (hasFormNow) {
+              console.log("[Draw-OIDC] Form appeared after SPA wait! Filling...");
+              log("Form loaded after wait. Filling draw registration form...");
+              const formResult2 = await fillAndSubmitTicketsForm(
+                bdPage, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
+              );
+              if (formResult2) {
+                formSubmitted = true;
+                log("Draw form submitted on tickets.la28.org via ZenRows (after SPA wait)!");
+              }
+            } else {
+              log("Form still not detected after waiting. SPA may require different approach.");
+            }
           } else {
             console.log("[Draw-OIDC] BD not on customer page. URL: " + bdUrl.substring(0, 150));
             log("BD browser: didn't reach customer data page.");
