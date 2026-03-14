@@ -2717,7 +2717,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           } catch {}
           if (!zenrowsUrl) {
-            zenrowsUrl = "wss://browser.zenrows.com?apikey=2dbfcfdaf0600497cb9f3d880ac64b1316530535";
+            zenrowsUrl = "wss://browser.zenrows.com?apikey=37f48a5787f7e01abecbf8c67c3c205f61ecc071";
           }
           console.log("[Draw-OIDC] Connecting to ZenRows Browser...");
           bdBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
