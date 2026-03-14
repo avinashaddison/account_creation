@@ -2434,6 +2434,126 @@ export async function completeDrawViaGigyaBrowser(
       if (useNstBrowser) {
         log("Draw form: Using NSTBrowser cloud anti-detect browser for OIDC...");
         console.log("[Draw-OIDC] Starting OIDC via NSTBrowser for " + email);
+      } else if (!page || page.isClosed()) {
+        log("Draw form: Page closed, launching fresh local browser for OIDC...");
+        console.log("[Draw-OIDC] Page closed, launching fresh local browser for " + email);
+
+        try {
+          const freshBrowser = await chromium.launch({
+            headless: true,
+            args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--ignore-certificate-errors'],
+          });
+          browser = freshBrowser;
+          const freshCtx = await freshBrowser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            viewport: { width: 1280, height: 900 },
+            ignoreHTTPSErrors: true,
+          });
+          page = await freshCtx.newPage();
+          page.setDefaultTimeout(30000);
+
+          console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
+          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
+          try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+          await page.waitForTimeout(2000);
+
+          await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", undefined, { timeout: 20000 });
+          console.log("[Draw-OIDC] Fresh browser: Gigya SDK loaded, logging in...");
+
+          const freshLogin = await page.evaluate(`(function(email, pwd) {
+            return new Promise(function(resolve) {
+              gigya.accounts.login({
+                loginID: email, password: pwd,
+                callback: function(resp) {
+                  resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
+                }
+              });
+              setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 20000);
+            });
+          })(${JSON.stringify(email)}, ${JSON.stringify(password)})`) as any;
+          console.log("[Draw-OIDC] Fresh browser Gigya login: " + JSON.stringify(freshLogin));
+
+          if (!freshLogin.success) {
+            throw new Error("Fresh browser Gigya login failed: " + freshLogin.errorMessage);
+          }
+
+          await page.waitForTimeout(3000);
+          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+          let freshUrl = page.url();
+          if (freshUrl.includes("proxy.html") || freshUrl.includes("consent.html")) {
+            console.log("[Draw-OIDC] Fresh browser: on intermediate page, navigating back to login...");
+            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await page.waitForTimeout(2000);
+          }
+
+          const freshAuth = await page.evaluate(`(function() {
+            return new Promise(function(resolve) {
+              gigya.accounts.getAccountInfo({
+                callback: function(resp) {
+                  resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' });
+                }
+              });
+              setTimeout(function() { resolve({ loggedIn: false, uid: '' }); }, 15000);
+            });
+          })()`) as any;
+          console.log("[Draw-OIDC] Fresh browser auth check: " + JSON.stringify(freshAuth));
+
+          if (!freshAuth.loggedIn) {
+            throw new Error("Fresh browser: Not logged in after Gigya login");
+          }
+
+          console.log("[Draw-OIDC] Fresh browser: setting profile + data via Gigya JS SDK...");
+          const freshProfileResult = await page.evaluate(`(function(birthYr, zip) {
+            return new Promise(function(resolve) {
+              gigya.accounts.setAccountInfo({
+                profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
+                callback: function(resp) {
+                  resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+                }
+              });
+              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+            });
+          })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
+          console.log("[Draw-OIDC] Fresh browser profile result: " + JSON.stringify(freshProfileResult));
+          if (freshProfileResult.success) profileSet = true;
+
+          const allSportsFresh = [
+            ...favOlympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+            ...favParalympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+          ];
+          const teamObjsFresh = favTeams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
+
+          const freshDataResult = await page.evaluate(`(function(sportsStr, teamsStr) {
+            return new Promise(function(resolve) {
+              var sports = JSON.parse(sportsStr);
+              var teams = JSON.parse(teamsStr);
+              gigya.accounts.setAccountInfo({
+                data: {
+                  personalization: { favoritesDisciplines: sports, favoritesCountries: teams, siteLanguage: 'en' },
+                  entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
+                },
+                callback: function(resp) {
+                  resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+                }
+              });
+              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+            });
+          })(${JSON.stringify(JSON.stringify(allSportsFresh))}, ${JSON.stringify(JSON.stringify(teamObjsFresh))})`) as { success: boolean; error?: string | null };
+          console.log("[Draw-OIDC] Fresh browser data result: " + JSON.stringify(freshDataResult));
+          if (freshDataResult.success) dataSet = true;
+
+          if (profileSet && dataSet && onEarlyComplete) {
+            console.log("[Draw-OIDC] Fresh browser: profile+data set, marking completed early");
+            onEarlyComplete();
+          }
+
+          console.log("[Draw-OIDC] Fresh browser ready for OIDC!");
+          log("Fresh local browser logged in, profile=" + profileSet + " data=" + dataSet + ". Proceeding to OIDC...");
+        } catch (freshErr: any) {
+          console.log("[Draw-OIDC] Fresh browser failed: " + (freshErr.message || '').substring(0, 200));
+          log("Fresh browser OIDC failed: " + (freshErr.message || '').substring(0, 80));
+        }
       } else {
         log("Draw form: Navigating OIDC in local browser (same session)...");
         console.log("[Draw-OIDC] Starting OIDC in local browser for " + email);
@@ -3224,6 +3344,7 @@ export async function completeDrawRegistrationViaApi(
   const loginData = await loginResp.json() as any;
 
   if (loginData.errorCode !== 0) {
+    console.log("[Draw-API] Login FAILED: errorCode=" + loginData.errorCode + " msg=" + (loginData.errorMessage || "") + " details=" + (loginData.errorDetails || "").substring(0, 120));
     log("[GIGYA ACCOUNT] Login failed: " + (loginData.errorMessage || "code " + loginData.errorCode));
     return { success: false, profileSet: false, dataSet: false, error: loginData.errorMessage || "Login failed" };
   }
