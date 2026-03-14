@@ -406,6 +406,50 @@ export async function registerRoutes(
   await cleanupStaleAccounts();
   setInterval(cleanupStaleAccounts, 10 * 60 * 1000);
 
+  let autoRetryRunning = false;
+  async function autoRetryDrawAccounts() {
+    if (autoRetryRunning) return;
+    autoRetryRunning = true;
+    try {
+      const stuckRows = await db.execute(sql`SELECT id, temp_email, la28_password, zip_code, batch_id, owner_id FROM accounts WHERE status = 'draw_registering' AND platform = 'la28' LIMIT 3`);
+      if (stuckRows.rows.length === 0) { autoRetryRunning = false; return; }
+      console.log(`[AutoRetry] Found ${stuckRows.rows.length} stuck draw_registering accounts`);
+      for (const row of stuckRows.rows) {
+        const acctId = row.id as string;
+        const email = row.temp_email as string;
+        const password = row.la28_password as string;
+        const zipCode = row.zip_code as string | null;
+        const batchId = (row.batch_id || acctId) as string;
+        const ownerId = row.owner_id as string | undefined;
+        const log = (msg: string) => { broadcastLog(batchId, acctId, msg, ownerId); };
+        console.log(`[AutoRetry] Retrying draw for ${email} (${acctId})`);
+        log("Auto-retry: attempting draw registration...");
+        try {
+          const result = await completeDrawViaGigyaBrowser(email, password, zipCode || undefined, log);
+          if (result.success || result.profileSet || result.dataSet) {
+            await storage.updateAccount(acctId, { status: "completed" });
+            const acct = await storage.getAccount(acctId);
+            if (acct) broadcastAccountUpdate(acct, ownerId);
+            console.log(`[AutoRetry] ${email} completed!`);
+            log("Auto-retry: draw registration completed!");
+          } else {
+            console.log(`[AutoRetry] ${email} still failing: ${result.error || 'unknown'}`);
+            log("Auto-retry: still blocked (" + (result.error || 'unknown').substring(0, 60) + "). Will retry later.");
+          }
+        } catch (err: any) {
+          console.log(`[AutoRetry] ${email} error: ${err.message.substring(0, 100)}`);
+          log("Auto-retry error: " + err.message.substring(0, 60) + ". Will retry later.");
+        }
+      }
+    } catch (err: any) {
+      console.log(`[AutoRetry] Error: ${err.message}`);
+    }
+    autoRetryRunning = false;
+  }
+
+  setInterval(autoRetryDrawAccounts, 15 * 60 * 1000);
+  setTimeout(autoRetryDrawAccounts, 60 * 1000);
+
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { email, password } = req.body;
