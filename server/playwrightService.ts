@@ -2003,34 +2003,50 @@ export async function completeDrawViaGigyaBrowser(
       const loginResult = await page.evaluate(`(function() {
         return new Promise(function(resolve) {
           if (typeof gigya === 'undefined' || !gigya.accounts) {
-            resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '' });
+            resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '', raw: 'no gigya' });
             return;
           }
+          var resolved = false;
           gigya.accounts.login({
             loginID: ${JSON.stringify(email)},
             password: ${JSON.stringify(password)},
             callback: function(resp) {
+              if (resolved) return;
+              resolved = true;
+              var keys = [];
+              try { keys = Object.keys(resp).slice(0, 15); } catch(e) {}
               resolve({
                 success: resp.errorCode === 0,
                 errorCode: resp.errorCode,
-                errorMessage: resp.errorMessage || '',
-                uid: resp.UID || ''
+                errorMessage: resp.errorMessage || resp.statusMessage || '',
+                uid: resp.UID || '',
+                statusCode: resp.statusCode,
+                statusReason: resp.statusReason || '',
+                keys: keys.join(','),
+                raw: JSON.stringify(resp).substring(0, 500)
               });
             }
           });
-          setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 30000);
+          setTimeout(function() {
+            if (resolved) return;
+            resolved = true;
+            resolve({ success: false, errorCode: -2, errorMessage: 'timeout_30s', uid: '', raw: 'timeout' });
+          }, 30000);
         });
       })()`) as any;
       console.log("[Draw] Login result (attempt " + (attempt + 1) + "): " + JSON.stringify(loginResult));
 
       if (!loginResult.success) {
-        if (loginResult.errorCode === 451002) {
-          log("Geo-blocked by Gigya (451002).");
-          continue;
+        const errCode = loginResult.errorCode;
+        const errMsg = loginResult.errorMessage || '';
+        log("Login failed (errorCode=" + errCode + "): " + (errMsg || 'unknown') + ". Attempt " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES);
+        console.log("[Draw] Login failed: errorCode=" + errCode + " msg=" + errMsg);
+        if (errCode === 400006) {
+          log("CAPTCHA required (400006). Cannot proceed.");
+          try { if (browser) await browser.close(); } catch {}
+          return { success: false, profileSet: false, dataSet: false, error: "Login failed: CAPTCHA required (400006)" };
         }
-        log("Login failed: " + (loginResult.errorMessage || 'unknown'));
-        try { if (browser) await browser.close(); } catch {}
-        return { success: false, profileSet: false, dataSet: false, error: "Login failed: " + (loginResult.errorMessage || 'errorCode ' + loginResult.errorCode) };
+        continue;
       }
 
       log("Login successful! UID: " + (loginResult.uid || "unknown"));
