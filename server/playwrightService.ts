@@ -1863,6 +1863,70 @@ async function fillAndSubmitTicketsForm(
   }
 }
 
+async function forwardViaProxy(targetUrl: string, postData: string, proxyUrl: string | null): Promise<string> {
+  const https = await import('https');
+  const http = await import('http');
+  const url = await import('url');
+
+  if (!proxyUrl) {
+    const resp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: postData,
+    });
+    return await resp.text();
+  }
+
+  const proxy = new URL(proxyUrl);
+  const target = new URL(targetUrl);
+
+  return new Promise((resolve, reject) => {
+    const connectReq = http.request({
+      host: proxy.hostname,
+      port: parseInt(proxy.port),
+      method: 'CONNECT',
+      path: target.hostname + ':443',
+      headers: {
+        'Proxy-Authorization': 'Basic ' + Buffer.from(decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password)).toString('base64'),
+      },
+    });
+
+    connectReq.on('connect', (_res: any, socket: any) => {
+      const tlsSocket = (require('tls') as any).connect({
+        host: target.hostname,
+        socket: socket,
+        rejectUnauthorized: false,
+      }, () => {
+        const postBuffer = Buffer.from(postData, 'utf-8');
+        const reqStr = `POST ${target.pathname} HTTP/1.1\r\nHost: ${target.hostname}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${postBuffer.length}\r\nConnection: close\r\n\r\n${postData}`;
+        tlsSocket.write(reqStr);
+      });
+
+      let data = '';
+      tlsSocket.on('data', (chunk: any) => { data += chunk.toString(); });
+      tlsSocket.on('end', () => {
+        const bodyStart = data.indexOf('\r\n\r\n');
+        if (bodyStart >= 0) {
+          const rawBody = data.substring(bodyStart + 4);
+          const jsonStart = rawBody.indexOf('{');
+          if (jsonStart >= 0) {
+            resolve(rawBody.substring(jsonStart));
+          } else {
+            resolve(rawBody);
+          }
+        } else {
+          resolve(data);
+        }
+      });
+      tlsSocket.on('error', (err: any) => reject(err));
+    });
+
+    connectReq.on('error', (err: any) => reject(err));
+    connectReq.setTimeout(30000, () => { connectReq.destroy(); reject(new Error('Proxy CONNECT timeout')); });
+    connectReq.end();
+  });
+}
+
 export async function completeDrawViaGigyaBrowser(
   email: string,
   password: string,
@@ -1886,8 +1950,8 @@ export async function completeDrawViaGigyaBrowser(
       if (row.key === 'iproyal_proxy_url' && row.value) iproyalProxy = row.value as string;
       if (row.key === 'residential_proxy_url' && row.value) brightDataProxy = row.value as string;
     }
-    residentialProxy = iproyalProxy || brightDataProxy;
-    console.log("[Draw] Proxy priority: iproyal=" + (iproyalProxy ? "yes" : "no") + " brightdata=" + (brightDataProxy ? "yes" : "no") + " selected=" + (residentialProxy ? new URL(residentialProxy).hostname : "none"));
+    residentialProxy = brightDataProxy || iproyalProxy;
+    console.log("[Draw] Proxy priority: brightdata=" + (brightDataProxy ? "yes" : "no") + " iproyal=" + (iproyalProxy ? "yes" : "no") + " selected=" + (residentialProxy ? new URL(residentialProxy).hostname : "none"));
   } catch {}
 
   const proxyLabel = residentialProxy ? "residential proxy" : "no proxy (direct)";
@@ -1924,24 +1988,8 @@ export async function completeDrawViaGigyaBrowser(
         '--window-size=1920,1080',
       ];
       const launchOpts: any = { headless: true, args: [...launchArgs, '--headless=new'] };
-      if (residentialProxy) {
-        try {
-          const proxyUrl = new URL(residentialProxy);
-          launchOpts.proxy = {
-            server: proxyUrl.protocol + '//' + proxyUrl.hostname + ':' + proxyUrl.port,
-            username: decodeURIComponent(proxyUrl.username),
-            password: decodeURIComponent(proxyUrl.password),
-          };
-          console.log("[Draw] Using proxy: " + proxyUrl.hostname + ":" + proxyUrl.port);
-        } catch (proxyParseErr: any) {
-          console.log("[Draw] Failed to parse proxy URL: " + (proxyParseErr.message || ''));
-        }
-      }
-
-      if (!residentialProxy) {
-        console.log("[Draw] WARNING: No residential proxy configured. Gigya will likely block datacenter IPs.");
-        log("WARNING: No residential proxy. Login will likely fail due to IP detection.");
-      }
+      console.log("[Draw] Launching browser WITHOUT proxy (reCAPTCHA needs direct access)");
+      console.log("[Draw] Gigya API calls will be intercepted and forwarded via residential proxy");
 
       browser = await chromium.launch(launchOpts);
       const context = await browser.newContext({
@@ -1995,9 +2043,52 @@ export async function completeDrawViaGigyaBrowser(
       page = await context.newPage();
       page.setDefaultTimeout(60000);
 
-      await page.route("**/*", (route) => {
+      await page.route("**/*", async (route) => {
         const resourceType = route.request().resourceType();
-        if (["media"].includes(resourceType)) return route.abort();
+        const url = route.request().url();
+        if (resourceType === "media" && !url.includes('recaptcha') && !url.includes('gigya')) return route.abort();
+        if (url.includes('www.google.com/recaptcha/')) {
+          const newUrl = url.replace('www.google.com/recaptcha/', 'www.recaptcha.net/recaptcha/');
+          return route.continue({ url: newUrl });
+        }
+        if (route.request().method() === 'POST' && (url.includes('/accounts.login') || url.includes('/accounts.setAccountInfo') || url.includes('/accounts.getAccountInfo'))) {
+          const endpoint = url.includes('/accounts.login') ? 'accounts.login'
+            : url.includes('/accounts.setAccountInfo') ? 'accounts.setAccountInfo'
+            : 'accounts.getAccountInfo';
+          console.log("[Draw] Intercepting POST to " + endpoint + " — forwarding direct from Node.js (bypasses browser geo-block)");
+          try {
+            const postData = route.request().postData() || '';
+            const origHeaders = route.request().headers();
+            const targetUrl = "https://accounts." + GIGYA_DATACENTER + ".gigya.com/" + endpoint;
+            const forwardHeaders: Record<string, string> = {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            };
+            if (origHeaders['cookie']) forwardHeaders['cookie'] = origHeaders['cookie'];
+            if (origHeaders['origin']) forwardHeaders['origin'] = origHeaders['origin'];
+            if (origHeaders['referer']) forwardHeaders['referer'] = origHeaders['referer'];
+            const directResp = await fetch(targetUrl, {
+              method: 'POST',
+              headers: forwardHeaders,
+              body: postData,
+            });
+            const body = await directResp.text();
+            try {
+              const parsed = JSON.parse(body);
+              console.log("[Draw] Direct " + endpoint + " response: errorCode=" + (parsed.errorCode || 0) + " (" + body.substring(0, 100) + "...)");
+            } catch { console.log("[Draw] Direct " + endpoint + " raw: " + body.substring(0, 100)); }
+            const respHeaders: Record<string, string> = {};
+            directResp.headers.forEach((v, k) => { respHeaders[k] = v; });
+            return route.fulfill({
+              status: directResp.status,
+              contentType: directResp.headers.get('content-type') || 'application/json',
+              headers: respHeaders,
+              body: body,
+            });
+          } catch (directErr: any) {
+            console.log("[Draw] Direct " + endpoint + " error: " + (directErr.message || '').substring(0, 120));
+            return route.continue();
+          }
+        }
         return route.continue();
       });
 
@@ -2014,24 +2105,19 @@ export async function completeDrawViaGigyaBrowser(
         }
       });
 
-      log("Step 1: Loading LA28 main site to establish cookies & Gigya session...");
-      console.log("[Draw] Step 1: Loading la28.org main site first for cookie warmup...");
-      try {
-        await page.goto("https://www.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-        await page.waitForTimeout(2000 + Math.random() * 2000);
-        console.log("[Draw] Main site loaded: " + page.url().substring(0, 100));
-      } catch (mainErr: any) {
-        console.log("[Draw] Main site load (non-critical): " + (mainErr.message || '').substring(0, 80));
-      }
-
-      log("Step 1b: Loading LA28 ID portal to establish Gigya session...");
-      console.log("[Draw] Step 1b: Loading la28id.la28.org...");
+      log("Step 1: Loading LA28 ID portal to establish Gigya cookies & session...");
+      console.log("[Draw] Step 1: Loading la28id.la28.org for Gigya cookie warmup...");
       try {
         await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-        await page.waitForTimeout(3000 + Math.random() * 2000);
+        try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
+        await page.waitForTimeout(4000 + Math.random() * 3000);
         console.log("[Draw] ID portal loaded: " + page.url().substring(0, 100));
+        try {
+          await page.waitForFunction("typeof gigya !== 'undefined'", { timeout: 15000 });
+          console.log("[Draw] Gigya SDK detected on homepage — cookies should be set");
+        } catch {
+          console.log("[Draw] Gigya SDK not found on homepage (will try login page)");
+        }
       } catch (homeErr: any) {
         console.log("[Draw] ID portal load error (continuing): " + (homeErr.message || '').substring(0, 80));
       }
@@ -2360,18 +2446,11 @@ export async function completeDrawViaGigyaBrowser(
             page = await freshCtx.newPage();
             page.setDefaultTimeout(60000);
 
-            console.log("[Draw-OIDC] Fresh browser: loading la28.org for cookie warmup...");
-            try {
-              await page.goto("https://www.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-              try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-              await page.waitForTimeout(2000 + Math.random() * 2000);
-            } catch {}
-
-            console.log("[Draw-OIDC] Fresh browser: loading LA28 ID portal...");
+            console.log("[Draw-OIDC] Fresh browser: loading la28id.la28.org for cookie warmup...");
             try {
               await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-              try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-              await page.waitForTimeout(3000 + Math.random() * 2000);
+              try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
+              await page.waitForTimeout(4000 + Math.random() * 3000);
             } catch {}
 
             console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
