@@ -2897,20 +2897,23 @@ export async function completeDrawViaGigyaBrowser(
                 } catch {}
               }
 
-              if (postLoginUrl.includes('proxy.html')) {
-                console.log("[Draw-OIDC] ZenRows on proxy.html, waiting for OIDC redirect (up to 60s)...");
-                for (let pw = 0; pw < 30; pw++) {
+              if (postLoginUrl.includes('proxy.html') || postLoginUrl.includes('chrome-error')) {
+                console.log("[Draw-OIDC] ZenRows on proxy.html/error, waiting for OIDC redirect (up to 30s)...");
+                for (let pw = 0; pw < 15; pw++) {
                   await bdPage.waitForTimeout(2000);
                   postLoginUrl = bdPage.url();
-                  if (!postLoginUrl.includes('proxy.html')) {
+                  if (!postLoginUrl.includes('proxy.html') && !postLoginUrl.includes('chrome-error')) {
                     console.log("[Draw-OIDC] ZenRows proxy.html redirected to: " + postLoginUrl.substring(0, 150));
                     break;
                   }
-                  if (pw === 10) {
-                    console.log("[Draw-OIDC] ZenRows: proxy.html not redirecting after 20s, reloading...");
-                    try { await bdPage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
-                    await bdPage.waitForTimeout(5000);
-                  }
+                }
+                if (postLoginUrl.includes('proxy.html') || postLoginUrl.includes('chrome-error')) {
+                  console.log("[Draw-OIDC] ZenRows OIDC redirect failed, navigating directly to tickets.la28.org/mycustomerdata/...");
+                  try {
+                    await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                  } catch {}
+                  await bdPage.waitForTimeout(5000);
+                  console.log("[Draw-OIDC] ZenRows after direct nav: " + bdPage.url().substring(0, 150));
                 }
               }
 
