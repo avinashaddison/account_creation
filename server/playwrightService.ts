@@ -1880,18 +1880,14 @@ export async function completeDrawViaGigyaBrowser(
   let residentialProxy: string | null = null;
   try {
     const proxyRows = await db.execute(sql`SELECT key, value FROM settings WHERE key IN ('residential_proxy_url', 'iproyal_proxy_url')`);
+    let brightDataProxy: string | null = null;
+    let iproyalProxy: string | null = null;
     for (const row of proxyRows.rows) {
-      if (row.key === 'residential_proxy_url' && row.value) {
-        residentialProxy = row.value as string;
-      }
+      if (row.key === 'iproyal_proxy_url' && row.value) iproyalProxy = row.value as string;
+      if (row.key === 'residential_proxy_url' && row.value) brightDataProxy = row.value as string;
     }
-    if (!residentialProxy) {
-      for (const row of proxyRows.rows) {
-        if (row.key === 'iproyal_proxy_url' && row.value) {
-          residentialProxy = row.value as string;
-        }
-      }
-    }
+    residentialProxy = iproyalProxy || brightDataProxy;
+    console.log("[Draw] Proxy priority: iproyal=" + (iproyalProxy ? "yes" : "no") + " brightdata=" + (brightDataProxy ? "yes" : "no") + " selected=" + (residentialProxy ? new URL(residentialProxy).hostname : "none"));
   } catch {}
 
   const proxyLabel = residentialProxy ? "residential proxy" : "no proxy (direct)";
@@ -1922,10 +1918,12 @@ export async function completeDrawViaGigyaBrowser(
         '--ignore-certificate-errors',
         '--no-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-web-security',
         '--lang=en-US',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-site-isolation-trials',
+        '--window-size=1920,1080',
       ];
-      const launchOpts: any = { headless: true, args: launchArgs };
+      const launchOpts: any = { headless: true, args: [...launchArgs, '--headless=new'] };
       if (residentialProxy) {
         try {
           const proxyUrl = new URL(residentialProxy);
@@ -1940,51 +1938,109 @@ export async function completeDrawViaGigyaBrowser(
         }
       }
 
+      if (!residentialProxy) {
+        console.log("[Draw] WARNING: No residential proxy configured. Gigya will likely block datacenter IPs.");
+        log("WARNING: No residential proxy. Login will likely fail due to IP detection.");
+      }
+
       browser = await chromium.launch(launchOpts);
       const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        viewport: { width: 1366, height: 768 },
+        viewport: { width: 1920, height: 1080 },
+        screen: { width: 1920, height: 1080 },
         ignoreHTTPSErrors: true,
         locale: 'en-US',
         timezoneId: 'America/New_York',
         geolocation: { latitude: 34.0522, longitude: -118.2437 },
         permissions: ['geolocation'],
+        colorScheme: 'light',
+        hasTouch: false,
+        javaScriptEnabled: true,
       });
 
       await context.addInitScript(`
-        Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
-        Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
-        Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; } });
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+        Object.defineProperty(navigator, 'connection', { get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }) });
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) =>
+          parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters);
         if (navigator.plugins.length === 0) {
-          Object.defineProperty(navigator, 'plugins', { get: function() { return [1, 2, 3, 4, 5]; } });
+          Object.defineProperty(navigator, 'plugins', {
+            get: () => {
+              const plugins = [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+              ];
+              plugins.length = 3;
+              return plugins;
+            }
+          });
         }
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) return 'Intel Inc.';
+          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+          return getParameter.call(this, parameter);
+        };
       `);
 
       page = await context.newPage();
-      page.setDefaultTimeout(45000);
+      page.setDefaultTimeout(60000);
 
       await page.route("**/*", (route) => {
         const resourceType = route.request().resourceType();
-        if (["media", "font"].includes(resourceType)) return route.abort();
+        if (["media"].includes(resourceType)) return route.abort();
         return route.continue();
       });
 
-      log("Step 1: Loading LA28 homepage to establish Gigya session...");
-      console.log("[Draw] Step 1: Loading LA28 homepage first...");
+      page.on('requestfailed', (request) => {
+        const url = request.url();
+        if (url.includes('gigya') || url.includes('accounts.login')) {
+          console.log("[Draw] REQUEST FAILED: " + url.substring(0, 120) + " reason=" + (request.failure()?.errorText || 'unknown'));
+        }
+      });
+      page.on('response', (response) => {
+        const url = response.url();
+        if (url.includes('accounts.login') || url.includes('accounts.setAccountInfo')) {
+          console.log("[Draw] RESPONSE: " + response.status() + " " + url.substring(0, 120));
+        }
+      });
+
+      log("Step 1: Loading LA28 main site to establish cookies & Gigya session...");
+      console.log("[Draw] Step 1: Loading la28.org main site first for cookie warmup...");
+      try {
+        await page.goto("https://www.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+        await page.waitForTimeout(2000 + Math.random() * 2000);
+        console.log("[Draw] Main site loaded: " + page.url().substring(0, 100));
+      } catch (mainErr: any) {
+        console.log("[Draw] Main site load (non-critical): " + (mainErr.message || '').substring(0, 80));
+      }
+
+      log("Step 1b: Loading LA28 ID portal to establish Gigya session...");
+      console.log("[Draw] Step 1b: Loading la28id.la28.org...");
       try {
         await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-        await page.waitForTimeout(3000);
-        console.log("[Draw] Homepage loaded: " + page.url().substring(0, 100));
+        try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+        await page.waitForTimeout(3000 + Math.random() * 2000);
+        console.log("[Draw] ID portal loaded: " + page.url().substring(0, 100));
       } catch (homeErr: any) {
-        console.log("[Draw] Homepage load error (continuing): " + (homeErr.message || '').substring(0, 80));
+        console.log("[Draw] ID portal load error (continuing): " + (homeErr.message || '').substring(0, 80));
       }
 
       log("Step 2: Navigating to login page...");
       console.log("[Draw] Step 2: Navigating to login page...");
       await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
       try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(3000 + Math.random() * 2000);
 
       console.log("[Draw] Login page URL: " + page.url());
 
@@ -2257,8 +2313,11 @@ export async function completeDrawViaGigyaBrowser(
               '--no-sandbox',
               '--disable-dev-shm-usage',
               '--lang=en-US',
+              '--disable-features=IsolateOrigins,site-per-process',
+              '--disable-site-isolation-trials',
+              '--window-size=1920,1080',
             ];
-            const freshLaunchOpts: any = { headless: true, args: freshLaunchArgs };
+            const freshLaunchOpts: any = { headless: true, args: [...freshLaunchArgs, '--headless=new'] };
             if (residentialProxy) {
               try {
                 const pUrl = new URL(residentialProxy);
@@ -2274,32 +2333,51 @@ export async function completeDrawViaGigyaBrowser(
             browser = freshBrowser;
             const freshCtx = await freshBrowser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-              viewport: { width: 1366, height: 768 },
+              viewport: { width: 1920, height: 1080 },
+              screen: { width: 1920, height: 1080 },
               ignoreHTTPSErrors: true,
               locale: 'en-US',
               timezoneId: 'America/New_York',
               geolocation: { latitude: 34.0522, longitude: -118.2437 },
               permissions: ['geolocation'],
+              colorScheme: 'light',
+              hasTouch: false,
             });
             await freshCtx.addInitScript(`
-              Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
-              Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
-              Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; } });
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+              Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+              Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+              Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+              const getParameter = WebGLRenderingContext.prototype.getParameter;
+              WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                if (parameter === 37445) return 'Intel Inc.';
+                if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                return getParameter.call(this, parameter);
+              };
             `);
             page = await freshCtx.newPage();
-            page.setDefaultTimeout(45000);
+            page.setDefaultTimeout(60000);
 
-            console.log("[Draw-OIDC] Fresh browser: loading LA28 homepage first...");
+            console.log("[Draw-OIDC] Fresh browser: loading la28.org for cookie warmup...");
+            try {
+              await page.goto("https://www.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
+              try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+              await page.waitForTimeout(2000 + Math.random() * 2000);
+            } catch {}
+
+            console.log("[Draw-OIDC] Fresh browser: loading LA28 ID portal...");
             try {
               await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-              try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-              await page.waitForTimeout(3000);
+              try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+              await page.waitForTimeout(3000 + Math.random() * 2000);
             } catch {}
 
             console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
             await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-            try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-            await page.waitForTimeout(2000);
+            try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+            await page.waitForTimeout(2000 + Math.random() * 2000);
 
             await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", undefined, { timeout: 20000 });
             console.log("[Draw-OIDC] Fresh browser: Gigya SDK loaded, logging in...");
@@ -2531,8 +2609,8 @@ export async function completeDrawViaGigyaBrowser(
 
           if (!browser || !page || page.isClosed()) {
             console.log("[Draw-OIDC] Local browser also unavailable, relaunching...");
-            const fallbackArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors', '--no-sandbox', '--lang=en-US'];
-            const fallbackOpts: any = { headless: true, args: fallbackArgs };
+            const fallbackArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors', '--no-sandbox', '--disable-dev-shm-usage', '--lang=en-US', '--disable-features=IsolateOrigins,site-per-process', '--window-size=1920,1080'];
+            const fallbackOpts: any = { headless: true, args: [...fallbackArgs, '--headless=new'] };
             if (residentialProxy) {
               try {
                 const proxyUrl = new URL(residentialProxy);
@@ -2546,20 +2624,25 @@ export async function completeDrawViaGigyaBrowser(
             browser = await chromium.launch(fallbackOpts);
             const ctx = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-              viewport: { width: 1366, height: 768 },
+              viewport: { width: 1920, height: 1080 },
+              screen: { width: 1920, height: 1080 },
               ignoreHTTPSErrors: true,
               locale: 'en-US',
               timezoneId: 'America/New_York',
               geolocation: { latitude: 34.0522, longitude: -118.2437 },
               permissions: ['geolocation'],
+              colorScheme: 'light',
+              hasTouch: false,
             });
             await ctx.addInitScript(`
-              Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
-              Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
-              Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; } });
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+              Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+              Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
             `);
             page = await ctx.newPage();
-            page.setDefaultTimeout(30000);
+            page.setDefaultTimeout(60000);
 
             console.log("[Draw-OIDC] Fallback: logging into Gigya in new local browser...");
             await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
