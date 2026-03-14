@@ -2742,20 +2742,9 @@ export async function completeDrawViaGigyaBrowser(
         capturedRedirectUrls.push(reqUrl);
         if (!interceptedTicketsUrl && (reqUrl.includes('code=') || reqUrl.includes('iss='))) {
           interceptedTicketsUrl = reqUrl;
-          console.log("[Draw-OIDC] INTERCEPTED tickets auth URL via route handler - fulfilling with dummy page to preserve code");
-          try {
-            await route.fulfill({
-              status: 200,
-              contentType: 'text/html',
-              body: '<html><head><title>Code Captured</title></head><body><h1>Auth code captured successfully</h1></body></html>',
-            });
-          } catch (e: any) {
-            console.log("[Draw-OIDC] Route fulfill error: " + (e.message || '').substring(0, 100));
-            try { await route.abort(); } catch {}
-          }
-        } else {
-          try { await route.continue(); } catch {}
+          console.log("[Draw-OIDC] CAPTURED tickets auth URL - letting page load to fill form and click submit");
         }
+        try { await route.continue(); } catch {}
       });
 
       page.on('request', (req) => {
@@ -2900,7 +2889,51 @@ export async function completeDrawViaGigyaBrowser(
         } catch (formErr: any) {
           console.log("[Draw-OIDC] Form fill error: " + (formErr.message || '').substring(0, 150));
         }
-      } else if (ticketsAuthUrl) {
+      }
+
+      if (!formSubmitted && ticketsAuthUrl) {
+        console.log("[Draw-OIDC] Form not submitted yet, trying to navigate to tickets.la28.org/mycustomerdata/...");
+        log("OIDC linked. Navigating to tickets.la28.org to submit registration...");
+        try {
+          await page.unroute(/tickets\.la28\.org\/mycustomerdata/);
+        } catch {}
+        try {
+          await page.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 30000 });
+          try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+          await page.waitForTimeout(3000);
+
+          let navUrl = page.url();
+          if (navUrl.includes("next.tickets.la28.org")) {
+            console.log("[Draw-OIDC] In Queue-it queue. Waiting...");
+            log("In Queue-it queue, waiting...");
+            const qStart = Date.now();
+            while (Date.now() - qStart < 240000) {
+              await page.waitForTimeout(5000);
+              navUrl = page.url();
+              if (!navUrl.includes("next.tickets.la28.org")) break;
+            }
+          }
+
+          const nowOnTickets = page.url().includes("tickets.la28.org") && !page.url().includes("next.tickets.la28.org");
+          if (nowOnTickets) {
+            console.log("[Draw-OIDC] Reached tickets.la28.org! Filling form...");
+            await page.waitForTimeout(5000);
+            const formResult = await fillAndSubmitTicketsForm(
+              page, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
+            );
+            if (formResult) {
+              formSubmitted = true;
+              log("Draw form submitted directly in browser!");
+            }
+          } else {
+            console.log("[Draw-OIDC] Could not reach tickets page. URL: " + page.url().substring(0, 120));
+          }
+        } catch (navErr: any) {
+          console.log("[Draw-OIDC] Nav to tickets page failed: " + (navErr.message || '').substring(0, 150));
+        }
+      }
+
+      if (!formSubmitted && ticketsAuthUrl) {
         oidcLinked = true;
         console.log("[Draw-OIDC] OIDC identity linking confirmed via auth code redirect chain");
         console.log("[Draw-OIDC] Auth code URL captured: " + ticketsAuthUrl.substring(0, 150));
