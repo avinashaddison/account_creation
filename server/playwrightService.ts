@@ -1877,554 +1877,330 @@ export async function completeDrawViaGigyaBrowser(
   const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
 
   let formSubmitted = false;
-  let iproyalProxy: string | null = null;
+  let residentialProxy: string | null = null;
   try {
-    const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'iproyal_proxy_url'`);
-    if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
-      iproyalProxy = proxyRow.rows[0].value as string;
+    const proxyRows = await db.execute(sql`SELECT key, value FROM settings WHERE key IN ('residential_proxy_url', 'iproyal_proxy_url')`);
+    for (const row of proxyRows.rows) {
+      if (row.key === 'residential_proxy_url' && row.value) {
+        residentialProxy = row.value as string;
+      }
+    }
+    if (!residentialProxy) {
+      for (const row of proxyRows.rows) {
+        if (row.key === 'iproyal_proxy_url' && row.value) {
+          residentialProxy = row.value as string;
+        }
+      }
     }
   } catch {}
 
-  log("Draw via Gigya browser: launching headless browser" + (iproyalProxy ? " (iProyal proxy)" : " (no proxy)") + "...");
-  console.log("[Draw-Gigya] Starting for " + email + (iproyalProxy ? " with iProyal proxy" : ""));
+  const proxyLabel = residentialProxy ? "residential proxy" : "no proxy (direct)";
+  log("Draw via Playwright browser (" + proxyLabel + ")...");
+  console.log("[Draw] Starting for " + email + " via " + proxyLabel);
 
   let browser: Browser | null = null;
   let page: Page | null = null;
   let profileSet = false;
   let dataSet = false;
-  let proxyBrowserFailed = false;
 
-  try {
-    const launchArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors'];
-    const launchOpts: any = { headless: true, args: launchArgs };
-    if (iproyalProxy) {
-      const proxyUrl = new URL(iproyalProxy);
-      launchOpts.proxy = {
-        server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-        username: proxyUrl.username,
-        password: proxyUrl.password,
-      };
+  const MAX_LOGIN_RETRIES = 5;
+
+  for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const backoffSec = 30 + attempt * 20;
+      console.log("[Draw] Login retry " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES + " — waiting " + backoffSec + "s...");
+      log("Geo-blocked. Retrying in " + backoffSec + "s (attempt " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES + ")...");
+      await new Promise(r => setTimeout(r, backoffSec * 1000));
+      try { if (browser) await browser.close(); } catch {}
+      browser = null;
+      page = null;
     }
-    browser = await chromium.launch(launchOpts);
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 900 },
-      ignoreHTTPSErrors: true,
-    });
-    page = await context.newPage();
-    page.setDefaultTimeout(30000);
 
-    await page.route("**/*", (route) => {
-      const resourceType = route.request().resourceType();
-      if (["image", "media", "font"].includes(resourceType)) return route.abort();
-      return route.continue();
-    });
-
-    log("Navigating to la28id.la28.org/login...");
-    console.log("[Draw-Gigya] Navigating to la28id.la28.org/login...");
-    await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-    try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-    await page.waitForTimeout(3000);
-
-    const pageUrl = page.url();
-    const pageTitle = await page.title();
-    console.log("[Draw-Gigya] Page URL: " + pageUrl + " title: " + pageTitle);
-
-    const scriptInfo = await page.evaluate(() => {
-      const scripts = document.querySelectorAll('script[src]');
-      const srcs: string[] = [];
-      for (let i = 0; i < scripts.length; i++) {
-        const src = (scripts[i] as HTMLScriptElement).src;
-        if (src.includes('gigya')) srcs.push(src);
-      }
-      return {
-        gigyaScripts: srcs,
-        gigyaExists: typeof (window as any).gigya !== 'undefined',
-        gigyaAccountsExists: typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined',
-        bodyLen: document.body?.innerText?.length || 0
-      };
-    });
-    console.log("[Draw-Gigya] Script info: " + JSON.stringify(scriptInfo));
-
-    console.log("[Draw-Gigya] Waiting for Gigya SDK...");
     try {
-      await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
-    } catch {
-      const retryInfo = await page.evaluate(() => ({
-        gigyaType: typeof (window as any).gigya,
-        gigyaKeys: typeof (window as any).gigya === 'object' ? Object.keys((window as any).gigya).slice(0, 10) : [],
-        bodySnippet: document.body?.innerText?.substring(0, 300) || ''
-      }));
-      console.log("[Draw-Gigya] Gigya SDK not available. Debug: " + JSON.stringify(retryInfo));
-      log("Gigya SDK did not load. Debug: gigyaType=" + retryInfo.gigyaType);
-      try { await browser.close(); } catch {}
-      return { success: false, profileSet: false, dataSet: false, error: "Gigya SDK not loaded" };
-    }
-
-    log("Gigya SDK loaded. Logging in via ScreenSet form...");
-    console.log("[Draw-Gigya] Gigya SDK loaded, logging in via ScreenSet form...");
-
-    let loginOk = false;
-
-    console.log("[Draw-Gigya] Attempting direct gigya.accounts.login API...");
-    log("Logging in via Gigya API...");
-    let apiLoginResult: any = null;
-    const MAX_LOGIN_ATTEMPTS = 6;
-    for (let loginAttempt = 0; loginAttempt < MAX_LOGIN_ATTEMPTS; loginAttempt++) {
-      if (loginAttempt > 0) {
-        const isGeoBlock = (apiLoginResult as any)?.errorCode === 451002;
-        const delaySec = isGeoBlock ? (30 + loginAttempt * 15) : 5;
-        log("Retrying Gigya login (attempt " + (loginAttempt + 1) + "/" + MAX_LOGIN_ATTEMPTS + ")" + (isGeoBlock ? " — geo-block, waiting " + delaySec + "s" : "") + "...");
-        console.log("[Draw-Gigya] Retry " + (loginAttempt + 1) + "/" + MAX_LOGIN_ATTEMPTS + (isGeoBlock ? " (geo-block backoff " + delaySec + "s)" : ""));
-        await page!.waitForTimeout(delaySec * 1000);
-      }
-      try {
-        apiLoginResult = await page!.evaluate(`(function() {
-          return new Promise(function(resolve) {
-            if (typeof gigya === 'undefined' || !gigya.accounts) {
-              resolve({ success: false, error: 'gigya not available' });
-              return;
-            }
-            gigya.accounts.login({
-              loginID: ${JSON.stringify(email)},
-              password: ${JSON.stringify(password)},
-              callback: function(resp) {
-                resolve({
-                  success: resp.errorCode === 0,
-                  errorCode: resp.errorCode,
-                  errorMessage: resp.errorMessage || '',
-                  uid: resp.UID || null
-                });
-              }
-            });
-            setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
-          });
-        })()`);
-        console.log("[Draw-Gigya] API login result (attempt " + (loginAttempt + 1) + "): " + JSON.stringify(apiLoginResult));
-        if ((apiLoginResult as any)?.success) break;
-        if ((apiLoginResult as any)?.errorCode === 451002) continue;
-        if ((apiLoginResult as any)?.errorCode !== 400006) break;
-      } catch (apiErr: any) {
-        console.log("[Draw-Gigya] API login attempt error: " + apiErr.message.substring(0, 80));
-      }
-    }
-    try {
-      if ((apiLoginResult as any)?.success) {
-        loginOk = true;
-        log("Login successful via Gigya API. UID: " + ((apiLoginResult as any).uid || "unknown"));
-      } else {
-        log("Gigya API login failed: " + ((apiLoginResult as any).errorMessage || (apiLoginResult as any).error || "unknown"));
-      }
-    } catch (apiLoginErr: any) {
-      console.log("[Draw-Gigya] API login error: " + apiLoginErr.message.substring(0, 150));
-      if (apiLoginErr.message.includes("context was destroyed") || apiLoginErr.message.includes("navigation")) {
-        loginOk = true;
-        log("Login triggered redirect (likely successful).");
-      } else {
-        log("API login error: " + apiLoginErr.message.substring(0, 80));
-      }
-    }
-
-    // Fallback: try ScreenSet form if API login didn't work
-    if (!loginOk) {
-      try {
-        console.log("[Draw-Gigya] API login failed, trying ScreenSet form...");
-        log("Trying ScreenSet form login...");
-        await page.waitForSelector('#container input[name="loginID"], #container input[name="username"]', { timeout: 15000 });
-        await page.waitForTimeout(1000);
-
-        const loginIDInput = page.locator('#container input[name="loginID"], #container input[name="username"]').first();
-        const passwordInput = page.locator('#container input[name="password"]').first();
-
-        await loginIDInput.fill(email);
-        await page.waitForTimeout(500);
-        await passwordInput.fill(password);
-        await page.waitForTimeout(500);
-
-        console.log("[Draw-Gigya] Form filled, clicking submit...");
-        const submitBtn = page.locator('#container input[type="submit"], #container .gigya-input-submit').first();
-        const navPromise = page.waitForURL(/proxy\.html|consent\.html/, { timeout: 30000 }).catch(() => null);
-        await submitBtn.click();
-        await navPromise;
-        await page.waitForTimeout(5000);
-
-        const postLoginUrl = page.url();
-        console.log("[Draw-Gigya] Post form-submit URL: " + postLoginUrl);
-        if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
-          loginOk = true;
-          log("Login successful via form.");
-        } else {
-          const isLoggedIn = await page.evaluate(`(function() {
-            return new Promise(function(resolve) {
-              if (typeof gigya === 'undefined' || !gigya.accounts) { resolve(false); return; }
-              gigya.accounts.getAccountInfo({ callback: function(resp) { resolve(resp.errorCode === 0); } });
-              setTimeout(function() { resolve(false); }, 8000);
-            });
-          })`) as boolean;
-          if (isLoggedIn) {
-            loginOk = true;
-            log("Login confirmed via getAccountInfo after form submit.");
-          }
-        }
-      } catch (loginErr: any) {
-        if (loginErr.message.includes("context was destroyed") || loginErr.message.includes("navigation")) {
-          loginOk = true;
-          log("Login triggered redirect (likely successful).");
-        } else {
-          console.log("[Draw-Gigya] ScreenSet form also failed: " + loginErr.message.substring(0, 150));
-          log("Both login methods failed.");
-        }
-      }
-    }
-
-    if (!loginOk) {
-      console.log("[Draw-Gigya] Browser login failed, falling back to REST API for profile/data...");
-      log("Browser login failed (likely geo-block). Using REST API fallback...");
-      try { await browser.close(); } catch {}
-
-      const restLoginParams = new URLSearchParams({
-        apiKey: GIGYA_API_KEY,
-        loginID: email,
-        password: password,
-      });
-      let restLoginOk = false;
-      let restLoginToken = '';
-      for (let restAttempt = 0; restAttempt < 3; restAttempt++) {
+      const launchArgs = [
+        '--disable-blink-features=AutomationControlled',
+        '--ignore-certificate-errors',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-web-security',
+        '--lang=en-US',
+      ];
+      const launchOpts: any = { headless: true, args: launchArgs };
+      if (residentialProxy) {
         try {
-          const restLoginResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: restLoginParams });
-          const restLoginData = await restLoginResp.json() as any;
-          if (restLoginData.errorCode === 0) {
-            restLoginToken = restLoginData.sessionInfo?.cookieValue || restLoginData.login_token || '';
-            restLoginOk = true;
-            console.log("[Draw-Gigya] REST API login OK, UID: " + (restLoginData.UID || "?"));
-            log("REST API login succeeded. UID: " + (restLoginData.UID || "unknown"));
-            break;
-          } else {
-            console.log("[Draw-Gigya] REST login attempt " + (restAttempt + 1) + " failed: " + (restLoginData.errorMessage || restLoginData.errorCode));
-            if (restAttempt < 2) await new Promise(r => setTimeout(r, 2000));
-          }
-        } catch (restErr: any) {
-          console.log("[Draw-Gigya] REST login attempt " + (restAttempt + 1) + " error: " + restErr.message.substring(0, 100));
+          const proxyUrl = new URL(residentialProxy);
+          launchOpts.proxy = {
+            server: proxyUrl.protocol + '//' + proxyUrl.hostname + ':' + proxyUrl.port,
+            username: decodeURIComponent(proxyUrl.username),
+            password: decodeURIComponent(proxyUrl.password),
+          };
+          console.log("[Draw] Using proxy: " + proxyUrl.hostname + ":" + proxyUrl.port);
+        } catch (proxyParseErr: any) {
+          console.log("[Draw] Failed to parse proxy URL: " + (proxyParseErr.message || ''));
         }
       }
 
-      if (!restLoginOk || !restLoginToken) {
-        return { success: false, profileSet: false, dataSet: false, error: "Both browser and REST API login failed" };
+      browser = await chromium.launch(launchOpts);
+      const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        viewport: { width: 1366, height: 768 },
+        ignoreHTTPSErrors: true,
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+        geolocation: { latitude: 34.0522, longitude: -118.2437 },
+        permissions: ['geolocation'],
+      });
+
+      await context.addInitScript(`
+        Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
+        Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
+        Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; } });
+        if (navigator.plugins.length === 0) {
+          Object.defineProperty(navigator, 'plugins', { get: function() { return [1, 2, 3, 4, 5]; } });
+        }
+      `);
+
+      page = await context.newPage();
+      page.setDefaultTimeout(45000);
+
+      await page.route("**/*", (route) => {
+        const resourceType = route.request().resourceType();
+        if (["media", "font"].includes(resourceType)) return route.abort();
+        return route.continue();
+      });
+
+      log("Step 1: Loading LA28 homepage to establish Gigya session...");
+      console.log("[Draw] Step 1: Loading LA28 homepage first...");
+      try {
+        await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        await page.waitForTimeout(3000);
+        console.log("[Draw] Homepage loaded: " + page.url().substring(0, 100));
+      } catch (homeErr: any) {
+        console.log("[Draw] Homepage load error (continuing): " + (homeErr.message || '').substring(0, 80));
       }
 
-      const restApiUrl = `https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.setAccountInfo`;
+      log("Step 2: Navigating to login page...");
+      console.log("[Draw] Step 2: Navigating to login page...");
+      await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+      try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+      await page.waitForTimeout(3000);
 
-      const allSportsJSONRest = JSON.stringify([
+      console.log("[Draw] Login page URL: " + page.url());
+
+      console.log("[Draw] Waiting for Gigya SDK...");
+      try {
+        await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
+      } catch {
+        console.log("[Draw] Gigya SDK not available on attempt " + (attempt + 1));
+        log("Gigya SDK did not load. Retrying...");
+        continue;
+      }
+
+      log("Step 3: Logging in via Gigya JS SDK...");
+      console.log("[Draw] Step 3: Gigya SDK loaded, logging in...");
+
+      const loginResult = await page.evaluate(`(function() {
+        return new Promise(function(resolve) {
+          if (typeof gigya === 'undefined' || !gigya.accounts) {
+            resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '' });
+            return;
+          }
+          gigya.accounts.login({
+            loginID: ${JSON.stringify(email)},
+            password: ${JSON.stringify(password)},
+            callback: function(resp) {
+              resolve({
+                success: resp.errorCode === 0,
+                errorCode: resp.errorCode,
+                errorMessage: resp.errorMessage || '',
+                uid: resp.UID || ''
+              });
+            }
+          });
+          setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 30000);
+        });
+      })()`) as any;
+      console.log("[Draw] Login result (attempt " + (attempt + 1) + "): " + JSON.stringify(loginResult));
+
+      if (!loginResult.success) {
+        if (loginResult.errorCode === 451002) {
+          log("Geo-blocked by Gigya (451002).");
+          continue;
+        }
+        log("Login failed: " + (loginResult.errorMessage || 'unknown'));
+        try { if (browser) await browser.close(); } catch {}
+        return { success: false, profileSet: false, dataSet: false, error: "Login failed: " + (loginResult.errorMessage || 'errorCode ' + loginResult.errorCode) };
+      }
+
+      log("Login successful! UID: " + (loginResult.uid || "unknown"));
+      console.log("[Draw] Login OK! UID: " + loginResult.uid);
+
+      await page.waitForTimeout(3000);
+      try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+      let currentUrl = page.url();
+      if (currentUrl.includes("proxy.html") || currentUrl.includes("consent.html")) {
+        console.log("[Draw] On intermediate page (" + currentUrl.substring(0, 80) + "), navigating back...");
+        try {
+          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(3000);
+        } catch {}
+      }
+
+      try {
+        await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+      } catch {
+        try {
+          await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(3000);
+          await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+        } catch {
+          log("Gigya SDK lost after login. Retrying...");
+          continue;
+        }
+      }
+
+      const authCheck = await page.evaluate(`(function() {
+        return new Promise(function(resolve) {
+          gigya.accounts.getAccountInfo({
+            callback: function(resp) {
+              resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' });
+            }
+          });
+          setTimeout(function() { resolve({ loggedIn: false, uid: '' }); }, 15000);
+        });
+      })()`) as any;
+      console.log("[Draw] Auth check: " + JSON.stringify(authCheck));
+
+      if (!authCheck.loggedIn) {
+        log("Session lost after redirect. Retrying...");
+        continue;
+      }
+
+      log("Step 4: Setting profile (birth year, zip, country)...");
+      console.log("[Draw] Step 4: Setting profile + data...");
+
+      const allSportsJSON = JSON.stringify([
         ...favOlympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
         ...favParalympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
       ]);
-      const teamsJSONRest = JSON.stringify(favTeams.map((code: string) => ({ ocsCode: code, nocCode: code, gameType: "OG" })));
+      const teamsJSON = JSON.stringify(favTeams.map((code: string) => ({ ocsCode: code, nocCode: code, gameType: "OG" })));
 
-      const restProfileParams = new URLSearchParams({
-        apiKey: GIGYA_API_KEY,
-        login_token: restLoginToken,
-        profile: JSON.stringify({ birthYear: parseInt(birthYear), zip: usedZip, country: 'US' }),
-      });
-      const restProfileResp = await fetch(restApiUrl, { method: "POST", body: restProfileParams });
-      const restProfileData = await restProfileResp.json() as any;
-      const restProfileSet = restProfileData.errorCode === 0;
-      console.log("[Draw-Gigya] REST profile result: " + JSON.stringify({ ok: restProfileSet, err: restProfileData.errorMessage }));
-      if (restProfileSet) log("REST: Profile set (birth year " + birthYear + ", zip " + usedZip + ")");
-
-      const restDataParams = new URLSearchParams({
-        apiKey: GIGYA_API_KEY,
-        login_token: restLoginToken,
-        data: JSON.stringify({
-          personalization: {
-            favoritesDisciplines: JSON.parse(allSportsJSONRest),
-            favoritesCountries: JSON.parse(teamsJSONRest),
-            siteLanguage: 'en'
-          },
-          entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
-        }),
-      });
-      const restDataResp = await fetch(restApiUrl, { method: "POST", body: restDataParams });
-      const restDataData = await restDataResp.json() as any;
-      const restDataSet = restDataData.errorCode === 0;
-      console.log("[Draw-Gigya] REST data result: " + JSON.stringify({ ok: restDataSet, err: restDataData.errorMessage }));
-      if (restDataSet) log("REST: Draw flags + favorites set!");
-
-      if (restProfileSet && restDataSet && onEarlyComplete) {
-        console.log("[Draw-Gigya] REST profile+data set, marking completed early");
-        onEarlyComplete();
-      }
-
-      log("REST fallback: profile/data set via API. Skipping OIDC/ZenRows (no browser session).");
-      return { success: restProfileSet && restDataSet, profileSet: restProfileSet, dataSet: restDataSet };
-    }
-
-    log("Waiting for post-login page to stabilize...");
-    try {
-      await page.waitForLoadState("domcontentloaded", { timeout: 15000 });
-    } catch {}
-    await page.waitForTimeout(3000);
-
-    let postLoginUrl = page.url();
-    console.log("[Draw-Gigya] Post-login URL: " + postLoginUrl);
-
-    if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
-      console.log("[Draw-Gigya] On intermediate page, waiting for navigations to complete...");
-      for (let navWait = 0; navWait < 10; navWait++) {
-        await page.waitForTimeout(2000);
-        const curUrl = page.url();
-        if (curUrl !== postLoginUrl) {
-          console.log("[Draw-Gigya] Navigation detected: " + curUrl.substring(0, 120));
-          postLoginUrl = curUrl;
-        }
-        if (!curUrl.includes("proxy.html") && !curUrl.includes("consent.html")) break;
-      }
-      try { await page.waitForLoadState("domcontentloaded", { timeout: 10000 }); } catch {}
-      await page.waitForTimeout(2000);
-      postLoginUrl = page.url();
-      console.log("[Draw-Gigya] Settled URL: " + postLoginUrl);
-      if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
-        console.log("[Draw-Gigya] Still on intermediate page, navigating to la28id.la28.org/login...");
-        try {
-          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
-          try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
-        } catch (navErr: any) {
-          console.log("[Draw-Gigya] Nav timeout, trying evaluate redirect...");
-          try {
-            await page.evaluate("window.location.href = 'https://la28id.la28.org/login/'");
-            await page.waitForTimeout(10000);
-          } catch {}
-        }
-        await page.waitForTimeout(3000);
-        postLoginUrl = page.url();
-        console.log("[Draw-Gigya] After nav URL: " + postLoginUrl);
-      }
-    }
-
-    console.log("[Draw-Gigya] Re-waiting for Gigya SDK after login...");
-    let gigyaSdkAvailable = false;
-    try {
-      await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
-      gigyaSdkAvailable = true;
-    } catch {
-      console.log("[Draw-Gigya] Gigya SDK not found after login. Page URL: " + page.url().substring(0, 100));
-      if (!page.url().includes('la28id')) {
-        try { await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 30000 }); } catch {}
-        await page.waitForTimeout(3000);
-        try {
-          await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
-          gigyaSdkAvailable = true;
-        } catch {}
-      }
-    }
-
-    if (!gigyaSdkAvailable) {
-      console.log("[Draw-Gigya] Gigya SDK lost. Using REST fallback for profile/data...");
-      log("Gigya SDK lost after login redirect. Using REST API...");
-      try { await browser.close(); } catch {}
-
-      const restFallbackParams = new URLSearchParams({ apiKey: GIGYA_API_KEY, loginID: email, password: password });
-      let restToken = '';
-      try {
-        const rResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: restFallbackParams });
-        const rData = await rResp.json() as any;
-        if (rData.errorCode === 0) restToken = rData.sessionInfo?.cookieValue || rData.login_token || '';
-      } catch {}
-      if (restToken) {
-        const restUrl = `https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.setAccountInfo`;
-        const allSportsJ = JSON.stringify([...favOlympicSports.map((c: string) => ({ ocsCode: c, odfCode: c, GameType: "OG" })), ...favParalympicSports.map((c: string) => ({ ocsCode: c, odfCode: c, GameType: "PG" }))]);
-        const teamsJ = JSON.stringify(favTeams.map((c: string) => ({ ocsCode: c, nocCode: c, gameType: "OG" })));
-        try { await fetch(restUrl, { method: "POST", body: new URLSearchParams({ apiKey: GIGYA_API_KEY, login_token: restToken, profile: JSON.stringify({ birthYear: parseInt(birthYear), zip: usedZip, country: 'US' }) }) }); } catch {}
-        try { await fetch(restUrl, { method: "POST", body: new URLSearchParams({ apiKey: GIGYA_API_KEY, login_token: restToken, data: JSON.stringify({ personalization: { favoritesDisciplines: JSON.parse(allSportsJ), favoritesCountries: JSON.parse(teamsJ), siteLanguage: 'en' }, entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' } }) }) }); } catch {}
-        log("REST profile/data set. Browser SDK was unavailable.");
-        if (onEarlyComplete) onEarlyComplete();
-        return { success: true, profileSet: true, dataSet: true };
-      }
-      return { success: false, profileSet: false, dataSet: false, error: "Gigya SDK lost and REST fallback failed" };
-    }
-
-    let isLoggedIn = { loggedIn: false, uid: null as string | null };
-    try {
-      isLoggedIn = await Promise.race([
-        page.evaluate(`(() => {
-          return new Promise(function(resolve) {
-            gigya.accounts.getAccountInfo({
-              callback: function(resp) {
-                resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || null });
-              }
-            });
-            setTimeout(function() { resolve({ loggedIn: false, uid: null }); }, 10000);
-          });
-        })()`),
-        new Promise<{ loggedIn: boolean; uid: string | null }>((resolve) => setTimeout(() => resolve({ loggedIn: false, uid: null }), 20000))
-      ]) as { loggedIn: boolean; uid: string | null };
-    } catch (evalErr: any) {
-      console.log("[Draw-Gigya] getAccountInfo error: " + (evalErr.message || '').substring(0, 100));
-    }
-    console.log("[Draw-Gigya] Post-login auth check: loggedIn=" + isLoggedIn.loggedIn + " uid=" + (isLoggedIn.uid || "null"));
-
-    if (!isLoggedIn.loggedIn) {
-      log("Not logged in after redirect. Using REST API fallback...");
-      try { await browser.close(); } catch {};
-
-      const restFallbackParams2 = new URLSearchParams({ apiKey: GIGYA_API_KEY, loginID: email, password: password });
-      let restToken2 = '';
-      try {
-        const rResp2 = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: restFallbackParams2 });
-        const rData2 = await rResp2.json() as any;
-        if (rData2.errorCode === 0) restToken2 = rData2.sessionInfo?.cookieValue || rData2.login_token || '';
-      } catch {}
-      if (restToken2) {
-        const restUrl2 = `https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.setAccountInfo`;
-        const allSportsJ2 = JSON.stringify([...favOlympicSports.map((c: string) => ({ ocsCode: c, odfCode: c, GameType: "OG" })), ...favParalympicSports.map((c: string) => ({ ocsCode: c, odfCode: c, GameType: "PG" }))]);
-        const teamsJ2 = JSON.stringify(favTeams.map((c: string) => ({ ocsCode: c, nocCode: c, gameType: "OG" })));
-        try { await fetch(restUrl2, { method: "POST", body: new URLSearchParams({ apiKey: GIGYA_API_KEY, login_token: restToken2, profile: JSON.stringify({ birthYear: parseInt(birthYear), zip: usedZip, country: 'US' }) }) }); } catch {}
-        try { await fetch(restUrl2, { method: "POST", body: new URLSearchParams({ apiKey: GIGYA_API_KEY, login_token: restToken2, data: JSON.stringify({ personalization: { favoritesDisciplines: JSON.parse(allSportsJ2), favoritesCountries: JSON.parse(teamsJ2), siteLanguage: 'en' }, entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' } }) }) }); } catch {}
-        log("REST profile/data set via fallback.");
-        if (onEarlyComplete) onEarlyComplete();
-        return { success: true, profileSet: true, dataSet: true };
-      }
-      return { success: false, profileSet: false, dataSet: false, error: "Not authenticated and REST fallback failed" };
-    }
-
-    log("Authenticated! UID: " + (isLoggedIn.uid || "unknown") + ". Setting profile...");
-
-    const allSportsJSON = JSON.stringify([
-      ...favOlympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
-      ...favParalympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
-    ]);
-    const teamsJSON = JSON.stringify(favTeams.map((code: string) => ({ ocsCode: code, nocCode: code, gameType: "OG" })));
-
-    const profileResult = await page.evaluate(`((birthYr, zip) => {
-      return new Promise(function(resolve) {
-        gigya.accounts.setAccountInfo({
-          profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
-          callback: function(resp) {
-            resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
-          }
-        });
-        setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-      });
-    })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
-
-    console.log("[Draw-Gigya] Profile result: " + JSON.stringify(profileResult));
-    const profileSet = profileResult.success;
-    if (profileSet) {
-      log("Profile set: birth year " + birthYear + ", zip " + usedZip);
-    } else {
-      log("Profile error: " + (profileResult.error || "unknown"));
-    }
-
-    const dataResult = await page.evaluate(`((sportsStr, teamsStr) => {
-      return new Promise(function(resolve) {
-        var sports = JSON.parse(sportsStr);
-        var teams = JSON.parse(teamsStr);
-        gigya.accounts.setAccountInfo({
-          data: {
-            personalization: {
-              favoritesDisciplines: sports,
-              favoritesCountries: teams,
-              siteLanguage: 'en'
-            },
-            entryCampaignandSegregation: {
-              l2028_ticketing: 'true',
-              l2028_fan28: 'true'
+      const profileResult = await page.evaluate(`(function(birthYr, zip) {
+        return new Promise(function(resolve) {
+          gigya.accounts.setAccountInfo({
+            profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
+            callback: function(resp) {
+              resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
             }
-          },
-          callback: function(resp) {
-            resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
-          }
+          });
+          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
         });
-        setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-      });
-    })(${JSON.stringify(allSportsJSON)}, ${JSON.stringify(teamsJSON)})`) as { success: boolean; error?: string | null };
+      })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
 
-    console.log("[Draw-Gigya] Data result: " + JSON.stringify(dataResult));
-    const dataSet = dataResult.success;
-    if (dataSet) {
-      log("Draw flags set! l2028_ticketing=true, l2028_fan28=true, favorites saved!");
-    } else {
-      log("Data error: " + (dataResult.error || "unknown") + ". Trying individual fields...");
-      const fallbackResult = await page.evaluate(`((sportsStr, teamsStr) => {
+      console.log("[Draw] Profile result: " + JSON.stringify(profileResult));
+      profileSet = profileResult.success;
+      if (profileSet) {
+        log("Profile set: birth year " + birthYear + ", zip " + usedZip);
+      } else {
+        log("Profile error: " + (profileResult.error || "unknown"));
+      }
+
+      log("Step 5: Setting favorites + draw flags...");
+      const dataResult = await page.evaluate(`(function(sportsStr, teamsStr) {
         return new Promise(function(resolve) {
           var sports = JSON.parse(sportsStr);
           var teams = JSON.parse(teamsStr);
           gigya.accounts.setAccountInfo({
-            data: { personalization: { favoritesDisciplines: sports } },
-            callback: function(r1) {
+            data: {
+              personalization: { favoritesDisciplines: sports, favoritesCountries: teams, siteLanguage: 'en' },
+              entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
+            },
+            callback: function(resp) {
+              resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+            }
+          });
+          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+        });
+      })(${JSON.stringify(allSportsJSON)}, ${JSON.stringify(teamsJSON)})`) as { success: boolean; error?: string | null };
+
+      console.log("[Draw] Data result: " + JSON.stringify(dataResult));
+      dataSet = dataResult.success;
+      if (dataSet) {
+        log("Draw flags set! l2028_ticketing=true, l2028_fan28=true, favorites saved!");
+      } else {
+        log("Data error: " + (dataResult.error || "unknown") + ". Trying individual fields...");
+        try {
+          const fallbackResult = await page.evaluate(`(function(sportsStr, teamsStr) {
+            return new Promise(function(resolve) {
+              var sports = JSON.parse(sportsStr);
+              var teams = JSON.parse(teamsStr);
               gigya.accounts.setAccountInfo({
-                data: { personalization: { favoritesCountries: teams } },
-                callback: function(r2) {
+                data: { personalization: { favoritesDisciplines: sports } },
+                callback: function(r1) {
                   gigya.accounts.setAccountInfo({
-                    data: { entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' } },
-                    callback: function(r3) {
-                      resolve({ success: r3.errorCode === 0, error: r3.errorCode === 0 ? null : r3.errorMessage });
+                    data: { personalization: { favoritesCountries: teams } },
+                    callback: function(r2) {
+                      gigya.accounts.setAccountInfo({
+                        data: { entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' } },
+                        callback: function(r3) {
+                          resolve({ success: r3.errorCode === 0, error: r3.errorCode === 0 ? null : r3.errorMessage });
+                        }
+                      });
                     }
                   });
                 }
               });
+              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 25000);
+            });
+          })(${JSON.stringify(allSportsJSON)}, ${JSON.stringify(teamsJSON)})`) as { success: boolean; error?: string | null };
+          if (fallbackResult.success) {
+            dataSet = true;
+            log("Draw flags set via individual updates!");
+          }
+        } catch {}
+      }
+
+      const verifyResult = await page.evaluate(`(function() {
+        return new Promise(function(resolve) {
+          gigya.accounts.getAccountInfo({
+            include: 'profile,data',
+            callback: function(resp) {
+              if (resp.errorCode === 0) {
+                resolve({
+                  ticketing: resp.data && resp.data.entryCampaignandSegregation && resp.data.entryCampaignandSegregation.l2028_ticketing,
+                  fan28: resp.data && resp.data.entryCampaignandSegregation && resp.data.entryCampaignandSegregation.l2028_fan28,
+                  birthYear: resp.profile && resp.profile.birthYear,
+                  zip: resp.profile && resp.profile.zip
+                });
+              } else {
+                resolve({ error: resp.errorMessage });
+              }
             }
           });
-          setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 25000);
+          setTimeout(function() { resolve({ error: 'timeout' }); }, 10000);
         });
-      })(${JSON.stringify(allSportsJSON)}, ${JSON.stringify(teamsJSON)})`) as { success: boolean; error?: string | null };
+      })()`) as any;
 
-      if (fallbackResult.success) {
-        log("Draw flags set via individual updates!");
+      console.log("[Draw] Verify result: " + JSON.stringify(verifyResult));
+      if (verifyResult.ticketing === "true" || verifyResult.ticketing === true) {
+        log("Verified: l2028_ticketing=" + verifyResult.ticketing + " fan28=" + verifyResult.fan28 + " birthYear=" + verifyResult.birthYear + " zip=" + verifyResult.zip);
+      }
+
+      if (profileSet && dataSet && onEarlyComplete) {
+        console.log("[Draw] Profile+Data confirmed set, marking completed early before OIDC step");
+        onEarlyComplete();
+      }
+
+      break;
+    } catch (err: any) {
+      console.log("[Draw] Attempt " + (attempt + 1) + " error: " + (err.message || '').substring(0, 200));
+      log("Attempt " + (attempt + 1) + " failed: " + (err.message || '').substring(0, 80));
+      if (attempt >= MAX_LOGIN_RETRIES - 1) {
         try { if (browser) await browser.close(); } catch {}
-        return { success: true, profileSet, dataSet: true };
+        return { success: false, profileSet: false, dataSet: false, error: "All " + MAX_LOGIN_RETRIES + " login attempts failed" };
       }
-    }
-
-    const verifyResult = await page.evaluate(`(() => {
-      return new Promise(function(resolve) {
-        gigya.accounts.getAccountInfo({
-          include: 'profile,data',
-          callback: function(resp) {
-            if (resp.errorCode === 0) {
-              resolve({
-                ticketing: resp.data && resp.data.entryCampaignandSegregation && resp.data.entryCampaignandSegregation.l2028_ticketing,
-                fan28: resp.data && resp.data.entryCampaignandSegregation && resp.data.entryCampaignandSegregation.l2028_fan28,
-                birthYear: resp.profile && resp.profile.birthYear,
-                zip: resp.profile && resp.profile.zip
-              });
-            } else {
-              resolve({ error: resp.errorMessage });
-            }
-          }
-        });
-        setTimeout(function() { resolve({ error: 'timeout' }); }, 10000);
-      });
-    })()`) as any;
-
-    console.log("[Draw-Gigya] Verify result: " + JSON.stringify(verifyResult));
-    if (verifyResult.ticketing === "true" || verifyResult.ticketing === true) {
-      log("Verified: l2028_ticketing=" + verifyResult.ticketing + " fan28=" + verifyResult.fan28 + " birthYear=" + verifyResult.birthYear + " zip=" + verifyResult.zip);
-    }
-
-    if (profileSet && dataSet && onEarlyComplete) {
-      console.log("[Draw-Gigya] Profile+Data confirmed set, marking completed early before OIDC step");
-      onEarlyComplete();
-    }
-  } catch (proxyErr: any) {
-    console.log("[Draw-Gigya] Proxy browser failed: " + (proxyErr.message || '').substring(0, 200));
-    log("Proxy browser failed (" + (proxyErr.message || '').substring(0, 80) + "). Using REST API for profile/data...");
-    try { if (browser) await browser.close(); } catch {}
-    browser = null;
-    proxyBrowserFailed = true;
-
-    try {
-      const restResult = await completeDrawRegistrationViaApi(email, password, zipCode, log);
-      profileSet = restResult.profileSet;
-      dataSet = restResult.dataSet;
-      if (profileSet && dataSet) {
-        log("REST API fallback: profile+data set successfully.");
-        if (onEarlyComplete) onEarlyComplete();
-      } else {
-        log("REST API fallback partial: profile=" + profileSet + " data=" + dataSet);
-      }
-    } catch (restErr: any) {
-      console.log("[Draw-Gigya] REST fallback also failed: " + (restErr.message || '').substring(0, 100));
-      log("REST API fallback failed: " + (restErr.message || '').substring(0, 60));
     }
   }
 
@@ -2459,21 +2235,53 @@ export async function completeDrawViaGigyaBrowser(
           }
 
           try {
-            const freshBrowser = await chromium.launch({
-              headless: true,
-              args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--ignore-certificate-errors'],
-            });
+            const freshLaunchArgs = [
+              '--disable-blink-features=AutomationControlled',
+              '--ignore-certificate-errors',
+              '--no-sandbox',
+              '--disable-dev-shm-usage',
+              '--lang=en-US',
+            ];
+            const freshLaunchOpts: any = { headless: true, args: freshLaunchArgs };
+            if (residentialProxy) {
+              try {
+                const pUrl = new URL(residentialProxy);
+                freshLaunchOpts.proxy = {
+                  server: pUrl.protocol + '//' + pUrl.hostname + ':' + pUrl.port,
+                  username: decodeURIComponent(pUrl.username),
+                  password: decodeURIComponent(pUrl.password),
+                };
+                console.log("[Draw-OIDC] Fresh browser using residential proxy: " + pUrl.hostname);
+              } catch {}
+            }
+            const freshBrowser = await chromium.launch(freshLaunchOpts);
             browser = freshBrowser;
             const freshCtx = await freshBrowser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-              viewport: { width: 1280, height: 900 },
+              viewport: { width: 1366, height: 768 },
               ignoreHTTPSErrors: true,
+              locale: 'en-US',
+              timezoneId: 'America/New_York',
+              geolocation: { latitude: 34.0522, longitude: -118.2437 },
+              permissions: ['geolocation'],
             });
+            await freshCtx.addInitScript(`
+              Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
+              Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
+              Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; } });
+            `);
             page = await freshCtx.newPage();
-            page.setDefaultTimeout(30000);
+            page.setDefaultTimeout(45000);
+
+            console.log("[Draw-OIDC] Fresh browser: loading LA28 homepage first...");
+            try {
+              await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
+              try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+              await page.waitForTimeout(3000);
+            } catch {}
 
             console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
-            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
+            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
             try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
             await page.waitForTimeout(2000);
 
@@ -2611,8 +2419,8 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          if (iproyalProxy) {
-            nstConfig.proxy = iproyalProxy;
+          if (residentialProxy) {
+            nstConfig.proxy = residentialProxy;
             console.log("[Draw-OIDC] NSTBrowser with iProyal proxy");
           }
 
@@ -2707,22 +2515,33 @@ export async function completeDrawViaGigyaBrowser(
 
           if (!browser || !page || page.isClosed()) {
             console.log("[Draw-OIDC] Local browser also unavailable, relaunching...");
-            const fallbackArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors'];
+            const fallbackArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors', '--no-sandbox', '--lang=en-US'];
             const fallbackOpts: any = { headless: true, args: fallbackArgs };
-            if (iproyalProxy) {
-              const proxyUrl = new URL(iproyalProxy);
-              fallbackOpts.proxy = {
-                server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-                username: proxyUrl.username,
-                password: proxyUrl.password,
-              };
+            if (residentialProxy) {
+              try {
+                const proxyUrl = new URL(residentialProxy);
+                fallbackOpts.proxy = {
+                  server: proxyUrl.protocol + '//' + proxyUrl.hostname + ':' + proxyUrl.port,
+                  username: decodeURIComponent(proxyUrl.username),
+                  password: decodeURIComponent(proxyUrl.password),
+                };
+              } catch {}
             }
             browser = await chromium.launch(fallbackOpts);
             const ctx = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-              viewport: { width: 1280, height: 900 },
+              viewport: { width: 1366, height: 768 },
               ignoreHTTPSErrors: true,
+              locale: 'en-US',
+              timezoneId: 'America/New_York',
+              geolocation: { latitude: 34.0522, longitude: -118.2437 },
+              permissions: ['geolocation'],
             });
+            await ctx.addInitScript(`
+              Object.defineProperty(navigator, 'webdriver', { get: function() { return false; } });
+              Object.defineProperty(navigator, 'languages', { get: function() { return ['en-US', 'en']; } });
+              Object.defineProperty(navigator, 'platform', { get: function() { return 'Win32'; } });
+            `);
             page = await ctx.newPage();
             page.setDefaultTimeout(30000);
 
