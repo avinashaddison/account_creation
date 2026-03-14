@@ -2913,130 +2913,195 @@ export async function completeDrawViaGigyaBrowser(
             return false;
           };
 
-          // Step 1: Navigate to tickets to trigger OIDC flow and capture proxy.html?context URL
-          console.log("[ZenRows] Step 1: Navigate to tickets to trigger OIDC flow...");
-          log("Opening tickets.la28.org...");
-          try {
-            await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
-          } catch {}
-          await bdPage.waitForTimeout(5000);
-          await waitQueueIt();
+          // Step 1: Login to Gigya FIRST (establish session before OIDC)
+          console.log("[ZenRows] Step 1: Login to Gigya first...");
+          log("Logging into Gigya via ZenRows...");
+          try { await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
+          await bdPage.waitForTimeout(3000);
+          try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+          await bdPage.waitForTimeout(3000);
 
-          let curUrl = bdPage.url();
-          console.log("[ZenRows] After nav: " + curUrl.substring(0, 150));
+          const loggedIn = await doGigyaLogin();
+          console.log("[ZenRows] Gigya login result: " + loggedIn);
 
-          // Save the proxy.html?context=... URL if we landed there (OIDC flow)
-          let savedContextUrl = '';
-          if (curUrl.includes('proxy.html') && curUrl.includes('context=')) {
-            savedContextUrl = curUrl;
-            console.log("[ZenRows] Saved OIDC context URL (length=" + savedContextUrl.length + ")");
-          }
-
-          // Step 2: Login to Gigya
-          const needsLogin = curUrl.includes('la28id.la28.org') || curUrl.includes('#/login') || curUrl.includes('#/register');
-          if (needsLogin) {
-            console.log("[ZenRows] Step 2: Logging in via Gigya...");
-            log("Logging in via Gigya...");
-
-            // Navigate to la28id login page
-            try { await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
+          if (loggedIn) {
             await bdPage.waitForTimeout(3000);
-            const loggedIn = await doGigyaLogin();
-            console.log("[ZenRows] Gigya login result: " + loggedIn);
 
-            if (loggedIn) {
-              // Wait for post-login redirects to settle
-              await bdPage.waitForTimeout(5000);
-              curUrl = bdPage.url();
-              console.log("[ZenRows] Post-login URL: " + curUrl.substring(0, 100));
-
-              // Step 3: Navigate back to saved context URL to complete OIDC flow
-              if (savedContextUrl) {
-                console.log("[ZenRows] Step 3: Re-navigating to saved OIDC context URL...");
-                try {
-                  await bdPage.goto(savedContextUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
-                } catch {}
-                await bdPage.waitForTimeout(5000);
-
-                // Wait for OIDC redirect chain to complete
-                for (let w = 0; w < 30; w++) {
-                  curUrl = bdPage.url();
-                  console.log("[ZenRows] OIDC redirect wait " + w + ": " + curUrl.substring(0, 120));
-                  if (curUrl.includes('tickets.la28.org/mycustomerdata') && !curUrl.includes('#/login') && !curUrl.includes('next.tickets.la28.org')) {
-                    console.log("[ZenRows] OIDC flow complete! On tickets with auth.");
-                    break;
+            const gigyaSession = await bdPage.evaluate(`
+              new Promise(function(resolve) {
+                if (typeof window.gigya === 'undefined' || !window.gigya.accounts) { resolve({ valid: false }); return; }
+                window.gigya.accounts.getAccountInfo({
+                  callback: function(r) {
+                    resolve({ valid: r.errorCode === 0, uid: (r.UID || '').substring(0, 20), email: r.profile ? r.profile.email : '' });
                   }
-                  if (curUrl.includes('next.tickets.la28.org') || curUrl.includes('queue-it')) {
-                    await waitQueueIt();
-                    curUrl = bdPage.url();
-                    if (curUrl.includes('tickets.la28.org/mycustomerdata') && !curUrl.includes('#/login')) break;
-                  }
-                  await bdPage.waitForTimeout(2000);
-                }
-              } else {
-                // No saved context URL - navigate to tickets directly
-                console.log("[ZenRows] Step 3: Navigate to tickets directly...");
-                try {
-                  await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
-                } catch {}
-                await bdPage.waitForTimeout(5000);
-                await waitQueueIt();
-              }
-            }
-          }
+                });
+                setTimeout(function() { resolve({ valid: false, error: 'timeout' }); }, 10000);
+              })
+            `) as any;
+            console.log("[ZenRows] Gigya session check: " + JSON.stringify(gigyaSession));
 
-          curUrl = bdPage.url();
-          // If still on proxy.html or consent, wait and then try direct navigation
-          if (curUrl.includes('proxy.html') || curUrl.includes('consent')) {
-            console.log("[ZenRows] On intermediate page (" + curUrl.substring(0, 80) + "), waiting...");
-            for (let w = 0; w < 15; w++) {
-              await bdPage.waitForTimeout(2000);
-              curUrl = bdPage.url();
-              if (curUrl.includes('tickets.la28.org') && !curUrl.includes('next.tickets.la28.org') && !curUrl.includes('#/login')) break;
-            }
-            if (!curUrl.includes('tickets.la28.org') || curUrl.includes('next.tickets.la28.org') || curUrl.includes('#/login')) {
-              console.log("[ZenRows] Navigating to tickets...");
-              try { await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 }); } catch {}
-              await bdPage.waitForTimeout(5000);
-              await waitQueueIt();
-            }
-          }
+            // Step 2: Navigate to OIDC auth URL directly (Keycloak endpoint)
+            // This triggers the full OIDC flow: Keycloak → proxy.html → (already logged in) → redirect back
+            const oidcUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+              response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
+              kc_idp_hint: 'gigya', ui_locales: 'en',
+              redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+            }).toString();
 
-          curUrl = bdPage.url();
-          if (curUrl.includes('#/login') || curUrl.includes('#/register')) {
-            console.log("[ZenRows] Still unauthenticated (" + curUrl.substring(0, 100) + "). Trying to click login button in Angular app...");
+            console.log("[ZenRows] Step 2: Navigate to OIDC auth URL...");
+            log("Opening OIDC auth flow...");
             try {
-              // Try to click the login/sign-in button that triggers the OIDC flow
-              const loginBtn = await bdPage.$('a[href*="login"], button:has-text("Log in"), button:has-text("Sign in"), a:has-text("LOG IN"), a:has-text("SIGN IN"), [class*="login"] a, [class*="login"] button');
-              if (loginBtn) {
-                console.log("[ZenRows] Found login button, clicking...");
-                await loginBtn.click();
-                await bdPage.waitForTimeout(10000);
+              await bdPage.goto(oidcUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+            } catch {}
+            await bdPage.waitForTimeout(5000);
+            await waitQueueIt();
+
+            let curUrl = bdPage.url();
+            console.log("[ZenRows] After OIDC nav: " + curUrl.substring(0, 150));
+
+            // Handle proxy.html - wait for Gigya auto-redirect (session already exists)
+            if (curUrl.includes('proxy.html')) {
+              console.log("[ZenRows] On proxy.html, waiting for Gigya auto-redirect...");
+
+              // Check if proxy.html has context param (OIDC flow) vs afterLogin
+              const hasContext = curUrl.includes('context=');
+              const hasAfterLogin = curUrl.includes('mode=afterLogin');
+              console.log("[ZenRows] proxy.html: context=" + hasContext + " afterLogin=" + hasAfterLogin);
+
+              // Wait for proxy.html JS to detect Gigya session and redirect
+              for (let pw = 0; pw < 20; pw++) {
+                await bdPage.waitForTimeout(3000);
                 curUrl = bdPage.url();
-                console.log("[ZenRows] After login button click: " + curUrl.substring(0, 120));
-                await waitQueueIt();
+                if (!curUrl.includes('proxy.html')) {
+                  console.log("[ZenRows] proxy.html redirected to: " + curUrl.substring(0, 150));
+                  break;
+                }
+                if (pw === 5) {
+                  // Try to force the Gigya OIDC IDP redirect by calling socialize.notifyLogin
+                  console.log("[ZenRows] proxy.html stuck, trying to force Gigya IDP redirect...");
+                  try {
+                    const forceResult = await bdPage.evaluate(`
+                      new Promise(function(resolve) {
+                        try {
+                          // Check if gigya has a pending OIDC flow
+                          if (typeof window.gigya !== 'undefined' && window.gigya.fidm) {
+                            resolve({ hasFidm: true, keys: Object.keys(window.gigya.fidm).join(',') });
+                          } else if (typeof window.gigya !== 'undefined') {
+                            // Try getAccountInfo to confirm session
+                            window.gigya.accounts.getAccountInfo({
+                              callback: function(r) {
+                                if (r.errorCode === 0) {
+                                  // Session valid, try reloading the page to re-trigger OIDC
+                                  resolve({ loggedIn: true, uid: (r.UID || '').substring(0, 20) });
+                                } else {
+                                  resolve({ loggedIn: false, error: r.errorMessage });
+                                }
+                              }
+                            });
+                          } else {
+                            resolve({ noGigya: true });
+                          }
+                        } catch(e) { resolve({ error: e.message }); }
+                        setTimeout(function() { resolve({ timeout: true }); }, 8000);
+                      })
+                    `) as any;
+                    console.log("[ZenRows] Force redirect result: " + JSON.stringify(forceResult));
+                  } catch {}
+                }
+                if (pw === 10) {
+                  // Reload proxy.html to re-trigger the OIDC flow with existing session
+                  console.log("[ZenRows] Reloading proxy.html to re-trigger OIDC...");
+                  try { await bdPage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+                  await bdPage.waitForTimeout(5000);
+                }
+                if (pw === 14) {
+                  // Last resort: navigate directly to tickets
+                  console.log("[ZenRows] Giving up on proxy.html, navigating to tickets directly...");
+                  try { await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 }); } catch {}
+                  await bdPage.waitForTimeout(5000);
+                  await waitQueueIt();
+                  curUrl = bdPage.url();
+                  break;
+                }
               }
-            } catch (clickErr: any) {
-              console.log("[ZenRows] Login button click error: " + (clickErr.message || '').substring(0, 100));
+              curUrl = bdPage.url();
             }
+
+            // Handle Queue-it
+            if (curUrl.includes('next.tickets.la28.org') || curUrl.includes('queue-it')) {
+              await waitQueueIt();
+              curUrl = bdPage.url();
+            }
+
+            // If on consent page, wait
+            if (curUrl.includes('consent')) {
+              console.log("[ZenRows] On consent page, waiting...");
+              for (let cw = 0; cw < 10; cw++) {
+                await bdPage.waitForTimeout(2000);
+                curUrl = bdPage.url();
+                if (!curUrl.includes('consent')) break;
+              }
+            }
+
+            // If still shows #/login, the session didn't carry through OIDC
+            if (curUrl.includes('#/login') || curUrl.includes('#/register')) {
+              console.log("[ZenRows] Still on login page. Trying login button to re-trigger OIDC...");
+              try {
+                const loginBtn = await bdPage.$('a[href*="login"], button:has-text("Log in"), button:has-text("Sign in"), a:has-text("LOG IN"), a:has-text("SIGN IN"), [class*="login"] a, [class*="login"] button');
+                if (loginBtn) {
+                  await loginBtn.click();
+                  await bdPage.waitForTimeout(15000);
+                  curUrl = bdPage.url();
+                  console.log("[ZenRows] After login button click: " + curUrl.substring(0, 120));
+                  await waitQueueIt();
+
+                  // If redirected to proxy.html, it should auto-redirect since we're logged in
+                  if (curUrl.includes('proxy.html')) {
+                    for (let pw = 0; pw < 15; pw++) {
+                      await bdPage.waitForTimeout(3000);
+                      curUrl = bdPage.url();
+                      if (!curUrl.includes('proxy.html')) {
+                        console.log("[ZenRows] proxy.html redirected: " + curUrl.substring(0, 120));
+                        break;
+                      }
+                    }
+                  }
+                }
+              } catch (clickErr: any) {
+                console.log("[ZenRows] Login button error: " + (clickErr.message || '').substring(0, 100));
+              }
+            }
+
+            curUrl = bdPage.url();
+            console.log("[ZenRows] Pre-form URL: " + curUrl.substring(0, 150));
+          } else {
+            console.log("[ZenRows] Gigya login failed - cannot proceed with OIDC");
+            log("ZenRows Gigya login failed.");
           }
 
-          curUrl = bdPage.url();
-          console.log("[ZenRows] Current URL: " + curUrl.substring(0, 150));
+          // Wait for Angular SPA to render the form
+          var zenCurUrl = bdPage.url();
+          const onTicketsAuth = zenCurUrl.includes('tickets.la28.org') && !zenCurUrl.includes('#/login') && !zenCurUrl.includes('#/register') && !zenCurUrl.includes('next.tickets.la28.org');
+          console.log("[ZenRows] Form wait: onTicketsAuth=" + onTicketsAuth + " url=" + zenCurUrl.substring(0, 100));
 
-          for (let spaWait = 0; spaWait < 12; spaWait++) {
+          if (onTicketsAuth) {
+            log("On tickets page, waiting for form to load...");
+          }
+
+          for (let spaWait = 0; spaWait < 15; spaWait++) {
             await bdPage.waitForTimeout(3000);
             const pageInfo = await bdPage.evaluate(`(() => {
               var txt = (document.body.innerText || '').substring(0, 2000);
               var selects = document.querySelectorAll('select').length;
               var inputs = document.querySelectorAll('input[type="text"]').length;
               var appRoot = document.querySelector('app-root, [class*="app"]');
-              return { txt: txt.substring(0, 500), selects: selects, inputs: inputs, hasAppRoot: !!appRoot, bodyLen: txt.length, url: location.href };
+              var scripts = document.querySelectorAll('script[src]').length;
+              return { txt: txt.substring(0, 500), selects: selects, inputs: inputs, hasAppRoot: !!appRoot, bodyLen: txt.length, url: location.href, scripts: scripts };
             })()`) as any;
-            if (spaWait === 0 || spaWait === 3 || spaWait === 6) {
-              console.log("[ZenRows] Wait " + spaWait + " page text: " + pageInfo.txt.substring(0, 300));
+            if (spaWait % 3 === 0) {
+              console.log("[ZenRows] Wait " + spaWait + " text: " + pageInfo.txt.substring(0, 300));
             }
-            console.log("[ZenRows] Wait " + spaWait + ": selects=" + pageInfo.selects + " inputs=" + pageInfo.inputs + " bodyLen=" + pageInfo.bodyLen + " appRoot=" + pageInfo.hasAppRoot + " url=" + pageInfo.url.substring(0, 80));
+            console.log("[ZenRows] Wait " + spaWait + ": selects=" + pageInfo.selects + " inputs=" + pageInfo.inputs + " bodyLen=" + pageInfo.bodyLen + " appRoot=" + pageInfo.hasAppRoot + " scripts=" + pageInfo.scripts + " url=" + pageInfo.url.substring(0, 80));
             if (pageInfo.selects >= 5 || (pageInfo.selects >= 3 && pageInfo.inputs >= 3)) {
               console.log("[ZenRows] Form loaded! selects=" + pageInfo.selects);
               break;
@@ -3046,10 +3111,21 @@ export async function completeDrawViaGigyaBrowser(
               await bdPage.waitForTimeout(3000);
               break;
             }
-            if (spaWait === 4) {
-              console.log("[ZenRows] Reloading...");
+            // If on login/register hash, form won't load - break early
+            if (pageInfo.url.includes('#/login') || pageInfo.url.includes('#/register')) {
+              console.log("[ZenRows] On login/register page - OIDC auth not completed, cannot load form.");
+              break;
+            }
+            if (spaWait === 5) {
+              console.log("[ZenRows] Reloading page to re-trigger Angular...");
+              try { await bdPage.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
+              await bdPage.waitForTimeout(5000);
+              await waitQueueIt();
+            }
+            if (spaWait === 10) {
+              console.log("[ZenRows] Second reload...");
               try { await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
-              await bdPage.waitForTimeout(3000);
+              await bdPage.waitForTimeout(5000);
               await waitQueueIt();
             }
             if (spaWait > 0 && pageInfo.bodyLen < 100) {
