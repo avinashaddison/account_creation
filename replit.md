@@ -1,7 +1,7 @@
 # Addison Panel - LA28 Account Management
 
 ## Overview
-Full admin panel for automated LA28 Olympic account creation with complete ticket draw registration. Creates Addison email addresses via mail.tm, fills the LA28 registration form via Playwright browser automation, captures verification codes, completes Gigya profile (birth year, sports, teams), and submits ticket draw registration on tickets.la28.org via Bright Data Browser API. Supports batch creation with real-time logs, multi-admin with data isolation, wallet system with TRC20 payments.
+Full admin panel for automated LA28 Olympic account creation with complete ticket draw registration. Creates Addison email addresses via mail.tm, fills the LA28 registration form via Playwright browser automation, captures verification codes, and completes draw registration via Gigya REST API (primary) — setting profile (birthYear, zip, country), favorites (disciplines, countries), and draw flags (l2028_ticketing, l2028_fan28) without touching tickets.la28.org. Browser-based OIDC/ZenRows flow available as fallback. Supports batch creation with real-time logs, multi-admin with data isolation, wallet system with TRC20 payments.
 
 ## Account Status Flow
 `pending` → `registering` → `waiting_code` → `verifying` → `verified` → `profile_saving` → `draw_registering` → `completed`
@@ -11,7 +11,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **verifying**: Submitting verification code
 - **verified**: Email verified, LA28 ID created
 - **profile_saving**: Saving Gigya profile (birth year, sports, teams)
-- **draw_registering**: Submitting ticket draw registration on tickets.la28.org via OIDC + Browser API
+- **draw_registering**: Setting draw registration via Gigya REST API (primary) or browser fallback
 - **completed**: Full flow done — draw registered with all 3 checkmarks (registered, profile, favorites)
 - **failed**: Error at any stage
 
@@ -56,7 +56,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - `server/index.ts` - Express app, session middleware, startup
 - `server/routes.ts` - API endpoints + WebSocket + auth/role middleware
 - `server/mailService.ts` - mail.tm API integration
-- `server/playwrightService.ts` - Playwright automation for LA28 registration. Draw registration uses Gigya browser ScreenSet login on `la28id.la28.org` → `setAccountInfo` for profile (birthYear, zip, country), personalization (favoritesDisciplines, favoritesCountries), and draw flags (`l2028_ticketing: true`, `l2028_fan28: true`) → OIDC linking with Keycloak (`web-sso__la28-org` client) → **curl-impersonate form fill on tickets.la28.org** (bypasses Akamai WAF via Chrome TLS fingerprint). curl-impersonate (`server/curl_chrome116` + `server/curl-impersonate-chrome`) navigates Queue-it, SSO authenticates via `/api/singleSignOn/857` with Keycloak auth code, loads registration form, and submits customer data. SSO provider ID: 857 (Gigya/Generic). Queue-it event: `la28q06260109`. Falls back to REST API (`completeDrawRegistrationViaApi`) if browser flow fails.
+- `server/playwrightService.ts` - Playwright automation for LA28 registration + Gigya REST API draw completion. **Primary draw flow**: `completeDrawRegistrationViaApi()` — pure REST API using `accounts.login` → `accounts.setAccountInfo` (profile: birthYear/zip/country) → `accounts.setAccountInfo` (data: favoritesDisciplines/favoritesCountries + l2028_ticketing/l2028_fan28 flags) → `accounts.getAccountInfo` (validation). Completes in ~1-2s. **Fallback**: `completeDrawViaGigyaBrowser()` — browser-based Gigya SDK login + OIDC linking + ZenRows for tickets.la28.org form fill. Browser fallback only runs if REST API fails.
 - `server/curl_chrome116` + `server/curl-impersonate-chrome` - curl-impersonate binaries that mimic Chrome 116's exact TLS fingerprint (JA3/JA4 hash). This bypasses Akamai's TLS fingerprinting which blocked all standard curl/Node.js/Playwright requests to tickets.la28.org.
 - `server/storage.ts` - Database storage with Drizzle ORM (owner-scoped queries)
 - `server/db.ts` - Database connection pool

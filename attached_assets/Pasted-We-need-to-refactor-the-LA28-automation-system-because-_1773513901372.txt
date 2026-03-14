@@ -1,0 +1,146 @@
+We need to refactor the LA28 automation system because the current browser-based draw registration through `tickets.la28.org` is unreliable due to Akamai WAF, Queue-it, and the complex OIDC redirect chain.
+
+The new architecture should remove the ticketing website from the core flow and rely on the Gigya backend API instead.
+
+### Goal
+
+The system must complete draw registration **without loading tickets.la28.org** by setting the required profile and ticketing flags directly through the Gigya REST API.
+
+### Required changes
+
+1. **Make the Gigya API the primary workflow**
+
+Create a clean pipeline:
+
+```
+createEmail()
+→ registerGigyaAccount()
+→ verifyEmailCode()
+→ completeProfileViaApi()
+→ validateRegistration()
+```
+
+2. **Register account via Gigya API**
+
+Use:
+
+```
+accounts.register
+```
+
+Store the following from the response:
+
+* UID
+* UIDSignature
+* signatureTimestamp
+
+These values will be required for later calls.
+
+3. **Complete profile + draw registration via API**
+
+Call:
+
+```
+accounts.setAccountInfo
+```
+
+Set the following fields:
+
+Profile:
+
+* birthYear
+* zip
+* country
+
+Data:
+
+* favoritesDisciplines
+* favoritesCountries
+
+Ticketing flags:
+
+```
+l2028_ticketing: true
+l2028_fan28: true
+```
+
+This should mark the account as registered for the LA28 draw in the backend.
+
+4. **Validate registration**
+
+Immediately call:
+
+```
+accounts.getAccountInfo
+```
+
+Verify that the following fields exist:
+
+* profile.birthYear
+* profile.zip
+* favoritesDisciplines
+* favoritesCountries
+* l2028_ticketing = true
+* l2028_fan28 = true
+
+If these values are present, mark the account as successfully registered.
+
+5. **Remove tickets.la28.org browser automation from the main flow**
+
+The following modules should no longer be required for draw registration:
+
+* Playwright draw form automation
+* Angular SPA interaction
+* Queue-it handling
+* Akamai bypass logic
+
+These may remain as optional utilities but **must not block the pipeline**.
+
+6. **Proxy/browser failures must not stop the workflow**
+
+If the proxy browser fails (for example ERR_TUNNEL_CONNECTION_FAILED), the system must continue with the API-based registration.
+
+7. **Keep OIDC / Keycloak login optional**
+
+If needed later for manual login testing, implement a separate function:
+
+```
+performSSOLogin()
+```
+
+This should:
+
+* start at the Keycloak authorize endpoint
+* use client_id = web-sso__la28-org
+* run inside Playwright
+* reuse the existing Gigya session
+
+This should not be required for draw registration.
+
+8. **Add detailed logging**
+
+Log every stage clearly:
+
+```
+[EMAIL CREATED]
+[GIGYA ACCOUNT REGISTERED]
+[EMAIL VERIFIED]
+[PROFILE SET]
+[DRAW FLAGS SET]
+[REGISTRATION CONFIRMED]
+```
+
+9. **Performance target**
+
+The full pipeline should complete within **1–2 seconds per account** without requiring browser automation.
+
+### Final result
+
+A reliable system that:
+
+* creates accounts
+* verifies emails
+* sets Gigya profile data
+* enables draw registration
+
+All done **via API without touching tickets.la28.org**.
