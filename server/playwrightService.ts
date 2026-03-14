@@ -2689,96 +2689,56 @@ export async function completeDrawViaGigyaBrowser(
           await bdPage.setDefaultNavigationTimeout(120000);
           await bdPage.setDefaultTimeout(60000);
 
-          console.log("[Draw-OIDC] Step 1: ZenRows login to Gigya on la28id.la28.org...");
-          log("Logging into Gigya via ZenRows browser...");
-          await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-          console.log("[Draw-OIDC] ZenRows login page URL: " + bdPage.url().substring(0, 100));
-
-          await bdPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 30000 });
-          console.log("[Draw-OIDC] BD Gigya SDK loaded");
-
-          const bdLoginResult = await bdPage.evaluate(async (creds: any) => {
-            return new Promise((resolve) => {
-              (window as any).gigya.accounts.login({
-                loginID: creds.email,
-                password: creds.password,
-                callback: (resp: any) => resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || null })
-              });
-            });
-          }, { email, password });
-          console.log("[Draw-OIDC] BD Gigya login: " + JSON.stringify(bdLoginResult));
-
-          await bdPage.waitForTimeout(3000);
-          const bdPostLoginUrl = bdPage.url();
-          console.log("[Draw-OIDC] BD post-login URL: " + bdPostLoginUrl.substring(0, 100));
-
-          if (bdPostLoginUrl.includes('proxy.html') || bdPostLoginUrl.includes('consent.html')) {
-            console.log("[Draw-OIDC] BD on intermediate page, navigating back to login...");
-            await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await bdPage.waitForTimeout(2000);
-          }
-
-          const bdAuth = await bdPage.evaluate(() => {
-            try {
-              return new Promise((resolve) => {
-                (window as any).gigya.accounts.getAccountInfo({
-                  callback: (resp: any) => resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || null })
-                });
-              });
-            } catch { return { loggedIn: false, uid: null }; }
-          });
-          console.log("[Draw-OIDC] BD auth check: " + JSON.stringify(bdAuth));
-
-          console.log("[Draw-OIDC] Step 2: BD navigating to tickets.la28.org/mycustomerdata/ (fresh OIDC flow)...");
-          log("Navigating to tickets.la28.org (BD handles Queue-it + OIDC)...");
+          console.log("[Draw-OIDC] ZenRows navigating directly to captured auth URL...");
+          log("Navigating ZenRows browser to tickets.la28.org with auth code...");
 
           const bdNavStart = Date.now();
-          await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
-          const bdNavTime = Date.now() - bdNavStart;
-          console.log("[Draw-OIDC] BD nav in " + bdNavTime + "ms, URL: " + bdPage.url().substring(0, 150));
-
-          if (bdPage.url().includes('proxy.html') || bdPage.url().includes('la28id.la28.org')) {
-            console.log("[Draw-OIDC] BD on Gigya proxy/OIDC page, waiting for JS redirect...");
-            try {
-              await bdPage.waitForURL(url => {
-                const u = url.toString();
-                return !u.includes('proxy.html') && !u.includes('la28id.la28.org');
-              }, { timeout: 30000 });
-              console.log("[Draw-OIDC] BD redirected to: " + bdPage.url().substring(0, 150));
-            } catch {
-              console.log("[Draw-OIDC] BD proxy didn't redirect. Current: " + bdPage.url().substring(0, 100));
+          try {
+            await bdPage.goto(ticketsAuthUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+          } catch (navErr: any) {
+            console.log("[Draw-OIDC] ZenRows direct nav error (may be expected): " + navErr.message.substring(0, 150));
+            if (bdPage.url().includes('chrome-error') || bdPage.url() === 'about:blank') {
+              console.log("[Draw-OIDC] ZenRows fallback: navigating to tickets.la28.org/mycustomerdata/...");
+              try {
+                await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+              } catch (navErr2: any) {
+                console.log("[Draw-OIDC] ZenRows fallback nav error: " + navErr2.message.substring(0, 150));
+              }
             }
           }
+          const bdNavTime = Date.now() - bdNavStart;
+          console.log("[Draw-OIDC] ZenRows nav in " + bdNavTime + "ms, URL: " + bdPage.url().substring(0, 150));
+
+          console.log("[Draw-OIDC] ZenRows: waiting for page to stabilize...");
+          await bdPage.waitForTimeout(8000);
 
           if (bdPage.url().includes('next.tickets.la28.org') || bdPage.url().includes('queue-it')) {
-            console.log("[Draw-OIDC] BD in Queue-it, waiting up to 4 min...");
+            console.log("[Draw-OIDC] ZenRows in Queue-it, waiting up to 4 min...");
             log("In Queue-it queue, waiting...");
             try {
               await bdPage.waitForURL(url => {
                 const u = url.toString();
                 return !u.includes('next.tickets.la28.org') && !u.includes('queue-it');
               }, { timeout: 240000 });
-              console.log("[Draw-OIDC] BD Queue-it passed! URL: " + bdPage.url().substring(0, 150));
+              console.log("[Draw-OIDC] ZenRows Queue-it passed! URL: " + bdPage.url().substring(0, 150));
             } catch {
-              console.log("[Draw-OIDC] BD Queue-it timeout. URL: " + bdPage.url().substring(0, 150));
+              console.log("[Draw-OIDC] ZenRows Queue-it timeout. URL: " + bdPage.url().substring(0, 150));
             }
+            await bdPage.waitForTimeout(5000);
           }
 
-          if (bdPage.url().includes('proxy.html') || bdPage.url().includes('la28id.la28.org')) {
-            console.log("[Draw-OIDC] BD back on Gigya proxy after Queue-it, waiting for redirect...");
+          if (bdPage.url().includes('la28id.la28.org') || bdPage.url().includes('proxy.html')) {
+            console.log("[Draw-OIDC] ZenRows on login/proxy page, navigating directly to mycustomerdata...");
             try {
-              await bdPage.waitForURL(url => {
-                const u = url.toString();
-                return !u.includes('proxy.html') && !u.includes('la28id.la28.org');
-              }, { timeout: 30000 });
-              console.log("[Draw-OIDC] BD final redirect to: " + bdPage.url().substring(0, 150));
-            } catch {
-              console.log("[Draw-OIDC] BD still on proxy. Trying direct nav to mycustomerdata...");
-              await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+            } catch (navErr3: any) {
+              console.log("[Draw-OIDC] ZenRows direct mycustomerdata nav error: " + navErr3.message.substring(0, 100));
             }
+            await bdPage.waitForTimeout(8000);
           }
 
-          await bdPage.waitForTimeout(5000);
+          try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+          await bdPage.waitForTimeout(3000);
           const bdUrl = bdPage.url();
           const bdContent = await bdPage.content();
           console.log("[Draw-OIDC] BD final URL: " + bdUrl.substring(0, 150));
