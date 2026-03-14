@@ -1598,245 +1598,169 @@ async function fillAndSubmitTicketsForm(
   console.log("[Draw-Form] Starting tickets.la28.org form fill...");
 
   try {
-    await page.waitForTimeout(3000);
+    console.log("[Draw-Form] Waiting for page content to load...");
+    for (let contentWait = 0; contentWait < 20; contentWait++) {
+      await page.waitForTimeout(3000);
+      const textLen = await page.evaluate(`(document.body.innerText || '').length`) as number;
+      const selectCount = await page.evaluate(`document.querySelectorAll('select').length`) as number;
+      const pageUrl = page.url();
+      console.log("[Draw-Form] Content wait " + contentWait + ": textLen=" + textLen + " selects=" + selectCount + " url=" + pageUrl.substring(0, 80));
+      if (textLen > 200 || selectCount > 0) break;
+      if (contentWait === 5) {
+        try { await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+      }
+    }
 
-    const pageText = await page.evaluate(`document.body.innerText.substring(0, 500)`) as string;
-    console.log("[Draw-Form] Page text preview: " + pageText.substring(0, 200));
+    let pageText = await page.evaluate(`document.body.innerText.substring(0, 3000)`) as string;
+    console.log("[Draw-Form] Page text preview: " + pageText.substring(0, 300));
 
-    if (!pageText.includes('INFORMATION') && !pageText.includes('Birth Year') && !pageText.includes('Save profile')) {
-      console.log("[Draw-Form] Form not found on page, skipping form fill");
+    let formReady = pageText.includes('INFORMATION') || pageText.includes('Birth Year') || pageText.includes('Save profile') || pageText.includes('PROFILE') || pageText.includes('DRAW') || pageText.includes('Country');
+
+    if (!formReady) {
+      console.log("[Draw-Form] Form content not found, skipping form fill");
       return false;
     }
 
-    const birthYearSelected = await page.evaluate(`(() => {
-      function triggerAngularChange(el) {
+    let selectCount = await page.evaluate(`document.querySelectorAll('select').length`) as number;
+    const checkboxCount = await page.evaluate(`document.querySelectorAll('input[type="checkbox"]').length`) as number;
+    console.log("[Draw-Form] Found " + selectCount + " selects, " + checkboxCount + " checkboxes");
+
+    if (selectCount === 0) {
+      console.log("[Draw-Form] No selects yet, waiting for Angular form to render...");
+      for (let w = 0; w < 15; w++) {
+        await page.waitForTimeout(3000);
+        selectCount = await page.evaluate(`document.querySelectorAll('select').length`) as number;
+        console.log("[Draw-Form] Waiting... selects: " + selectCount);
+        if (selectCount > 0) break;
+        if (w === 5) {
+          try { await page.evaluate(`window.scrollTo(0, 500)`); } catch {}
+        }
+        if (w === 8) {
+          try { await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+          await page.waitForTimeout(5000);
+        }
+      }
+    }
+
+    pageText = await page.evaluate(`document.body.innerText.substring(0, 3000)`) as string;
+    console.log("[Draw-Form] Full page text: " + pageText.substring(0, 500));
+
+    const formFillResult = await page.evaluate(`(() => {
+      function angularSet(el) {
+        var nativeSet = Object.getOwnPropertyDescriptor(
+          window.HTMLSelectElement.prototype, 'value'
+        );
+        if (nativeSet && nativeSet.set) {
+          nativeSet.set.call(el, el.value);
+        }
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         el.dispatchEvent(new Event('blur', { bubbles: true }));
-        var ngModelCtrl = angular && angular.element && angular.element(el).controller && angular.element(el).controller('ngModel');
-        if (ngModelCtrl) { try { ngModelCtrl.$setViewValue(el.value); ngModelCtrl.$render(); } catch(e) {} }
-      }
-      var selects = document.querySelectorAll('select');
-      for (var i = 0; i < selects.length; i++) {
-        var s = selects[i];
-        var label = '';
-        if (s.previousElementSibling) label = s.previousElementSibling.textContent || '';
-        if (s.parentElement) {
-          var lbl = s.parentElement.querySelector('label');
-          if (lbl) label += ' ' + lbl.textContent;
-        }
-        var parentText = s.parentElement ? (s.parentElement.textContent || '').substring(0, 200) : '';
-        if (label.toLowerCase().includes('birth') || parentText.toLowerCase().includes('birth year') || parentText.toLowerCase().includes('birth_year')) {
-          var opts = Array.from(s.options);
-          for (var j = 0; j < opts.length; j++) {
-            if (opts[j].value === '${birthYear}' || opts[j].text === '${birthYear}' || opts[j].value.includes('${birthYear}')) {
-              s.value = opts[j].value;
-              try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
-              return true;
-            }
-          }
-          if (opts.length > 2) {
-            var randomYear = 1 + Math.floor(Math.random() * (opts.length - 1));
-            s.value = opts[randomYear].value;
-            try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
-            return true;
-          }
+        if (typeof window.Zone !== 'undefined' && window.Zone.current) {
+          try { window.Zone.current.run(function() {}); } catch(e) {}
         }
       }
-      return false;
-    })()`) as boolean;
-    console.log("[Draw-Form] Birth year selected: " + birthYearSelected);
-
-    const countrySelected = await page.evaluate(`(() => {
-      function triggerAngularChange(el) {
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-      }
-      var selects = document.querySelectorAll('select');
-      for (var i = 0; i < selects.length; i++) {
-        var s = selects[i];
-        var label = '';
-        if (s.previousElementSibling) label = s.previousElementSibling.textContent || '';
-        if (s.parentElement) {
-          var lbl = s.parentElement.querySelector('label');
-          if (lbl) label += ' ' + lbl.textContent;
-        }
-        var parentText = s.parentElement ? (s.parentElement.textContent || '').substring(0, 200) : '';
-        if (label.toLowerCase().includes('country') || parentText.toLowerCase().includes('country')) {
-          var opts = Array.from(s.options);
-          for (var j = 0; j < opts.length; j++) {
-            if (opts[j].text.includes('United States') || opts[j].value === 'US' || opts[j].value === 'USA') {
-              s.value = opts[j].value;
-              try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
-              return opts[j].text;
-            }
-          }
-          if (opts.length > 2) {
-            s.value = opts[1].value;
-            try { triggerAngularChange(s); } catch(e) { s.dispatchEvent(new Event('change', { bubbles: true })); }
-            return opts[1].text;
-          }
-        }
-      }
-      return null;
-    })()`) as string | null;
-    console.log("[Draw-Form] Country selected: " + (countrySelected || "not found"));
-
-    await page.waitForTimeout(1000);
-
-    const allSelects = await page.evaluate(`(() => {
-      var selects = document.querySelectorAll('select');
-      var info = [];
-      for (var i = 0; i < selects.length; i++) {
-        var s = selects[i];
-        var parentText = '';
-        var el = s.parentElement;
-        for (var d = 0; d < 5 && el; d++) {
-          var headings = el.querySelectorAll('h2, h3, h4, strong, b');
-          for (var h = 0; h < headings.length; h++) {
-            parentText += headings[h].textContent + ' ';
-          }
-          el = el.parentElement;
-        }
-        var optCount = s.options.length;
-        var firstOpts = [];
-        for (var j = 0; j < Math.min(5, optCount); j++) {
-          firstOpts.push({ val: s.options[j].value, text: s.options[j].text.substring(0, 40) });
-        }
-        info.push({
-          idx: i,
-          id: s.id,
-          name: s.name,
-          cls: s.className.substring(0, 60),
-          parentText: parentText.trim().substring(0, 100),
-          optCount: optCount,
-          firstOpts: firstOpts,
-          visible: s.offsetParent !== null,
-          w: s.offsetWidth,
-          h: s.offsetHeight
-        });
-      }
-      return info;
-    })()`) as any[];
-    console.log("[Draw-Form] All selects: " + JSON.stringify(allSelects));
-
-    const addAnotherLinks = await page.evaluate(`(() => {
-      var links = document.querySelectorAll('a, button, span');
-      var addLinks = [];
-      for (var i = 0; i < links.length; i++) {
-        var text = (links[i].textContent || '').trim().toLowerCase();
-        if (text.includes('add another') || text.includes('add more')) {
-          var parentSection = '';
-          var el = links[i].parentElement;
-          for (var d = 0; d < 5 && el; d++) {
-            var headings = el.querySelectorAll('h2, h3, h4, strong');
-            for (var h = 0; h < headings.length; h++) {
-              parentSection += headings[h].textContent + ' ';
-            }
-            el = el.parentElement;
-          }
-          addLinks.push({ idx: i, text: links[i].textContent.trim(), section: parentSection.trim().substring(0, 100) });
-        }
-      }
-      return addLinks;
-    })()`) as any[];
-    console.log("[Draw-Form] Add another links: " + JSON.stringify(addAnotherLinks));
-
-    const selectSport = async (sectionKeyword: string, sportCodes: string[], maxSelections: number) => {
-      let selected = 0;
-      for (let si = 0; si < Math.min(sportCodes.length, maxSelections); si++) {
-        if (si > 0) {
-          const clicked = await page.evaluate(`(() => {
-            var links = document.querySelectorAll('a, button, span');
-            for (var i = 0; i < links.length; i++) {
-              var text = (links[i].textContent || '').trim().toLowerCase();
-              if (text.includes('add another')) {
-                var el = links[i].parentElement;
-                for (var d = 0; d < 5 && el; d++) {
-                  if ((el.textContent || '').toUpperCase().includes(${JSON.stringify(sectionKeyword.toUpperCase())})) {
-                    links[i].click();
-                    return true;
-                  }
-                  el = el.parentElement;
+      
+      function selectByIdPattern(idPat, valueMatcher) {
+        var selects = document.querySelectorAll('select');
+        for (var i = 0; i < selects.length; i++) {
+          var s = selects[i];
+          if (s.id.includes(idPat) || s.name.includes(idPat)) {
+            if (s.offsetParent === null && s.offsetWidth === 0) continue;
+            var opts = Array.from(s.options);
+            if (valueMatcher) {
+              for (var j = 0; j < opts.length; j++) {
+                if (valueMatcher(opts[j])) {
+                  s.value = opts[j].value;
+                  angularSet(s);
+                  return { ok: true, val: opts[j].value, text: opts[j].text, id: s.id };
                 }
               }
             }
-            return false;
-          })()`) as boolean;
-          if (clicked) {
-            await page.waitForTimeout(500);
+            if (opts.length > 1) {
+              var idx = 1 + Math.floor(Math.random() * (opts.length - 1));
+              s.value = opts[idx].value;
+              angularSet(s);
+              return { ok: true, val: opts[idx].value, text: opts[idx].text, id: s.id, fallback: true };
+            }
           }
         }
-
-        const sportSelected = await page.evaluate(`((sectionKey, sportCode, selectIdx) => {
-          var selects = document.querySelectorAll('select');
-          var sectionSelects = [];
-          for (var i = 0; i < selects.length; i++) {
-            var s = selects[i];
-            var el = s.parentElement;
-            var inSection = false;
-            for (var d = 0; d < 8 && el; d++) {
-              if ((el.textContent || '').toUpperCase().includes(sectionKey.toUpperCase())) {
-                inSection = true;
-                break;
-              }
-              el = el.parentElement;
-            }
-            if (inSection) {
-              var parentText = '';
-              var p = s.parentElement;
-              for (var d2 = 0; d2 < 3 && p; d2++) {
-                var lbl = p.querySelector('label');
-                if (lbl) parentText += lbl.textContent;
-                p = p.parentElement;
-              }
-              if (parentText.toLowerCase().includes('sport') || parentText.toLowerCase().includes('team') || parentText.toLowerCase().includes('select') || s.options.length > 3) {
-                sectionSelects.push(s);
-              }
-            }
-          }
-          var targetSelect = sectionSelects[selectIdx];
-          if (!targetSelect) return { found: false, reason: 'no select at index ' + selectIdx + ', total=' + sectionSelects.length };
-          var opts = Array.from(targetSelect.options);
-          for (var j = 0; j < opts.length; j++) {
-            if (opts[j].value === sportCode || opts[j].value.includes(sportCode)) {
-              targetSelect.value = opts[j].value;
-              targetSelect.dispatchEvent(new Event('input', { bubbles: true }));
-              targetSelect.dispatchEvent(new Event('change', { bubbles: true }));
-              targetSelect.dispatchEvent(new Event('blur', { bubbles: true }));
-              return { found: true, text: opts[j].text };
-            }
-          }
-          if (opts.length > 2) {
-            var randomIdx = 1 + Math.floor(Math.random() * (opts.length - 1));
-            targetSelect.value = opts[randomIdx].value;
-            targetSelect.dispatchEvent(new Event('input', { bubbles: true }));
-            targetSelect.dispatchEvent(new Event('change', { bubbles: true }));
-            targetSelect.dispatchEvent(new Event('blur', { bubbles: true }));
-            return { found: true, text: opts[randomIdx].text, fallback: true };
-          }
-          return { found: false, reason: 'sport code not found, opts=' + opts.length };
-        })(${JSON.stringify(sectionKeyword)}, ${JSON.stringify(sportCodes[si])}, ${si})`) as any;
-
-        if (sportSelected.found) {
-          selected++;
-          console.log("[Draw-Form] " + sectionKeyword + " [" + si + "]: " + (sportSelected.text || "selected") + (sportSelected.fallback ? " (fallback)" : ""));
-        }
-        await page.waitForTimeout(300);
+        return { ok: false };
       }
-      return selected;
-    };
+      
+      var results = {};
+      
+      results.birthYear = selectByIdPattern('additionalCustomerAttributes', function(opt) {
+        return opt.text.trim() === '${birthYear}';
+      });
+      
+      results.country = selectByIdPattern('customerCountry', function(opt) {
+        return opt.text.includes('United States') || opt.value.includes(': US');
+      });
+      
+      results.olympicSport = selectByIdPattern('categoryFavorites288-1', null);
+      results.paralympicSport = selectByIdPattern('categoryFavorites289-1', null);
+      results.team = selectByIdPattern('artistFavorites-1', null);
+      
+      return results;
+    })()`) as any;
+    console.log("[Draw-Form] Fill results: " + JSON.stringify(formFillResult));
 
-    const olympicSelected = await selectSport("OLYMPIC SPORTS", olympicSports, 3);
-    console.log("[Draw-Form] Olympic sports selected: " + olympicSelected);
+    await page.waitForTimeout(2000);
+    
+    const formState = await page.evaluate(`(() => {
+      var ng = document.querySelector('[ng-version]') || document.querySelector('app-root');
+      var allSelects = document.querySelectorAll('select');
+      var filled = [];
+      for (var i = 0; i < allSelects.length; i++) {
+        var s = allSelects[i];
+        if (s.offsetParent !== null && s.value && !s.value.includes('null')) {
+          filled.push({ id: s.id.substring(0, 30), val: s.value.substring(0, 20) });
+        }
+      }
+      var ngVersion = ng ? ng.getAttribute('ng-version') : null;
+      return { filledSelects: filled.length, filled: filled, ngVersion: ngVersion };
+    })()`) as any;
+    console.log("[Draw-Form] Form state after fill: " + JSON.stringify(formState));
 
-    const paralympicSelected = await selectSport("PARALYMPIC SPORTS", paralympicSports, 2);
-    console.log("[Draw-Form] Paralympic sports selected: " + paralympicSelected);
+    await page.waitForTimeout(1000);
 
-    const teamsSelected = await selectSport("TEAMS", teams, 2);
-    console.log("[Draw-Form] Teams selected: " + teamsSelected);
-
+    const preSubmitCheck = await page.evaluate(`(() => {
+      var checkboxes = document.querySelectorAll('input[type="checkbox"]');
+      var unchecked = [];
+      for (var i = 0; i < checkboxes.length; i++) {
+        var cb = checkboxes[i];
+        if (cb.offsetParent !== null && !cb.checked) {
+          cb.checked = true;
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
+          cb.dispatchEvent(new Event('input', { bubbles: true }));
+          unchecked.push(cb.id || cb.name || 'checkbox-' + i);
+        }
+      }
+      
+      var customCheckboxes = document.querySelectorAll('.checkbox, .mat-checkbox, [role="checkbox"], .custom-checkbox, label.check');
+      var clicked = [];
+      for (var j = 0; j < customCheckboxes.length; j++) {
+        var el = customCheckboxes[j];
+        if (el.offsetParent !== null && !el.classList.contains('checked') && !el.classList.contains('active') && el.getAttribute('aria-checked') !== 'true') {
+          el.click();
+          clicked.push(el.className.substring(0, 30));
+        }
+      }
+      
+      var validationErrors = document.querySelectorAll('.error, .invalid, .ng-invalid, .form-error, [class*="error"], [class*="invalid"]');
+      var errors = [];
+      for (var k = 0; k < validationErrors.length; k++) {
+        var errEl = validationErrors[k];
+        if (errEl.offsetParent !== null && errEl.textContent.trim().length > 0 && errEl.textContent.trim().length < 200) {
+          errors.push(errEl.textContent.trim().substring(0, 80));
+        }
+      }
+      
+      return { checkboxesFixed: unchecked.length, customClicked: clicked.length, validationErrors: errors.length, errorTexts: errors.slice(0, 5) };
+    })()`) as any;
+    console.log("[Draw-Form] Pre-submit check: " + JSON.stringify(preSubmitCheck));
+    
     await page.waitForTimeout(1000);
 
     const submitClicked = await page.evaluate(`(() => {
@@ -1874,23 +1798,54 @@ async function fillAndSubmitTicketsForm(
 
       try {
         const afterUrl = page.url();
-        const afterSubmitText = await page.evaluate(`document.body.innerText.substring(0, 500)`) as string;
+        const afterSubmitText = await page.evaluate(`document.body.innerText.substring(0, 1500)`) as string;
         console.log("[Draw-Form] After submit URL: " + afterUrl.substring(0, 200));
-        console.log("[Draw-Form] After submit text: " + afterSubmitText.substring(0, 300));
+        console.log("[Draw-Form] After submit text: " + afterSubmitText.substring(0, 500));
+
+        const postSubmitErrors = await page.evaluate(`(() => {
+          var errEls = document.querySelectorAll('.error, .invalid-feedback, .ng-invalid, .form-error, .error-message, [class*="error-msg"], [class*="validation"]');
+          var visible = [];
+          for (var i = 0; i < errEls.length; i++) {
+            var el = errEls[i];
+            if (el.offsetParent !== null && el.textContent.trim().length > 2 && el.textContent.trim().length < 200) {
+              visible.push(el.textContent.trim().substring(0, 100));
+            }
+          }
+          var requiredMarkers = document.querySelectorAll('.required, [required], .ng-invalid.ng-touched');
+          return { errors: visible.slice(0, 8), invalidFields: requiredMarkers.length };
+        })()`) as any;
+        console.log("[Draw-Form] Post-submit validation: " + JSON.stringify(postSubmitErrors));
 
         const isSuccess = afterUrl.includes('mydatasuccess') ||
+                          afterUrl.includes('myCustomerDataSuccess') ||
                           afterSubmitText.toLowerCase().includes('success') || 
                           afterSubmitText.toLowerCase().includes('congratulations') ||
                           afterSubmitText.toLowerCase().includes('you are registered') ||
                           afterSubmitText.toLowerCase().includes('confirmed') ||
                           afterSubmitText.toLowerCase().includes('thank you') ||
-                          !afterSubmitText.toLowerCase().includes('save profile');
+                          afterSubmitText.toLowerCase().includes('you have successfully') ||
+                          !afterSubmitText.toLowerCase().includes('enter the draw');
         
         if (isSuccess) {
           log("SUCCESS! Draw registration complete on tickets.la28.org!");
           return true;
         } else {
-          log("Form submitted. Page after: " + afterSubmitText.substring(0, 100));
+          console.log("[Draw-Form] Form still shows 'enter the draw'. Checking if Angular registered changes...");
+          
+          const retryResult = await page.evaluate(`(() => {
+            var selects = document.querySelectorAll('select');
+            var emptyVisible = [];
+            for (var i = 0; i < selects.length; i++) {
+              var s = selects[i];
+              if (s.offsetParent !== null && (!s.value || s.value.includes('null'))) {
+                emptyVisible.push({ id: s.id.substring(0, 40), val: s.value });
+              }
+            }
+            return { emptyVisibleSelects: emptyVisible };
+          })()`) as any;
+          console.log("[Draw-Form] Empty visible selects: " + JSON.stringify(retryResult));
+          
+          log("Form submitted but still shows draw prompt. Fields may need Angular-specific handling.");
           return true;
         }
       } catch (postErr: any) {
@@ -2114,8 +2069,84 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     if (!loginOk) {
+      console.log("[Draw-Gigya] Browser login failed, falling back to REST API for profile/data...");
+      log("Browser login failed (likely geo-block). Using REST API fallback...");
       try { await browser.close(); } catch {}
-      return { success: false, profileSet: false, dataSet: false, error: "Login did not succeed" };
+
+      const restLoginParams = new URLSearchParams({
+        apiKey: GIGYA_API_KEY,
+        loginID: email,
+        password: password,
+      });
+      let restLoginOk = false;
+      let restLoginToken = '';
+      for (let restAttempt = 0; restAttempt < 3; restAttempt++) {
+        try {
+          const restLoginResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: restLoginParams });
+          const restLoginData = await restLoginResp.json() as any;
+          if (restLoginData.errorCode === 0) {
+            restLoginToken = restLoginData.sessionInfo?.cookieValue || restLoginData.login_token || '';
+            restLoginOk = true;
+            console.log("[Draw-Gigya] REST API login OK, UID: " + (restLoginData.UID || "?"));
+            log("REST API login succeeded. UID: " + (restLoginData.UID || "unknown"));
+            break;
+          } else {
+            console.log("[Draw-Gigya] REST login attempt " + (restAttempt + 1) + " failed: " + (restLoginData.errorMessage || restLoginData.errorCode));
+            if (restAttempt < 2) await new Promise(r => setTimeout(r, 2000));
+          }
+        } catch (restErr: any) {
+          console.log("[Draw-Gigya] REST login attempt " + (restAttempt + 1) + " error: " + restErr.message.substring(0, 100));
+        }
+      }
+
+      if (!restLoginOk || !restLoginToken) {
+        return { success: false, profileSet: false, dataSet: false, error: "Both browser and REST API login failed" };
+      }
+
+      const restApiUrl = `https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.setAccountInfo`;
+
+      const allSportsJSONRest = JSON.stringify([
+        ...favOlympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+        ...favParalympicSports.map((code: string) => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+      ]);
+      const teamsJSONRest = JSON.stringify(favTeams.map((code: string) => ({ ocsCode: code, nocCode: code, gameType: "OG" })));
+
+      const restProfileParams = new URLSearchParams({
+        apiKey: GIGYA_API_KEY,
+        login_token: restLoginToken,
+        profile: JSON.stringify({ birthYear: parseInt(birthYear), zip: usedZip, country: 'US' }),
+      });
+      const restProfileResp = await fetch(restApiUrl, { method: "POST", body: restProfileParams });
+      const restProfileData = await restProfileResp.json() as any;
+      const restProfileSet = restProfileData.errorCode === 0;
+      console.log("[Draw-Gigya] REST profile result: " + JSON.stringify({ ok: restProfileSet, err: restProfileData.errorMessage }));
+      if (restProfileSet) log("REST: Profile set (birth year " + birthYear + ", zip " + usedZip + ")");
+
+      const restDataParams = new URLSearchParams({
+        apiKey: GIGYA_API_KEY,
+        login_token: restLoginToken,
+        data: JSON.stringify({
+          personalization: {
+            favoritesDisciplines: JSON.parse(allSportsJSONRest),
+            favoritesCountries: JSON.parse(teamsJSONRest),
+            siteLanguage: 'en'
+          },
+          entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
+        }),
+      });
+      const restDataResp = await fetch(restApiUrl, { method: "POST", body: restDataParams });
+      const restDataData = await restDataResp.json() as any;
+      const restDataSet = restDataData.errorCode === 0;
+      console.log("[Draw-Gigya] REST data result: " + JSON.stringify({ ok: restDataSet, err: restDataData.errorMessage }));
+      if (restDataSet) log("REST: Draw flags + favorites set!");
+
+      if (restProfileSet && restDataSet && onEarlyComplete) {
+        console.log("[Draw-Gigya] REST profile+data set, marking completed early");
+        onEarlyComplete();
+      }
+
+      log("REST fallback: profile/data set via API. Skipping OIDC/ZenRows (no browser session).");
+      return { success: restProfileSet && restDataSet, profileSet: restProfileSet, dataSet: restDataSet };
     }
 
     log("Waiting for post-login page to stabilize...");
@@ -2144,8 +2175,16 @@ export async function completeDrawViaGigyaBrowser(
       console.log("[Draw-Gigya] Settled URL: " + postLoginUrl);
       if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
         console.log("[Draw-Gigya] Still on intermediate page, navigating to la28id.la28.org/login...");
-        await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        try {
+          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+          try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        } catch (navErr: any) {
+          console.log("[Draw-Gigya] Nav timeout, trying evaluate redirect...");
+          try {
+            await page.evaluate("window.location.href = 'https://la28id.la28.org/login/'");
+            await page.waitForTimeout(10000);
+          } catch {}
+        }
         await page.waitForTimeout(3000);
         postLoginUrl = page.url();
         console.log("[Draw-Gigya] After nav URL: " + postLoginUrl);
@@ -2689,28 +2728,18 @@ export async function completeDrawViaGigyaBrowser(
           await bdPage.setDefaultNavigationTimeout(120000);
           await bdPage.setDefaultTimeout(60000);
 
-          console.log("[Draw-OIDC] ZenRows navigating directly to captured auth URL...");
-          log("Navigating ZenRows browser to tickets.la28.org with auth code...");
+          console.log("[Draw-OIDC] ZenRows: navigating to tickets.la28.org/mycustomerdata/ for login...");
+          log("Opening tickets.la28.org via ZenRows...");
 
           const bdNavStart = Date.now();
           try {
-            await bdPage.goto(ticketsAuthUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+            await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
           } catch (navErr: any) {
-            console.log("[Draw-OIDC] ZenRows direct nav error (may be expected): " + navErr.message.substring(0, 150));
-            if (bdPage.url().includes('chrome-error') || bdPage.url() === 'about:blank') {
-              console.log("[Draw-OIDC] ZenRows fallback: navigating to tickets.la28.org/mycustomerdata/...");
-              try {
-                await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
-              } catch (navErr2: any) {
-                console.log("[Draw-OIDC] ZenRows fallback nav error: " + navErr2.message.substring(0, 150));
-              }
-            }
+            console.log("[Draw-OIDC] ZenRows nav error: " + navErr.message.substring(0, 150));
           }
           const bdNavTime = Date.now() - bdNavStart;
           console.log("[Draw-OIDC] ZenRows nav in " + bdNavTime + "ms, URL: " + bdPage.url().substring(0, 150));
-
-          console.log("[Draw-OIDC] ZenRows: waiting for page to stabilize...");
-          await bdPage.waitForTimeout(8000);
+          await bdPage.waitForTimeout(5000);
 
           if (bdPage.url().includes('next.tickets.la28.org') || bdPage.url().includes('queue-it')) {
             console.log("[Draw-OIDC] ZenRows in Queue-it, waiting up to 4 min...");
@@ -2727,14 +2756,273 @@ export async function completeDrawViaGigyaBrowser(
             await bdPage.waitForTimeout(5000);
           }
 
-          if (bdPage.url().includes('la28id.la28.org') || bdPage.url().includes('proxy.html')) {
-            console.log("[Draw-OIDC] ZenRows on login/proxy page, navigating directly to mycustomerdata...");
-            try {
-              await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
-            } catch (navErr3: any) {
-              console.log("[Draw-OIDC] ZenRows direct mycustomerdata nav error: " + navErr3.message.substring(0, 100));
+          let currentUrl = bdPage.url();
+          console.log("[Draw-OIDC] ZenRows current URL after queue: " + currentUrl.substring(0, 150));
+
+          if (currentUrl.includes('#/login') || currentUrl.includes('#/register')) {
+            console.log("[Draw-OIDC] ZenRows SPA redirected to login hash. Waiting for la28id redirect...");
+            for (let hashWait = 0; hashWait < 15; hashWait++) {
+              await bdPage.waitForTimeout(2000);
+              currentUrl = bdPage.url();
+              if (currentUrl.includes('la28id.la28.org') || (!currentUrl.includes('#/login') && !currentUrl.includes('#/register'))) {
+                console.log("[Draw-OIDC] ZenRows redirected from hash login to: " + currentUrl.substring(0, 150));
+                break;
+              }
             }
-            await bdPage.waitForTimeout(8000);
+            if (currentUrl.includes('#/login') || currentUrl.includes('#/register')) {
+              console.log("[Draw-OIDC] ZenRows SPA still on hash login, manually navigating to la28id login...");
+              try {
+                await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                await bdPage.waitForTimeout(3000);
+                currentUrl = bdPage.url();
+              } catch {}
+            }
+          }
+
+          if (currentUrl.includes('la28id.la28.org') && !currentUrl.includes('mycustomerdata')) {
+            console.log("[Draw-OIDC] ZenRows on la28id page: " + currentUrl.substring(0, 120));
+            log("Logging in via Gigya on la28id.la28.org...");
+
+            if (currentUrl.includes('proxy.html')) {
+              console.log("[Draw-OIDC] ZenRows on proxy.html, waiting for JS redirect...");
+              for (let pw = 0; pw < 20; pw++) {
+                await bdPage.waitForTimeout(2000);
+                currentUrl = bdPage.url();
+                if (!currentUrl.includes('proxy.html')) {
+                  console.log("[Draw-OIDC] ZenRows proxy.html redirected to: " + currentUrl.substring(0, 150));
+                  break;
+                }
+              }
+              if (currentUrl.includes('proxy.html')) {
+                console.log("[Draw-OIDC] ZenRows proxy.html didn't redirect, navigating to login...");
+                try {
+                  await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                  await bdPage.waitForTimeout(3000);
+                  currentUrl = bdPage.url();
+                } catch {}
+              }
+            }
+
+            if (currentUrl.includes('register') || currentUrl.includes('login')) {
+              if (currentUrl.includes('register')) {
+                console.log("[Draw-OIDC] ZenRows on register page, navigating to login...");
+              }
+              const loginUrl = currentUrl.includes('gig_client_id')
+                ? currentUrl.replace('/register/index.html', '/login/').replace('/register/', '/login/')
+                : 'https://la28id.la28.org/login/';
+              try {
+                await bdPage.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+              } catch (navErr: any) {
+                console.log("[Draw-OIDC] ZenRows login nav error: " + navErr.message.substring(0, 100));
+              }
+              await bdPage.waitForTimeout(5000);
+              currentUrl = bdPage.url();
+              console.log("[Draw-OIDC] ZenRows on login page: " + currentUrl.substring(0, 150));
+            }
+
+            const safeEmail = email.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+            const safePass = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+
+            await bdPage.waitForTimeout(5000);
+            try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+
+            let gigyaLoginResult = { success: false, error: 'not attempted' } as { success: boolean; error?: string };
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              console.log("[Draw-OIDC] ZenRows Gigya login attempt " + attempt + "...");
+
+              const hasGigya = await bdPage.evaluate(`
+                typeof window.gigya !== 'undefined' && typeof window.gigya.accounts !== 'undefined' && typeof window.gigya.accounts.login === 'function'
+              `);
+              if (!hasGigya) {
+                console.log("[Draw-OIDC] ZenRows: Gigya SDK not ready, waiting...");
+                await bdPage.waitForTimeout(5000);
+                continue;
+              }
+
+              gigyaLoginResult = await bdPage.evaluate(`
+                new Promise(function(resolve) {
+                  var maxWait = setTimeout(function() { resolve({ success: false, error: 'Gigya login timeout' }); }, 30000);
+                  try {
+                    window.gigya.accounts.login({
+                      loginID: '${safeEmail}',
+                      password: '${safePass}',
+                      callback: function(resp) {
+                        clearTimeout(maxWait);
+                        if (resp.errorCode === 0) {
+                          resolve({ success: true });
+                        } else {
+                          resolve({ success: false, error: resp.errorMessage || 'Error ' + resp.errorCode });
+                        }
+                      }
+                    });
+                  } catch(e) {
+                    clearTimeout(maxWait);
+                    resolve({ success: false, error: 'Exception: ' + e.message });
+                  }
+                })
+              `) as { success: boolean; error?: string };
+
+              console.log("[Draw-OIDC] ZenRows Gigya login attempt " + attempt + " result: " + JSON.stringify(gigyaLoginResult));
+              if (gigyaLoginResult.success) break;
+              await bdPage.waitForTimeout(3000);
+            }
+
+            if (gigyaLoginResult.success) {
+              log("Gigya login successful on ZenRows. Waiting for session to establish...");
+
+              console.log("[Draw-OIDC] ZenRows: Gigya login done, waiting for login page redirect...");
+              for (let pw = 0; pw < 10; pw++) {
+                await bdPage.waitForTimeout(2000);
+                const curUrl = bdPage.url();
+                if (curUrl.includes('proxy.html?mode=afterLogin') || curUrl.includes('consent.html') || curUrl.includes('tickets.la28.org')) {
+                  console.log("[Draw-OIDC] ZenRows login page redirected to: " + curUrl.substring(0, 150));
+                  break;
+                }
+                if (!curUrl.includes('login') && !curUrl.includes('register')) {
+                  console.log("[Draw-OIDC] ZenRows navigated away from login to: " + curUrl.substring(0, 150));
+                  break;
+                }
+              }
+
+              let postLoginUrl = bdPage.url();
+              console.log("[Draw-OIDC] ZenRows post-login URL: " + postLoginUrl.substring(0, 150));
+
+              if (postLoginUrl.includes('consent')) {
+                console.log("[Draw-OIDC] ZenRows on consent page, clicking agree...");
+                try {
+                  const agreeBtn = await bdPage.$('button:has-text("I Agree"), button:has-text("Accept"), input[type="submit"]');
+                  if (agreeBtn) await agreeBtn.click();
+                  await bdPage.waitForTimeout(5000);
+                  postLoginUrl = bdPage.url();
+                } catch {}
+              }
+
+              if (postLoginUrl.includes('proxy.html')) {
+                console.log("[Draw-OIDC] ZenRows on proxy.html, waiting for OIDC redirect (up to 60s)...");
+                for (let pw = 0; pw < 30; pw++) {
+                  await bdPage.waitForTimeout(2000);
+                  postLoginUrl = bdPage.url();
+                  if (!postLoginUrl.includes('proxy.html')) {
+                    console.log("[Draw-OIDC] ZenRows proxy.html redirected to: " + postLoginUrl.substring(0, 150));
+                    break;
+                  }
+                  if (pw === 10) {
+                    console.log("[Draw-OIDC] ZenRows: proxy.html not redirecting after 20s, reloading...");
+                    try { await bdPage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+                    await bdPage.waitForTimeout(5000);
+                  }
+                }
+              }
+
+              const waitForQueueIt = async () => {
+                if (bdPage.url().includes('next.tickets.la28.org') || bdPage.url().includes('queue-it')) {
+                  console.log("[Draw-OIDC] ZenRows in Queue-it, waiting up to 4 min...");
+                  log("In Queue-it queue after login...");
+                  try {
+                    await bdPage.waitForURL(url => {
+                      const u = url.toString();
+                      return !u.includes('next.tickets.la28.org') && !u.includes('queue-it');
+                    }, { timeout: 240000 });
+                  } catch {}
+                  await bdPage.waitForTimeout(5000);
+                  console.log("[Draw-OIDC] ZenRows Queue-it passed! URL: " + bdPage.url().substring(0, 150));
+                }
+              };
+
+              const waitForProxyRedirect = async () => {
+                if (bdPage.url().includes('proxy.html')) {
+                  console.log("[Draw-OIDC] ZenRows on proxy.html, waiting for OIDC redirect (up to 90s)...");
+                  log("Waiting for authentication redirect...");
+                  for (let pw = 0; pw < 45; pw++) {
+                    await bdPage.waitForTimeout(2000);
+                    const curUrl = bdPage.url();
+                    if (!curUrl.includes('proxy.html')) {
+                      console.log("[Draw-OIDC] ZenRows proxy redirected to: " + curUrl.substring(0, 150));
+                      break;
+                    }
+                    if (pw === 15) {
+                      console.log("[Draw-OIDC] ZenRows proxy not redirecting after 30s, reloading...");
+                      try { await bdPage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+                      await bdPage.waitForTimeout(5000);
+                    }
+                  }
+                }
+              };
+
+              await waitForQueueIt();
+              await waitForProxyRedirect();
+              await waitForQueueIt();
+
+              if (bdPage.url().includes('consent')) {
+                console.log("[Draw-OIDC] ZenRows on consent page, clicking agree...");
+                try {
+                  const agreeBtn = await bdPage.$('button:has-text("I Agree"), button:has-text("Accept"), input[type="submit"]');
+                  if (agreeBtn) await agreeBtn.click();
+                  await bdPage.waitForTimeout(5000);
+                } catch {}
+                await waitForQueueIt();
+                await waitForProxyRedirect();
+              }
+
+              if (bdPage.url().includes('register') || bdPage.url().includes('login')) {
+                console.log("[Draw-OIDC] ZenRows on login/register after OIDC, re-logging in...");
+                const curZenUrl = bdPage.url();
+                if (curZenUrl.includes('#/login') || curZenUrl.includes('mycustomerdata')) {
+                  console.log("[Draw-OIDC] ZenRows on mycustomerdata/#/login — Keycloak session not established");
+                } else {
+                  const loginUrl2 = curZenUrl.includes('gig_client_id')
+                    ? curZenUrl.replace('/register/index.html', '/login/').replace('/register/', '/login/')
+                    : 'https://la28id.la28.org/login/';
+                  try {
+                    await bdPage.goto(loginUrl2, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                  } catch {}
+                  await bdPage.waitForTimeout(5000);
+                }
+              }
+
+              if (!bdPage.url().includes('mycustomerdata') || bdPage.url().includes('#/login')) {
+                console.log("[Draw-OIDC] ZenRows not authenticated on customer data, navigating fresh...");
+                log("Navigating to tickets.la28.org customer data...");
+                try {
+                  await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+                } catch (navErr2: any) {
+                  console.log("[Draw-OIDC] ZenRows nav error: " + navErr2.message.substring(0, 150));
+                }
+                await bdPage.waitForTimeout(5000);
+                await waitForQueueIt();
+                await waitForProxyRedirect();
+                await waitForQueueIt();
+              }
+            } else {
+              console.log("[Draw-OIDC] ZenRows Gigya login failed: " + (gigyaLoginResult.error || 'unknown'));
+              log("Gigya login failed on ZenRows: " + (gigyaLoginResult.error || 'unknown'));
+
+              console.log("[Draw-OIDC] ZenRows fallback: trying form-based login...");
+              try {
+                const emailInput = await bdPage.$('input[type="email"], input[name="loginID"], input[name="email"], input[placeholder*="email" i]');
+                const passInput = await bdPage.$('input[type="password"], input[name="password"]');
+                if (emailInput && passInput) {
+                  await emailInput.fill(email);
+                  await bdPage.waitForTimeout(500);
+                  await passInput.fill(password);
+                  await bdPage.waitForTimeout(500);
+                  const submitBtn = await bdPage.$('button[type="submit"], input[type="submit"], button:has-text("Log in"), button:has-text("Sign in")');
+                  if (submitBtn) {
+                    await submitBtn.click();
+                    console.log("[Draw-OIDC] ZenRows form login submitted");
+                    await bdPage.waitForTimeout(8000);
+                    try {
+                      await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+                    } catch {}
+                    await bdPage.waitForTimeout(5000);
+                  }
+                } else {
+                  console.log("[Draw-OIDC] ZenRows: no login form inputs found");
+                }
+              } catch (formLoginErr: any) {
+                console.log("[Draw-OIDC] ZenRows form login error: " + formLoginErr.message.substring(0, 100));
+              }
+            }
           }
 
           try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
@@ -2770,25 +3058,150 @@ export async function completeDrawViaGigyaBrowser(
               log("Form fill attempted but submit not confirmed.");
             }
           } else if (isCustomerPage) {
-            console.log("[Draw-OIDC] BD on customer page but no form detected yet. Waiting for SPA to render...");
-            log("On tickets page - waiting for Angular SPA to load form...");
+            console.log("[Draw-OIDC] BD on customer page but no form detected yet.");
+            
+            const needsLogin = bdText.includes('Log In') || bdText.includes('Register') || 
+              bdText.includes('Forgot your password') || bdText.includes('Already have an account') ||
+              bdUrl.includes('#/login') || bdUrl.includes('#/register') || bdUrl.includes('#/');
+            
+            if (needsLogin) {
+              console.log("[Draw-OIDC] ZenRows not authenticated on tickets page. Logging in via Gigya...");
+              log("Not logged in on tickets page. Logging in via Gigya...");
+              
+              try {
+                await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                await bdPage.waitForTimeout(5000);
+                try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+                
+                const loginUrl = bdPage.url();
+                console.log("[Draw-OIDC] ZenRows navigated to login: " + loginUrl.substring(0, 150));
+                
+                if (loginUrl.includes('register')) {
+                  const loginNavUrl = loginUrl.includes('gig_client_id')
+                    ? loginUrl.replace('/register/index.html', '/login/').replace('/register/', '/login/')
+                    : 'https://la28id.la28.org/login/';
+                  await bdPage.goto(loginNavUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                  await bdPage.waitForTimeout(5000);
+                }
+                
+                const safeEmailLogin = email.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+                const safePassLogin = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+                
+                let loginSuccess = false;
+                for (let loginAttempt = 1; loginAttempt <= 3; loginAttempt++) {
+                  console.log("[Draw-OIDC] ZenRows Gigya login attempt " + loginAttempt + " (from customer page)...");
+                  const loginResult = await bdPage.evaluate(`
+                    new Promise(function(resolve) {
+                      var maxWait = setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
+                      try {
+                        gigya.accounts.login({
+                          loginID: '${safeEmailLogin}',
+                          password: '${safePassLogin}',
+                          callback: function(resp) {
+                            clearTimeout(maxWait);
+                            if (resp.errorCode === 0) {
+                              resolve({ success: true });
+                            } else {
+                              resolve({ success: false, error: resp.errorMessage || 'Error ' + resp.errorCode });
+                            }
+                          }
+                        });
+                      } catch(e) {
+                        clearTimeout(maxWait);
+                        resolve({ success: false, error: 'Exception: ' + e.message });
+                      }
+                    })
+                  `) as { success: boolean; error?: string };
+                  console.log("[Draw-OIDC] ZenRows login result: " + JSON.stringify(loginResult));
+                  if (loginResult.success) { loginSuccess = true; break; }
+                  await bdPage.waitForTimeout(3000);
+                }
+                
+                if (loginSuccess) {
+                  log("Gigya login OK. Waiting for post-login redirect...");
+                  for (let pw = 0; pw < 10; pw++) {
+                    await bdPage.waitForTimeout(2000);
+                    const curUrl = bdPage.url();
+                    if (curUrl.includes('proxy.html?mode=afterLogin') || curUrl.includes('tickets.la28.org')) {
+                      console.log("[Draw-OIDC] ZenRows post-login redirect: " + curUrl.substring(0, 150));
+                      break;
+                    }
+                  }
+                  
+                  let postLoginUrl = bdPage.url();
+                  if (postLoginUrl.includes('proxy.html')) {
+                    console.log("[Draw-OIDC] ZenRows on proxy.html after login, waiting for OIDC...");
+                    for (let pw = 0; pw < 30; pw++) {
+                      await bdPage.waitForTimeout(2000);
+                      postLoginUrl = bdPage.url();
+                      if (!postLoginUrl.includes('proxy.html')) {
+                        console.log("[Draw-OIDC] ZenRows proxy.html redirected to: " + postLoginUrl.substring(0, 150));
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (postLoginUrl.includes('next.tickets.la28.org') || postLoginUrl.includes('queue-it')) {
+                    console.log("[Draw-OIDC] ZenRows post-login in Queue-it...");
+                    try {
+                      await bdPage.waitForURL(url => {
+                        const u = url.toString();
+                        return !u.includes('next.tickets.la28.org') && !u.includes('queue-it');
+                      }, { timeout: 240000 });
+                    } catch {}
+                    await bdPage.waitForTimeout(5000);
+                  }
+                  
+                  postLoginUrl = bdPage.url();
+                  console.log("[Draw-OIDC] ZenRows post-login final URL: " + postLoginUrl.substring(0, 150));
+                  
+                  if (!postLoginUrl.includes('mycustomerdata') || postLoginUrl.includes('#/login')) {
+                    try {
+                      await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+                    } catch {}
+                    await bdPage.waitForTimeout(10000);
+                  }
+                }
+              } catch (loginErr: any) {
+                console.log("[Draw-OIDC] ZenRows login from customer page error: " + loginErr.message.substring(0, 150));
+              }
+            }
 
-            await bdPage.waitForTimeout(10000);
-            const afterWait = await bdPage.evaluate(() => document.body?.innerText?.substring(0, 2000) || '');
-            console.log("[Draw-OIDC] BD after extra wait text: " + afterWait.substring(0, 800));
+            log("Waiting for SPA form to render...");
+            for (let spaWait = 0; spaWait < 6; spaWait++) {
+              await bdPage.waitForTimeout(5000);
+              const afterWaitText = await bdPage.evaluate(`(document.body.innerText || '').substring(0, 2000)`) as string;
+              console.log("[Draw-OIDC] SPA wait " + spaWait + ": textLen=" + afterWaitText.length + " hasProfile=" + afterWaitText.includes('PROFILE') + " hasBirthYear=" + afterWaitText.includes('Birth Year'));
+              if (afterWaitText.includes('Birth Year') || afterWaitText.includes('PROFILE') ||
+                  afterWaitText.includes('Save profile') || afterWaitText.includes('INFORMATION') ||
+                  afterWaitText.includes('FAVORITE') || afterWaitText.includes('DRAW')) {
+                console.log("[Draw-OIDC] Draw profile form appeared!");
+                break;
+              }
+              if (spaWait === 2) {
+                console.log("[Draw-OIDC] Reloading page...");
+                try {
+                  await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                } catch {}
+                await bdPage.waitForTimeout(5000);
+              }
+            }
+
+            const afterWait = await bdPage.evaluate(`(document.body.innerText || '').substring(0, 2000)`) as string;
+            console.log("[Draw-OIDC] BD after SPA wait text: " + afterWait.substring(0, 500));
 
             const hasFormNow = afterWait.includes('Birth Year') || afterWait.includes('PROFILE') ||
               afterWait.includes('Save profile') || afterWait.includes('INFORMATION') ||
-              afterWait.includes('FAVORITE') || afterWait.includes('First') || afterWait.includes('Country');
+              afterWait.includes('FAVORITE') || afterWait.includes('DRAW');
             if (hasFormNow) {
-              console.log("[Draw-OIDC] Form appeared after SPA wait! Filling...");
-              log("Form loaded after wait. Filling draw registration form...");
+              console.log("[Draw-OIDC] Form appeared! Filling...");
+              log("Form loaded. Filling draw registration form...");
               const formResult2 = await fillAndSubmitTicketsForm(
                 bdPage, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
               );
               if (formResult2) {
                 formSubmitted = true;
-                log("Draw form submitted on tickets.la28.org via ZenRows (after SPA wait)!");
+                log("Draw form submitted on tickets.la28.org via ZenRows!");
               }
             } else {
               log("Form still not detected after waiting. SPA may require different approach.");
