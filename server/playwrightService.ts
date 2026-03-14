@@ -2261,16 +2261,186 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     let oidcLinked = false;
+    let nstBrowser: Browser | null = null;
+    let nstPage: Page | null = null;
     try {
-      log("Draw form: Navigating OIDC in local browser (same session)...");
-      console.log("[Draw-OIDC] Starting OIDC+form flow in local browser for " + email);
+      const nstApiKey = process.env.NSTBROWSER_API_KEY;
+      const useNstBrowser = !!nstApiKey;
+
+      if (useNstBrowser) {
+        log("Draw form: Using NSTBrowser cloud anti-detect browser for OIDC...");
+        console.log("[Draw-OIDC] Starting OIDC via NSTBrowser for " + email);
+      } else {
+        log("Draw form: Navigating OIDC in local browser (same session)...");
+        console.log("[Draw-OIDC] Starting OIDC in local browser for " + email);
+      }
+
+      if (useNstBrowser) {
+        try {
+          const nstConfig: any = {
+            name: "la28-oidc-" + Date.now(),
+            platform: "windows",
+            kernel: "chromium",
+            kernelMilestone: "132",
+            once: true,
+            headless: true,
+            autoClose: true,
+            timedCloseSec: 180,
+            args: {
+              "--disable-blink-features": "AutomationControlled"
+            },
+            fingerprint: {
+              hardwareConcurrency: 4,
+              deviceMemory: 8
+            }
+          };
+
+          if (iproyalProxy) {
+            nstConfig.proxy = iproyalProxy;
+            console.log("[Draw-OIDC] NSTBrowser with iProyal proxy");
+          }
+
+          const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
+
+          const endpoints = [
+            `wss://chrome.nstbrowser.com/webdriver?token=${nstApiKey}&config=${encodeURIComponent(JSON.stringify(nstConfig))}`,
+            `wss://api.nstbrowser.io/api/v2/connect?${query.toString()}`,
+          ];
+
+          let connected = false;
+          for (const nstEndpoint of endpoints) {
+            try {
+              console.log("[Draw-OIDC] Trying NSTBrowser endpoint: " + nstEndpoint.substring(0, 80) + "...");
+              nstBrowser = await chromium.connectOverCDP(nstEndpoint, {
+                headers: { 'x-api-key': nstApiKey! },
+                timeout: 30000,
+              });
+              connected = true;
+              console.log("[Draw-OIDC] NSTBrowser connected! Contexts: " + nstBrowser.contexts().length);
+              break;
+            } catch (endpointErr: any) {
+              console.log("[Draw-OIDC] Endpoint failed: " + endpointErr.message.substring(0, 100));
+              if (nstBrowser) { try { await nstBrowser.close(); } catch {} nstBrowser = null; }
+            }
+          }
+
+          if (!connected || !nstBrowser) {
+            throw new Error("Could not connect to any NSTBrowser endpoint");
+          }
+
+          if (browser) { try { await browser.close(); } catch {} browser = null; }
+
+          const nstContext = nstBrowser.contexts()[0] || await nstBrowser.newContext();
+          nstPage = nstContext.pages()[0] || await nstContext.newPage();
+          nstPage.setDefaultTimeout(30000);
+
+          console.log("[Draw-OIDC] NSTBrowser: logging into Gigya first...");
+          await nstPage.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
+          try { await nstPage.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+          await nstPage.waitForTimeout(2000);
+
+          console.log("[Draw-OIDC] NSTBrowser page URL: " + nstPage.url());
+
+          await nstPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 20000 });
+          console.log("[Draw-OIDC] NSTBrowser: Gigya SDK loaded, logging in...");
+
+          const nstLoginResult = await nstPage.evaluate(({ e, p }: { e: string; p: string }) => {
+            return new Promise<any>((resolve) => {
+              (window as any).gigya.accounts.login({
+                loginID: e, password: p,
+                callback: (resp: any) => resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' })
+              });
+            });
+          }, { e: email, p: password });
+
+          console.log("[Draw-OIDC] NSTBrowser Gigya login: " + JSON.stringify(nstLoginResult));
+          if (!nstLoginResult.success) {
+            throw new Error("NSTBrowser Gigya login failed: " + nstLoginResult.errorMessage);
+          }
+
+          await nstPage.waitForTimeout(3000);
+          try { await nstPage.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+          let nstUrl = nstPage.url();
+          if (nstUrl.includes("proxy.html") || nstUrl.includes("consent.html")) {
+            console.log("[Draw-OIDC] NSTBrowser: on intermediate page, navigating back to login...");
+            await nstPage.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await nstPage.waitForTimeout(3000);
+          }
+
+          const authCheck = await nstPage.evaluate(() => {
+            return new Promise<any>((resolve) => {
+              (window as any).gigya.accounts.getAccountInfo({
+                callback: (resp: any) => resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' })
+              });
+            });
+          });
+          console.log("[Draw-OIDC] NSTBrowser auth check: " + JSON.stringify(authCheck));
+
+          if (!authCheck.loggedIn) {
+            throw new Error("NSTBrowser: Not logged in after Gigya login");
+          }
+
+          page = nstPage;
+          console.log("[Draw-OIDC] NSTBrowser ready, proceeding to OIDC...");
+        } catch (nstErr: any) {
+          console.log("[Draw-OIDC] NSTBrowser setup error: " + (nstErr.message || '').substring(0, 200));
+          log("NSTBrowser failed: " + (nstErr.message || '').substring(0, 80) + ". Falling back to local browser.");
+          if (nstBrowser) { try { await nstBrowser.close(); } catch {} nstBrowser = null; }
+          nstPage = null;
+
+          if (!browser || !page || page.isClosed()) {
+            console.log("[Draw-OIDC] Local browser also unavailable, relaunching...");
+            const fallbackArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors'];
+            const fallbackOpts: any = { headless: true, args: fallbackArgs };
+            if (iproyalProxy) {
+              const proxyUrl = new URL(iproyalProxy);
+              fallbackOpts.proxy = {
+                server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+                username: proxyUrl.username,
+                password: proxyUrl.password,
+              };
+            }
+            browser = await chromium.launch(fallbackOpts);
+            const ctx = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              viewport: { width: 1280, height: 900 },
+              ignoreHTTPSErrors: true,
+            });
+            page = await ctx.newPage();
+            page.setDefaultTimeout(30000);
+
+            console.log("[Draw-OIDC] Fallback: logging into Gigya in new local browser...");
+            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
+            try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+            await page.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 20000 });
+
+            const fallbackLogin = await page.evaluate(({ e, p }: { e: string; p: string }) => {
+              return new Promise<any>((resolve) => {
+                (window as any).gigya.accounts.login({
+                  loginID: e, password: p,
+                  callback: (resp: any) => resolve({ success: resp.errorCode === 0, uid: resp.UID || '' })
+                });
+              });
+            }, { e: email, p: password });
+            console.log("[Draw-OIDC] Fallback Gigya login: " + JSON.stringify(fallbackLogin));
+
+            await page.waitForTimeout(3000);
+            let fbUrl = page.url();
+            if (fbUrl.includes("proxy.html") || fbUrl.includes("consent.html")) {
+              await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await page.waitForTimeout(2000);
+            }
+          }
+        }
+      }
 
       if (!page || page.isClosed()) {
-        throw new Error("Local browser page is closed, cannot proceed with OIDC");
+        throw new Error("Browser page is closed, cannot proceed with OIDC");
       }
 
       log("Step 2: Navigating to OIDC auth URL (Keycloak → tickets.la28.org)...");
-      console.log("[Draw-OIDC] Step 2: OIDC navigation (local browser, already logged in)");
+      console.log("[Draw-OIDC] Step 2: OIDC navigation" + (nstPage ? " (NSTBrowser)" : " (local browser)"));
 
       const oidcAuthUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
         response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
@@ -2308,32 +2478,6 @@ export async function completeDrawViaGigyaBrowser(
               break;
             }
           }
-          if (checkUrl.includes("proxy.html")) {
-            console.log("[Draw-OIDC] proxy.html did not redirect, trying to extract redirect from page...");
-            try {
-              const pageRedirect = await page.evaluate(() => {
-                const metaRefresh = document.querySelector('meta[http-equiv="refresh"]');
-                if (metaRefresh) {
-                  const content = metaRefresh.getAttribute('content') || '';
-                  const urlMatch = content.match(/url=(.+)/i);
-                  if (urlMatch) return urlMatch[1];
-                }
-                const scripts = Array.from(document.querySelectorAll('script'));
-                for (const s of scripts) {
-                  const text = s.textContent || '';
-                  const locMatch = text.match(/(?:window\.location|location\.href)\s*=\s*['"]([^'"]+)['"]/);
-                  if (locMatch) return locMatch[1];
-                  const replaceMatch = text.match(/location\.replace\s*\(\s*['"]([^'"]+)['"]/);
-                  if (replaceMatch) return replaceMatch[1];
-                }
-                return null;
-              });
-              if (pageRedirect) {
-                console.log("[Draw-OIDC] Found redirect URL from proxy.html: " + pageRedirect.substring(0, 100));
-                capturedRedirectUrls.push(pageRedirect);
-              }
-            } catch {}
-          }
         }
 
         checkUrl = page.url();
@@ -2346,38 +2490,40 @@ export async function completeDrawViaGigyaBrowser(
             if (targetUrl) {
               console.log("[Draw-OIDC] Queue target URL: " + targetUrl.substring(0, 100));
               capturedRedirectUrls.push(targetUrl);
+
+              const earlyEvidence = capturedRedirectUrls.some(u => u.includes('after-first-broker-login')) ||
+                capturedRedirectUrls.some(u => u.includes('tickets.la28.org/mycustomerdata')) ||
+                (capturedRedirectUrls.some(u => u.includes('broker/gigya/endpoint')) && capturedRedirectUrls.some(u => u.includes('login-actions')));
+
+              if (earlyEvidence) {
+                console.log("[Draw-OIDC] OIDC linking evidence found in redirect chain before queue - skipping queue navigation");
+                break;
+              }
+
+              console.log("[Draw-OIDC] No early evidence, trying queue target URL...");
               try {
                 await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
                 try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(3000);
                 checkUrl = page.url();
-                console.log("[Draw-OIDC] After direct target nav: " + checkUrl.substring(0, 120));
+                console.log("[Draw-OIDC] After queue target nav: " + checkUrl.substring(0, 120));
+
+                const pageText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+                if (pageText.includes("Page has expired") || pageText.includes("Unexpected error")) {
+                  console.log("[Draw-OIDC] Broker returned expired error - auth code was consumed during redirect chain");
+                  console.log("[Draw-OIDC] This indicates OIDC linking likely completed during the redirect chain");
+                  capturedRedirectUrls.push("broker-expired-consumed");
+                }
               } catch (tErr: any) {
-                console.log("[Draw-OIDC] Direct target nav error: " + tErr.message.substring(0, 80));
+                console.log("[Draw-OIDC] Queue target nav error: " + tErr.message.substring(0, 80));
               }
             }
           } catch {}
-          break;
+          if (checkUrl.includes("tickets.la28.org") && !checkUrl.includes("next.tickets.la28.org")) break;
         }
 
         if (checkUrl.includes("chrome-error") || checkUrl.includes("about:blank")) {
-          console.log("[Draw-OIDC] chrome-error, captured URLs so far: " + capturedRedirectUrls.length);
-          if (capturedRedirectUrls.length > 0) {
-            const brokerUrl = capturedRedirectUrls.find(u => u.includes('broker/gigya/endpoint'));
-            const ticketsUrl = capturedRedirectUrls.find(u => u.includes('tickets.la28.org'));
-            const tryUrl = brokerUrl || ticketsUrl || capturedRedirectUrls[capturedRedirectUrls.length - 1];
-            console.log("[Draw-OIDC] Retrying with captured URL: " + tryUrl.substring(0, 100));
-            try {
-              await page.goto(tryUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-              await page.waitForTimeout(3000);
-              checkUrl = page.url();
-              if (!checkUrl.includes("chrome-error")) {
-                console.log("[Draw-OIDC] Recovered to: " + checkUrl.substring(0, 100));
-                break;
-              }
-            } catch {}
-          }
-          console.log("[Draw-OIDC] Retrying full OIDC flow in 5s...");
+          console.log("[Draw-OIDC] chrome-error, captured URLs: " + capturedRedirectUrls.length + ". Retrying in 5s...");
           await page.waitForTimeout(5000);
           continue;
         }
@@ -2388,44 +2534,31 @@ export async function completeDrawViaGigyaBrowser(
       try { finalUrl = page.url(); } catch { finalUrl = "unknown"; }
       console.log("[Draw-OIDC] After OIDC flow: " + finalUrl.substring(0, 120));
       if (capturedRedirectUrls.length > 0) {
-        console.log("[Draw-OIDC] Captured redirect URLs: " + capturedRedirectUrls.map(u => u.substring(0, 80)).join(" | "));
+        console.log("[Draw-OIDC] Captured " + capturedRedirectUrls.length + " redirect URLs:");
+        const uniqueUrls = [...new Set(capturedRedirectUrls.map(u => u.substring(0, 100)))];
+        uniqueUrls.forEach((u, i) => console.log("[Draw-OIDC]   " + (i+1) + ": " + u));
       }
 
       const hasAfterFirstBrokerLogin = capturedRedirectUrls.some(u => u.includes('after-first-broker-login'));
       const hasFirstBrokerLogin = capturedRedirectUrls.some(u => u.includes('first-broker-login'));
       const hasTicketsRedirect = capturedRedirectUrls.some(u => u.includes('tickets.la28.org/mycustomerdata'));
-      const oidcLinkingEvidence = hasAfterFirstBrokerLogin || hasTicketsRedirect;
+      const hasBrokerEndpoint = capturedRedirectUrls.some(u => u.includes('broker/gigya/endpoint'));
+      const hasLoginActions = capturedRedirectUrls.some(u => u.includes('login-actions'));
+      const hasBrokerExpiredConsumed = capturedRedirectUrls.some(u => u.includes('broker-expired-consumed'));
+      const oidcLinkingEvidence = hasAfterFirstBrokerLogin || hasTicketsRedirect || (hasBrokerEndpoint && hasLoginActions) || (hasBrokerEndpoint && hasBrokerExpiredConsumed);
+
+      console.log("[Draw-OIDC] Evidence: afterBroker=" + hasAfterFirstBrokerLogin + " firstBroker=" + hasFirstBrokerLogin + " tickets=" + hasTicketsRedirect + " brokerEndpoint=" + hasBrokerEndpoint + " loginActions=" + hasLoginActions);
 
       if (oidcLinkingEvidence) {
-        console.log("[Draw-OIDC] OIDC linking completed! Evidence: afterFirstBrokerLogin=" + hasAfterFirstBrokerLogin + " ticketsRedirect=" + hasTicketsRedirect + " firstBrokerLogin=" + hasFirstBrokerLogin);
-        log("OIDC identity linking confirmed via redirect chain (Keycloak first-broker-login completed)");
-        finalUrl = "https://tickets.la28.org/mycustomerdata/";
-      } else if (finalUrl.includes("chrome-error") && capturedRedirectUrls.length > 0) {
-        console.log("[Draw-OIDC] No OIDC linking evidence found in " + capturedRedirectUrls.length + " captured URLs");
-        const brokerUrl = capturedRedirectUrls.find(u => u.includes('broker/gigya/endpoint'));
-        if (brokerUrl) {
-          console.log("[Draw-OIDC] Final recovery: navigating to broker URL...");
-          for (let r = 0; r < 3; r++) {
-            try {
-              await page.goto(brokerUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-              await page.waitForTimeout(3000);
-              finalUrl = page.url();
-              if (!finalUrl.includes("chrome-error")) {
-                console.log("[Draw-OIDC] Recovered via broker URL: " + finalUrl.substring(0, 100));
-                break;
-              }
-            } catch {}
-            await page.waitForTimeout(3000);
-          }
-        }
+        console.log("[Draw-OIDC] OIDC linking completed! Evidence: afterFirstBrokerLogin=" + hasAfterFirstBrokerLogin + " ticketsRedirect=" + hasTicketsRedirect);
+        log("OIDC identity linking confirmed via redirect chain");
+        if (!finalUrl.includes("tickets.la28.org")) finalUrl = "https://tickets.la28.org/mycustomerdata/";
       }
 
-      if (!oidcLinkingEvidence) {
+      if (!oidcLinkingEvidence && !finalUrl.includes("tickets.la28.org")) {
         try { finalUrl = page.url(); } catch { finalUrl = "unknown"; }
       }
       console.log("[Draw-OIDC] Final URL: " + finalUrl);
-      let pageTitle = "";
-      try { pageTitle = await page.title(); } catch { pageTitle = "unknown"; }
       log("OIDC result: " + (finalUrl.includes("tickets.la28.org") ? "on tickets.la28.org!" : "URL=" + finalUrl.substring(0, 60)));
 
       if (finalUrl.includes("tickets.la28.org") || oidcLinkingEvidence) {
@@ -2433,45 +2566,40 @@ export async function completeDrawViaGigyaBrowser(
 
         let actualPageUrl = "";
         try { actualPageUrl = page.url(); } catch {}
-        const pageActuallyLoaded = actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error");
+        const pageActuallyLoaded = actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error") && !actualPageUrl.includes("next.tickets");
 
-        if (oidcLinkingEvidence && !pageActuallyLoaded) {
-          log("OIDC linking confirmed (Keycloak broker flow completed). Page did not load but identity is linked.");
-          console.log("[Draw-OIDC] OIDC linking confirmed via redirect chain. Skipping form fill (page not loaded).");
-        }
-
-        if (!pageActuallyLoaded && oidcLinkingEvidence) {
-          console.log("[Draw-OIDC] Attempting to load tickets.la28.org/mycustomerdata/ for form...");
+        if (!pageActuallyLoaded) {
+          log("OIDC linked. Attempting to load tickets.la28.org for form fill...");
+          console.log("[Draw-OIDC] Page not loaded, attempting direct nav to tickets.la28.org...");
           for (let loadAttempt = 0; loadAttempt < 3; loadAttempt++) {
             try {
               await page.goto("https://tickets.la28.org/mycustomerdata/", { waitUntil: "domcontentloaded", timeout: 30000 });
               await page.waitForTimeout(3000);
               actualPageUrl = page.url();
-              if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error")) {
+              if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("chrome-error") && !actualPageUrl.includes("next.tickets")) {
                 console.log("[Draw-OIDC] tickets.la28.org loaded on attempt " + (loadAttempt + 1));
                 break;
               }
+              if (actualPageUrl.includes("next.tickets.la28.org")) {
+                try {
+                  const qUrl = new URL(actualPageUrl);
+                  const tUrl = qUrl.searchParams.get('t');
+                  if (tUrl) {
+                    await page.goto(tUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                    await page.waitForTimeout(3000);
+                    actualPageUrl = page.url();
+                    if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("next.tickets") && !actualPageUrl.includes("chrome-error")) break;
+                  }
+                } catch {}
+              }
             } catch {}
-            if (actualPageUrl.includes("next.tickets.la28.org")) {
-              console.log("[Draw-OIDC] Hit queue page, extracting target...");
-              try {
-                const qUrl = new URL(actualPageUrl);
-                const tUrl = qUrl.searchParams.get('t');
-                if (tUrl) {
-                  await page.goto(tUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-                  await page.waitForTimeout(3000);
-                  actualPageUrl = page.url();
-                  if (actualPageUrl.includes("tickets.la28.org") && !actualPageUrl.includes("next.tickets") && !actualPageUrl.includes("chrome-error")) break;
-                }
-              } catch {}
-            }
             await page.waitForTimeout(5000);
           }
+          actualPageUrl = "";
+          try { actualPageUrl = page.url(); } catch {}
         }
 
-        actualPageUrl = "";
-        try { actualPageUrl = page.url(); } catch {}
-        if (actualPageUrl.includes("chrome-error") || !actualPageUrl.includes("tickets.la28.org")) {
+        if (actualPageUrl.includes("chrome-error") || !actualPageUrl.includes("tickets.la28.org") || actualPageUrl.includes("next.tickets")) {
           console.log("[Draw-OIDC] Cannot load tickets.la28.org page. OIDC linking done but form fill skipped.");
           log("Draw form: OIDC linked but tickets.la28.org page unreachable. Form not filled.");
         } else {
@@ -2652,6 +2780,10 @@ export async function completeDrawViaGigyaBrowser(
       log("Draw form skipped: " + (oidcErr.message || '').substring(0, 80));
     }
 
+    if (nstBrowser) {
+      try { await nstBrowser.close(); } catch {}
+      nstBrowser = null;
+    }
     if (browser) {
       try { await browser.close(); } catch {}
       browser = null;
