@@ -90,7 +90,8 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
         return r.json();
       })
       .then((data) => {
-        const val = data[field.fieldName] || "";
+        const raw = data[field.fieldName];
+        const val = raw !== undefined && raw !== null ? String(raw) : "";
         setValue(val);
         setOriginalValue(val);
         setLoading(false);
@@ -110,12 +111,13 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
   }, []);
 
   async function handleSave() {
-    if (!value.trim()) return;
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
     setSaving(true);
     sounds.click();
     try {
       const body: Record<string, string> = {};
-      body[field.fieldName] = value.trim();
+      body[field.fieldName] = trimmed;
       const res = await fetch(field.putEndpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -126,7 +128,7 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
       const data = await res.json();
       if (res.ok) {
         sounds.success();
-        setOriginalValue(value.trim());
+        setOriginalValue(trimmed);
         toast({ title: "Saved", description: `${field.label} updated successfully.` });
       } else {
         sounds.error();
@@ -140,9 +142,10 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
     }
   }
 
-  const hasChanged = value.trim() !== originalValue;
+  const strValue = String(value || "");
+  const hasChanged = strValue.trim() !== originalValue;
   const isSecret = field.id !== "account-price";
-  const maskedValue = value ? value.slice(0, 6) + "•".repeat(Math.max(0, value.length - 10)) + value.slice(-4) : "";
+  const maskedValue = strValue ? strValue.slice(0, 6) + "•".repeat(Math.max(0, strValue.length - 10)) + strValue.slice(-4) : "";
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${field.borderColor}`, background: 'rgba(19,26,38,0.9)' }} data-testid={`card-setting-${field.id}`}>
@@ -207,9 +210,9 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
             </div>
             <Button
               onClick={handleSave}
-              disabled={saving || !hasChanged || !value.trim()}
+              disabled={saving || !hasChanged || !strValue.trim()}
               className={`h-9 px-3 font-mono text-[11px] rounded-lg transition-all duration-200 ${
-                hasChanged && value.trim()
+                hasChanged && strValue.trim()
                   ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25"
                   : "bg-zinc-800/30 text-zinc-600 border border-zinc-700/20"
               }`}
