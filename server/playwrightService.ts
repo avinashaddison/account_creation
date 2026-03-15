@@ -1,4 +1,6 @@
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium as vanillaChromium, type Browser, type Page } from "playwright";
+import { chromium } from "playwright-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { execSync, execFile } from "child_process";
 import { promisify } from "util";
 import * as path from "path";
@@ -18,6 +20,8 @@ const IPROYAL_UNBLOCKER_HOST = "unblocker.iproyal.com";
 const IPROYAL_UNBLOCKER_PORT = 12323;
 const IPROYAL_UNBLOCKER_USER = "Gy1cwo1086864";
 const IPROYAL_UNBLOCKER_PASS = "KklSwl63u3TgeL8F";
+
+chromium.use(StealthPlugin());
 
 let activeProxyProvider: "iproyal" | "decodo" = "iproyal";
 
@@ -2138,7 +2142,7 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=90`;
       console.log("[Draw] Using Browserless built-in residential proxy (US)");
       console.log("[Draw] Connecting to Browserless Playwright endpoint...");
 
@@ -2160,54 +2164,7 @@ export async function completeDrawViaGigyaBrowser(
       });
       console.log("[Draw] Created Browserless context with residential proxy (US)");
 
-      await context.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
-
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters: any) =>
-          parameters.name === 'notifications'
-            ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
-            : originalQuery(parameters);
-
-        (window.navigator as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
-
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
-          if (parameter === 37445) return 'Intel Inc.';
-          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-          return getParameter.call(this, parameter);
-        };
-
-        const pluginData = [
-          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-        ];
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => {
-            const plugins = pluginData.map(p => {
-              const plugin = Object.create(Plugin.prototype);
-              Object.defineProperties(plugin, {
-                name: { value: p.name },
-                filename: { value: p.filename },
-                description: { value: p.description },
-                length: { value: 1 },
-              });
-              return plugin;
-            });
-            (plugins as any).item = (i: number) => plugins[i] || null;
-            (plugins as any).namedItem = (n: string) => plugins.find(p => p.name === n) || null;
-            (plugins as any).refresh = () => {};
-            return plugins;
-          },
-        });
-      });
-      console.log("[Draw] Stealth init scripts applied");
+      console.log("[Draw] Stealth plugin applied via playwright-extra");
 
       page = await context.newPage();
       page.setDefaultTimeout(60000);
@@ -2306,103 +2263,43 @@ export async function completeDrawViaGigyaBrowser(
       });
       console.log("[Draw] Pre-login reCAPTCHA check: " + JSON.stringify(preLoginRecaptcha));
 
-      let loginResult: any = null;
-
-      try {
-        const loginResponsePromise = page.waitForResponse(
-          (resp: any) => resp.url().includes('accounts.login') && resp.status() === 200,
-          { timeout: 45000 }
-        );
-
-        const submitBtn = await page.$('input[type="submit"][value*="Log"]:visible, input[type="submit"][value*="Sign"]:visible, button[type="submit"]:visible, .gigya-input-submit:visible, input.gigya-input-submit:visible');
-        if (submitBtn) {
-          console.log("[Draw] Found submit button, clicking...");
-          try {
-            const box = await submitBtn.boundingBox();
-            if (box) {
-              await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 + Math.floor(Math.random() * 5) });
-              await page.waitForTimeout(200 + Math.random() * 300);
-              await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-            } else {
-              await submitBtn.click();
-            }
-          } catch {
-            await submitBtn.click();
+      let loginResult = await page.evaluate(`(function() {
+        return new Promise(function(resolve) {
+          if (typeof gigya === 'undefined' || !gigya.accounts) {
+            resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '', raw: 'no gigya' });
+            return;
           }
-          console.log("[Draw] Login button clicked, waiting for Gigya response...");
-        } else {
-          console.log("[Draw] No submit button found, pressing Enter...");
-          await page.keyboard.press("Enter");
-        }
-
-        const gigyaResponse = await loginResponsePromise;
-        const respText = await gigyaResponse.text();
-        try {
-          const respJson = JSON.parse(respText.replace(/^[^{]*/, '').replace(/[^}]*$/, ''));
-          loginResult = {
-            success: respJson.errorCode === 0,
-            errorCode: respJson.errorCode,
-            errorMessage: respJson.errorMessage || '',
-            errorDetails: respJson.errorDetails || '',
-            uid: respJson.UID || '',
-            statusCode: respJson.statusCode,
-            statusReason: respJson.statusReason || '',
-            keys: Object.keys(respJson).slice(0, 20).join(','),
-            raw: 'redacted'
-          };
-        } catch {
-          console.log("[Draw] Could not parse Gigya response, checking page state...");
-          await page.waitForTimeout(5000);
-          const currentUrl = page.url();
-          loginResult = {
-            success: !currentUrl.includes('/login'),
-            errorCode: currentUrl.includes('/login') ? -3 : 0,
-            errorMessage: currentUrl.includes('/login') ? 'Still on login page after click' : 'Redirected after click',
-            uid: '',
-            keys: '',
-            raw: 'click-based'
-          };
-        }
-      } catch (clickErr: any) {
-        console.log("[Draw] Click-based login error: " + (clickErr.message || '').substring(0, 100));
-        console.log("[Draw] Falling back to SDK-based login...");
-
-        loginResult = await page.evaluate(`(function() {
-          return new Promise(function(resolve) {
-            if (typeof gigya === 'undefined' || !gigya.accounts) {
-              resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '', raw: 'no gigya' });
-              return;
-            }
-            var resolved = false;
-            gigya.accounts.login({
-              loginID: ${JSON.stringify(email)},
-              password: ${JSON.stringify(password)},
-              callback: function(resp) {
-                if (resolved) return;
-                resolved = true;
-                var keys = [];
-                try { keys = Object.keys(resp).slice(0, 20); } catch(e) {}
-                resolve({
-                  success: resp.errorCode === 0,
-                  errorCode: resp.errorCode,
-                  errorMessage: resp.errorMessage || resp.statusMessage || '',
-                  errorDetails: resp.errorDetails || '',
-                  uid: resp.UID || '',
-                  statusCode: resp.statusCode,
-                  statusReason: resp.statusReason || '',
-                  keys: keys.join(','),
-                  raw: 'redacted'
-                });
-              }
-            });
-            setTimeout(function() {
+          var resolved = false;
+          var loginParams = {
+            loginID: ${JSON.stringify(email)},
+            password: ${JSON.stringify(password)},
+            callback: function(resp) {
               if (resolved) return;
               resolved = true;
-              resolve({ success: false, errorCode: -2, errorMessage: 'timeout_30s', uid: '', raw: 'timeout' });
-            }, 30000);
-          });
-        })()`) as any;
-      }
+              var keys = [];
+              try { keys = Object.keys(resp).slice(0, 20); } catch(e) {}
+              resolve({
+                success: resp.errorCode === 0,
+                errorCode: resp.errorCode,
+                errorMessage: resp.errorMessage || resp.statusMessage || '',
+                errorDetails: resp.errorDetails || '',
+                uid: resp.UID || '',
+                statusCode: resp.statusCode,
+                statusReason: resp.statusReason || '',
+                keys: keys.join(','),
+                raw: 'redacted'
+              });
+            }
+          };
+          console.log('[Gigya-Login] Calling gigya.accounts.login (SDK handles reCAPTCHA internally)');
+          gigya.accounts.login(loginParams);
+          setTimeout(function() {
+            if (resolved) return;
+            resolved = true;
+            resolve({ success: false, errorCode: -2, errorMessage: 'timeout_30s', uid: '', raw: 'timeout' });
+          }, 30000);
+        });
+      })()`) as any;
       console.log("[Draw] Login result (attempt " + (attempt + 1) + "): " + JSON.stringify(loginResult));
 
       if (!loginResult.success) {
@@ -2681,7 +2578,7 @@ export async function completeDrawViaGigyaBrowser(
         console.log("[Draw-OIDC] Page closed, reconnecting Browserless for " + email);
 
         try {
-          const freshBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+          const freshBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=90`;
           console.log("[Draw-OIDC] Connecting to Browserless Playwright with residential proxy for OIDC...");
           const freshBrowser = await chromium.connect(freshBrowserlessUrl, { timeout: 60000 });
           browser = freshBrowser;
@@ -2934,7 +2831,7 @@ export async function completeDrawViaGigyaBrowser(
 
           if (!browser || !page || page.isClosed()) {
             console.log("[Draw-OIDC] Browser unavailable, reconnecting Browserless for OIDC fallback...");
-            const fallbackBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+            const fallbackBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=90`;
             browser = await chromium.connect(fallbackBrowserlessUrl, { timeout: 60000 });
             const ctx = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
