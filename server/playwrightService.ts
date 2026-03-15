@@ -2090,13 +2090,15 @@ export async function completeDrawViaGigyaBrowser(
 
   let formSubmitted = false;
   const browserlessToken = process.env.BROWSERLESS_TOKEN;
-  if (!browserlessToken) {
-    log("ERROR: BROWSERLESS_TOKEN not set. Cannot proceed.");
-    return { success: false, profileSet: false, dataSet: false, error: "BROWSERLESS_TOKEN environment variable not configured" };
-  }
+  const useLocal = !browserlessToken;
 
-  log("Draw via Browserless Stealth Chromium...");
-  console.log("[Draw] Starting for " + email + " via Browserless Stealth Chromium (US-based)");
+  if (useLocal) {
+    log("Draw via local Chromium (no Browserless configured)...");
+    console.log("[Draw] Starting for " + email + " via local Chromium");
+  } else {
+    log("Draw via Browserless Stealth Chromium...");
+    console.log("[Draw] Starting for " + email + " via Browserless Stealth Chromium (US-based)");
+  }
 
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -2117,24 +2119,35 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=60000`;
-      console.log("[Draw] Using Browserless STEALTH endpoint with residential proxy (US)");
-      console.log("[Draw] Connecting to Browserless Stealth CDP endpoint...");
-
-      browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 90000 });
-      console.log("[Draw] Browserless Stealth connected via CDP!");
-
-      const contexts = browser.contexts();
-      let context: any;
-      if (contexts.length > 0) {
-        context = contexts[0];
+      if (useLocal) {
+        console.log("[Draw] Launching local Chromium...");
+        browser = await chromium.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        });
+        const context = await browser.newContext({ ignoreHTTPSErrors: true });
+        page = await context.newPage();
+        page.setDefaultTimeout(60000);
       } else {
-        context = await browser.newContext({ ignoreHTTPSErrors: true });
-      }
+        const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=60000`;
+        console.log("[Draw] Using Browserless STEALTH endpoint with residential proxy (US)");
+        console.log("[Draw] Connecting to Browserless Stealth CDP endpoint...");
 
-      const pages = context.pages();
-      page = pages.length > 0 ? pages[0] : await context.newPage();
-      page.setDefaultTimeout(60000);
+        browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 90000 });
+        console.log("[Draw] Browserless Stealth connected via CDP!");
+
+        const contexts = browser.contexts();
+        let context: any;
+        if (contexts.length > 0) {
+          context = contexts[0];
+        } else {
+          context = await browser.newContext({ ignoreHTTPSErrors: true });
+        }
+
+        const pages = context.pages();
+        page = pages.length > 0 ? pages[0] : await context.newPage();
+        page.setDefaultTimeout(60000);
+      }
 
       try {
         const cdpSession = await page.context().newCDPSession(page);
@@ -2309,7 +2322,7 @@ export async function completeDrawViaGigyaBrowser(
               if (el) return el.getAttribute('data-sitekey');
               return null;
             });
-            const recaptchaSiteKey = siteKey || "6LcPEfwpAAAAAH29k3K6rBdKt0WlAJ-PNy5-bKsv";
+            const recaptchaSiteKey = siteKey || "6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr";
             console.log("[Draw] Using reCAPTCHA site key: " + recaptchaSiteKey);
             log("Solving reCAPTCHA via CapSolver (site key: " + recaptchaSiteKey.substring(0, 10) + "...)");
 
@@ -2328,7 +2341,7 @@ export async function completeDrawViaGigyaBrowser(
                     loginID: ${JSON.stringify(email)},
                     password: ${JSON.stringify(password)},
                     captchaToken: "${capResult.token}",
-                    captchaType: "recaptchaV2",
+                    captchaType: "reCaptchaV2",
                     callback: function(resp) {
                       resolve({
                         success: resp.errorCode === 0,
@@ -3952,7 +3965,46 @@ export async function completeDrawRegistrationViaApi(
     password: password,
   });
   const loginResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: loginParams });
-  const loginData = await loginResp.json() as any;
+  let loginData = await loginResp.json() as any;
+
+  if (loginData.errorCode === 400006) {
+    console.log("[Draw-API] CAPTCHA required (400006), attempting CapSolver...");
+    log("[GIGYA ACCOUNT] CAPTCHA required. Solving via CapSolver...");
+    try {
+      const capResultV2 = await solveRecaptchaV2Enterprise(
+        "https://la28id.la28.org/login/",
+        "6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr"
+      );
+      const capResultV3 = capResultV2.success ? capResultV2 : await solveRecaptchaV3Enterprise(
+        "https://la28id.la28.org/login/",
+        "6Lc8WkwhAAAAAPHXbaEde5PP3Skj9tCZn-A8U555",
+        "login",
+        0.7
+      );
+      const capResult = capResultV2.success ? capResultV2 : capResultV3;
+      const captchaType = capResultV2.success ? "reCaptchaV2" : "invisible";
+      if (capResult.success && capResult.token) {
+        console.log("[Draw-API] CapSolver token received (type=" + captchaType + "), length: " + capResult.token.length + ". Retrying login...");
+        log("[GIGYA ACCOUNT] CapSolver solved! Retrying login with token...");
+        const retryParams = new URLSearchParams({
+          apiKey: GIGYA_API_KEY,
+          loginID: email,
+          password: password,
+          captchaToken: capResult.token,
+          captchaType: captchaType,
+        });
+        const retryResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: retryParams });
+        loginData = await retryResp.json() as any;
+        console.log("[Draw-API] CapSolver retry result: errorCode=" + loginData.errorCode + " msg=" + (loginData.errorMessage || ""));
+      } else {
+        console.log("[Draw-API] CapSolver failed: " + capResult.error);
+        log("[GIGYA ACCOUNT] CapSolver failed: " + (capResult.error || "unknown"));
+      }
+    } catch (capErr: any) {
+      console.log("[Draw-API] CapSolver error: " + (capErr.message || "").substring(0, 100));
+      log("[GIGYA ACCOUNT] CapSolver error: " + (capErr.message || "").substring(0, 60));
+    }
+  }
 
   if (loginData.errorCode !== 0) {
     console.log("[Draw-API] Login FAILED: errorCode=" + loginData.errorCode + " msg=" + (loginData.errorMessage || "") + " details=" + (loginData.errorDetails || "").substring(0, 120));

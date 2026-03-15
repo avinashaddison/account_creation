@@ -14,18 +14,16 @@ import { getSMSPoolBalance } from "./smspoolService";
 import { getCapSolverBalance } from "./capsolverService";
 import { randomUUID, createHash } from "crypto";
 
-async function getDefaultBrowserApiUrl(): Promise<string> {
+async function getDefaultBrowserApiUrl(): Promise<string | null> {
   const saved = await storage.getSetting("browser_proxy_url");
-  if (!saved) {
-    throw new Error("No browser proxy URL configured. Please set it in Settings > Browser Proxy URL.");
-  }
-  return saved;
+  return saved || null;
 }
 
 async function getDefaultProxies(proxyList?: string[]): Promise<string[]> {
   if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;
   const saved = await getDefaultBrowserApiUrl();
-  return [saved];
+  if (saved) return [saved];
+  return ["local"];
 }
 
 function hashPassword(password: string): string {
@@ -985,7 +983,7 @@ export async function registerRoutes(
       (async () => {
         await processAccount(
           account.id, batchId, cleanFirstName, cleanLastName, cleanPassword,
-          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId, await getDefaultBrowserApiUrl()
+          cleanCountry, cleanLanguage, addisonEmail, addisonEmailPassword, userId, (await getDefaultBrowserApiUrl()) || ""
         );
         broadcastBatchComplete(batchId, userId);
       })();
@@ -1090,29 +1088,47 @@ export async function registerRoutes(
     try {
       await storage.updateAccount(account.id, { status: "draw_registering" });
       broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
-      log("Retrying draw registration via Gigya browser (no proxy needed)...");
+      log("Retrying draw registration via REST API (with CapSolver for CAPTCHA)...");
 
-      const gigyaResult = await completeDrawViaGigyaBrowser(
+      const apiResult = await completeDrawRegistrationViaApi(
         account.email,
         account.la28Password,
         account.zipCode || undefined,
         log
       );
 
-      if (gigyaResult.success) {
+      if (apiResult.success) {
         await storage.updateAccount(account.id, { status: "completed" });
         broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-        log("Draw registration completed successfully via Gigya browser!");
+        log("Draw registration completed successfully via REST API!");
       } else {
-        log("Gigya browser approach incomplete (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + " error=" + (gigyaResult.error || "none") + ").");
-        if (gigyaResult.profileSet || gigyaResult.dataSet) {
+        log("REST API draw failed (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "), trying Gigya browser fallback...");
+
+        if (apiResult.profileSet || apiResult.dataSet) {
           await storage.updateAccount(account.id, { status: "completed" });
           broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-          log("Partial success. Marked as completed.");
+          log("Partial success via API. Marked as completed.");
         } else {
-          await storage.updateAccount(account.id, { status: "draw_registering" });
-          broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
-          log("Draw registration failed. Status kept as draw_registering for retry.");
+          const gigyaResult = await completeDrawViaGigyaBrowser(
+            account.email,
+            account.la28Password,
+            account.zipCode || undefined,
+            log
+          );
+
+          if (gigyaResult.success) {
+            await storage.updateAccount(account.id, { status: "completed" });
+            broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+            log("Draw registration completed via Gigya browser fallback!");
+          } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
+            await storage.updateAccount(account.id, { status: "completed" });
+            broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+            log("Partial success via browser. Marked as completed.");
+          } else {
+            await storage.updateAccount(account.id, { status: "draw_registering" });
+            broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
+            log("Draw registration failed. Status kept as draw_registering for retry.");
+          }
         }
       }
     } catch (err: any) {
@@ -1380,7 +1396,7 @@ export async function registerRoutes(
 
       const { count = 1 } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
-      const proxyUrl = req.body.proxyUrl || await getDefaultBrowserApiUrl();
+      const proxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -1619,7 +1635,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Count must be between 1 and 100" });
       }
       const numAccounts = parsed;
-      const proxyUrl = req.body.proxyUrl || await getDefaultBrowserApiUrl();
+      const proxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");

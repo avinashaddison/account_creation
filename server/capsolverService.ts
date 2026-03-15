@@ -34,7 +34,8 @@ export async function solveRecaptchaV2Enterprise(
   websiteURL: string,
   websiteKey: string,
   enterprisePayload?: Record<string, any>,
-  proxy?: string
+  proxy?: string,
+  isInvisible?: boolean
 ): Promise<CapSolverTaskResult> {
   try {
     const taskType = proxy ? "ReCaptchaV2EnterpriseTask" : "ReCaptchaV2EnterpriseTaskProxyLess";
@@ -43,6 +44,9 @@ export async function solveRecaptchaV2Enterprise(
       websiteURL,
       websiteKey,
     };
+    if (isInvisible) {
+      task.isInvisible = true;
+    }
     if (enterprisePayload) {
       task.enterprisePayload = enterprisePayload;
     }
@@ -51,7 +55,7 @@ export async function solveRecaptchaV2Enterprise(
       Object.assign(task, parsed);
     }
 
-    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL}`);
+    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL} isInvisible=${!!isInvisible}`);
     return await createAndPollTask(task);
   } catch (err: any) {
     console.log(`[CapSolver] ReCaptchaV2Enterprise error: ${err.message}`);
