@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveFunCaptcha } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha } from "./capsolverService";
 
 const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
@@ -5575,6 +5575,769 @@ export async function loginOutlookAccount(
     if (browser) {
       try { await browser.close(); } catch {}
     }
+  }
+}
+
+export interface ZenrowsRegistrationResult {
+  success: boolean;
+  error?: string;
+  apiKey?: string;
+}
+
+export async function registerZenrowsAccount(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<ZenrowsRegistrationResult> {
+  let localBrowser: any = null;
+  let zenrowsBrowser: any = null;
+
+  const zenrowsPassword = "Zr" + Math.random().toString(36).substring(2, 10) + "!" + Math.floor(Math.random() * 900 + 100);
+
+  try {
+    log("Step 1/5: Registering on ZenRows...");
+    log("Using email: " + outlookEmail);
+    log("Generated ZenRows password: " + zenrowsPassword.substring(0, 3) + "***");
+
+    let zenrowsUrl = "";
+    try {
+      const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+      if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+        zenrowsUrl = zrRow.rows[0].value as string;
+      }
+    } catch {}
+
+    if (!zenrowsUrl) {
+      return { success: false, error: "ZenRows Browser URL not configured. Set it in Settings." };
+    }
+    if (!zenrowsUrl.includes('proxy_country=')) {
+      zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+    }
+
+    log("Launching browser for ZenRows registration...");
+
+    await ensureBrowserInstalled();
+    const dedicatedBrowser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+      ],
+    });
+    localBrowser = dedicatedBrowser;
+    log("Browser launched");
+
+    const context = await dedicatedBrowser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1920, height: 1080 },
+      locale: "en-US",
+      timezoneId: "America/Los_Angeles",
+    });
+    const page = await context.newPage();
+    await page.setDefaultNavigationTimeout(120000);
+    await page.setDefaultTimeout(30000);
+
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      (window as any).chrome = { runtime: {} };
+    });
+
+    log("Navigating to ZenRows register page...");
+    try {
+      await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 120000 });
+    } catch (navErr: any) {
+      log("Navigation note: " + (navErr.message || "").substring(0, 150));
+    }
+
+    await page.waitForTimeout(5000);
+    let currentPageUrl = page.url();
+    log("Initial page: " + currentPageUrl.substring(0, 80));
+
+    const bodyText1 = await page.textContent("body").catch(() => "");
+    const pageTitle = await page.title().catch(() => "");
+    log("Page title: " + pageTitle + ", body preview: " + (bodyText1 || "").substring(0, 100).replace(/\s+/g, " "));
+
+    if ((bodyText1 || "").includes("Just a moment") || pageTitle.includes("Just a moment") || (bodyText1 || "").includes("challenge")) {
+      log("Cloudflare challenge detected, waiting up to 45s for auto-solve...");
+      for (let cfRetry = 0; cfRetry < 9; cfRetry++) {
+        await page.waitForTimeout(5000);
+        const currentBody = await page.textContent("body").catch(() => "");
+        const currentTitle = await page.title().catch(() => "");
+        if (!(currentBody || "").includes("Just a moment") && !currentTitle.includes("Just a moment")) {
+          log("Cloudflare challenge resolved after " + ((cfRetry + 1) * 5) + "s");
+          break;
+        }
+        if (cfRetry === 8) {
+          log("Cloudflare challenge NOT resolved after 45s");
+          const cfPageContent = (currentBody || "").substring(0, 300).replace(/\s+/g, " ");
+          log("CF page: " + cfPageContent);
+        }
+      }
+      currentPageUrl = page.url();
+      log("After CF wait: " + currentPageUrl.substring(0, 80));
+    }
+
+    const inputSelectors = [
+      'input[type="email"]', 'input[name="email"]', 'input[placeholder*="mail"]',
+      'input[placeholder*="Mail"]', 'input[placeholder*="Email"]',
+      'input[autocomplete="email"]', 'input[id*="email"]', 'input[id*="Email"]',
+    ];
+
+    let emailInput: any = null;
+    for (const sel of inputSelectors) {
+      try {
+        emailInput = await page.waitForSelector(sel, { timeout: 5000 });
+        if (emailInput) {
+          log("Found email input with: " + sel);
+          break;
+        }
+      } catch {}
+    }
+
+    if (!emailInput) {
+      const allInputs = await page.$$('input');
+      log("Found " + allInputs.length + " total input elements on page");
+      for (let i = 0; i < allInputs.length; i++) {
+        const attrs = await allInputs[i].evaluate((el: any) => ({
+          type: el.type, name: el.name, id: el.id, placeholder: el.placeholder,
+          ariaLabel: el.getAttribute('aria-label'), className: el.className?.substring?.(0, 80)
+        }));
+        log("  Input " + i + ": " + JSON.stringify(attrs));
+      }
+      const bodySnippet = await page.textContent("body").catch(() => "");
+      log("Page text: " + (bodySnippet || "").substring(0, 300).replace(/\s+/g, " "));
+
+      if (allInputs.length > 0) {
+        emailInput = allInputs[0];
+        log("Using first input as email field");
+      } else {
+        return { success: false, error: "No input fields found on ZenRows register page" };
+      }
+    }
+
+    await emailInput.click();
+    await page.waitForTimeout(300 + Math.random() * 300);
+    for (const char of outlookEmail) {
+      await page.keyboard.type(char, { delay: 0 });
+      await page.waitForTimeout(20 + Math.random() * 40);
+    }
+    log("Email filled");
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+
+    const passSelectors = ['input[type="password"]', 'input[name="password"]', 'input[id*="password"]', 'input[id*="Password"]'];
+    let passwordInput: any = null;
+    for (const sel of passSelectors) {
+      try {
+        passwordInput = await page.$(sel);
+        if (passwordInput) break;
+      } catch {}
+    }
+
+    if (!passwordInput) {
+      const allInputs = await page.$$('input');
+      if (allInputs.length > 1) {
+        passwordInput = allInputs[1];
+        log("Using second input as password field");
+      }
+    }
+
+    if (passwordInput) {
+      await passwordInput.click();
+      await page.waitForTimeout(300 + Math.random() * 300);
+      for (const char of zenrowsPassword) {
+        await page.keyboard.type(char, { delay: 0 });
+        await page.waitForTimeout(20 + Math.random() * 40);
+      }
+      log("Password filled");
+    } else {
+      return { success: false, error: "Could not find password input on ZenRows register page" };
+    }
+
+    await page.waitForTimeout(1000 + Math.random() * 500);
+
+    log("Checking for captcha on registration page...");
+    const captchaInfo = await page.evaluate(() => {
+      const result: any = { turnstile: null, recaptchaV2: null, recaptchaV3: null, hcaptcha: null, allIframes: [] };
+
+      const turnstileWidget = document.querySelector('[data-sitekey].cf-turnstile, .cf-turnstile[data-sitekey], iframe[src*="challenges.cloudflare.com"]');
+      if (turnstileWidget) {
+        result.turnstile = (turnstileWidget as any).getAttribute('data-sitekey') || null;
+      }
+      const turnstileIframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+      if (turnstileIframe && !result.turnstile) {
+        const src = (turnstileIframe as HTMLIFrameElement).src;
+        const match = src.match(/[?&]k=([^&]+)/);
+        if (match) result.turnstile = match[1];
+      }
+
+      const recaptchaEl = document.querySelector('.g-recaptcha[data-sitekey], [data-sitekey]:not(.cf-turnstile)');
+      if (recaptchaEl) {
+        result.recaptchaV2 = (recaptchaEl as any).getAttribute('data-sitekey');
+      }
+      const recaptchaV3Script = document.querySelector('script[src*="recaptcha/api.js?render="], script[src*="recaptcha/enterprise.js?render="]');
+      if (recaptchaV3Script) {
+        const src = (recaptchaV3Script as HTMLScriptElement).src;
+        const match = src.match(/render=([^&]+)/);
+        if (match && match[1] !== 'explicit') result.recaptchaV3 = match[1];
+      }
+
+      const hcaptchaEl = document.querySelector('.h-captcha[data-sitekey]');
+      if (hcaptchaEl) {
+        result.hcaptcha = (hcaptchaEl as any).getAttribute('data-sitekey');
+      }
+
+      document.querySelectorAll('iframe').forEach((f: HTMLIFrameElement) => {
+        result.allIframes.push(f.src?.substring(0, 120) || '(no src)');
+      });
+
+      const responseInputs: string[] = [];
+      document.querySelectorAll('textarea[name*="captcha"], input[name*="captcha"], textarea[name*="token"], input[name*="turnstile"], textarea.g-recaptcha-response, textarea[name="cf-turnstile-response"], textarea[name="g-recaptcha-response"], textarea[name="h-captcha-response"]').forEach((el: any) => {
+        responseInputs.push(el.name || el.id || el.className?.substring(0, 40));
+      });
+      result.responseInputs = responseInputs;
+
+      const allBtns: string[] = [];
+      document.querySelectorAll('button, input[type="submit"], a[role="button"]').forEach((b: any) => {
+        allBtns.push((b.type || '') + '|' + (b.textContent || '').trim().substring(0, 40) + '|' + (b.className || '').substring(0, 40));
+      });
+      result.allButtons = allBtns;
+
+      return result;
+    });
+
+    log("Captcha scan: turnstile=" + (captchaInfo.turnstile || 'none') +
+        " recaptchaV2=" + (captchaInfo.recaptchaV2 || 'none') +
+        " recaptchaV3=" + (captchaInfo.recaptchaV3 || 'none') +
+        " hcaptcha=" + (captchaInfo.hcaptcha || 'none'));
+    if (captchaInfo.allIframes.length > 0) log("Iframes: " + captchaInfo.allIframes.join(", "));
+    if (captchaInfo.responseInputs.length > 0) log("Response inputs: " + captchaInfo.responseInputs.join(", "));
+    log("Buttons found: " + captchaInfo.allButtons.map((b: string) => b).join(" | "));
+
+    if (captchaInfo.turnstile) {
+      log("Solving Turnstile captcha with CapSolver (sitekey: " + captchaInfo.turnstile + ")...");
+      const turnstileResult = await solveAntiTurnstile("https://app.zenrows.com/register", captchaInfo.turnstile);
+      if (turnstileResult.success && turnstileResult.token) {
+        log("Turnstile solved! Injecting token...");
+        await page.evaluate((token: string) => {
+          const respInputs = document.querySelectorAll('textarea[name="cf-turnstile-response"], input[name="cf-turnstile-response"]');
+          respInputs.forEach((el: any) => { el.value = token; });
+          const callbackName = document.querySelector('.cf-turnstile')?.getAttribute('data-callback');
+          if (callbackName && typeof (window as any)[callbackName] === 'function') {
+            (window as any)[callbackName](token);
+          }
+          if (typeof (window as any).turnstile !== 'undefined') {
+            try { (window as any).turnstile.getResponse = () => token; } catch {}
+          }
+        }, turnstileResult.token);
+        await page.waitForTimeout(1000);
+      } else {
+        log("Turnstile solve failed: " + (turnstileResult.error || "unknown"));
+      }
+    }
+
+    if (captchaInfo.recaptchaV2) {
+      log("Solving reCAPTCHA V2 with CapSolver (sitekey: " + captchaInfo.recaptchaV2 + ")...");
+      const v2Result = await solveRecaptchaV2("https://app.zenrows.com/register", captchaInfo.recaptchaV2);
+      if (v2Result.success && v2Result.token) {
+        log("reCAPTCHA V2 solved! Injecting token...");
+        await page.evaluate((token: string) => {
+          const textarea = document.querySelector('textarea.g-recaptcha-response, textarea[name="g-recaptcha-response"]');
+          if (textarea) (textarea as any).value = token;
+          if (typeof (window as any).___grecaptcha_cfg !== 'undefined') {
+            try {
+              const clients = (window as any).___grecaptcha_cfg?.clients;
+              if (clients) {
+                Object.keys(clients).forEach(k => {
+                  try { clients[k]?.callback?.(token); } catch {}
+                });
+              }
+            } catch {}
+          }
+        }, v2Result.token);
+        await page.waitForTimeout(1000);
+      } else {
+        log("reCAPTCHA V2 solve failed: " + (v2Result.error || "unknown"));
+      }
+    }
+
+    if (captchaInfo.recaptchaV3) {
+      log("Solving reCAPTCHA V3 with CapSolver (sitekey: " + captchaInfo.recaptchaV3 + ")...");
+      const v3Result = await solveRecaptchaV3Enterprise("https://app.zenrows.com/register", captchaInfo.recaptchaV3, "register");
+      if (v3Result.success && v3Result.token) {
+        log("reCAPTCHA V3 solved! Injecting token...");
+        await page.evaluate((token: string) => {
+          const textarea = document.querySelector('textarea.g-recaptcha-response, textarea[name="g-recaptcha-response"]');
+          if (textarea) (textarea as any).value = token;
+        }, v3Result.token);
+        await page.waitForTimeout(1000);
+      } else {
+        log("reCAPTCHA V3 solve failed: " + (v3Result.error || "unknown"));
+      }
+    }
+
+    if (captchaInfo.hcaptcha) {
+      log("Solving hCaptcha with CapSolver (sitekey: " + captchaInfo.hcaptcha + ")...");
+      const hResult = await solveHCaptcha("https://app.zenrows.com/register", captchaInfo.hcaptcha);
+      if (hResult.success && hResult.token) {
+        log("hCaptcha solved! Injecting token...");
+        await page.evaluate((token: string) => {
+          const textarea = document.querySelector('textarea[name="h-captcha-response"]');
+          if (textarea) (textarea as any).value = token;
+        }, hResult.token);
+        await page.waitForTimeout(1000);
+      } else {
+        log("hCaptcha solve failed: " + (hResult.error || "unknown"));
+      }
+    }
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+
+    const allButtons = await page.$$('button, input[type="submit"]');
+    let signupBtn: any = null;
+    for (const btn of allButtons) {
+      const btnText = (await btn.textContent().catch(() => "") || "").trim();
+      const isOAuthBtn = /google|github|facebook|twitter|apple|microsoft/i.test(btnText);
+      if (isOAuthBtn) continue;
+
+      const isSignupBtn = /^sign\s*up$/i.test(btnText) ||
+        /^register$/i.test(btnText) ||
+        /^create\s*(account)?$/i.test(btnText) ||
+        /^get\s*started$/i.test(btnText) ||
+        /^start$/i.test(btnText) ||
+        /^submit$/i.test(btnText);
+      if (isSignupBtn) {
+        signupBtn = btn;
+        log("Found email signup button: '" + btnText.substring(0, 40) + "'");
+        break;
+      }
+    }
+
+    if (!signupBtn) {
+      for (const btn of allButtons) {
+        const btnText = (await btn.textContent().catch(() => "") || "").trim();
+        const btnType = await btn.getAttribute("type").catch(() => "");
+        if (btnType === "submit" && !/google|github|facebook/i.test(btnText)) {
+          signupBtn = btn;
+          log("Using submit button: '" + btnText.substring(0, 40) + "'");
+          break;
+        }
+      }
+    }
+
+    if (signupBtn) {
+      await signupBtn.click();
+      log("Clicked signup button");
+    } else {
+      log("No specific signup button found, pressing Enter...");
+      await page.keyboard.press("Enter");
+    }
+
+    await page.waitForTimeout(8000 + Math.random() * 3000);
+    const afterSignupUrl = page.url();
+    log("After signup: " + afterSignupUrl.substring(0, 100));
+
+    const pageContent = await page.textContent("body").catch(() => "");
+    const pageLower = (pageContent || "").toLowerCase();
+    const needsVerification = pageLower.includes("verify") ||
+                              pageLower.includes("check your email") ||
+                              pageLower.includes("confirmation");
+    const alreadyExists = pageLower.includes("already") ||
+                          pageLower.includes("exists") ||
+                          pageLower.includes("registered") ||
+                          pageLower.includes("in use");
+    const hasError = pageLower.includes("error") || pageLower.includes("invalid");
+
+    if (alreadyExists) {
+      log("Account may already exist — trying login directly");
+    } else if (needsVerification || afterSignupUrl.includes("verify") || afterSignupUrl.includes("confirm")) {
+      log("ZenRows requires email verification");
+    } else if (afterSignupUrl.includes("dashboard") || afterSignupUrl.includes("onboarding")) {
+      log("Signup succeeded — redirected to dashboard/onboarding");
+    } else if (hasError) {
+      const errorSnippet = (pageContent || "").substring(0, 200).replace(/\s+/g, " ");
+      log("Signup error detected: " + errorSnippet);
+    } else {
+      log("Page after signup: " + (pageContent || "").substring(0, 200).replace(/\s+/g, " "));
+      const allToasts = await page.$$eval('[role="alert"], .toast, .notification, [class*="alert"], [class*="toast"]', (els: any[]) =>
+        els.map((e: any) => (e.textContent || "").substring(0, 150))
+      ).catch(() => []);
+      if (allToasts.length > 0) {
+        log("Toasts/alerts on page: " + allToasts.join(" | ").substring(0, 200));
+      }
+    }
+
+    try { await page.close(); } catch {}
+    try { await context.close(); } catch {}
+
+    log("Step 2/5: Logging into Outlook to get verification email...");
+
+    let outlookBrowser = localBrowser;
+    let usedZenRows = false;
+
+    try {
+      if (!zenrowsUrl.includes('proxy_country=')) {
+        zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+      }
+      zenrowsBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 30000 });
+      outlookBrowser = zenrowsBrowser;
+      usedZenRows = true;
+      log("ZenRows browser connected for Outlook");
+    } catch (cdpErr: any) {
+      log("ZenRows CDP unavailable (" + (cdpErr.message || "").substring(0, 60) + "), using local browser for Outlook");
+      if (!localBrowser || !localBrowser.isConnected()) {
+        await ensureBrowserInstalled();
+        localBrowser = await chromium.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+        });
+        outlookBrowser = localBrowser;
+      }
+    }
+
+    const outlookCtx = usedZenRows
+      ? (outlookBrowser!.contexts()[0] || await outlookBrowser!.newContext())
+      : await outlookBrowser!.newContext({
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          viewport: { width: 1920, height: 1080 },
+        });
+    const outlookPage = await outlookCtx.newPage();
+    await outlookPage.setDefaultNavigationTimeout(120000);
+    await outlookPage.setDefaultTimeout(30000);
+
+    log("Navigating to Outlook login...");
+    await outlookPage.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await outlookPage.waitForTimeout(2000 + Math.random() * 1500);
+
+    const olEmailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 15000 });
+    if (olEmailInput) {
+      await olEmailInput.click();
+      await outlookPage.waitForTimeout(300);
+      for (const char of outlookEmail) {
+        await outlookPage.keyboard.type(char, { delay: 0 });
+        await outlookPage.waitForTimeout(30 + Math.random() * 50);
+      }
+      log("Outlook email typed");
+    }
+
+    await outlookPage.waitForTimeout(500 + Math.random() * 500);
+    const nextBtn = await outlookPage.$('input[type="submit"]#idSIButton9, input[value="Next"]');
+    if (nextBtn) await nextBtn.click();
+    else await outlookPage.keyboard.press("Enter");
+
+    await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
+    log("After email submit: " + outlookPage.url().substring(0, 80));
+
+    const olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 });
+    if (olPassInput) {
+      await olPassInput.click();
+      await outlookPage.waitForTimeout(300);
+      for (const char of outlookPassword) {
+        await outlookPage.keyboard.type(char, { delay: 0 });
+        await outlookPage.waitForTimeout(30 + Math.random() * 50);
+      }
+      log("Outlook password typed");
+    }
+
+    await outlookPage.waitForTimeout(800 + Math.random() * 500);
+    const signInBtn = await outlookPage.$('input[type="submit"]#idSIButton9, input[value="Sign in"]');
+    if (signInBtn) await signInBtn.click();
+    else await outlookPage.keyboard.press("Enter");
+
+    await outlookPage.waitForTimeout(4000 + Math.random() * 3000);
+    log("After sign in: " + outlookPage.url().substring(0, 80));
+
+    const stayBtn = await outlookPage.$('#idSIButton9, input[value="Yes"]');
+    if (stayBtn) {
+      const btnVal = await stayBtn.getAttribute("value");
+      if (btnVal === "Yes" || outlookPage.url().includes("kmsi")) {
+        await stayBtn.click();
+        await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
+        log("Handled 'Stay signed in?' prompt");
+      }
+    }
+
+    log("Step 3/5: Navigating to Outlook inbox...");
+    await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await outlookPage.waitForTimeout(5000 + Math.random() * 3000);
+    log("Inbox loaded: " + outlookPage.url().substring(0, 80));
+
+    let verifyLink = "";
+    for (let attempt = 0; attempt < 12; attempt++) {
+      log(`Searching for ZenRows verification email (attempt ${attempt + 1}/12)...`);
+
+      try {
+        const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], [aria-label*="message"], div[data-convid], tr[aria-label], div.customScrollBar div[tabindex]');
+        log(`Found ${emailItems.length} email items in inbox`);
+
+        for (const item of emailItems) {
+          const text = await item.textContent().catch(() => "");
+          if ((text || "").toLowerCase().includes("zenrows") || (text || "").toLowerCase().includes("verify") || (text || "").toLowerCase().includes("confirm your")) {
+            log("Found potential ZenRows email! Clicking...");
+            await item.click();
+            await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
+            break;
+          }
+        }
+
+        const allLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
+          links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
+        );
+
+        for (const link of allLinks) {
+          if (link.href && (
+            link.href.includes("zenrows.com") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token")) ||
+            link.text.toLowerCase().includes("verify") && link.href.includes("zenrows")
+          )) {
+            verifyLink = link.href;
+            log("Found verification link: " + verifyLink.substring(0, 120));
+            break;
+          }
+        }
+
+        if (verifyLink) break;
+
+        const bodyText = await outlookPage.textContent("body").catch(() => "");
+        const zenrowsMention = (bodyText || "").toLowerCase().indexOf("zenrows");
+        if (zenrowsMention > -1) {
+          const snippet = (bodyText || "").substring(Math.max(0, zenrowsMention - 50), zenrowsMention + 200);
+          log("Found 'zenrows' in page text near: " + snippet.replace(/\s+/g, " ").substring(0, 120));
+        }
+
+        if (!verifyLink && attempt === 3) {
+          log("Checking 'Other' folder...");
+          try {
+            await outlookPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await outlookPage.waitForTimeout(4000);
+            const junkItems = await outlookPage.$$('[role="listbox"] [role="option"], [aria-label*="message"], div[data-convid], tr[aria-label], div.customScrollBar div[tabindex]');
+            for (const item of junkItems) {
+              const text = await item.textContent().catch(() => "");
+              if ((text || "").toLowerCase().includes("zenrows") || (text || "").toLowerCase().includes("verify")) {
+                log("Found ZenRows email in junk folder! Clicking...");
+                await item.click();
+                await outlookPage.waitForTimeout(3000);
+                const junkLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
+                  links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
+                );
+                for (const link of junkLinks) {
+                  if (link.href && link.href.includes("zenrows.com") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token"))) {
+                    verifyLink = link.href;
+                    log("Found verification link in junk: " + verifyLink.substring(0, 120));
+                    break;
+                  }
+                }
+                break;
+              }
+            }
+            if (!verifyLink) {
+              await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await outlookPage.waitForTimeout(4000);
+            }
+          } catch (junkErr: any) {
+            log("Junk folder check error: " + (junkErr.message || "").substring(0, 60));
+            await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+            await outlookPage.waitForTimeout(3000);
+          }
+        }
+
+        if (!verifyLink && attempt < 11) {
+          log("Verification email not found yet, refreshing inbox...");
+          try {
+            await outlookPage.keyboard.press("F5");
+          } catch {
+            await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 60000 });
+          }
+          await outlookPage.waitForTimeout(8000 + Math.random() * 4000);
+        }
+      } catch (searchErr: any) {
+        log("Inbox search error: " + (searchErr.message || "").substring(0, 100));
+        await outlookPage.waitForTimeout(5000);
+      }
+    }
+
+    if (!verifyLink) {
+      try {
+        const allText = await outlookPage.textContent("body").catch(() => "");
+        const linkRegex = /https?:\/\/[^\s"'<>]*zenrows[^\s"'<>]*/gi;
+        const matches = (allText || "").match(linkRegex);
+        if (matches && matches.length > 0) {
+          verifyLink = matches[0];
+          log("Found ZenRows link via regex: " + verifyLink.substring(0, 120));
+        }
+      } catch {}
+    }
+
+    if (!verifyLink) {
+      try { await outlookPage.close(); } catch {}
+      try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
+      zenrowsBrowser = null;
+      return { success: false, error: "Could not find ZenRows verification email after 12 attempts. The email may not have arrived yet." };
+    }
+
+    log("Step 4/5: Clicking verification link...");
+    try { await outlookPage.close(); } catch {}
+    try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
+    zenrowsBrowser = null;
+
+    if (!localBrowser || !localBrowser.isConnected()) {
+      await ensureBrowserInstalled();
+      localBrowser = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+      });
+    }
+    const verifyCtx = await localBrowser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    });
+    const verifyPage = await verifyCtx.newPage();
+    await verifyPage.setDefaultNavigationTimeout(60000);
+
+    await verifyPage.goto(verifyLink, { waitUntil: "domcontentloaded" });
+    await verifyPage.waitForTimeout(5000 + Math.random() * 3000);
+    const verifyUrl = verifyPage.url();
+    log("After verification: " + verifyUrl.substring(0, 100));
+
+    const verifyText = await verifyPage.textContent("body").catch(() => "");
+    if ((verifyText || "").toLowerCase().includes("verified") || (verifyText || "").toLowerCase().includes("confirmed") || (verifyText || "").toLowerCase().includes("success")) {
+      log("Email verified successfully!");
+    } else {
+      log("Verification page content: " + (verifyText || "").substring(0, 150).replace(/\s+/g, " "));
+    }
+
+    try { await verifyPage.close(); } catch {}
+    try { await verifyCtx.close(); } catch {}
+
+    log("Step 5/5: Logging into ZenRows to get API key...");
+    if (!localBrowser || !localBrowser.isConnected()) {
+      await ensureBrowserInstalled();
+      localBrowser = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+      });
+    }
+    const apiCtx = await localBrowser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    });
+    const apiPage = await apiCtx.newPage();
+    await apiPage.setDefaultNavigationTimeout(60000);
+    await apiPage.setDefaultTimeout(30000);
+
+    await apiPage.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded" });
+    await apiPage.waitForTimeout(2000 + Math.random() * 1500);
+
+    const zrLoginEmail = await apiPage.waitForSelector('input[type="email"], input[name="email"]', { timeout: 15000 });
+    if (zrLoginEmail) {
+      await zrLoginEmail.click();
+      await apiPage.waitForTimeout(300);
+      for (const char of outlookEmail) {
+        await apiPage.keyboard.type(char, { delay: 0 });
+        await apiPage.waitForTimeout(20 + Math.random() * 40);
+      }
+    }
+
+    await apiPage.waitForTimeout(500);
+
+    const zrLoginPass = await apiPage.$('input[type="password"], input[name="password"]');
+    if (zrLoginPass) {
+      await zrLoginPass.click();
+      await apiPage.waitForTimeout(300);
+      for (const char of zenrowsPassword) {
+        await apiPage.keyboard.type(char, { delay: 0 });
+        await apiPage.waitForTimeout(20 + Math.random() * 40);
+      }
+    }
+
+    await apiPage.waitForTimeout(500);
+    const zrLoginBtn = await apiPage.$('button[type="submit"], button:has-text("Log in"), button:has-text("Sign in")');
+    if (zrLoginBtn) await zrLoginBtn.click();
+    else await apiPage.keyboard.press("Enter");
+
+    await apiPage.waitForTimeout(5000 + Math.random() * 3000);
+    log("ZenRows login: " + apiPage.url().substring(0, 100));
+
+    await apiPage.goto("https://app.zenrows.com/builder", { waitUntil: "domcontentloaded" });
+    await apiPage.waitForTimeout(3000 + Math.random() * 2000);
+    log("Builder page loaded: " + apiPage.url().substring(0, 100));
+
+    let apiKey = "";
+
+    try {
+      apiKey = await apiPage.evaluate(() => {
+        const inputs = document.querySelectorAll('input[readonly], input[type="text"]');
+        for (const input of inputs) {
+          const val = (input as HTMLInputElement).value;
+          if (val && val.length > 20 && /^[a-f0-9]+$/.test(val)) return val;
+        }
+        const codeElements = document.querySelectorAll('code, pre, [class*="api"], [class*="key"]');
+        for (const el of codeElements) {
+          const text = (el.textContent || "").trim();
+          if (text.length > 20 && /^[a-f0-9]+$/.test(text)) return text;
+        }
+        const bodyText = document.body.innerText || "";
+        const match = bodyText.match(/\b[a-f0-9]{30,}\b/);
+        if (match) return match[0];
+        return "";
+      });
+    } catch {}
+
+    if (!apiKey) {
+      try {
+        const copyBtn = await apiPage.$('button:has-text("Copy"), button:has-text("copy"), button[aria-label*="copy"]');
+        if (copyBtn) {
+          log("Found Copy button, trying to extract API key from nearby elements...");
+          apiKey = await apiPage.evaluate(() => {
+            const copyBtns = Array.from(document.querySelectorAll('button'));
+            for (const btn of copyBtns) {
+              if ((btn.textContent || "").toLowerCase().includes("copy")) {
+                const parent = btn.parentElement;
+                if (parent) {
+                  const inputs = parent.querySelectorAll('input, code, span, div');
+                  for (const el of inputs) {
+                    const text = ((el as HTMLInputElement).value || el.textContent || "").trim();
+                    if (text.length > 20 && /^[a-f0-9]+$/.test(text)) return text;
+                  }
+                }
+                const prev = btn.previousElementSibling;
+                if (prev) {
+                  const text = ((prev as HTMLInputElement).value || prev.textContent || "").trim();
+                  if (text.length > 20 && /^[a-f0-9]+$/.test(text)) return text;
+                }
+              }
+            }
+            return "";
+          });
+        }
+      } catch {}
+    }
+
+    if (!apiKey) {
+      const allText = await apiPage.textContent("body").catch(() => "");
+      const hexMatch = (allText || "").match(/\b[a-f0-9]{30,50}\b/);
+      if (hexMatch) {
+        apiKey = hexMatch[0];
+      }
+    }
+
+    try { await apiPage.close(); } catch {}
+    try { await apiCtx.close(); } catch {}
+
+    if (apiKey) {
+      log("API Key found: " + apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4));
+      return { success: true, apiKey };
+    } else {
+      log("Could not extract API key from builder page");
+      return { success: false, error: "Registered and verified but could not extract API key from builder page" };
+    }
+  } catch (err: any) {
+    log("Error: " + (err.message || "").substring(0, 200));
+    return { success: false, error: (err.message || "Unknown error").substring(0, 300) };
+  } finally {
+    if (localBrowser) { try { await localBrowser.close(); } catch {} }
+    if (zenrowsBrowser) { try { await zenrowsBrowser.close(); } catch {} }
   }
 }
 

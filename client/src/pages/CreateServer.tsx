@@ -101,6 +101,23 @@ const platforms: Platform[] = [
       { label: "ZenRows", icon: Globe },
     ],
   },
+  {
+    id: "zenrows",
+    name: "ZenRows Register",
+    description: "Auto-create ZenRows accounts via Outlook email verification & extract API keys",
+    href: "/admin/zenrows-register",
+    gradient: "from-emerald-600/80 via-teal-700/60 to-green-900/80",
+    badge: "ACTIVE",
+    badgeColor: "text-emerald-400",
+    borderColor: "rgba(34,197,94,0.2)",
+    comingSoon: false,
+    icon: <Globe className="w-7 h-7 text-white" />,
+    stats: [
+      { label: "Auto Register", icon: Shield },
+      { label: "Email Verify", icon: Mail },
+      { label: "API Key", icon: Zap },
+    ],
+  },
 ];
 
 export default function CreateServer() {

@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -1938,6 +1938,47 @@ export async function registerRoutes(
         } catch (err: any) {
           broadcastLog(batchId, loginId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "outlook_login_result", loginId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/zenrows-register", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { outlookEmail, outlookPassword } = req.body;
+      if (!outlookEmail || !outlookPassword) {
+        return res.status(400).json({ error: "Outlook email and password are required" });
+      }
+
+      const userId = req.session.userId;
+      const regId = randomUUID().substring(0, 8);
+      const batchId = `zenrows-reg-${regId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, regId, batchId, message: "ZenRows registration started" });
+
+      (async () => {
+        broadcastLog(batchId, regId, `Starting ZenRows account registration flow...`, userId);
+        try {
+          const result = await registerZenrowsAccount(
+            outlookEmail,
+            outlookPassword,
+            (msg) => broadcastLog(batchId, regId, msg, userId)
+          );
+
+          if (result.success && result.apiKey) {
+            broadcastLog(batchId, regId, `ZenRows API Key extracted successfully`, userId);
+            broadcast({ type: "zenrows_register_result", regId, batchId, success: true, apiKey: result.apiKey }, userId);
+          } else {
+            broadcastLog(batchId, regId, `Registration failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "zenrows_register_result", regId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, regId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "zenrows_register_result", regId, batchId, success: false, error: err.message }, userId);
         }
         broadcastBatchComplete(batchId, userId);
       })();

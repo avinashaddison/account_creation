@@ -21,6 +21,7 @@ import WalletPage from "@/pages/Wallet";
 import Home from "@/pages/Home";
 import Settings from "@/pages/Settings";
 import OutlookLogin from "@/pages/OutlookLogin";
+import ZenRowsRegister from "@/pages/ZenRowsRegister";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -49,6 +50,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/uefa-create" component={UEFACreate} />
         <Route path="/admin/brunomars-create" component={BrunoMarsCreate} />
         <Route path="/admin/outlook-login" component={OutlookLogin} />
+        <Route path="/admin/zenrows-register" component={ZenRowsRegister} />
         <Route path="/admin/auto-create"><Redirect to="/admin/create-server" /></Route>
         <Route path="/admin/email-server"><Redirect to="/admin/email-workspace" /></Route>
         <Route path="/admin/email-workspace" component={EmailWorkspace} />
