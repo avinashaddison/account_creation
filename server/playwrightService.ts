@@ -2294,8 +2294,8 @@ export async function completeDrawViaGigyaBrowser(
       console.log("[Draw] Step 3: Human behavior simulation...");
       await simulateHumanBehavior(page, email, password);
 
-      log("Step 4: Logging in via Gigya JS SDK...");
-      console.log("[Draw] Step 4: Gigya SDK loaded, logging in...");
+      log("Step 4: Clicking login button (form-based login)...");
+      console.log("[Draw] Step 4: Attempting form-based login via button click...");
 
       const preLoginRecaptcha = await page.evaluate(() => {
         const g = (window as any).grecaptcha;
@@ -2306,43 +2306,103 @@ export async function completeDrawViaGigyaBrowser(
       });
       console.log("[Draw] Pre-login reCAPTCHA check: " + JSON.stringify(preLoginRecaptcha));
 
-      let loginResult = await page.evaluate(`(function() {
-        return new Promise(function(resolve) {
-          if (typeof gigya === 'undefined' || !gigya.accounts) {
-            resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '', raw: 'no gigya' });
-            return;
+      let loginResult: any = null;
+
+      try {
+        const loginResponsePromise = page.waitForResponse(
+          (resp: any) => resp.url().includes('accounts.login') && resp.status() === 200,
+          { timeout: 45000 }
+        );
+
+        const submitBtn = await page.$('input[type="submit"][value*="Log"]:visible, input[type="submit"][value*="Sign"]:visible, button[type="submit"]:visible, .gigya-input-submit:visible, input.gigya-input-submit:visible');
+        if (submitBtn) {
+          console.log("[Draw] Found submit button, clicking...");
+          try {
+            const box = await submitBtn.boundingBox();
+            if (box) {
+              await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 + Math.floor(Math.random() * 5) });
+              await page.waitForTimeout(200 + Math.random() * 300);
+              await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+            } else {
+              await submitBtn.click();
+            }
+          } catch {
+            await submitBtn.click();
           }
-          var resolved = false;
-          var loginParams = {
-            loginID: ${JSON.stringify(email)},
-            password: ${JSON.stringify(password)},
-            callback: function(resp) {
+          console.log("[Draw] Login button clicked, waiting for Gigya response...");
+        } else {
+          console.log("[Draw] No submit button found, pressing Enter...");
+          await page.keyboard.press("Enter");
+        }
+
+        const gigyaResponse = await loginResponsePromise;
+        const respText = await gigyaResponse.text();
+        try {
+          const respJson = JSON.parse(respText.replace(/^[^{]*/, '').replace(/[^}]*$/, ''));
+          loginResult = {
+            success: respJson.errorCode === 0,
+            errorCode: respJson.errorCode,
+            errorMessage: respJson.errorMessage || '',
+            errorDetails: respJson.errorDetails || '',
+            uid: respJson.UID || '',
+            statusCode: respJson.statusCode,
+            statusReason: respJson.statusReason || '',
+            keys: Object.keys(respJson).slice(0, 20).join(','),
+            raw: 'redacted'
+          };
+        } catch {
+          console.log("[Draw] Could not parse Gigya response, checking page state...");
+          await page.waitForTimeout(5000);
+          const currentUrl = page.url();
+          loginResult = {
+            success: !currentUrl.includes('/login'),
+            errorCode: currentUrl.includes('/login') ? -3 : 0,
+            errorMessage: currentUrl.includes('/login') ? 'Still on login page after click' : 'Redirected after click',
+            uid: '',
+            keys: '',
+            raw: 'click-based'
+          };
+        }
+      } catch (clickErr: any) {
+        console.log("[Draw] Click-based login error: " + (clickErr.message || '').substring(0, 100));
+        console.log("[Draw] Falling back to SDK-based login...");
+
+        loginResult = await page.evaluate(`(function() {
+          return new Promise(function(resolve) {
+            if (typeof gigya === 'undefined' || !gigya.accounts) {
+              resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '', raw: 'no gigya' });
+              return;
+            }
+            var resolved = false;
+            gigya.accounts.login({
+              loginID: ${JSON.stringify(email)},
+              password: ${JSON.stringify(password)},
+              callback: function(resp) {
+                if (resolved) return;
+                resolved = true;
+                var keys = [];
+                try { keys = Object.keys(resp).slice(0, 20); } catch(e) {}
+                resolve({
+                  success: resp.errorCode === 0,
+                  errorCode: resp.errorCode,
+                  errorMessage: resp.errorMessage || resp.statusMessage || '',
+                  errorDetails: resp.errorDetails || '',
+                  uid: resp.UID || '',
+                  statusCode: resp.statusCode,
+                  statusReason: resp.statusReason || '',
+                  keys: keys.join(','),
+                  raw: 'redacted'
+                });
+              }
+            });
+            setTimeout(function() {
               if (resolved) return;
               resolved = true;
-              var keys = [];
-              try { keys = Object.keys(resp).slice(0, 20); } catch(e) {}
-              resolve({
-                success: resp.errorCode === 0,
-                errorCode: resp.errorCode,
-                errorMessage: resp.errorMessage || resp.statusMessage || '',
-                errorDetails: resp.errorDetails || '',
-                uid: resp.UID || '',
-                statusCode: resp.statusCode,
-                statusReason: resp.statusReason || '',
-                keys: keys.join(','),
-                raw: 'redacted'
-              });
-            }
-          };
-          console.log('[Gigya-Login] Params: loginID=' + loginParams.loginID + ' (no manual captchaToken - letting Gigya SDK handle reCAPTCHA internally)');
-          gigya.accounts.login(loginParams);
-          setTimeout(function() {
-            if (resolved) return;
-            resolved = true;
-            resolve({ success: false, errorCode: -2, errorMessage: 'timeout_30s', uid: '', raw: 'timeout' });
-          }, 30000);
-        });
-      })()`) as any;
+              resolve({ success: false, errorCode: -2, errorMessage: 'timeout_30s', uid: '', raw: 'timeout' });
+            }, 30000);
+          });
+        })()`) as any;
+      }
       console.log("[Draw] Login result (attempt " + (attempt + 1) + "): " + JSON.stringify(loginResult));
 
       if (!loginResult.success) {
