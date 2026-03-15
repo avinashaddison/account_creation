@@ -2138,22 +2138,12 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const proxyPort = 10001 + (attempt % 10);
-      const proxyConfig = getActiveProxyConfig(proxyPort);
-      console.log("[Draw] Using proxy: " + getActiveProxyLabel(proxyPort));
+      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+      console.log("[Draw] Using Browserless built-in residential proxy (US)");
+      console.log("[Draw] Connecting to Browserless Playwright endpoint...");
 
-      const launchArgs = ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"];
-      const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: launchArgs }));
-      let browserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken + "&launch=" + browserlessLaunch + "&blockAds=false";
-      if (activeProxyProvider === "iproyal") {
-        const proxyUrl = `http://${IPROYAL_UNBLOCKER_USER}:${encodeURIComponent(IPROYAL_UNBLOCKER_PASS)}@${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`;
-        browserlessUrl += "&proxy=" + encodeURIComponent(proxyUrl);
-        console.log("[Draw] Proxy via Browserless ?proxy= param (IPRoyal unblocker)");
-      }
-      console.log("[Draw] Connecting to Browserless Stealth Chromium...");
-
-      browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 60000 });
-      console.log("[Draw] Browserless connected! Contexts: " + browser.contexts().length);
+      browser = await chromium.connect(browserlessUrl, { timeout: 60000 });
+      console.log("[Draw] Browserless connected!");
 
       const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -2167,9 +2157,57 @@ export async function completeDrawViaGigyaBrowser(
         colorScheme: 'light',
         hasTouch: false,
         javaScriptEnabled: true,
-        ...(activeProxyProvider === "decodo" ? { proxy: proxyConfig } : {}),
       });
-      console.log("[Draw] Created Browserless context with " + getActiveProxyLabel(proxyPort));
+      console.log("[Draw] Created Browserless context with residential proxy (US)");
+
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters: any) =>
+          parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
+            : originalQuery(parameters);
+
+        (window.navigator as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+          if (parameter === 37445) return 'Intel Inc.';
+          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+          return getParameter.call(this, parameter);
+        };
+
+        const pluginData = [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ];
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => {
+            const plugins = pluginData.map(p => {
+              const plugin = Object.create(Plugin.prototype);
+              Object.defineProperties(plugin, {
+                name: { value: p.name },
+                filename: { value: p.filename },
+                description: { value: p.description },
+                length: { value: 1 },
+              });
+              return plugin;
+            });
+            (plugins as any).item = (i: number) => plugins[i] || null;
+            (plugins as any).namedItem = (n: string) => plugins.find(p => p.name === n) || null;
+            (plugins as any).refresh = () => {};
+            return plugins;
+          },
+        });
+      });
+      console.log("[Draw] Stealth init scripts applied");
 
       page = await context.newPage();
       page.setDefaultTimeout(60000);
@@ -2583,9 +2621,9 @@ export async function completeDrawViaGigyaBrowser(
         console.log("[Draw-OIDC] Page closed, reconnecting Browserless for " + email);
 
         try {
-          const freshBrowserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken;
-          console.log("[Draw-OIDC] Connecting to Browserless Stealth for OIDC...");
-          const freshBrowser = await chromium.connectOverCDP(freshBrowserlessUrl, { timeout: 60000 });
+          const freshBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+          console.log("[Draw-OIDC] Connecting to Browserless Playwright with residential proxy for OIDC...");
+          const freshBrowser = await chromium.connect(freshBrowserlessUrl, { timeout: 60000 });
           browser = freshBrowser;
           console.log("[Draw-OIDC] Browserless connected for OIDC!");
 
@@ -2599,7 +2637,6 @@ export async function completeDrawViaGigyaBrowser(
             permissions: ['geolocation'],
             colorScheme: 'light',
             hasTouch: false,
-            proxy: getActiveProxyConfig(),
           });
 
           page = await freshCtx.newPage();
@@ -2837,8 +2874,8 @@ export async function completeDrawViaGigyaBrowser(
 
           if (!browser || !page || page.isClosed()) {
             console.log("[Draw-OIDC] Browser unavailable, reconnecting Browserless for OIDC fallback...");
-            const fallbackBrowserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken;
-            browser = await chromium.connectOverCDP(fallbackBrowserlessUrl, { timeout: 60000 });
+            const fallbackBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+            browser = await chromium.connect(fallbackBrowserlessUrl, { timeout: 60000 });
             const ctx = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
               viewport: { width: 1366, height: 768 },
@@ -2849,7 +2886,6 @@ export async function completeDrawViaGigyaBrowser(
               permissions: ['geolocation'],
               colorScheme: 'light',
               hasTouch: false,
-              proxy: getActiveProxyConfig(),
             });
             await ctx.addInitScript(`
               Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
