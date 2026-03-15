@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [recentAccounts, setRecentAccounts] = useState<RecentAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [smsPoolBalance, setSmsPoolBalance] = useState<string | null>(null);
+  const [capSolverBalance, setCapSolverBalance] = useState<string | null>(null);
   const { toast } = useToast();
   const accountPrice = useAccountPrice();
 
@@ -50,11 +51,16 @@ export default function Dashboard() {
         if (!r.ok) return null;
         return r.json();
       }).catch(() => null),
+      fetch("/api/capsolver/balance", { credentials: "include" }).then((r) => {
+        if (!r.ok) return null;
+        return r.json();
+      }).catch(() => null),
     ])
-      .then(([dashData, accounts, smsData]) => {
+      .then(([dashData, accounts, smsData, capData]) => {
         if (dashData) setData(dashData);
         setRecentAccounts((accounts || []).slice(0, 8));
         if (smsData?.configured && smsData?.balance) setSmsPoolBalance(smsData.balance);
+        if (capData?.balance !== undefined) setCapSolverBalance(String(capData.balance));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -233,13 +239,23 @@ export default function Dashboard() {
                 <div className="text-2xl font-black text-amber-300">${accountPrice.toFixed(2)}</div>
               </div>
               {smsPoolBalance !== null && (
-                <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 col-span-2" data-testid="card-smspool-balance">
+                <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10" data-testid="card-smspool-balance">
                   <div className="flex items-center gap-2 mb-2">
                     <Phone className="w-4 h-4 text-blue-400" />
                     <span className="text-xs font-medium text-blue-400">SMSPool Balance</span>
                   </div>
                   <div className="text-2xl font-black text-blue-300">${parseFloat(smsPoolBalance).toFixed(2)}</div>
                   <div className="text-[10px] text-zinc-600 mt-1">Phone verification credits</div>
+                </div>
+              )}
+              {capSolverBalance !== null && (
+                <div className="p-4 rounded-xl bg-purple-500/5 border border-purple-500/10" data-testid="card-capsolver-balance">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="w-4 h-4 text-purple-400" />
+                    <span className="text-xs font-medium text-purple-400">CapSolver Balance</span>
+                  </div>
+                  <div className="text-2xl font-black text-purple-300">${parseFloat(capSolverBalance).toFixed(2)}</div>
+                  <div className="text-[10px] text-zinc-600 mt-1">CAPTCHA solving credits</div>
                 </div>
               )}
             </div>

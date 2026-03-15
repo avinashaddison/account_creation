@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
+import { solveRecaptchaV2, solveHCaptcha, injectRecaptchaToken } from "./capsolverService";
 
 chromium.use(StealthPlugin());
 
@@ -953,8 +954,9 @@ async function doTMRegistration(
 
     if (isChallenge(pageLower)) {
       log(`🛡️ CAPTCHA detected, waiting for auto-solver...`);
-      console.log("[TM-Playwright] Captcha/challenge detected. Waiting for Browser API captcha solver (up to 120s)...");
-      for (let cw = 0; cw < 40; cw++) {
+      console.log("[TM-Playwright] Captcha/challenge detected. Waiting for Browser API captcha solver (up to 60s)...");
+      let challengeResolved = false;
+      for (let cw = 0; cw < 20; cw++) {
         await page.waitForTimeout(3000);
         try {
           pageText = await getPageText(page);
@@ -967,10 +969,62 @@ async function doTMRegistration(
           if (!isChallenge(pageLower)) {
             log(`✅ CAPTCHA solved!`);
             console.log("[TM-Playwright] Challenge resolved!");
+            challengeResolved = true;
             break;
           }
         } catch {
           console.log("[TM-Playwright] Page navigating during challenge solve...");
+        }
+      }
+
+      if (!challengeResolved && isChallenge(pageLower)) {
+        log(`🔧 Auto-solver timed out, trying CapSolver...`);
+        console.log("[TM-Playwright] Browser solver failed, attempting CapSolver...");
+        try {
+          const siteKey = await page.evaluate(() => {
+            const el = document.querySelector('.g-recaptcha, [data-sitekey]');
+            if (el) return el.getAttribute('data-sitekey');
+            const iframe = document.querySelector('iframe[src*="recaptcha"]');
+            if (iframe) {
+              const src = iframe.getAttribute('src') || '';
+              const match = src.match(/[?&]k=([^&]+)/);
+              if (match) return match[1];
+            }
+            const hcap = document.querySelector('[data-hcaptcha-widget-id], .h-captcha');
+            if (hcap) return hcap.getAttribute('data-sitekey');
+            return null;
+          });
+          const currentUrl = page.url();
+
+          if (siteKey) {
+            console.log(`[TM-Playwright] Found CAPTCHA site key: ${siteKey}`);
+            log(`Found CAPTCHA key, solving via CapSolver...`);
+
+            const isHCaptcha = await page.evaluate(() => !!document.querySelector('.h-captcha, [data-hcaptcha-widget-id]'));
+            const capResult = isHCaptcha
+              ? await solveHCaptcha(currentUrl, siteKey)
+              : await solveRecaptchaV2(currentUrl, siteKey);
+
+            if (capResult.success && capResult.token) {
+              console.log(`[TM-Playwright] CapSolver token received (${capResult.token.length} chars)`);
+              log(`✅ CapSolver solved! Injecting token...`);
+              await injectRecaptchaToken(page, capResult.token);
+              await page.waitForTimeout(3000);
+
+              pageText = await getPageText(page);
+              pageLower = pageText.toLowerCase();
+              if (!isChallenge(pageLower)) {
+                console.log("[TM-Playwright] Challenge resolved after CapSolver!");
+              }
+            } else {
+              console.log(`[TM-Playwright] CapSolver failed: ${capResult.error}`);
+              log(`CapSolver failed: ${capResult.error || 'unknown'}`);
+            }
+          } else {
+            console.log("[TM-Playwright] No CAPTCHA site key found on page");
+          }
+        } catch (capErr: any) {
+          console.log(`[TM-Playwright] CapSolver error: ${capErr.message?.substring(0, 100)}`);
         }
       }
     }

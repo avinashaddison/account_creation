@@ -7,6 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise } from "./capsolverService";
 
 const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
@@ -2290,9 +2291,77 @@ export async function completeDrawViaGigyaBrowser(
         log("Login failed (errorCode=" + errCode + "): " + (errMsg || 'unknown') + ". Attempt " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES);
         console.log("[Draw] Login failed: errorCode=" + errCode + " msg=" + errMsg);
         if (errCode === 400006) {
-          log("CAPTCHA required (400006). Cannot proceed.");
-          try { if (browser) await browser.close(); } catch {}
-          return { success: false, profileSet: false, dataSet: false, error: "Login failed: CAPTCHA required (400006)" };
+          log("CAPTCHA required (400006). Attempting CapSolver...");
+          console.log("[Draw] CAPTCHA 400006 — trying CapSolver to get reCAPTCHA token...");
+          try {
+            const siteKey = await page.evaluate(() => {
+              const g = (window as any).grecaptcha;
+              const clients = (window as any).___grecaptcha_cfg?.clients;
+              if (clients) {
+                for (const clientId of Object.keys(clients)) {
+                  const client = clients[clientId];
+                  const keys = JSON.stringify(client);
+                  const match = keys.match(/["']sitekey["']\s*:\s*["']([^"']+)["']/i);
+                  if (match) return match[1];
+                }
+              }
+              const el = document.querySelector('.g-recaptcha, [data-sitekey]');
+              if (el) return el.getAttribute('data-sitekey');
+              return null;
+            });
+            const recaptchaSiteKey = siteKey || "6LcPEfwpAAAAAH29k3K6rBdKt0WlAJ-PNy5-bKsv";
+            console.log("[Draw] Using reCAPTCHA site key: " + recaptchaSiteKey);
+            log("Solving reCAPTCHA via CapSolver (site key: " + recaptchaSiteKey.substring(0, 10) + "...)");
+
+            const capResult = await solveRecaptchaV2Enterprise(
+              "https://la28id.la28.org/login/",
+              recaptchaSiteKey
+            );
+
+            if (capResult.success && capResult.token) {
+              console.log("[Draw] CapSolver token received, length: " + capResult.token.length);
+              log("CapSolver solved! Retrying login with token...");
+
+              const capLoginResult = await page.evaluate(`(function() {
+                return new Promise(function(resolve) {
+                  gigya.accounts.login({
+                    loginID: ${JSON.stringify(email)},
+                    password: ${JSON.stringify(password)},
+                    captchaToken: "${capResult.token}",
+                    captchaType: "recaptchaV2",
+                    callback: function(resp) {
+                      resolve({
+                        success: resp.errorCode === 0,
+                        errorCode: resp.errorCode,
+                        errorMessage: resp.errorMessage || '',
+                        uid: resp.UID || ''
+                      });
+                    }
+                  });
+                  setTimeout(function() { resolve({ success: false, errorCode: -2, errorMessage: 'timeout', uid: '' }); }, 30000);
+                });
+              })()`) as any;
+              console.log("[Draw] CapSolver login result: " + JSON.stringify(capLoginResult));
+
+              if (capLoginResult.success) {
+                loginResult = capLoginResult;
+                log("Login with CapSolver token succeeded! UID: " + (capLoginResult.uid || "unknown"));
+              } else {
+                log("CapSolver token login failed: " + capLoginResult.errorMessage);
+              }
+            } else {
+              console.log("[Draw] CapSolver failed: " + capResult.error);
+              log("CapSolver failed: " + (capResult.error || "unknown"));
+            }
+          } catch (capErr: any) {
+            console.log("[Draw] CapSolver error: " + (capErr.message || '').substring(0, 100));
+            log("CapSolver error: " + (capErr.message || '').substring(0, 60));
+          }
+
+          if (!loginResult.success) {
+            try { if (browser) await browser.close(); } catch {}
+            return { success: false, profileSet: false, dataSet: false, error: "Login failed: CAPTCHA required (400006), CapSolver also failed" };
+          }
         }
         if (errCode === 451002 && attempt === MAX_LOGIN_RETRIES - 1) {
           console.log("[Draw] 451002 on final Browserless attempt — trying local Chromium fallback...");

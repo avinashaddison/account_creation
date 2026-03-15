@@ -130,6 +130,14 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Endpoints**: `GET /api/smspool/balance` — check SMSPool balance (shown on dashboard)
 - **Usage**: Automatically orders US phone number for Ticketmaster service during TM registration flow
 
+## CapSolver Integration
+- **API**: `https://api.capsolver.com` with `CAPSOLVER_API_KEY` env secret
+- **Service**: `server/capsolverService.ts` — solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveHCaptcha, solveFunCaptcha, solveAntiTurnstile, getCapSolverBalance, injectRecaptchaToken
+- **Endpoints**: `GET /api/capsolver/balance` — check CapSolver balance (shown on dashboard)
+- **LA28 Integration**: When Gigya login returns error 400006 (CAPTCHA required), CapSolver automatically solves reCAPTCHA Enterprise and retries login with the token
+- **Ticketmaster Integration**: When browser auto-solver times out on CAPTCHA challenges, CapSolver attempts to solve reCAPTCHA/hCaptcha and inject the token
+- **Dashboard**: CapSolver balance displayed in purple card alongside SMSPool balance
+
 ## Proxy Status (as of March 11, 2026)
 - **Oxylabs Web Unblocker** (`unblock.oxylabs.io:60000`): Only proxy that passes Akamai bot detection on tickets.la28.org. Works for single HTTP requests (curl). Cannot maintain sessions or run interactive JS. Free trial limits apply (3 rendered requests per window).
 - **Bright Data scraping_browser1**: Blocked by robots.txt on tickets.la28.org. JS navigation bypass gets 403 from Akamai.

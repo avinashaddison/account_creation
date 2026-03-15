@@ -11,6 +11,7 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
+import { getCapSolverBalance } from "./capsolverService";
 import { randomUUID, createHash } from "crypto";
 
 async function getDefaultBrowserApiUrl(): Promise<string> {
@@ -677,6 +678,15 @@ export async function registerRoutes(
   app.get("/api/smspool/balance", requireAuth, async (_req, res) => {
     try {
       const result = await getSMSPoolBalance();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/capsolver/balance", requireAuth, async (_req, res) => {
+    try {
+      const result = await getCapSolverBalance();
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
