@@ -79,14 +79,14 @@ export default function Earnings() {
   };
 
   return (
-    <div className="space-y-6" data-testid="earnings-page">
+    <div className="animate-float-up space-y-6" data-testid="earnings-page">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white" data-testid="text-earnings-title">Earnings</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-earnings-title">Earnings</h1>
         <p className="text-zinc-500 mt-1 text-sm">Revenue overview from all admin account creations</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <div className="relative overflow-hidden rounded-xl bg-[#111118] border border-white/5 p-5 group hover:border-white/10 transition-all" data-testid="card-total-revenue">
+        <div className="relative overflow-hidden rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5 group hover:border-white/10 transition-all" data-testid="card-total-revenue">
           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-10 -mt-10" />
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Total Revenue</span>
@@ -101,7 +101,7 @@ export default function Earnings() {
           </div>
         </div>
 
-        <div className="relative overflow-hidden rounded-xl bg-[#111118] border border-white/5 p-5 group hover:border-white/10 transition-all" data-testid="card-total-accounts">
+        <div className="relative overflow-hidden rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5 group hover:border-white/10 transition-all" data-testid="card-total-accounts">
           <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 rounded-full -mr-10 -mt-10" />
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Total Accounts</span>
@@ -115,7 +115,7 @@ export default function Earnings() {
           </div>
         </div>
 
-        <div className="relative overflow-hidden rounded-xl bg-[#111118] border border-white/5 p-5 group hover:border-white/10 transition-all" data-testid="card-active-admins">
+        <div className="relative overflow-hidden rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5 group hover:border-white/10 transition-all" data-testid="card-active-admins">
           <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full -mr-10 -mt-10" />
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Active Admins</span>
@@ -129,7 +129,7 @@ export default function Earnings() {
           </div>
         </div>
 
-        <div className="relative overflow-hidden rounded-xl bg-[#111118] border border-white/5 p-5 group hover:border-white/10 transition-all" data-testid="card-avg-per-account">
+        <div className="relative overflow-hidden rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5 group hover:border-white/10 transition-all" data-testid="card-avg-per-account">
           <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full -mr-10 -mt-10" />
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Per Account</span>
@@ -145,7 +145,7 @@ export default function Earnings() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-xl bg-[#111118] border border-white/5 p-6" data-testid="card-platform-breakdown">
+        <div className="lg:col-span-2 rounded-xl glass-panel bg-transparent border border-white/[0.04] p-6" data-testid="card-platform-breakdown">
           <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-5 flex items-center gap-2">
             <BarChart3 className="w-4 h-4" /> Platform Revenue
           </h3>
@@ -182,7 +182,7 @@ export default function Earnings() {
           )}
         </div>
 
-        <div className="rounded-xl bg-[#111118] border border-white/5 p-6" data-testid="card-success-overview">
+        <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-6" data-testid="card-success-overview">
           <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-5">Account Status</h3>
           <div className="flex flex-col items-center">
             <div className="relative w-36 h-36">
@@ -226,7 +226,7 @@ export default function Earnings() {
       </div>
 
       {data.adminBreakdown.length > 0 && (
-        <div className="rounded-xl bg-[#111118] border border-white/5 p-6" data-testid="card-admin-breakdown">
+        <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-6" data-testid="card-admin-breakdown">
           <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Users className="w-4 h-4" /> Admin Performance
           </h3>
@@ -270,7 +270,7 @@ export default function Earnings() {
       )}
 
       {data.recentTransactions.length > 0 && (
-        <div className="rounded-xl bg-[#111118] border border-white/5 p-6" data-testid="card-recent-transactions">
+        <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-6" data-testid="card-recent-transactions">
           <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Clock className="w-4 h-4" /> Recent Transactions
           </h3>

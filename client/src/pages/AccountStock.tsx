@@ -300,10 +300,10 @@ export default function AccountStock() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-float-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white" data-testid="text-account-stock-title">Account Stock</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-account-stock-title">Account Stock</h1>
           <p className="text-zinc-500 mt-1 text-sm">
             {verified.length} verified, {inProgress.length} in progress, {failed.length} failed
           </p>
@@ -325,7 +325,7 @@ export default function AccountStock() {
         <Button
           variant={platformFilter === "all" ? "default" : "outline"}
           size="sm"
-          className={`h-7 text-xs ${platformFilter === "all" ? "bg-red-600 hover:bg-red-700" : "border-white/10 text-zinc-400 hover:bg-white/5"}`}
+          className={`h-7 text-xs ${platformFilter === "all" ? "bg-violet-600 hover:bg-violet-700" : "border-white/10 text-zinc-400 hover:bg-white/[0.04]"}`}
           onClick={() => setPlatformFilter("all")}
           data-testid="filter-all"
         >
@@ -339,7 +339,7 @@ export default function AccountStock() {
               key={p}
               variant={platformFilter === p ? "default" : "outline"}
               size="sm"
-              className={`h-7 text-xs ${platformFilter === p ? "bg-red-600 hover:bg-red-700" : "border-white/10 text-zinc-400 hover:bg-white/5"}`}
+              className={`h-7 text-xs ${platformFilter === p ? "bg-violet-600 hover:bg-violet-700" : "border-white/10 text-zinc-400 hover:bg-white/[0.04]"}`}
               onClick={() => setPlatformFilter(p)}
               data-testid={`filter-${p}`}
             >
@@ -355,7 +355,7 @@ export default function AccountStock() {
         </div>
       ) : (
         <Tabs defaultValue="available" className="space-y-4">
-          <TabsList className="bg-[#111118] border border-white/5">
+          <TabsList className="bg-white/[0.03] border border-white/[0.04]">
             <TabsTrigger value="available" className="data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-400" data-testid="tab-available">
               Available ({availableAccounts.length})
             </TabsTrigger>
@@ -368,7 +368,7 @@ export default function AccountStock() {
           </TabsList>
 
           <TabsContent value="available">
-            <Card className="bg-[#111118] border-white/5">
+            <Card className="glass-panel border-white/[0.04]">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm text-zinc-400">Available Accounts</CardTitle>
               </CardHeader>
@@ -384,7 +384,7 @@ export default function AccountStock() {
           </TabsContent>
 
           <TabsContent value="used">
-            <Card className="bg-[#111118] border-white/5">
+            <Card className="glass-panel border-white/[0.04]">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm text-zinc-400">Used Accounts</CardTitle>
               </CardHeader>
@@ -400,7 +400,7 @@ export default function AccountStock() {
           </TabsContent>
 
           <TabsContent value="other">
-            <Card className="bg-[#111118] border-white/5">
+            <Card className="glass-panel border-white/[0.04]">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm text-zinc-400">Pending, In Progress & Failed</CardTitle>
               </CardHeader>

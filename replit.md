@@ -16,7 +16,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **failed**: Error at any stage
 
 ## Architecture
-- **Frontend**: React + Vite + Tailwind CSS + shadcn/ui components
+- **Frontend**: React + Vite + Tailwind CSS + shadcn/ui components (premium dark UI with glass-morphism panels, Inter font, violet/purple accent theme, subtle animations)
 - **Backend**: Express.js (TypeScript) with WebSocket for real-time logs
 - **Database**: PostgreSQL with Drizzle ORM
 - **Sessions**: PostgreSQL-backed via connect-pg-simple (`user_sessions` table)

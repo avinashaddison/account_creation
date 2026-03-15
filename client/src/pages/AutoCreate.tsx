@@ -192,17 +192,17 @@ export default function AutoCreate() {
   const estimatedCost = (count * accountPrice).toFixed(2);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-float-up">
       <div className="flex items-center gap-3">
         <Link href="/admin/create-server" data-testid="button-back-platforms">
-          <div className="p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+          <div className="p-2 rounded-lg hover:bg-white/[0.04] transition-colors cursor-pointer">
             <ArrowLeft className="w-5 h-5 text-zinc-500" />
           </div>
         </Link>
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-auto-create-title">LA28 Account Creator</h1>
-            <Badge className="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/15 text-[10px]">Olympic ID</Badge>
+            <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/15 hover:bg-violet-500/15 text-[10px]">Olympic ID</Badge>
           </div>
           <p className="text-zinc-500 text-sm mt-0.5">Full flow: Register, Verify, Profile, Draw Registration</p>
         </div>
@@ -210,9 +210,9 @@ export default function AutoCreate() {
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+          <div className="rounded-xl glass-panel p-5">
             <div className="flex items-center gap-2 mb-5">
-              <div className="p-1.5 rounded-lg bg-gradient-to-br from-red-500 to-rose-600 text-white">
+              <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-600 to-purple-700 text-white">
                 <Rocket className="w-3.5 h-3.5" />
               </div>
               <span className="text-sm font-semibold text-zinc-200">Configuration</span>
@@ -252,8 +252,8 @@ export default function AutoCreate() {
                       disabled={isRunning}
                       className={`flex-1 h-9 text-sm font-semibold rounded-lg border transition-all ${
                         count === n
-                          ? "bg-gradient-to-r from-red-600 to-rose-600 border-red-500/30 text-white shadow-lg shadow-red-500/20"
-                          : "bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/5 hover:text-zinc-300"
+                          ? "bg-gradient-to-r from-violet-600 to-purple-600 border-violet-500/30 text-white shadow-lg shadow-violet-900/20"
+                          : "bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-300"
                       } disabled:opacity-50`}
                       data-testid={`button-count-${n}`}
                     >
@@ -312,7 +312,7 @@ export default function AutoCreate() {
               )}
 
               <Button
-                className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 shadow-lg shadow-red-500/20 border-0"
+                className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 shadow-lg shadow-violet-900/25 border-0"
                 onClick={() => { sounds.start(); startBatch(count); }}
                 disabled={isRunning}
                 data-testid="button-start-batch"
@@ -333,7 +333,7 @@ export default function AutoCreate() {
           </div>
         </div>
 
-        <div className="lg:col-span-3 rounded-xl bg-[#111118] border border-white/5 p-5">
+        <div className="lg:col-span-3 rounded-xl glass-panel p-5">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <div className="p-1.5 rounded-lg bg-zinc-800 text-zinc-300">
@@ -396,7 +396,7 @@ export default function AutoCreate() {
             </div>
           )}
 
-          <ScrollArea className="h-[420px] rounded-xl border border-white/5 bg-[#0a0a0f] p-4">
+          <ScrollArea className="h-[420px] rounded-xl border border-white/[0.04] bg-[#07071a] p-4">
             {logs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-sm gap-2">
                 {isRunning ? (

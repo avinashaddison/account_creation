@@ -114,7 +114,7 @@ export default function UEFACreate() {
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+          <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
             <div className="flex items-center gap-2 mb-5">
               <div className="p-1.5 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
                 <Rocket className="w-3.5 h-3.5" />
@@ -156,7 +156,7 @@ export default function UEFACreate() {
                 />
               </div>
 
-              <div className="rounded-xl bg-white/[0.02] border border-white/5 p-4 space-y-2">
+              <div className="rounded-xl bg-white/[0.02] border border-white/[0.04] p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Accounts</span>
                   <span className="font-semibold text-zinc-300">{count}</span>
@@ -202,7 +202,7 @@ export default function UEFACreate() {
         </div>
 
         <div className="lg:col-span-3 space-y-4">
-          <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+          <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-zinc-500" />
@@ -242,7 +242,7 @@ export default function UEFACreate() {
               </div>
             )}
 
-            <ScrollArea className="h-[420px] rounded-xl border border-white/5 bg-[#0a0a0f] p-4">
+            <ScrollArea className="h-[420px] rounded-xl border border-white/[0.04] bg-[#07071a] p-4">
               {logs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-sm gap-2">
                   {isRunning ? (

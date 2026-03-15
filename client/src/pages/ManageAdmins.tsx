@@ -268,10 +268,10 @@ export default function ManageAdmins() {
   const pendingPayments = payments.filter(p => p.status === "pending");
 
   return (
-    <div className="space-y-6">
+    <div className="animate-float-up space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight" data-testid="text-manage-admins-title">Manage Admins</h1>
+          <h1 className="text-2xl font-bold tracking-tight" data-testid="text-manage-admins-title">Manage Admins</h1>
           <p className="text-muted-foreground mt-1">Create admins, manage funds, and approve payments</p>
         </div>
         <Button onClick={() => setShowForm(!showForm)} data-testid="button-toggle-create-form">
@@ -280,7 +280,7 @@ export default function ManageAdmins() {
         </Button>
       </div>
 
-      <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+      <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
         <div className="flex items-center gap-2 mb-4">
           <div className="p-1.5 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white">
             <Settings className="w-3.5 h-3.5" />
@@ -317,7 +317,7 @@ export default function ManageAdmins() {
         <p className="text-[11px] text-zinc-600 mt-2">This price is charged per account creation across all platforms (LA28, Ticketmaster, UEFA).</p>
       </div>
 
-      <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+      <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
         <div className="flex items-center gap-2 mb-4">
           <div className="p-1.5 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white">
             <Globe className="w-3.5 h-3.5" />
@@ -327,7 +327,7 @@ export default function ManageAdmins() {
         <form onSubmit={updateProxy} className="space-y-3">
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current Proxy URL</Label>
-            <div className="text-xs font-mono text-cyan-400 bg-white/[0.02] border border-white/5 rounded-lg px-3 py-2 truncate" data-testid="text-current-proxy">
+            <div className="text-xs font-mono text-cyan-400 bg-white/[0.02] border border-white/[0.04] rounded-lg px-3 py-2 truncate" data-testid="text-current-proxy">
               {browserProxy || "Not set"}
             </div>
           </div>
@@ -637,7 +637,7 @@ export default function ManageAdmins() {
 
       {changingPasswordFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-xl bg-[#111118] border border-white/10 p-6 shadow-2xl">
+          <div className="w-full max-w-md rounded-xl glass-panel bg-transparent border border-white/10 p-6 shadow-2xl">
             <h3 className="text-lg font-semibold text-white mb-1">Change Password</h3>
             <p className="text-sm text-zinc-400 mb-4">
               Set a new password for <span className="text-white font-medium">{changingPasswordFor.email}</span>

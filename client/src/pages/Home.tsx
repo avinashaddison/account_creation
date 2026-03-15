@@ -219,7 +219,7 @@ export default function Home() {
   const statusInfo = STATUS_LABELS[currentStatus] || STATUS_LABELS.pending;
 
   return (
-    <div className="space-y-6">
+    <div className="animate-float-up space-y-6">
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-home-title">LA28 Registration</h1>
@@ -230,7 +230,7 @@ export default function Home() {
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+          <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 rounded-lg bg-gradient-to-br from-red-500 to-rose-600 text-white">
@@ -321,7 +321,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white/[0.02] border border-white/5 p-3">
+              <div className="rounded-xl bg-white/[0.02] border border-white/[0.04] p-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500 flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" /> Cost</span>
                   <span className="font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">${accountPrice.toFixed(2)}</span>
@@ -371,7 +371,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="lg:col-span-3 rounded-xl bg-[#111118] border border-white/5 p-5">
+        <div className="lg:col-span-3 rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
           <div className="flex items-center gap-2 mb-4">
             <div className="p-1.5 rounded-lg bg-zinc-800 text-zinc-300">
               <Terminal className="w-3.5 h-3.5" />
@@ -379,7 +379,7 @@ export default function Home() {
             <span className="text-sm font-semibold text-zinc-200">Live Progress</span>
           </div>
 
-          <ScrollArea className="h-[380px] rounded-xl border border-white/5 bg-[#0a0a0f] p-4" data-testid="container-live-logs">
+          <ScrollArea className="h-[380px] rounded-xl border border-white/[0.04] bg-[#07071a] p-4" data-testid="container-live-logs">
             {logs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-sm gap-2">
                 {isRunning ? (
@@ -423,7 +423,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-[#111118] border border-white/5 p-5">
+      <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-lg bg-zinc-800 text-zinc-300">

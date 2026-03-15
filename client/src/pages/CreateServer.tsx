@@ -97,12 +97,12 @@ export default function CreateServer() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-float-up">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white" data-testid="text-create-server-title">
+        <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-create-server-title">
           Account Create Server
         </h1>
-        <p className="text-zinc-500 mt-1">Select a platform to start creating accounts</p>
+        <p className="text-zinc-500 mt-1 text-sm">Select a platform to start creating accounts</p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">

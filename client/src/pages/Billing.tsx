@@ -46,9 +46,9 @@ export default function Billing() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-float-up">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight" data-testid="text-billing-title">Billing</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-billing-title">Billing</h1>
         <p className="text-muted-foreground mt-1">Track costs for account creation (${accountPrice.toFixed(2)} per account)</p>
       </div>
 

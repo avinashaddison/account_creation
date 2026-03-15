@@ -28,52 +28,52 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
-  --font-sans: 'Outfit', sans-serif;
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 :root {
-  --background: 240 15% 4%;
-  --foreground: 0 0% 93%;
-  --card: 240 12% 7%;
-  --card-foreground: 0 0% 93%;
-  --popover: 240 12% 7%;
-  --popover-foreground: 0 0% 93%;
-  --primary: 221 83% 53%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 240 5% 17%;
-  --secondary-foreground: 0 0% 80%;
-  --muted: 240 5% 13%;
-  --muted-foreground: 240 5% 55%;
-  --accent: 240 5% 15%;
-  --accent-foreground: 0 0% 93%;
-  --destructive: 0 62.8% 50%;
+  --background: 228 14% 5%;
+  --foreground: 210 20% 92%;
+  --card: 228 14% 8%;
+  --card-foreground: 210 20% 92%;
+  --popover: 228 14% 8%;
+  --popover-foreground: 210 20% 92%;
+  --primary: 263 70% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 228 10% 14%;
+  --secondary-foreground: 210 10% 70%;
+  --muted: 228 10% 12%;
+  --muted-foreground: 228 8% 50%;
+  --accent: 228 10% 14%;
+  --accent-foreground: 210 20% 92%;
+  --destructive: 0 62% 50%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 5% 12%;
-  --input: 240 5% 12%;
-  --ring: 221 83% 53%;
-  --radius: 0.5rem;
+  --border: 228 10% 13%;
+  --input: 228 10% 13%;
+  --ring: 263 70% 58%;
+  --radius: 0.625rem;
 }
 
 .dark {
-  --background: 240 15% 4%;
-  --foreground: 0 0% 93%;
-  --card: 240 12% 7%;
-  --card-foreground: 0 0% 93%;
-  --popover: 240 12% 7%;
-  --popover-foreground: 0 0% 93%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 240 5% 17%;
-  --secondary-foreground: 0 0% 80%;
-  --muted: 240 5% 13%;
-  --muted-foreground: 240 5% 55%;
-  --accent: 240 5% 15%;
-  --accent-foreground: 0 0% 93%;
-  --destructive: 0 62.8% 30.6%;
+  --background: 228 14% 5%;
+  --foreground: 210 20% 92%;
+  --card: 228 14% 8%;
+  --card-foreground: 210 20% 92%;
+  --popover: 228 14% 8%;
+  --popover-foreground: 210 20% 92%;
+  --primary: 263 70% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 228 10% 14%;
+  --secondary-foreground: 210 10% 70%;
+  --muted: 228 10% 12%;
+  --muted-foreground: 228 8% 50%;
+  --accent: 228 10% 14%;
+  --accent-foreground: 210 20% 92%;
+  --destructive: 0 62% 30%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 5% 12%;
-  --input: 240 5% 12%;
-  --ring: 217.2 91.2% 59.8%;
+  --border: 228 10% 13%;
+  --input: 228 10% 13%;
+  --ring: 263 70% 58%;
 }
 
 @layer base {
@@ -83,4 +83,70 @@
   body {
     @apply font-sans antialiased bg-background text-foreground;
   }
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes float-up {
+  0% { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+
+.animate-glow {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+.animate-float-up {
+  animation: float-up 0.5s ease-out forwards;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.glass-panel {
+  background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.glass-panel-hover:hover {
+  background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+  border-color: rgba(255,255,255,0.1);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.14);
 }

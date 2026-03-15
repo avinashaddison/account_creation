@@ -116,9 +116,9 @@ export default function Wallet() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="animate-float-up space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight" data-testid="text-wallet-title">Wallet</h1>
+        <h1 className="text-2xl font-bold tracking-tight" data-testid="text-wallet-title">Wallet</h1>
         <p className="text-muted-foreground mt-1">Manage your funds and add balance via Binance TRC20</p>
       </div>
 
@@ -131,7 +131,7 @@ export default function Wallet() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-emerald-400">${balance.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-emerald-400">${balance.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground mt-1">Available for account creation</p>
           </CardContent>
         </Card>
@@ -144,7 +144,7 @@ export default function Wallet() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{accountsCanCreate}</div>
+            <div className="text-2xl font-bold">{accountsCanCreate}</div>
             <p className="text-xs text-muted-foreground mt-1">Based on wallet balance</p>
           </CardContent>
         </Card>
@@ -157,7 +157,7 @@ export default function Wallet() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">${accountPrice.toFixed(2)}</div>
+            <div className="text-2xl font-bold">${accountPrice.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground mt-1">Per account created</p>
           </CardContent>
         </Card>
