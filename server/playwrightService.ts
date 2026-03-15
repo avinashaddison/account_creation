@@ -4858,7 +4858,7 @@ export async function fullRegistrationFlow(
   password: string,
   country: string,
   language: string,
-  onStatusUpdate: (status: string) => void,
+  onStatusUpdate: (status: string) => void | Promise<void>,
   getVerificationCode: () => Promise<string | null>,
   onLog?: (message: string) => void,
   proxyUrl?: string
@@ -4901,7 +4901,7 @@ async function doRegistration(
   password: string,
   country: string,
   language: string,
-  onStatusUpdate: (status: string) => void,
+  onStatusUpdate: (status: string) => void | Promise<void>,
   getVerificationCode: () => Promise<string | null>,
   log: (message: string) => void,
   proxyUrl?: string
@@ -4941,7 +4941,7 @@ async function doRegistration(
   });
 
   try {
-    onStatusUpdate("registering");
+    await onStatusUpdate("registering");
     console.log("[Playwright] Navigating to LA28 registration...");
     await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
 
@@ -5132,7 +5132,7 @@ async function doRegistration(
     }
 
     console.log("[Playwright] Verification code needed. Waiting for code from email...");
-    onStatusUpdate("waiting_code");
+    await onStatusUpdate("waiting_code");
 
     let code: string | null = null;
     try {
@@ -5149,7 +5149,7 @@ async function doRegistration(
       return { success: false, error: "Timed out waiting for verification email" };
     }
 
-    onStatusUpdate("verifying");
+    await onStatusUpdate("verifying");
     console.log(`[Playwright] Entering verification code: ${code}`);
 
     try {
@@ -5187,7 +5187,7 @@ async function doRegistration(
       return { success: false, error: "Verification failed", pageContent: finalText.substring(0, 500) };
     }
 
-    onStatusUpdate("verified");
+    await onStatusUpdate("verified");
     log("Registration verified! Waiting for post-verification page to settle...");
 
     try {
@@ -5209,7 +5209,7 @@ async function doRegistration(
       }
     }
 
-    onStatusUpdate("profile_saving");
+    await onStatusUpdate("profile_saving");
     try {
       await completeTicketsProfile(page, email, password, log);
       log("Profile data saved via Gigya SDK!");
@@ -5218,7 +5218,7 @@ async function doRegistration(
       log("Account created & verified. Profile step had issues.");
     }
 
-    onStatusUpdate("draw_registering");
+    await onStatusUpdate("draw_registering");
     log("[DRAW] Starting draw registration — must fill form on tickets.la28.org and reach success page...");
     let drawSuccess = false;
     let profileDataSet = false;
@@ -5238,17 +5238,17 @@ async function doRegistration(
 
     log("[DRAW] Attempting browser-based form fill on tickets.la28.org...");
     try {
-      const earlyComplete = () => {
+      const earlyComplete = async () => {
         if (!drawSuccess) {
           drawSuccess = true;
-          onStatusUpdate("completed");
+          await onStatusUpdate("completed");
           log("[DRAW COMPLETE] Form submitted on tickets.la28.org and success page reached!");
         }
       };
       const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log, earlyComplete);
       if (gigyaResult.formSubmitted && !drawSuccess) {
         drawSuccess = true;
-        onStatusUpdate("completed");
+        await onStatusUpdate("completed");
         log("[DRAW COMPLETE] Draw registration confirmed — form submitted on tickets.la28.org!");
       } else if (!drawSuccess) {
         log("[DRAW] Browser form fill did not complete. formSubmitted=" + gigyaResult.formSubmitted + " oidcLinked=" + gigyaResult.oidcLinked);
@@ -5260,7 +5260,7 @@ async function doRegistration(
 
     if (!drawSuccess) {
       log("[DRAW FAILED] Could not fill draw form on tickets.la28.org. Account verified but draw NOT registered.");
-      onStatusUpdate("verified");
+      await onStatusUpdate("verified");
     }
 
     await context.close();
