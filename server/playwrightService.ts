@@ -157,6 +157,8 @@ async function waitForRecaptchaEnterprise(page: Page, timeoutMs: number = 15000)
 }
 
 function setupRecaptchaLogging(page: Page): void {
+  const recaptchaInitTracker = { anchor: false, reload: false, clr: false, enterpriseJs: false };
+
   page.on('request', (request) => {
     const url = request.url();
     if (url.includes('recaptcha') || url.includes('grecaptcha')) {
@@ -164,19 +166,30 @@ function setupRecaptchaLogging(page: Page): void {
       const type = request.resourceType();
       console.log("[reCAPTCHA-Net] " + method + " " + type + " " + url.substring(0, 200));
     }
+    if (url.includes('accounts.login') || url.includes('accounts.initRegistration')) {
+      const method = request.method();
+      const postData = request.postData() || '';
+      const hasToken = postData.includes('captchaToken') || postData.includes('riskToken');
+      console.log("[Gigya-Net] REQUEST " + method + " " + url.substring(0, 200) + " hasCaptchaToken=" + hasToken + " bodyLen=" + postData.length);
+    }
   });
 
   page.on('response', (response) => {
     const url = response.url();
     if (url.includes('recaptcha') || url.includes('grecaptcha')) {
-      console.log("[reCAPTCHA-Net] RESPONSE " + response.status() + " " + url.substring(0, 200));
+      const status = response.status();
+      console.log("[reCAPTCHA-Net] RESPONSE " + status + " " + url.substring(0, 200));
+      if (url.includes('/anchor')) recaptchaInitTracker.anchor = status < 400;
+      if (url.includes('/reload')) recaptchaInitTracker.reload = status < 400;
+      if (url.includes('enterprise.js')) recaptchaInitTracker.enterpriseJs = status < 400;
+      if (url.includes('/clr')) recaptchaInitTracker.clr = status < 400;
     }
     if (url.includes('accounts.login')) {
       console.log("[Gigya-Net] RESPONSE " + response.status() + " " + url.substring(0, 200));
       response.text().then(body => {
         try {
           const parsed = JSON.parse(body);
-          console.log("[Gigya-Net] errorCode=" + (parsed.errorCode ?? 'N/A') + " statusCode=" + (parsed.statusCode ?? 'N/A'));
+          console.log("[Gigya-Net] errorCode=" + (parsed.errorCode ?? 'N/A') + " statusCode=" + (parsed.statusCode ?? 'N/A') + " errorDetails=" + (parsed.errorDetails || 'none').substring(0, 100));
         } catch {
           console.log("[Gigya-Net] Response length: " + body.length);
         }
@@ -187,9 +200,22 @@ function setupRecaptchaLogging(page: Page): void {
   page.on('requestfailed', (request) => {
     const url = request.url();
     if (url.includes('recaptcha') || url.includes('grecaptcha')) {
-      console.log("[reCAPTCHA-Net] FAILED " + url.substring(0, 200) + " reason=" + (request.failure()?.errorText || 'unknown'));
+      const reason = request.failure()?.errorText || 'unknown';
+      console.log("[reCAPTCHA-Net] FAILED " + url.substring(0, 200) + " reason=" + reason);
+      if (url.includes('/anchor')) recaptchaInitTracker.anchor = false;
+      if (url.includes('/reload')) recaptchaInitTracker.reload = false;
+      if (url.includes('enterprise.js')) recaptchaInitTracker.enterpriseJs = false;
     }
   });
+
+  (page as any).__recaptchaInitTracker = recaptchaInitTracker;
+}
+
+function checkRecaptchaInitialization(page: Page): { ready: boolean; state: Record<string, boolean> } {
+  const tracker = (page as any).__recaptchaInitTracker || { anchor: false, reload: false, clr: false, enterpriseJs: false };
+  const ready = tracker.enterpriseJs === true;
+  console.log("[reCAPTCHA-Init] State: " + JSON.stringify(tracker) + " ready=" + ready);
+  return { ready, state: tracker };
 }
 
 async function ensureCurlImpersonate(): Promise<boolean> {
@@ -2147,6 +2173,13 @@ export async function completeDrawViaGigyaBrowser(
       });
       console.log("[Draw] reCAPTCHA state: " + JSON.stringify(recaptchaState));
 
+      const initCheck = checkRecaptchaInitialization(page);
+      if (!initCheck.ready) {
+        console.log("[Draw] reCAPTCHA initialization incomplete, waiting additional 5s for enterprise.js...");
+        await page.waitForTimeout(5000);
+        checkRecaptchaInitialization(page);
+      }
+
       log("Step 3: Simulating human interaction before login...");
       console.log("[Draw] Step 3: Human behavior simulation...");
       await simulateHumanBehavior(page, email, password);
@@ -2237,7 +2270,82 @@ export async function completeDrawViaGigyaBrowser(
           try { if (browser) await browser.close(); } catch {}
           return { success: false, profileSet: false, dataSet: false, error: "Login failed: CAPTCHA required (400006)" };
         }
-        continue;
+        if (errCode === 451002 && attempt === MAX_LOGIN_RETRIES - 1) {
+          console.log("[Draw] 451002 on final Browserless attempt — trying local Chromium fallback...");
+          log("reCAPTCHA score too low on Browserless. Trying local Chromium fallback...");
+          try {
+            if (browser) { try { await browser.close(); } catch {} browser = null; }
+            const localProxyPort = 10001 + ((attempt + 5) % 10);
+            const localBrowser = await chromium.launch({
+              headless: true,
+              proxy: getDecodoProxyConfig(localProxyPort),
+              args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-setuid-sandbox'],
+            });
+            const localCtx = await localBrowser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              viewport: { width: 1366, height: 768 },
+              screen: { width: 1366, height: 768 },
+              locale: 'en-US',
+              timezoneId: 'America/New_York',
+              geolocation: { latitude: 40.7128, longitude: -74.0060 },
+              permissions: ['geolocation'],
+              colorScheme: 'light',
+              hasTouch: false,
+            });
+            await localCtx.addInitScript(`
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+              Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+              Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+            `);
+            const localPage = await localCtx.newPage();
+            localPage.setDefaultTimeout(60000);
+            setupRecaptchaLogging(localPage);
+
+            console.log("[Draw-LocalFallback] Navigating to la28id login...");
+            await localPage.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+            try { await localPage.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
+            await localPage.waitForTimeout(3000 + Math.random() * 2000);
+
+            await localPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
+            const localRecaptchaReady = await waitForRecaptchaEnterprise(localPage, 10000);
+            console.log("[Draw-LocalFallback] reCAPTCHA ready: " + localRecaptchaReady);
+            await simulateHumanBehavior(localPage, email, password);
+
+            const localLoginResult = await localPage.evaluate(`(function() {
+              return new Promise(function(resolve) {
+                gigya.accounts.login({
+                  loginID: ${JSON.stringify(email)},
+                  password: ${JSON.stringify(password)},
+                  callback: function(resp) {
+                    resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
+                  }
+                });
+                setTimeout(function() { resolve({ success: false, errorCode: -2, errorMessage: 'timeout', uid: '' }); }, 30000);
+              });
+            })()`) as any;
+            console.log("[Draw-LocalFallback] Login result: errorCode=" + localLoginResult.errorCode + " success=" + localLoginResult.success);
+            log("Local Chromium fallback: errorCode=" + localLoginResult.errorCode + " (Browserless was 451002)");
+
+            if (localLoginResult.success) {
+              browser = localBrowser;
+              page = localPage;
+              log("Local Chromium login succeeded! Continuing with local browser.");
+              console.log("[Draw-LocalFallback] Login succeeded, switching to local browser");
+            } else {
+              console.log("[Draw-LocalFallback] Also failed: errorCode=" + localLoginResult.errorCode);
+              try { await localBrowser.close(); } catch {}
+              continue;
+            }
+          } catch (localErr: any) {
+            console.log("[Draw-LocalFallback] Error: " + (localErr.message || '').substring(0, 150));
+            log("Local Chromium fallback failed: " + (localErr.message || '').substring(0, 60));
+            continue;
+          }
+        } else {
+          continue;
+        }
       }
 
       log("Login successful! UID: " + (loginResult.uid || "unknown"));
