@@ -52,3 +52,7 @@ LA28_PROXY_URL = "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay
 DECODO_PROXY_USERNAME = "spzg7axtkh"
 DECODO_PROXY_PASSWORD = "ua62voA3DQqvi9Zf=t"
 DECODO_PROXY_HOST = "us.decodo.com"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
