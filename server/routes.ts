@@ -236,6 +236,7 @@ export async function registerRoutes(
     const sessionId = sidMatch ? decodeURIComponent(sidMatch[1]) : null;
 
     if (!sessionId) {
+      console.log("[WS] No session cookie found, client will receive all broadcasts");
       wsClients.set(ws, "");
       ws.on("close", () => wsClients.delete(ws));
       return;
@@ -244,12 +245,16 @@ export async function registerRoutes(
     wsPool.query(`SELECT sess FROM user_sessions WHERE sid = $1`, [sessionId])
       .then((result: any) => {
         if (result.rows.length > 0 && result.rows[0].sess?.userId) {
-          wsClients.set(ws, result.rows[0].sess.userId);
+          const userId = result.rows[0].sess.userId;
+          wsClients.set(ws, userId);
+          console.log(`[WS] Client authenticated: ${userId}`);
         } else {
+          console.log(`[WS] Session found but no userId, trying sess data...`);
           wsClients.set(ws, "");
         }
       })
-      .catch(() => {
+      .catch((err: any) => {
+        console.log(`[WS] Session lookup failed: ${err.message}`);
         wsClients.set(ws, "");
       });
     ws.on("close", () => wsClients.delete(ws));
@@ -426,12 +431,15 @@ export async function registerRoutes(
         log("Auto-retry: attempting draw registration...");
         try {
           const result = await completeDrawViaGigyaBrowser(email, password, zipCode || undefined, log);
-          if (result.success || result.profileSet || result.dataSet) {
+          if (result.formSubmitted) {
             await storage.updateAccount(acctId, { status: "completed" });
             const acct = await storage.getAccount(acctId);
             if (acct) broadcastAccountUpdate(acct, ownerId);
             console.log(`[AutoRetry] ${email} completed!`);
-            log("Auto-retry: draw registration completed!");
+            log("Auto-retry: draw form submitted + success page confirmed!");
+          } else if (result.profileSet || result.dataSet) {
+            console.log(`[AutoRetry] ${email} profile/data set but form NOT submitted`);
+            log("Auto-retry: profile data set but draw form NOT submitted. Will retry later.");
           } else {
             console.log(`[AutoRetry] ${email} still failing: ${result.error || 'unknown'}`);
             log("Auto-retry: still blocked (" + (result.error || 'unknown').substring(0, 60) + "). Will retry later.");
@@ -1291,7 +1299,7 @@ export async function registerRoutes(
     const filtered = logs.slice(since);
     const accounts = await storage.getAccountsByBatch(batchId);
     const isComplete = logs.some(l => l.message === "Batch complete") ||
-      accounts.every(a => a.status === "verified" || a.status === "failed");
+      accounts.every(a => ["verified", "completed", "failed"].includes(a.status));
     res.json({
       logs: filtered,
       nextSince: logs.length,
