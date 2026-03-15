@@ -362,13 +362,224 @@ async function curlImpersonate(
   return { statusCode, body, headers, finalUrl };
 }
 
+const ZENROWS_DEFAULT_API_KEY = "2f7def46c284b44ea590b7658faf856467dc7e02";
+const ZENROWS_API_BASE = "https://api.zenrows.com/v1/";
+let zenrowsRestApiKeyCache: string | null = null;
+
+async function getZenRowsApiKey(): Promise<string> {
+  if (zenrowsRestApiKeyCache !== null) return zenrowsRestApiKeyCache;
+
+  if (process.env.ZENROWS_API_KEY) {
+    zenrowsRestApiKeyCache = process.env.ZENROWS_API_KEY;
+    return zenrowsRestApiKeyCache;
+  }
+
+  try {
+    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_rest_api_key'`);
+    if (result.rows.length > 0 && result.rows[0].value) {
+      zenrowsRestApiKeyCache = result.rows[0].value as string;
+      return zenrowsRestApiKeyCache;
+    }
+  } catch {}
+
+  zenrowsRestApiKeyCache = ZENROWS_DEFAULT_API_KEY;
+  return zenrowsRestApiKeyCache;
+}
+
+async function zenRowsRequest(
+  url: string,
+  opts: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    cookies?: string;
+    followRedirects?: boolean;
+  } = {}
+): Promise<CurlResponse> {
+  const apiKey = await getZenRowsApiKey();
+  const method = (opts.method || "GET").toUpperCase();
+  const params = new URLSearchParams({
+    apikey: apiKey,
+    url: url,
+    premium_proxy: "true",
+  });
+
+  if (opts.cookies) {
+    params.set("custom_cookies", opts.cookies);
+  }
+
+  const zenUrl = `${ZENROWS_API_BASE}?${params.toString()}`;
+
+  const fetchOpts: RequestInit = {
+    method: method,
+    headers: {
+      ...(opts.headers || {}),
+    },
+    signal: AbortSignal.timeout(90000),
+  };
+
+  if (opts.followRedirects === false) {
+    fetchOpts.redirect = "manual";
+  }
+
+  if (opts.body && method !== "GET") {
+    fetchOpts.body = opts.body;
+  }
+
+  try {
+    const response = await fetch(zenUrl, fetchOpts);
+    const body = await response.text();
+    const headers: Record<string, string> = {};
+    response.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
+
+    console.log("[ZenRows-REST] " + method + " " + url.substring(0, 80) + " => " + response.status + " (body=" + body.length + ")");
+
+    return {
+      statusCode: response.status,
+      body,
+      headers,
+      finalUrl: url,
+    };
+  } catch (err: any) {
+    console.log("[ZenRows-REST] Error for " + url.substring(0, 80) + ": " + (err.message || "").substring(0, 150));
+    throw err;
+  }
+}
+
+function persistCookiesToFile(cookieString: string, cookieFile: string, domain: string = ".tickets.la28.org"): void {
+  try {
+    const existingLines: string[] = [];
+    if (fs.existsSync(cookieFile)) {
+      existingLines.push(...fs.readFileSync(cookieFile, "utf8").split("\n").filter(l => l.trim()));
+    }
+    if (existingLines.length === 0) {
+      existingLines.push("# Netscape HTTP Cookie File");
+    }
+
+    const expiry = Math.floor(Date.now() / 1000) + 86400;
+    const domainFlag = domain.startsWith(".") ? "TRUE" : "FALSE";
+    const existingCookieNames = new Set(existingLines.map(l => {
+      const parts = l.split("\t");
+      return parts.length >= 7 ? parts[5] : "";
+    }).filter(n => n));
+
+    for (const pair of cookieString.split("; ")) {
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx > 0) {
+        const name = pair.substring(0, eqIdx).trim();
+        const value = pair.substring(eqIdx + 1).trim();
+        if (existingCookieNames.has(name)) {
+          for (let i = 0; i < existingLines.length; i++) {
+            const parts = existingLines[i].split("\t");
+            if (parts.length >= 7 && parts[5] === name) {
+              parts[6] = value;
+              existingLines[i] = parts.join("\t");
+              break;
+            }
+          }
+        } else {
+          existingLines.push(`${domain}\t${domainFlag}\t/\tTRUE\t${expiry}\t${name}\t${value}`);
+        }
+      }
+    }
+
+    fs.writeFileSync(cookieFile, existingLines.join("\n") + "\n");
+    console.log("[ZenRows-REST] Synced ZenRows cookies to curl cookie jar: " + cookieFile);
+  } catch (err: any) {
+    console.log("[ZenRows-REST] Failed to persist cookies to file: " + (err.message || "").substring(0, 80));
+  }
+}
+
+function browserCookiesToString(cookies: Array<{ name: string; value: string }>): string {
+  return cookies.map(c => `${c.name}=${c.value}`).join("; ");
+}
+
+function extractCookiesFromResponse(resp: CurlResponse): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  const rawHeaders: string[] = [];
+
+  if (resp.headers["set-cookie"]) {
+    rawHeaders.push(...resp.headers["set-cookie"].split(/,(?=[^ ])/));
+  }
+  if (resp.headers["Set-Cookie"]) {
+    rawHeaders.push(...resp.headers["Set-Cookie"].split(/,(?=[^ ])/));
+  }
+
+  for (const part of rawHeaders) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const nameVal = trimmed.split(";")[0];
+    const eqIdx = nameVal.indexOf("=");
+    if (eqIdx > 0) {
+      const name = nameVal.substring(0, eqIdx).trim();
+      if (name && !name.includes(" ")) {
+        cookies[name] = nameVal.substring(eqIdx + 1).trim();
+      }
+    }
+  }
+  return cookies;
+}
+
+function isZenRowsFailure(resp: CurlResponse): boolean {
+  return resp.statusCode === 403 ||
+    resp.statusCode === 429 ||
+    resp.statusCode >= 500 ||
+    resp.body.includes("Access Denied");
+}
+
+function mergeCookieStrings(existing: string, newCookies: Record<string, string>): string {
+  const cookieMap: Record<string, string> = {};
+  if (existing) {
+    for (const pair of existing.split("; ")) {
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx > 0) {
+        cookieMap[pair.substring(0, eqIdx).trim()] = pair.substring(eqIdx + 1).trim();
+      }
+    }
+  }
+  for (const [k, v] of Object.entries(newCookies)) {
+    cookieMap[k] = v;
+  }
+  return Object.entries(cookieMap).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
 async function navigateQueueIt(
   targetUrl: string,
   cookieFile: string,
   proxyUrl: string,
   log: (msg: string) => void
-): Promise<boolean> {
+): Promise<{ passed: boolean; zenRowsCookies?: string }> {
   log("Navigating through Queue-it for tickets.la28.org...");
+
+  try {
+    log("Trying ZenRows premium proxy for Queue-it navigation...");
+    const zrResp = await zenRowsRequest(targetUrl);
+    if (!isZenRowsFailure(zrResp) &&
+        (zrResp.body.includes("Official LA28") || zrResp.body.includes("login-app") || zrResp.body.includes("tickets.la28.org"))) {
+      log("Queue-it bypassed via ZenRows premium proxy!");
+      try {
+        const zrCookies = extractCookiesFromResponse(zrResp);
+        if (Object.keys(zrCookies).length > 0) {
+          const cookieLines = ["# Netscape HTTP Cookie File"];
+          const expiry = Math.floor(Date.now() / 1000) + 86400;
+          for (const [name, value] of Object.entries(zrCookies)) {
+            cookieLines.push(`.tickets.la28.org\tTRUE\t/\tTRUE\t${expiry}\t${name}\t${value}`);
+          }
+          fs.writeFileSync(cookieFile, cookieLines.join("\n") + "\n");
+          console.log("[ZenRows-REST] Persisted " + Object.keys(zrCookies).length + " ZenRows cookies to curl cookie jar");
+        }
+      } catch {}
+      const queueCookieStr = Object.entries(extractCookiesFromResponse(zrResp)).map(([k, v]) => `${k}=${v}`).join("; ");
+      return { passed: true, zenRowsCookies: queueCookieStr || undefined };
+    }
+    if (isZenRowsFailure(zrResp)) {
+      console.log("[ZenRows-REST] Queue-it navigation failed (" + zrResp.statusCode + "), falling back to curl-impersonate");
+    } else {
+      console.log("[ZenRows-REST] Queue-it response " + zrResp.statusCode + " but no LA28 content, falling back to curl-impersonate");
+    }
+  } catch (zrErr: any) {
+    console.log("[ZenRows-REST] Queue-it error: " + (zrErr.message || "").substring(0, 100) + ", falling back to curl-impersonate");
+  }
 
   const resp1 = await curlImpersonate(targetUrl, {
     cookieFile,
@@ -379,7 +590,7 @@ async function navigateQueueIt(
 
   if (resp1.body.includes("Official LA28") || resp1.body.includes("login-app")) {
     log("Queue-it bypassed - got real page directly!");
-    return true;
+    return { passed: true };
   }
 
   const queueRedirectMatch = resp1.body.match(/decodeURIComponent\('([^']+)'\)/);
@@ -397,7 +608,7 @@ async function navigateQueueIt(
 
     if (resp2.body.includes("Official LA28") || resp2.body.includes("login-app")) {
       log("Queue-it passed - got real page!");
-      return true;
+      return { passed: true };
     }
 
     const queueRedirect2 = resp2.body.match(/decodeURIComponent\('([^']+)'\)/);
@@ -415,18 +626,18 @@ async function navigateQueueIt(
 
       if (resp3.body.includes("Official LA28") || resp3.body.includes("login-app")) {
         log("Queue-it passed on third attempt!");
-        return true;
+        return { passed: true };
       }
     }
   }
 
   if (resp1.finalUrl.includes("tickets.la28.org") && !resp1.finalUrl.includes("next.tickets")) {
     log("Reached tickets.la28.org (may not have full page content)");
-    return true;
+    return { passed: true };
   }
 
   log("Could not navigate through Queue-it");
-  return false;
+  return { passed: false };
 }
 
 export async function ticketsFormFillWithCookies(
@@ -464,19 +675,50 @@ export async function ticketsFormFillWithCookies(
     fs.writeFileSync(cookieFile, cookieLines.join("\n") + "\n");
     console.log("[CurlCookie] Wrote " + browserCookies.length + " cookies to " + cookieFile);
 
-    const regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
-      cookieFile,
-      proxy: proxyUrl,
-      headers: {
-        "Accept": "application/json",
-        "Referer": "https://tickets.la28.org/mycustomerdata/",
-      },
-    });
+    let zenRowsCookieString = browserCookiesToString(browserCookies);
+    let useZenRows = true;
+    let regResp: CurlResponse;
 
-    console.log("[CurlCookie] Registration form: " + regResp.statusCode + " size=" + regResp.body.length);
+    try {
+      log("Trying ZenRows premium proxy for registration form...");
+      regResp = await zenRowsRequest("https://tickets.la28.org/api/login/registration", {
+        headers: {
+          "Accept": "application/json",
+          "Referer": "https://tickets.la28.org/mycustomerdata/",
+        },
+        cookies: zenRowsCookieString,
+      });
+
+      if (isZenRowsFailure(regResp)) {
+        console.log("[ZenRows-REST] Registration form failed (" + regResp.statusCode + "), falling back to curl-impersonate");
+        useZenRows = false;
+      } else {
+        const regCookies = extractCookiesFromResponse(regResp);
+        zenRowsCookieString = mergeCookieStrings(zenRowsCookieString, regCookies);
+        persistCookiesToFile(zenRowsCookieString, cookieFile);
+      }
+    } catch (zrErr: any) {
+      console.log("[ZenRows-REST] Registration form error: " + (zrErr.message || "").substring(0, 100) + ", falling back to curl-impersonate");
+      useZenRows = false;
+      regResp = { statusCode: 0, body: "", headers: {}, finalUrl: "" };
+    }
+
+    if (!useZenRows) {
+      persistCookiesToFile(zenRowsCookieString, cookieFile);
+      regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+        cookieFile,
+        proxy: proxyUrl,
+        headers: {
+          "Accept": "application/json",
+          "Referer": "https://tickets.la28.org/mycustomerdata/",
+        },
+      });
+    }
+
+    console.log("[CurlCookie] Registration form: " + regResp.statusCode + " size=" + regResp.body.length + (useZenRows ? " (via ZenRows)" : " (via curl)"));
 
     if (regResp.statusCode === 403) {
-      log("Akamai blocked API call (403). Browser cookies may not transfer to curl.");
+      log("Akamai blocked API call (403). Browser cookies may not transfer.");
       return { success: false, formSubmitted: false, error: "Akamai blocked (403)" };
     }
 
@@ -533,15 +775,55 @@ export async function ticketsFormFillWithCookies(
     ];
 
     for (const p of payloads) {
-      const submitResp = await curlImpersonate(p.url, {
-        method: p.method,
-        cookieFile,
-        proxy: proxyUrl,
-        headers: submitHeaders,
-        body: p.body,
-      });
+      let submitResp: CurlResponse;
+      let usedZenRowsForSubmit = useZenRows;
 
-      console.log("[CurlCookie] Submit " + p.method + " " + p.url.split("/api/")[1] + ": " + submitResp.statusCode + " body: " + submitResp.body.substring(0, 200));
+      if (useZenRows) {
+        try {
+          submitResp = await zenRowsRequest(p.url, {
+            method: p.method,
+            headers: submitHeaders,
+            body: p.body,
+            cookies: zenRowsCookieString,
+          });
+
+          if (isZenRowsFailure(submitResp)) {
+            console.log("[ZenRows-REST] Submit " + p.method + " failed (" + submitResp.statusCode + "), falling back to curl");
+            usedZenRowsForSubmit = false;
+            useZenRows = false;
+            persistCookiesToFile(zenRowsCookieString, cookieFile);
+            submitResp = await curlImpersonate(p.url, {
+              method: p.method,
+              cookieFile,
+              proxy: proxyUrl,
+              headers: submitHeaders,
+              body: p.body,
+            });
+          }
+        } catch {
+          console.log("[ZenRows-REST] Submit error, falling back to curl for " + p.method);
+          usedZenRowsForSubmit = false;
+          useZenRows = false;
+          persistCookiesToFile(zenRowsCookieString, cookieFile);
+          submitResp = await curlImpersonate(p.url, {
+            method: p.method,
+            cookieFile,
+            proxy: proxyUrl,
+            headers: submitHeaders,
+            body: p.body,
+          });
+        }
+      } else {
+        submitResp = await curlImpersonate(p.url, {
+          method: p.method,
+          cookieFile,
+          proxy: proxyUrl,
+          headers: submitHeaders,
+          body: p.body,
+        });
+      }
+
+      console.log("[CurlCookie] Submit " + p.method + " " + p.url.split("/api/")[1] + ": " + submitResp.statusCode + " body: " + submitResp.body.substring(0, 200) + (usedZenRowsForSubmit ? " (via ZenRows)" : " (via curl)"));
 
       if (submitResp.statusCode >= 200 && submitResp.statusCode < 300) {
         log("Form submitted on tickets.la28.org via " + p.method + " " + p.url.split("/api/")[1] + "!");
@@ -592,14 +874,14 @@ export async function ticketsFormFillViaCurl(
     log("Starting tickets.la28.org form fill via curl-impersonate...");
     console.log("[CurlImp] Session: " + sessionId + ", proxy: " + proxyUrl.substring(0, 40));
 
-    const queuePassed = await navigateQueueIt(
+    const queueResult = await navigateQueueIt(
       "https://tickets.la28.org/mycustomerdata/",
       cookieFile,
       proxyUrl,
       log
     );
 
-    if (!queuePassed) {
+    if (!queueResult.passed) {
       return { success: false, formSubmitted: false, error: "Queue-it navigation failed" };
     }
 
@@ -611,17 +893,49 @@ export async function ticketsFormFillViaCurl(
       redirectUrl: "https://tickets.la28.org/mycustomerdata/",
     }).toString();
 
-    const ssoResp = await curlImpersonate(ssoUrl, {
-      cookieFile,
-      proxy: proxyUrl,
-      headers: {
-        "Accept": "application/json",
-        "Referer": "https://tickets.la28.org/mycustomerdata/",
-      },
-      followRedirects: false,
-    });
+    let useZenRows = true;
+    let ssoResp: CurlResponse;
+    let zenRowsCookies = queueResult.zenRowsCookies || "";
 
-    console.log("[CurlImp] SSO response: " + ssoResp.statusCode + " body: " + ssoResp.body.substring(0, 200));
+    try {
+      log("Trying ZenRows premium proxy for SSO call...");
+      ssoResp = await zenRowsRequest(ssoUrl, {
+        headers: {
+          "Accept": "application/json",
+          "Referer": "https://tickets.la28.org/mycustomerdata/",
+        },
+        followRedirects: false,
+        cookies: zenRowsCookies || undefined,
+      });
+
+      if (isZenRowsFailure(ssoResp)) {
+        console.log("[ZenRows-REST] SSO failed (" + ssoResp.statusCode + "), falling back to curl-impersonate");
+        useZenRows = false;
+      } else {
+        const ssoCookies = extractCookiesFromResponse(ssoResp);
+        zenRowsCookies = mergeCookieStrings(zenRowsCookies, ssoCookies);
+        persistCookiesToFile(zenRowsCookies, cookieFile);
+        console.log("[ZenRows-REST] SSO cookies captured: " + Object.keys(ssoCookies).join(", "));
+      }
+    } catch (zrErr: any) {
+      console.log("[ZenRows-REST] SSO error: " + (zrErr.message || "").substring(0, 100) + ", falling back to curl-impersonate");
+      useZenRows = false;
+      ssoResp = { statusCode: 0, body: "", headers: {}, finalUrl: "" };
+    }
+
+    if (!useZenRows) {
+      ssoResp = await curlImpersonate(ssoUrl, {
+        cookieFile,
+        proxy: proxyUrl,
+        headers: {
+          "Accept": "application/json",
+          "Referer": "https://tickets.la28.org/mycustomerdata/",
+        },
+        followRedirects: false,
+      });
+    }
+
+    console.log("[CurlImp] SSO response: " + ssoResp.statusCode + " body: " + ssoResp.body.substring(0, 200) + (useZenRows ? " (via ZenRows)" : " (via curl)"));
 
     if (ssoResp.statusCode === 403 || ssoResp.body.includes("Access Denied")) {
       log("Akamai blocked SSO API call. Session cookies may be invalid.");
@@ -629,25 +943,71 @@ export async function ticketsFormFillViaCurl(
     }
 
     if (ssoResp.body.includes("errorCode") && ssoResp.body.includes('"message"')) {
-      const ssoData = JSON.parse(ssoResp.body);
-      if (ssoData.errorCode && ssoData.errorCode !== 0) {
-        log("SSO login error: " + (ssoData.message || "code " + ssoData.errorCode));
-        return { success: false, formSubmitted: false, error: "SSO: " + (ssoData.message || "login failed") };
+      try {
+        const ssoData = JSON.parse(ssoResp.body);
+        if (ssoData.errorCode && ssoData.errorCode !== 0) {
+          log("SSO login error: " + (ssoData.message || "code " + ssoData.errorCode));
+          return { success: false, formSubmitted: false, error: "SSO: " + (ssoData.message || "login failed") };
+        }
+      } catch {
+        console.log("[CurlImp] SSO response body not valid JSON: " + ssoResp.body.substring(0, 200));
       }
     }
 
     log("SSO authenticated on tickets.la28.org! Loading customer form...");
 
-    const regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
-      cookieFile,
-      proxy: proxyUrl,
-      headers: {
-        "Accept": "application/json",
-        "Referer": "https://tickets.la28.org/mycustomerdata/",
-      },
-    });
+    let regResp: CurlResponse;
+    if (useZenRows) {
+      try {
+        regResp = await zenRowsRequest("https://tickets.la28.org/api/login/registration", {
+          headers: {
+            "Accept": "application/json",
+            "Referer": "https://tickets.la28.org/mycustomerdata/",
+          },
+          cookies: zenRowsCookies || undefined,
+        });
+        if (isZenRowsFailure(regResp)) {
+          console.log("[ZenRows-REST] Registration form failed (" + regResp.statusCode + "), falling back to curl");
+          useZenRows = false;
+          if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
+          regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+            cookieFile,
+            proxy: proxyUrl,
+            headers: {
+              "Accept": "application/json",
+              "Referer": "https://tickets.la28.org/mycustomerdata/",
+            },
+          });
+        } else {
+          const regCookies = extractCookiesFromResponse(regResp);
+          zenRowsCookies = mergeCookieStrings(zenRowsCookies, regCookies);
+          persistCookiesToFile(zenRowsCookies, cookieFile);
+        }
+      } catch {
+        console.log("[ZenRows-REST] Registration form error, falling back to curl");
+        useZenRows = false;
+        if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
+        regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+          cookieFile,
+          proxy: proxyUrl,
+          headers: {
+            "Accept": "application/json",
+            "Referer": "https://tickets.la28.org/mycustomerdata/",
+          },
+        });
+      }
+    } else {
+      regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+        cookieFile,
+        proxy: proxyUrl,
+        headers: {
+          "Accept": "application/json",
+          "Referer": "https://tickets.la28.org/mycustomerdata/",
+        },
+      });
+    }
 
-    console.log("[CurlImp] Registration form: " + regResp.statusCode + " size=" + regResp.body.length);
+    console.log("[CurlImp] Registration form: " + regResp.statusCode + " size=" + regResp.body.length + (useZenRows ? " (via ZenRows)" : " (via curl)"));
 
     let xsrfToken = "";
     let formFields: any = null;
@@ -699,15 +1059,49 @@ export async function ticketsFormFillViaCurl(
       page: "registration",
     });
 
-    const submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
-      method: "POST",
-      cookieFile,
-      proxy: proxyUrl,
-      headers: submitHeaders,
-      body: submitBody,
-    });
+    let submitResp: CurlResponse;
+    if (useZenRows) {
+      try {
+        submitResp = await zenRowsRequest("https://tickets.la28.org/api/login/registration", {
+          method: "POST",
+          headers: submitHeaders,
+          body: submitBody,
+          cookies: zenRowsCookies || undefined,
+        });
 
-    console.log("[CurlImp] Submit response: " + submitResp.statusCode + " body: " + submitResp.body.substring(0, 300));
+        if (isZenRowsFailure(submitResp)) {
+          console.log("[ZenRows-REST] Submit failed (" + submitResp.statusCode + "), retrying with curl-impersonate");
+          if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
+          submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+            method: "POST",
+            cookieFile,
+            proxy: proxyUrl,
+            headers: submitHeaders,
+            body: submitBody,
+          });
+        }
+      } catch {
+        console.log("[ZenRows-REST] Submit error, falling back to curl");
+        if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
+        submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+          method: "POST",
+          cookieFile,
+          proxy: proxyUrl,
+          headers: submitHeaders,
+          body: submitBody,
+        });
+      }
+    } else {
+      submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
+        method: "POST",
+        cookieFile,
+        proxy: proxyUrl,
+        headers: submitHeaders,
+        body: submitBody,
+      });
+    }
+
+    console.log("[CurlImp] Submit response: " + submitResp.statusCode + " body: " + submitResp.body.substring(0, 300) + (useZenRows ? " (via ZenRows)" : " (via curl)"));
 
     if (submitResp.statusCode >= 200 && submitResp.statusCode < 300) {
       log("Form submitted on tickets.la28.org!");
@@ -3059,7 +3453,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           } catch {}
           if (!zenrowsUrl) {
-            zenrowsUrl = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
+            zenrowsUrl = "wss://browser.zenrows.com?apikey=2f7def46c284b44ea590b7658faf856467dc7e02";
           }
           if (!zenrowsUrl.includes('proxy_country=')) {
             zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
