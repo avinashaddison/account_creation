@@ -30,9 +30,9 @@ export default function Login({ onLogin }: LoginProps) {
         i++;
       } else {
         clearInterval(timer);
-        setTimeout(() => setBootReady(true), 200);
+        setTimeout(() => setBootReady(true), 100);
       }
-    }, 300);
+    }, 150);
     return () => clearInterval(timer);
   }, []);
 
@@ -115,8 +115,8 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
 
           <div className="mx-6 mb-4 rounded-lg p-3 font-mono text-[10px] leading-relaxed" style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(0,229,255,0.12)' }}>
-            {bootLines.map((line, i) => (
-              <div key={i} className={`${line.includes('[OK]') ? 'text-emerald-400' : line.includes('[SYS]') ? 'text-cyan-400/60' : line.includes('[NET]') ? 'text-violet-400/60' : 'text-amber-400/60'}`}>
+            {(bootLines || []).map((line, i) => (
+              <div key={i} className={`${line?.includes('[OK]') ? 'text-emerald-400' : line?.includes('[SYS]') ? 'text-cyan-400/60' : line?.includes('[NET]') ? 'text-violet-400/60' : 'text-amber-400/60'}`}>
                 {line}
               </div>
             ))}
