@@ -258,12 +258,11 @@
 
 .scan-line {
   position: relative;
-  overflow: hidden;
 }
 
 .scan-line::after {
   content: '';
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
@@ -271,6 +270,7 @@
   background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.15), transparent);
   animation: scan-line 4s linear infinite;
   pointer-events: none;
+  z-index: 50;
 }
 
 .cyber-text {
