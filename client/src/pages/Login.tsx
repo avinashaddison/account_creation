@@ -66,10 +66,10 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden cyber-grid" style={{ background: 'var(--cyber-bg)' }}>
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden cyber-grid" style={{ background: '#0d1117' }}>
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-30%] left-[-15%] w-[60%] h-[60%] rounded-full opacity-[0.06]" style={{ background: 'radial-gradient(circle, #00f0ff 0%, transparent 70%)' }} />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full opacity-[0.04]" style={{ background: 'radial-gradient(circle, #a855f7 0%, transparent 70%)' }} />
+        <div className="absolute top-[-30%] left-[-15%] w-[60%] h-[60%] rounded-full opacity-[0.1]" style={{ background: 'radial-gradient(circle, #00e5ff 0%, transparent 70%)' }} />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full opacity-[0.07]" style={{ background: 'radial-gradient(circle, #a855f7 0%, transparent 70%)' }} />
         <div className="absolute top-[15%] right-[20%] w-1 h-1 rounded-full bg-cyan-400/50 animate-glow" />
         <div className="absolute top-[65%] left-[15%] w-1.5 h-1.5 rounded-full bg-violet-400/30 animate-glow" style={{ animationDelay: '1s' }} />
         <div className="absolute top-[35%] left-[65%] w-0.5 h-0.5 rounded-full bg-cyan-400/40 animate-glow" style={{ animationDelay: '2s' }} />
@@ -114,7 +114,7 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
           </div>
 
-          <div className="mx-6 mb-4 rounded-lg p-3 font-mono text-[10px] leading-relaxed" style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(0,240,255,0.06)' }}>
+          <div className="mx-6 mb-4 rounded-lg p-3 font-mono text-[10px] leading-relaxed" style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(0,229,255,0.12)' }}>
             {bootLines.map((line, i) => (
               <div key={i} className={`${line.includes('[OK]') ? 'text-emerald-400' : line.includes('[SYS]') ? 'text-cyan-400/60' : line.includes('[NET]') ? 'text-violet-400/60' : 'text-amber-400/60'}`}>
                 {line}
@@ -135,7 +135,7 @@ export default function Login({ onLogin }: LoginProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="operator@addison.io"
                   required
-                  className="h-11 bg-black/30 border-cyan-500/15 text-cyan-50 placeholder:text-cyan-900/60 rounded-lg font-mono text-sm focus:border-cyan-400/40 focus:ring-cyan-400/15 transition-all"
+                  className="h-11 bg-black/20 border-cyan-500/20 text-cyan-50 placeholder:text-zinc-500 rounded-lg font-mono text-sm focus:border-cyan-400/40 focus:ring-cyan-400/15 transition-all"
                   data-testid="input-login-email"
                 />
               </div>
@@ -149,7 +149,7 @@ export default function Login({ onLogin }: LoginProps) {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter passkey"
                   required
-                  className="h-11 bg-black/30 border-cyan-500/15 text-cyan-50 placeholder:text-cyan-900/60 rounded-lg font-mono text-sm focus:border-cyan-400/40 focus:ring-cyan-400/15 transition-all"
+                  className="h-11 bg-black/20 border-cyan-500/20 text-cyan-50 placeholder:text-zinc-500 rounded-lg font-mono text-sm focus:border-cyan-400/40 focus:ring-cyan-400/15 transition-all"
                   data-testid="input-login-password"
                 />
               </div>

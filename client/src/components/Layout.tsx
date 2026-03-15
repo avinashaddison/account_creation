@@ -61,8 +61,8 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
   ];
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'var(--cyber-bg)' }}>
-      <aside className="w-[260px] flex flex-col shrink-0 h-screen sticky top-0 border-r border-cyan-500/[0.06]" style={{ background: 'linear-gradient(180deg, #08081a 0%, #06060f 100%)' }} data-testid="sidebar">
+    <div className="min-h-screen flex" style={{ background: '#0d1117' }}>
+      <aside className="w-[260px] flex flex-col shrink-0 h-screen sticky top-0 border-r border-cyan-500/[0.12]" style={{ background: 'linear-gradient(180deg, #0f1520 0%, #0d1117 100%)' }} data-testid="sidebar">
         <div className="px-5 pt-4 pb-2">
           {isEditing ? (
             <div className="space-y-2">
@@ -175,7 +175,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto cyber-grid scan-line" style={{ background: 'linear-gradient(135deg, #06060f 0%, #0a0a1a 50%, #06060f 100%)' }}>
+      <main className="flex-1 overflow-auto cyber-grid scan-line" style={{ background: 'linear-gradient(135deg, #0d1117 0%, #111824 50%, #0d1117 100%)' }}>
         <div className="p-6 max-w-[1400px] mx-auto">{children}</div>
       </main>
     </div>

@@ -33,56 +33,56 @@
 }
 
 :root {
-  --background: 230 18% 4%;
-  --foreground: 185 60% 90%;
-  --card: 230 18% 6%;
-  --card-foreground: 185 60% 90%;
-  --popover: 230 18% 6%;
-  --popover-foreground: 185 60% 90%;
-  --primary: 175 80% 50%;
-  --primary-foreground: 230 18% 4%;
-  --secondary: 230 12% 12%;
-  --secondary-foreground: 185 20% 65%;
-  --muted: 230 12% 10%;
-  --muted-foreground: 230 10% 45%;
-  --accent: 260 70% 55%;
-  --accent-foreground: 185 60% 90%;
+  --background: 228 20% 10%;
+  --foreground: 210 40% 92%;
+  --card: 228 22% 13%;
+  --card-foreground: 210 40% 92%;
+  --popover: 228 22% 13%;
+  --popover-foreground: 210 40% 92%;
+  --primary: 185 100% 50%;
+  --primary-foreground: 228 20% 6%;
+  --secondary: 228 16% 18%;
+  --secondary-foreground: 210 20% 75%;
+  --muted: 228 16% 16%;
+  --muted-foreground: 228 12% 55%;
+  --accent: 260 70% 60%;
+  --accent-foreground: 210 40% 92%;
   --destructive: 0 65% 50%;
   --destructive-foreground: 0 0% 98%;
-  --border: 230 12% 12%;
-  --input: 230 12% 12%;
-  --ring: 175 80% 50%;
+  --border: 228 16% 20%;
+  --input: 228 16% 18%;
+  --ring: 185 100% 50%;
   --radius: 0.5rem;
 
-  --cyber-cyan: #00f0ff;
+  --cyber-cyan: #00e5ff;
   --cyber-violet: #a855f7;
   --cyber-green: #00ff88;
   --cyber-red: #ff3366;
   --cyber-amber: #ffaa00;
-  --cyber-bg: #06060f;
-  --cyber-surface: #0a0a18;
+  --cyber-bg: #0d1117;
+  --cyber-surface: #151b27;
 }
 
 .dark {
-  --background: 230 18% 4%;
-  --foreground: 185 60% 90%;
-  --card: 230 18% 6%;
-  --card-foreground: 185 60% 90%;
-  --popover: 230 18% 6%;
-  --popover-foreground: 185 60% 90%;
-  --primary: 175 80% 50%;
-  --primary-foreground: 230 18% 4%;
-  --secondary: 230 12% 12%;
-  --secondary-foreground: 185 20% 65%;
-  --muted: 230 12% 10%;
-  --muted-foreground: 230 10% 45%;
-  --accent: 260 70% 55%;
-  --accent-foreground: 185 60% 90%;
-  --destructive: 0 65% 35%;
+  --background: 228 20% 10%;
+  --foreground: 210 40% 92%;
+  --card: 228 22% 13%;
+  --card-foreground: 210 40% 92%;
+  --popover: 228 22% 13%;
+  --popover-foreground: 210 40% 92%;
+  --primary: 185 100% 50%;
+  --primary-foreground: 228 20% 6%;
+  --secondary: 228 16% 18%;
+  --secondary-foreground: 210 20% 75%;
+  --muted: 228 16% 16%;
+  --muted-foreground: 228 12% 55%;
+  --accent: 260 70% 60%;
+  --accent-foreground: 210 40% 92%;
+  --destructive: 0 65% 45%;
   --destructive-foreground: 0 0% 98%;
-  --border: 230 12% 12%;
-  --input: 230 12% 12%;
-  --ring: 175 80% 50%;
+  --border: 228 16% 20%;
+  --input: 228 16% 18%;
+  --ring: 185 100% 50%;
 }
 
 @layer base {
@@ -90,7 +90,9 @@
     @apply border-border;
   }
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-sans antialiased;
+    background-color: #0d1117;
+    color: #e2e8f0;
   }
 }
 
@@ -100,12 +102,12 @@
 }
 
 @keyframes glow-pulse {
-  0%, 100% { opacity: 0.3; }
+  0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
 }
 
 @keyframes float-up {
-  0% { opacity: 0; transform: translateY(16px); }
+  0% { opacity: 0; transform: translateY(12px); }
   100% { opacity: 1; transform: translateY(0); }
 }
 
@@ -122,15 +124,13 @@
 @keyframes flicker {
   0%, 100% { opacity: 1; }
   92% { opacity: 1; }
-  93% { opacity: 0.8; }
+  93% { opacity: 0.85; }
   94% { opacity: 1; }
-  96% { opacity: 0.9; }
-  97% { opacity: 1; }
 }
 
 @keyframes cyber-glow {
-  0%, 100% { box-shadow: 0 0 5px var(--cyber-cyan), 0 0 10px rgba(0, 240, 255, 0.2); }
-  50% { box-shadow: 0 0 10px var(--cyber-cyan), 0 0 30px rgba(0, 240, 255, 0.3), 0 0 50px rgba(0, 240, 255, 0.1); }
+  0%, 100% { box-shadow: 0 0 5px var(--cyber-cyan), 0 0 10px rgba(0, 229, 255, 0.2); }
+  50% { box-shadow: 0 0 10px var(--cyber-cyan), 0 0 30px rgba(0, 229, 255, 0.3); }
 }
 
 @keyframes text-glow {
@@ -174,11 +174,11 @@
 }
 
 .animate-float-up {
-  animation: float-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: float-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-shimmer {
-  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.03), transparent);
+  background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.05), transparent);
   background-size: 200% 100%;
   animation: shimmer 3s infinite;
 }
@@ -201,22 +201,22 @@
 }
 
 .glass-panel {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.02) 0%, rgba(168, 85, 247, 0.02) 50%, rgba(0, 240, 255, 0.01) 100%);
+  background: rgba(21, 27, 39, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.12);
 }
 
 .glass-panel-hover:hover {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.04) 0%, rgba(168, 85, 247, 0.03) 50%, rgba(0, 240, 255, 0.02) 100%);
-  border-color: rgba(0, 240, 255, 0.15);
-  box-shadow: 0 0 20px rgba(0, 240, 255, 0.05), inset 0 0 20px rgba(0, 240, 255, 0.02);
+  background: rgba(21, 27, 39, 0.95);
+  border-color: rgba(0, 229, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.06);
 }
 
 .cyber-card {
   position: relative;
-  background: linear-gradient(135deg, rgba(6, 6, 15, 0.9) 0%, rgba(10, 10, 24, 0.95) 100%);
-  border: 1px solid rgba(0, 240, 255, 0.1);
+  background: linear-gradient(135deg, #131a26 0%, #161e2e 100%);
+  border: 1px solid rgba(0, 229, 255, 0.15);
   overflow: hidden;
 }
 
@@ -227,8 +227,8 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--cyber-cyan), transparent);
-  opacity: 0.5;
+  background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.6), transparent);
+  opacity: 0.6;
 }
 
 .cyber-card::after {
@@ -238,21 +238,21 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.4), transparent);
-  opacity: 0.3;
+  background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.5), transparent);
+  opacity: 0.4;
 }
 
 .cyber-grid {
   background-image:
-    linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(0, 229, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.04) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
 .cyber-grid-dense {
   background-image:
-    linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(0, 229, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.05) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
@@ -267,7 +267,7 @@
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.15), transparent);
+  background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.2), transparent);
   animation: scan-line 4s linear infinite;
   pointer-events: none;
   z-index: 50;
@@ -275,7 +275,7 @@
 
 .cyber-text {
   color: var(--cyber-cyan);
-  text-shadow: 0 0 6px rgba(0, 240, 255, 0.4);
+  text-shadow: 0 0 6px rgba(0, 229, 255, 0.4);
 }
 
 .cyber-text-violet {
@@ -284,22 +284,22 @@
 }
 
 .cyber-border {
-  border: 1px solid rgba(0, 240, 255, 0.12);
-  box-shadow: 0 0 8px rgba(0, 240, 255, 0.05), inset 0 0 8px rgba(0, 240, 255, 0.02);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.06);
 }
 
 .neon-button {
   position: relative;
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.12) 0%, rgba(168, 85, 247, 0.1) 100%);
+  border: 1px solid rgba(0, 229, 255, 0.35);
   color: var(--cyber-cyan);
   transition: all 0.2s;
 }
 
 .neon-button:hover {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.2) 0%, rgba(168, 85, 247, 0.15) 100%);
-  border-color: rgba(0, 240, 255, 0.5);
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.15), 0 0 30px rgba(0, 240, 255, 0.05);
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.22) 0%, rgba(168, 85, 247, 0.16) 100%);
+  border-color: rgba(0, 229, 255, 0.55);
+  box-shadow: 0 0 15px rgba(0, 229, 255, 0.15), 0 0 30px rgba(0, 229, 255, 0.05);
 }
 
 .hex-badge {
@@ -312,7 +312,7 @@
   position: absolute;
   width: 12px;
   height: 12px;
-  border-color: rgba(0, 240, 255, 0.3);
+  border-color: rgba(0, 229, 255, 0.35);
   pointer-events: none;
 }
 
@@ -331,21 +331,21 @@
 }
 
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(13, 17, 23, 0.5);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.15);
-  border-radius: 2px;
+  background: rgba(0, 229, 255, 0.2);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.3);
+  background: rgba(0, 229, 255, 0.35);
 }
 
 ::selection {
-  background: rgba(0, 240, 255, 0.2);
+  background: rgba(0, 229, 255, 0.25);
   color: #fff;
 }

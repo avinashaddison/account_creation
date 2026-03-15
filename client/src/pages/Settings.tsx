@@ -145,7 +145,7 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
   const maskedValue = value ? value.slice(0, 6) + "•".repeat(Math.max(0, value.length - 10)) + value.slice(-4) : "";
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${field.borderColor}`, background: 'rgba(6,6,15,0.6)' }} data-testid={`card-setting-${field.id}`}>
+    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${field.borderColor}`, background: 'rgba(19,26,38,0.9)' }} data-testid={`card-setting-${field.id}`}>
       <div className="px-5 py-4">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2.5">
@@ -191,7 +191,7 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={field.placeholder}
-                className="h-9 text-[12px] bg-black/40 border-cyan-500/10 text-cyan-50 font-mono rounded-lg pr-10 focus:border-cyan-500/30 placeholder:text-zinc-600"
+                className="h-9 text-[12px] bg-black/20 border-cyan-500/15 text-cyan-50 font-mono rounded-lg pr-10 focus:border-cyan-500/30 placeholder:text-zinc-500"
                 data-testid={`input-${field.id}`}
               />
               {isSecret && (

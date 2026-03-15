@@ -123,7 +123,7 @@ export default function CreateServer() {
           >
             <div className="relative rounded-xl overflow-hidden" style={{ border: `1px solid ${platform.borderColor}` }}>
               <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} ${platform.comingSoon ? "opacity-30" : "opacity-50 group-hover:opacity-70"} transition-all duration-300`} />
-              <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(6,6,15,0.6) 0%, rgba(6,6,15,0.9) 100%)' }} />
+              <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(13,17,23,0.6) 0%, rgba(13,17,23,0.92) 100%)' }} />
               <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
               <div className="relative p-5 min-h-[240px] flex flex-col justify-between text-white">

@@ -99,7 +99,7 @@ function App() {
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center cyber-grid" style={{ background: 'var(--cyber-bg, #06060f)' }}>
+      <div className="min-h-screen flex items-center justify-center cyber-grid" style={{ background: '#0d1117' }}>
         <div className="flex flex-col items-center gap-3">
           <div className="relative">
             <div className="absolute inset-0 rounded-full bg-cyan-400/10 blur-md animate-glow" />
