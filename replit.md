@@ -145,6 +145,12 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Queue-it on tickets.la28.org**: 100% server-side (zero client JS). `/mycustomerdata/` always returns Queue-it redirect. No known bypass — queue may open at specific time windows.
 - **Primary approach**: Pure Gigya REST API sets all draw registration data (profile + favorites + l2028_ticketing flag) without needing tickets.la28.org access at all.
 
+## Vite Dev Server Configuration
+- **HMR disabled**: `hmr: false` in both `vite.config.ts` and `server/vite.ts` (Replit proxy incompatibility)
+- **WebSocket patching**: `server/vite.ts` intercepts `/@vite/client` responses before Vite middleware, replaces all `new WebSocket()` calls with no-op stubs to prevent connection errors in Replit's proxied iframe
+- **Runtime error overlay removed**: `@replit/vite-plugin-runtime-error-modal` removed (was re-importing `/@vite/client` and triggering WebSocket errors)
+- **React deduplication**: `resolve.dedupe: ["react","react-dom"]` prevents "Invalid hook call" errors
+
 ## Deployment
 - **Target**: VM (required for Playwright + persistent WebSocket connections)
 - **Build**: `npm run build` (Vite client + esbuild server)
