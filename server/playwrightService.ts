@@ -5343,7 +5343,7 @@ export async function loginOutlookAccount(
     await page.setDefaultTimeout(30000);
 
     log("Navigating to login.live.com...");
-    await page.goto("https://login.live.com/", { waitUntil: "domcontentloaded" });
+    await page.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 120000 });
     await page.waitForTimeout(2000 + Math.random() * 1500);
 
     const currentUrl = page.url();
