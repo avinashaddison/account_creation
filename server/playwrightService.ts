@@ -3076,6 +3076,11 @@ export async function completeDrawViaGigyaBrowser(
           const safeEmail = email.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
           const safePass = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
 
+          // Warmup: visit la28.org first to establish cookies/JS context
+          console.log("[ZenRows] Warming up browser...");
+          try { await bdPage.goto('https://www.la28.org/', { waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+          await bdPage.waitForTimeout(3000);
+
           const waitQueueIt = async () => {
             if (bdPage.url().includes('next.tickets.la28.org') || bdPage.url().includes('queue-it')) {
               console.log("[ZenRows] In Queue-it, waiting...");
@@ -3114,18 +3119,31 @@ export async function completeDrawViaGigyaBrowser(
             try { await bdPage.waitForLoadState('networkidle', { timeout: 20000 }); } catch {}
             await bdPage.waitForTimeout(5000);
 
-            for (let attempt = 1; attempt <= 5; attempt++) {
+            for (let attempt = 1; attempt <= 8; attempt++) {
               console.log("[ZenRows] Gigya login attempt " + attempt + "...");
               const hasGigya = await bdPage.evaluate(`typeof window.gigya !== 'undefined' && typeof window.gigya.accounts !== 'undefined' && typeof window.gigya.accounts.login === 'function'`);
               if (!hasGigya) {
-                console.log("[ZenRows] Gigya SDK not ready, waiting 8s...");
-                await bdPage.waitForTimeout(8000);
-                if (attempt === 2) {
+                console.log("[ZenRows] Gigya SDK not ready, waiting 10s...");
+                await bdPage.waitForTimeout(10000);
+                if (attempt === 2 || attempt === 5) {
                   console.log("[ZenRows] Reloading login page...");
                   try { await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
-                  await bdPage.waitForTimeout(5000);
-                  try { await bdPage.waitForLoadState('networkidle', { timeout: 20000 }); } catch {}
-                  await bdPage.waitForTimeout(5000);
+                  await bdPage.waitForTimeout(8000);
+                  try { await bdPage.waitForLoadState('networkidle', { timeout: 30000 }); } catch {}
+                  await bdPage.waitForTimeout(8000);
+                }
+                if (attempt === 4) {
+                  console.log("[ZenRows] Trying to inject Gigya SDK manually...");
+                  try {
+                    await bdPage.evaluate(`
+                      if (!document.querySelector('script[src*="gigya.com"]')) {
+                        var s = document.createElement('script');
+                        s.src = 'https://cdns.eu1.gigya.com/js/gigya.js?apikey=4_w4CcQ6tKu4jTeDPirnKxnA';
+                        document.head.appendChild(s);
+                      }
+                    `);
+                    await bdPage.waitForTimeout(10000);
+                  } catch {}
                 }
                 continue;
               }
@@ -3184,33 +3202,74 @@ export async function completeDrawViaGigyaBrowser(
             return false;
           };
 
-          // Step 1: Login to Gigya FIRST (establish session before OIDC)
+          // Step 1: Login to Gigya via REST API and inject session cookie into ZenRows browser
           console.log("[ZenRows] Step 1: Login to Gigya first...");
           log("Logging into Gigya via ZenRows...");
-          try { await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
-          await bdPage.waitForTimeout(3000);
-          try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
-          await bdPage.waitForTimeout(3000);
 
-          const loggedIn = await doGigyaLogin();
-          console.log("[ZenRows] Gigya login result: " + loggedIn);
+          // Extract Gigya session cookie from local browser (which already logged in successfully)
+          let localLoginToken: string | null = null;
+          try {
+            console.log("[ZenRows] Extracting Gigya session cookie from local browser...");
+            const localCookies = await page.context().cookies(['https://la28id.la28.org', 'https://la28.org']);
+            const gltCookie = localCookies.find((c: any) => c.name.startsWith('glt_'));
+            if (gltCookie) {
+              localLoginToken = gltCookie.value;
+              console.log("[ZenRows] Got login token from local browser: " + localLoginToken.substring(0, 20) + "... (name=" + gltCookie.name + ")");
+            } else {
+              console.log("[ZenRows] No glt_ cookie found in local browser. Available cookies: " + localCookies.map((c: any) => c.name).join(', '));
+              // Try extracting from Gigya SDK directly
+              const sdkToken = await page.evaluate(`
+                (function() {
+                  try {
+                    var cookies = document.cookie.split(';');
+                    for (var i = 0; i < cookies.length; i++) {
+                      var c = cookies[i].trim();
+                      if (c.startsWith('glt_')) return c.split('=').slice(1).join('=');
+                    }
+                  } catch(e) {}
+                  return null;
+                })()
+              `);
+              if (sdkToken) {
+                localLoginToken = sdkToken as string;
+                console.log("[ZenRows] Got login token via document.cookie: " + localLoginToken.substring(0, 20) + "...");
+              }
+            }
+          } catch (cookieErr: any) {
+            console.log("[ZenRows] Cookie extraction error: " + (cookieErr.message || '').substring(0, 80));
+          }
+
+          if (localLoginToken) {
+            // Inject session cookies into ZenRows browser
+            console.log("[ZenRows] Injecting session cookies into ZenRows browser...");
+            const cookieDomains = ['.la28.org', '.la28id.la28.org', 'la28id.la28.org'];
+            for (const domain of cookieDomains) {
+              try {
+                await bdContext.addCookies([
+                  { name: 'glt_4_w4CcQ6tKu4jTeDPirnKxnA', value: localLoginToken, domain, path: '/', secure: true, sameSite: 'None' as any },
+                ]);
+              } catch {}
+            }
+            console.log("[ZenRows] Session cookies injected! Skipping SDK login, going straight to OIDC...");
+            // Visit la28id.la28.org briefly to establish the cookie on that domain
+            try { await bdPage.goto('https://la28id.la28.org/', { waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+            await bdPage.waitForTimeout(3000);
+          } else {
+            console.log("[ZenRows] No local login token found, will try SDK login as fallback...");
+          }
+
+          let loggedIn = !!localLoginToken; // If local browser token was injected, we're already logged in
+          if (!loggedIn) {
+            // Fallback: try SDK-based login if cookie injection didn't work
+            try { await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
+            await bdPage.waitForTimeout(3000);
+            try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+            await bdPage.waitForTimeout(5000);
+            loggedIn = await doGigyaLogin();
+          }
+          console.log("[ZenRows] Login result: " + loggedIn + (localLoginToken ? " (via local browser cookie injection)" : " (via SDK)"));
 
           if (loggedIn) {
-            await bdPage.waitForTimeout(3000);
-
-            const gigyaSession = await bdPage.evaluate(`
-              new Promise(function(resolve) {
-                if (typeof window.gigya === 'undefined' || !window.gigya.accounts) { resolve({ valid: false }); return; }
-                window.gigya.accounts.getAccountInfo({
-                  callback: function(r) {
-                    resolve({ valid: r.errorCode === 0, uid: (r.UID || '').substring(0, 20), email: r.profile ? r.profile.email : '' });
-                  }
-                });
-                setTimeout(function() { resolve({ valid: false, error: 'timeout' }); }, 10000);
-              })
-            `) as any;
-            console.log("[ZenRows] Gigya session check: " + JSON.stringify(gigyaSession));
-
             // Step 2: Navigate to OIDC auth URL directly (Keycloak endpoint)
             // This triggers the full OIDC flow: Keycloak → proxy.html → (already logged in) → redirect back
             const oidcUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
@@ -3343,6 +3402,62 @@ export async function completeDrawViaGigyaBrowser(
                 await bdPage.waitForTimeout(2000);
                 curUrl = bdPage.url();
                 if (!curUrl.includes('consent')) break;
+              }
+            }
+
+            // If landed on Gigya register/login page, the SDK should be loaded here - use it to login
+            if (curUrl.includes('la28id.la28.org/register') || curUrl.includes('la28id.la28.org/login')) {
+              console.log("[ZenRows] Landed on Gigya page: " + curUrl.substring(0, 120));
+              console.log("[ZenRows] Attempting SDK login from this page (SDK should be loaded)...");
+
+              // Wait for Gigya SDK to load on this page
+              try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+              await bdPage.waitForTimeout(5000);
+
+              const sdkLoginResult = await bdPage.evaluate(`
+                new Promise(function(resolve) {
+                  if (typeof window.gigya === 'undefined' || !window.gigya.accounts) {
+                    resolve({ success: false, error: 'no_sdk' });
+                    return;
+                  }
+                  var t = setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
+                  try {
+                    window.gigya.accounts.login({
+                      loginID: '${safeEmail}',
+                      password: '${safePass}',
+                      callback: function(r) {
+                        clearTimeout(t);
+                        resolve({ success: r.errorCode === 0, error: r.errorMessage || ('code_' + r.errorCode), code: r.errorCode });
+                      }
+                    });
+                  } catch(e) { clearTimeout(t); resolve({ success: false, error: e.message }); }
+                })
+              `) as any;
+              console.log("[ZenRows] SDK login on register page: " + JSON.stringify(sdkLoginResult));
+
+              if (sdkLoginResult.success) {
+                // After login, wait for proxy.html to process OIDC and redirect
+                await bdPage.waitForTimeout(8000);
+                curUrl = bdPage.url();
+                console.log("[ZenRows] After SDK login redirect: " + curUrl.substring(0, 150));
+
+                // If still on proxy.html or Gigya page, wait more
+                for (let rw = 0; rw < 15; rw++) {
+                  if (curUrl.includes('tickets.la28.org') && !curUrl.includes('next.tickets')) break;
+                  if (!curUrl.includes('proxy.html') && !curUrl.includes('la28id.la28.org')) break;
+                  await bdPage.waitForTimeout(3000);
+                  curUrl = bdPage.url();
+                  console.log("[ZenRows] SDK login redirect wait " + rw + ": " + curUrl.substring(0, 120));
+                }
+                await waitQueueIt();
+                curUrl = bdPage.url();
+              } else {
+                console.log("[ZenRows] SDK login failed on register page, trying direct tickets nav...");
+                try { await bdPage.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 }); } catch {}
+                await bdPage.waitForTimeout(5000);
+                await waitQueueIt();
+                curUrl = bdPage.url();
+                console.log("[ZenRows] After direct tickets nav: " + curUrl.substring(0, 150));
               }
             }
 
@@ -3542,58 +3657,88 @@ export async function completeDrawViaGigyaBrowser(
           };
 
           console.log("[ZenRows-Full] Step 1: Login to Gigya...");
-          try { await bdPg2.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
-          await bdPg2.waitForTimeout(5000);
+
+          // Extract Gigya session cookie from local browser
+          let localToken2: string | null = null;
+          try {
+            console.log("[ZenRows-Full] Extracting Gigya session from local browser...");
+            const cookies2 = await page.context().cookies(['https://la28id.la28.org', 'https://la28.org']);
+            const glt2 = cookies2.find((c: any) => c.name.startsWith('glt_'));
+            if (glt2) {
+              localToken2 = glt2.value;
+              console.log("[ZenRows-Full] Got login token: " + localToken2.substring(0, 20) + "...");
+            } else {
+              const st2 = await page.evaluate(`(function(){try{var cs=document.cookie.split(';');for(var i=0;i<cs.length;i++){var c=cs[i].trim();if(c.startsWith('glt_'))return c.split('=').slice(1).join('=');}}catch(e){}return null;})()`);
+              if (st2) { localToken2 = st2 as string; console.log("[ZenRows-Full] Got token via document.cookie"); }
+            }
+          } catch (ce2: any) {
+            console.log("[ZenRows-Full] Cookie extraction error: " + (ce2.message || '').substring(0, 80));
+          }
 
           var gigyaLogin2 = false;
-          var lastZrError = '';
-          const ZR_MAX_ATTEMPTS = 6;
-          for (let att = 0; att < ZR_MAX_ATTEMPTS; att++) {
-            if (att > 0) {
-              const isGeo = !!(lastZrError && lastZrError.includes('451002'));
-              const delaySec = isGeo ? (30 + att * 15) : 5;
-              console.log("[ZenRows-Full] Retry " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + (isGeo ? " (geo-block backoff " + delaySec + "s)" : ""));
-              await bdPg2.waitForTimeout(delaySec * 1000);
+          if (localToken2) {
+            for (const d of ['.la28.org', '.la28id.la28.org', 'la28id.la28.org']) {
+              try { await bdCtx2.addCookies([{ name: 'glt_4_w4CcQ6tKu4jTeDPirnKxnA', value: localToken2, domain: d, path: '/', secure: true, sameSite: 'None' as any }]); } catch {}
             }
-            lastZrError = '';
-            console.log("[ZenRows-Full] Gigya login attempt " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + "...");
-            try {
-              if (att === 0) {
-                try {
-                  await bdPg2.waitForFunction("typeof window.gigya !== 'undefined' && typeof window.gigya.accounts !== 'undefined'", { timeout: 15000 });
-                  await waitForRecaptchaEnterprise(bdPg2, 8000);
-                  await simulateHumanBehavior(bdPg2, email, password);
-                } catch (simErr: any) {
-                  console.log("[ZenRows-Full] Pre-login simulation error: " + (simErr.message || '').substring(0, 80));
-                }
+            try { await bdPg2.goto('https://la28id.la28.org/', { waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+            await bdPg2.waitForTimeout(3000);
+            gigyaLogin2 = true;
+            console.log("[ZenRows-Full] Session cookies injected, skipping SDK login");
+          }
+
+          if (!gigyaLogin2) {
+            try { await bdPg2.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
+            await bdPg2.waitForTimeout(5000);
+
+            var lastZrError = '';
+            const ZR_MAX_ATTEMPTS = 6;
+            for (let att = 0; att < ZR_MAX_ATTEMPTS; att++) {
+              if (att > 0) {
+                const isGeo = !!(lastZrError && lastZrError.includes('451002'));
+                const delaySec = isGeo ? (30 + att * 15) : 5;
+                console.log("[ZenRows-Full] Retry " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + (isGeo ? " (geo-block backoff " + delaySec + "s)" : ""));
+                await bdPg2.waitForTimeout(delaySec * 1000);
               }
-              const loginRes2 = await bdPg2.evaluate(`
-                new Promise(function(resolve) {
+              lastZrError = '';
+              console.log("[ZenRows-Full] Gigya login attempt " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + "...");
+              try {
+                if (att === 0) {
                   try {
-                    if (typeof window.gigya === 'undefined') { resolve({ success: false, error: 'no gigya' }); return; }
-                    window.gigya.accounts.login({
-                      loginID: '${safeEmail2}',
-                      password: '${safePass2}',
-                      callback: function(r) {
-                        resolve({ success: r.errorCode === 0, error: 'Error ' + r.errorCode });
-                      }
-                    });
-                    setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-                  } catch(e) { resolve({ success: false, error: e.message }); }
-                })
-              `) as any;
-              console.log("[ZenRows-Full] Login attempt " + (att + 1) + ": " + JSON.stringify(loginRes2));
-              lastZrError = loginRes2?.error || '';
-              if (loginRes2 && loginRes2.success) { gigyaLogin2 = true; break; }
-              if (lastZrError.includes('451002')) continue;
-            } catch (loginErr2: any) {
-              console.log("[ZenRows-Full] Login error: " + (loginErr2.message || '').substring(0, 100));
-              lastZrError = loginErr2.message || '';
+                    await bdPg2.waitForFunction("typeof window.gigya !== 'undefined' && typeof window.gigya.accounts !== 'undefined'", { timeout: 15000 });
+                    await waitForRecaptchaEnterprise(bdPg2, 8000);
+                    await simulateHumanBehavior(bdPg2, email, password);
+                  } catch (simErr: any) {
+                    console.log("[ZenRows-Full] Pre-login simulation error: " + (simErr.message || '').substring(0, 80));
+                  }
+                }
+                const loginRes2 = await bdPg2.evaluate(`
+                  new Promise(function(resolve) {
+                    try {
+                      if (typeof window.gigya === 'undefined') { resolve({ success: false, error: 'no gigya' }); return; }
+                      window.gigya.accounts.login({
+                        loginID: '${safeEmail2}',
+                        password: '${safePass2}',
+                        callback: function(r) {
+                          resolve({ success: r.errorCode === 0, error: 'Error ' + r.errorCode });
+                        }
+                      });
+                      setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+                    } catch(e) { resolve({ success: false, error: e.message }); }
+                  })
+                `) as any;
+                console.log("[ZenRows-Full] Login attempt " + (att + 1) + ": " + JSON.stringify(loginRes2));
+                lastZrError = loginRes2?.error || '';
+                if (loginRes2 && loginRes2.success) { gigyaLogin2 = true; break; }
+                if (lastZrError.includes('451002')) continue;
+              } catch (loginErr2: any) {
+                console.log("[ZenRows-Full] Login error: " + (loginErr2.message || '').substring(0, 100));
+                lastZrError = loginErr2.message || '';
+              }
             }
           }
 
           if (!gigyaLogin2) {
-            console.log("[ZenRows-Full] SDK login failed after " + ZR_MAX_ATTEMPTS + " attempts. Trying form-based login...");
+            console.log("[ZenRows-Full] SDK login failed. Trying form-based login...");
             try {
               await bdPg2.waitForTimeout(3000);
               const formContainer = await bdPg2.$('#container, .gigya-screen, [data-screenset-element-id]');
@@ -3737,6 +3882,46 @@ export async function completeDrawViaGigyaBrowser(
                   curUrl2 = bdPg2.url();
                   break;
                 }
+              }
+            }
+
+            // If landed on Gigya register/login page, SDK should be loaded - use it to login
+            if (curUrl2.includes('la28id.la28.org/register') || curUrl2.includes('la28id.la28.org/login')) {
+              console.log("[ZenRows-Full] Landed on Gigya page: " + curUrl2.substring(0, 120));
+              console.log("[ZenRows-Full] Attempting SDK login from this page...");
+              try { await bdPg2.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
+              await bdPg2.waitForTimeout(5000);
+              const sdkLogin2 = await bdPg2.evaluate(`
+                new Promise(function(resolve) {
+                  if (typeof window.gigya === 'undefined' || !window.gigya.accounts) { resolve({ success: false, error: 'no_sdk' }); return; }
+                  var t = setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
+                  try {
+                    window.gigya.accounts.login({
+                      loginID: '${safeEmail2}', password: '${safePass2}',
+                      callback: function(r) { clearTimeout(t); resolve({ success: r.errorCode === 0, error: r.errorMessage || ('code_' + r.errorCode), code: r.errorCode }); }
+                    });
+                  } catch(e) { clearTimeout(t); resolve({ success: false, error: e.message }); }
+                })
+              `) as any;
+              console.log("[ZenRows-Full] SDK login result: " + JSON.stringify(sdkLogin2));
+              if (sdkLogin2.success) {
+                await bdPg2.waitForTimeout(8000);
+                curUrl2 = bdPg2.url();
+                console.log("[ZenRows-Full] After SDK login: " + curUrl2.substring(0, 150));
+                for (let rw2 = 0; rw2 < 15; rw2++) {
+                  if (curUrl2.includes('tickets.la28.org') && !curUrl2.includes('next.tickets')) break;
+                  if (!curUrl2.includes('proxy.html') && !curUrl2.includes('la28id.la28.org')) break;
+                  await bdPg2.waitForTimeout(3000);
+                  curUrl2 = bdPg2.url();
+                }
+                await waitQueueIt2();
+                curUrl2 = bdPg2.url();
+              } else {
+                console.log("[ZenRows-Full] SDK login failed, trying direct tickets nav...");
+                try { await bdPg2.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 }); } catch {}
+                await bdPg2.waitForTimeout(5000);
+                await waitQueueIt2();
+                curUrl2 = bdPg2.url();
               }
             }
 
