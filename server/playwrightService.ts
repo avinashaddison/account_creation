@@ -213,7 +213,7 @@ function setupRecaptchaLogging(page: Page): void {
 
 function checkRecaptchaInitialization(page: Page): { ready: boolean; state: Record<string, boolean> } {
   const tracker = (page as any).__recaptchaInitTracker || { anchor: false, reload: false, clr: false, enterpriseJs: false };
-  const ready = tracker.enterpriseJs === true;
+  const ready = tracker.enterpriseJs === true && (tracker.anchor === true || tracker.reload === true);
   console.log("[reCAPTCHA-Init] State: " + JSON.stringify(tracker) + " ready=" + ready);
   return { ready, state: tracker };
 }
@@ -2220,7 +2220,7 @@ export async function completeDrawViaGigyaBrowser(
         }
       }
 
-      const loginResult = await page.evaluate(`(function() {
+      let loginResult = await page.evaluate(`(function() {
         return new Promise(function(resolve) {
           if (typeof gigya === 'undefined' || !gigya.accounts) {
             resolve({ success: false, errorCode: -1, errorMessage: 'gigya not available', uid: '', raw: 'no gigya' });
@@ -2331,8 +2331,9 @@ export async function completeDrawViaGigyaBrowser(
             if (localLoginResult.success) {
               browser = localBrowser;
               page = localPage;
-              log("Local Chromium login succeeded! Continuing with local browser.");
-              console.log("[Draw-LocalFallback] Login succeeded, switching to local browser");
+              loginResult = localLoginResult;
+              log("Local Chromium login succeeded! UID: " + (localLoginResult.uid || "unknown"));
+              console.log("[Draw-LocalFallback] Login succeeded, switching to local browser. UID: " + (localLoginResult.uid || "unknown"));
             } else {
               console.log("[Draw-LocalFallback] Also failed: errorCode=" + localLoginResult.errorCode);
               try { await localBrowser.close(); } catch {}
@@ -2348,8 +2349,8 @@ export async function completeDrawViaGigyaBrowser(
         }
       }
 
-      log("Login successful! UID: " + (loginResult.uid || "unknown"));
-      console.log("[Draw] Login OK! UID: " + loginResult.uid);
+      log("Login successful! UID: " + (loginResult?.uid || "unknown"));
+      console.log("[Draw] Login OK! UID: " + (loginResult?.uid || "unknown"));
 
       await page.waitForTimeout(3000);
       try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
