@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download, Check, RotateCcw, Trophy, UserCheck, Ticket } from "lucide-react";
+import { RefreshCw, Copy, CheckCircle2, XCircle, Clock, Loader2, Download, Check, RotateCcw, Trophy, UserCheck, Ticket, Database } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -27,22 +27,22 @@ type Account = {
 };
 
 const statusBadge: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  pending: { label: "Pending", variant: "outline" },
-  registering: { label: "Registering", variant: "secondary" },
-  waiting_code: { label: "Waiting Code", variant: "secondary" },
-  verifying: { label: "Verifying", variant: "secondary" },
-  verified: { label: "Verified", variant: "default" },
-  profile_saving: { label: "Saving Profile", variant: "secondary" },
-  draw_registering: { label: "Draw Registration", variant: "secondary" },
-  completed: { label: "Draw Registered", variant: "default" },
-  failed: { label: "Failed", variant: "destructive" },
+  pending: { label: "PENDING", variant: "outline" },
+  registering: { label: "REGISTER", variant: "secondary" },
+  waiting_code: { label: "WAIT_CODE", variant: "secondary" },
+  verifying: { label: "VERIFY", variant: "secondary" },
+  verified: { label: "VERIFIED", variant: "default" },
+  profile_saving: { label: "PROFILE", variant: "secondary" },
+  draw_registering: { label: "DRAW_REG", variant: "secondary" },
+  completed: { label: "DRAW_OK", variant: "default" },
+  failed: { label: "FAILED", variant: "destructive" },
 };
 
 const platformLabel: Record<string, { name: string; color: string }> = {
-  la28: { name: "LA28", color: "bg-red-500/10 text-red-400 border-red-500/20" },
-  ticketmaster: { name: "Ticketmaster", color: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
-  uefa: { name: "UEFA", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
-  brunomars: { name: "Bruno Mars", color: "bg-purple-500/10 text-purple-400 border-purple-500/20" },
+  la28: { name: "LA28", color: "bg-red-500/8 text-red-400 border-red-500/15" },
+  ticketmaster: { name: "TM", color: "bg-sky-500/8 text-sky-400 border-sky-500/15" },
+  uefa: { name: "UEFA", color: "bg-emerald-500/8 text-emerald-400 border-emerald-500/15" },
+  brunomars: { name: "BM", color: "bg-purple-500/8 text-purple-400 border-purple-500/15" },
 };
 
 export default function AccountStock() {
@@ -115,7 +115,7 @@ export default function AccountStock() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast({ title: "Draw Retry Started", description: "The draw registration is being retried. Status will update automatically." });
+        toast({ title: "Draw Retry", description: "Draw registration re-queued." });
         setAccounts((prev) => prev.map((a) => a.id === accountId ? { ...a, status: "draw_registering" } : a));
       } else {
         toast({ title: "Error", description: data.error || "Failed to retry", variant: "destructive" });
@@ -152,13 +152,13 @@ export default function AccountStock() {
 
   function getStatusIcon(status: string) {
     switch (status) {
-      case "completed": return <Trophy className="w-4 h-4 text-emerald-400" />;
-      case "verified": return <CheckCircle2 className="w-4 h-4 text-teal-400" />;
-      case "profile_saving": return <UserCheck className="w-4 h-4 text-blue-400 animate-pulse" />;
-      case "draw_registering": return <Ticket className="w-4 h-4 text-violet-400 animate-pulse" />;
-      case "failed": return <XCircle className="w-4 h-4 text-red-400" />;
-      case "pending": return <Clock className="w-4 h-4 text-amber-400" />;
-      default: return <Loader2 className="w-4 h-4 text-red-400 animate-spin" />;
+      case "completed": return <Trophy className="w-3.5 h-3.5 text-emerald-400" />;
+      case "verified": return <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />;
+      case "profile_saving": return <UserCheck className="w-3.5 h-3.5 text-blue-400 animate-pulse" />;
+      case "draw_registering": return <Ticket className="w-3.5 h-3.5 text-violet-400 animate-pulse" />;
+      case "failed": return <XCircle className="w-3.5 h-3.5 text-red-400" />;
+      case "pending": return <Clock className="w-3.5 h-3.5 text-amber-400" />;
+      default: return <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" />;
     }
   }
 
@@ -179,113 +179,110 @@ export default function AccountStock() {
   function renderTable(items: Account[], showToggle: boolean, toggleLabel: string, toggleIcon: React.ReactNode) {
     if (items.length === 0) {
       return (
-        <p className="text-center text-zinc-500 py-8" data-testid="text-no-accounts">No accounts in this category</p>
+        <div className="text-center py-8 font-mono" data-testid="text-no-accounts">
+          <p className="text-cyan-400/20 text-[11px]">[ No records in this category ]</p>
+        </div>
       );
     }
     return (
-      <div className="rounded-md border border-white/5 overflow-x-auto">
+      <div className="rounded-md overflow-x-auto" style={{ border: '1px solid rgba(0,240,255,0.06)' }}>
         <Table>
           <TableHeader>
-            <TableRow className="border-white/5 hover:bg-transparent">
-              <TableHead className="w-8 text-zinc-500">#</TableHead>
-              <TableHead className="text-zinc-500">Status</TableHead>
-              <TableHead className="text-zinc-500">Platform</TableHead>
-              <TableHead className="text-zinc-500">Name</TableHead>
-              <TableHead className="text-zinc-500">Email</TableHead>
-              <TableHead className="text-zinc-500">Postal Code</TableHead>
-              <TableHead className="text-zinc-500">Password</TableHead>
-              <TableHead className="text-zinc-500">Code</TableHead>
-              <TableHead className="text-zinc-500">Created</TableHead>
-              <TableHead className="w-24 text-zinc-500">Action</TableHead>
+            <TableRow className="border-cyan-500/[0.06] hover:bg-transparent">
+              <TableHead className="w-8 text-cyan-400/25 font-mono text-[10px]">#</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Status</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Module</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Identity</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Email</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Zip</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Passkey</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Code</TableHead>
+              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Timestamp</TableHead>
+              <TableHead className="w-24 text-cyan-400/25 font-mono text-[10px]">Ops</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.map((acc, i) => {
               const badge = statusBadge[acc.status] || statusBadge.pending;
-              const plat = platformLabel[acc.platform] || { name: acc.platform, color: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20" };
+              const plat = platformLabel[acc.platform] || { name: acc.platform, color: "bg-zinc-500/8 text-zinc-400 border-zinc-500/15" };
               return (
-                <TableRow key={acc.id} className="border-white/5 hover:bg-white/[0.02]" data-testid={`row-account-${acc.id}`}>
-                  <TableCell className="text-zinc-600 text-xs">{i + 1}</TableCell>
+                <TableRow key={acc.id} className="border-cyan-500/[0.04] hover:bg-cyan-500/[0.02]" data-testid={`row-account-${acc.id}`}>
+                  <TableCell className="text-zinc-600 text-[10px] font-mono">{i + 1}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       {getStatusIcon(acc.status)}
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                      <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-sm border ${
+                        acc.status === "completed" ? "bg-emerald-400/8 text-emerald-400 border-emerald-400/15" :
+                        acc.status === "verified" ? "bg-cyan-400/8 text-cyan-400 border-cyan-400/15" :
+                        acc.status === "failed" ? "bg-red-400/8 text-red-400 border-red-400/15" :
+                        "bg-amber-400/8 text-amber-400 border-amber-400/15"
+                      }`}>{badge.label}</span>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge className={`text-[10px] ${plat.color} hover:opacity-80`} data-testid={`badge-platform-${acc.id}`}>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-sm border ${plat.color}`} data-testid={`badge-platform-${acc.id}`}>
                       {plat.name}
-                    </Badge>
+                    </span>
                   </TableCell>
-                  <TableCell className="font-medium text-zinc-200">{acc.firstName} {acc.lastName}</TableCell>
+                  <TableCell className="font-mono text-[11px] text-zinc-300">{acc.firstName} {acc.lastName}</TableCell>
                   <TableCell>
-                    <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300">{acc.email}</code>
+                    <code className="text-[10px] text-cyan-400/50 font-mono">{acc.email}</code>
                   </TableCell>
                   <TableCell>
                     {acc.zipCode ? (
-                      <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300" data-testid={`text-zip-${acc.id}`}>{acc.zipCode}</code>
+                      <code className="text-[10px] text-zinc-400 font-mono" data-testid={`text-zip-${acc.id}`}>{acc.zipCode}</code>
                     ) : (
-                      <span className="text-xs text-zinc-600">-</span>
+                      <span className="text-[10px] text-zinc-700 font-mono">--</span>
                     )}
                   </TableCell>
                   <TableCell>
-                    <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-zinc-300">{acc.la28Password}</code>
+                    <code className="text-[10px] text-zinc-400 font-mono">{acc.la28Password}</code>
                   </TableCell>
                   <TableCell>
                     {acc.verificationCode ? (
-                      <code className="text-xs font-bold text-emerald-400">{acc.verificationCode}</code>
+                      <code className="text-[10px] font-bold text-emerald-400 font-mono">{acc.verificationCode}</code>
                     ) : (
-                      <span className="text-xs text-zinc-600">-</span>
+                      <span className="text-[10px] text-zinc-700 font-mono">--</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-zinc-500">
+                  <TableCell className="text-[10px] text-zinc-600 font-mono">
                     {new Date(acc.createdAt).toLocaleString()}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5">
                       {acc.platform === "la28" && ["verified", "profile_saving", "draw_registering"].includes(acc.status) && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-xs text-amber-400 hover:text-amber-300"
+                          className="h-6 px-1.5 text-[10px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/8 font-mono"
                           onClick={() => { sounds.click(); retryDraw(acc.id); }}
                           disabled={retrying === acc.id}
                           data-testid={`button-retry-draw-${acc.id}`}
                         >
-                          {retrying === acc.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          )}
-                          <span className="ml-1">Draw</span>
+                          {retrying === acc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
                         </Button>
                       )}
                       {(acc.status === "verified" || acc.status === "completed") && showToggle && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-xs"
+                          className="h-6 px-1.5 text-[10px] font-mono"
                           onClick={() => { sounds.toggle(); toggleUsed(acc.id); }}
                           disabled={toggling === acc.id}
                           data-testid={`button-toggle-${acc.id}`}
                         >
-                          {toggling === acc.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            toggleIcon
-                          )}
-                          <span className="ml-1">{toggleLabel}</span>
+                          {toggling === acc.id ? <Loader2 className="w-3 h-3 animate-spin" /> : toggleIcon}
                         </Button>
                       )}
                       {(acc.status === "verified" || acc.status === "completed") && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 px-2"
+                          className="h-6 px-1.5 text-cyan-400/30 hover:text-cyan-400"
                           onClick={() => { sounds.click(); copyToClipboard(`${acc.email}\t${acc.la28Password}`); }}
                           data-testid={`button-copy-${acc.id}`}
                         >
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy className="w-3 h-3" />
                         </Button>
                       )}
                     </div>
@@ -300,32 +297,37 @@ export default function AccountStock() {
   }
 
   return (
-    <div className="space-y-6 animate-float-up">
+    <div className="space-y-5 animate-float-up">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-account-stock-title">Account Stock</h1>
-          <p className="text-zinc-500 mt-1 text-sm">
-            {verified.length} verified, {inProgress.length} in progress, {failed.length} failed
+          <div className="flex items-center gap-2.5">
+            <Database className="w-5 h-5 text-cyan-400/50" />
+            <h1 className="text-xl font-bold tracking-tight text-white font-mono" data-testid="text-account-stock-title">
+              Account<span className="text-cyan-400">_</span>Stock
+            </h1>
+          </div>
+          <p className="text-cyan-400/30 mt-1 text-[11px] font-mono pl-7.5">
+            {verified.length} verified / {inProgress.length} active / {failed.length} failed
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportVerified} className="border-white/10 text-zinc-300 hover:bg-white/5" data-testid="button-export-accounts">
-            <Download className="w-4 h-4 mr-2" />
-            Export CSV
+          <Button variant="outline" onClick={exportVerified} className="border-cyan-500/15 text-cyan-400/60 hover:bg-cyan-500/5 hover:text-cyan-400 hover:border-cyan-500/25 font-mono text-[11px] h-8" data-testid="button-export-accounts">
+            <Download className="w-3.5 h-3.5 mr-1.5" />
+            Export
           </Button>
-          <Button variant="outline" onClick={fetchAccounts} className="border-white/10 text-zinc-300 hover:bg-white/5" data-testid="button-refresh-accounts">
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
+          <Button variant="outline" onClick={fetchAccounts} className="border-cyan-500/15 text-cyan-400/60 hover:bg-cyan-500/5 hover:text-cyan-400 hover:border-cyan-500/25 font-mono text-[11px] h-8" data-testid="button-refresh-accounts">
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+            Sync
           </Button>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-zinc-500 uppercase tracking-wider mr-1">Filter:</span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[9px] text-cyan-400/20 font-mono uppercase tracking-wider mr-1">Filter:</span>
         <Button
           variant={platformFilter === "all" ? "default" : "outline"}
           size="sm"
-          className={`h-7 text-xs ${platformFilter === "all" ? "bg-violet-600 hover:bg-violet-700" : "border-white/10 text-zinc-400 hover:bg-white/[0.04]"}`}
+          className={`h-6 text-[10px] font-mono ${platformFilter === "all" ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/25 hover:bg-cyan-500/20" : "border-cyan-500/10 text-zinc-500 hover:bg-cyan-500/[0.03] hover:text-zinc-400"}`}
           onClick={() => setPlatformFilter("all")}
           data-testid="filter-all"
         >
@@ -339,7 +341,7 @@ export default function AccountStock() {
               key={p}
               variant={platformFilter === p ? "default" : "outline"}
               size="sm"
-              className={`h-7 text-xs ${platformFilter === p ? "bg-violet-600 hover:bg-violet-700" : "border-white/10 text-zinc-400 hover:bg-white/[0.04]"}`}
+              className={`h-6 text-[10px] font-mono ${platformFilter === p ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/25 hover:bg-cyan-500/20" : "border-cyan-500/10 text-zinc-500 hover:bg-cyan-500/[0.03] hover:text-zinc-400"}`}
               onClick={() => setPlatformFilter(p)}
               data-testid={`filter-${p}`}
             >
@@ -351,68 +353,53 @@ export default function AccountStock() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-zinc-600" />
+          <Loader2 className="w-5 h-5 animate-spin text-cyan-400/40" />
         </div>
       ) : (
-        <Tabs defaultValue="available" className="space-y-4">
-          <TabsList className="bg-white/[0.03] border border-white/[0.04]">
-            <TabsTrigger value="available" className="data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-400" data-testid="tab-available">
+        <Tabs defaultValue="available" className="space-y-3">
+          <TabsList className="bg-black/30 border border-cyan-500/[0.08]">
+            <TabsTrigger value="available" className="data-[state=active]:bg-emerald-500/10 data-[state=active]:text-emerald-400 font-mono text-[11px]" data-testid="tab-available">
               Available ({availableAccounts.length})
             </TabsTrigger>
-            <TabsTrigger value="used" className="data-[state=active]:bg-amber-600/20 data-[state=active]:text-amber-400" data-testid="tab-used">
+            <TabsTrigger value="used" className="data-[state=active]:bg-amber-500/10 data-[state=active]:text-amber-400 font-mono text-[11px]" data-testid="tab-used">
               Used ({usedAccounts.length})
             </TabsTrigger>
-            <TabsTrigger value="other" className="data-[state=active]:bg-zinc-600/20 data-[state=active]:text-zinc-300" data-testid="tab-other">
+            <TabsTrigger value="other" className="data-[state=active]:bg-zinc-500/10 data-[state=active]:text-zinc-300 font-mono text-[11px]" data-testid="tab-other">
               Other ({otherAccounts.length})
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="available">
-            <Card className="glass-panel border-white/[0.04]">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm text-zinc-400">Available Accounts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {renderTable(
-                  availableAccounts,
-                  true,
-                  "Use",
-                  <Check className="w-3.5 h-3.5 text-amber-400" />
-                )}
-              </CardContent>
-            </Card>
+            <div className="cyber-card rounded-lg">
+              <div className="px-4 py-3 border-b border-cyan-500/[0.06]">
+                <span className="text-[9px] font-mono text-cyan-400/30 uppercase tracking-wider">Available Records</span>
+              </div>
+              <div className="p-3">
+                {renderTable(availableAccounts, true, "Use", <Check className="w-3 h-3 text-amber-400" />)}
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="used">
-            <Card className="glass-panel border-white/[0.04]">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm text-zinc-400">Used Accounts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {renderTable(
-                  usedAccounts,
-                  true,
-                  "Undo",
-                  <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-                )}
-              </CardContent>
-            </Card>
+            <div className="cyber-card rounded-lg">
+              <div className="px-4 py-3 border-b border-cyan-500/[0.06]">
+                <span className="text-[9px] font-mono text-cyan-400/30 uppercase tracking-wider">Used Records</span>
+              </div>
+              <div className="p-3">
+                {renderTable(usedAccounts, true, "Undo", <RotateCcw className="w-3 h-3 text-emerald-400" />)}
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="other">
-            <Card className="glass-panel border-white/[0.04]">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm text-zinc-400">Pending, In Progress & Failed</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {renderTable(
-                  otherAccounts,
-                  false,
-                  "",
-                  null
-                )}
-              </CardContent>
-            </Card>
+            <div className="cyber-card rounded-lg">
+              <div className="px-4 py-3 border-b border-cyan-500/[0.06]">
+                <span className="text-[9px] font-mono text-cyan-400/30 uppercase tracking-wider">Pending / Active / Failed</span>
+              </div>
+              <div className="p-3">
+                {renderTable(otherAccounts, false, "", null)}
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       )}

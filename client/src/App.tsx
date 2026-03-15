@@ -97,8 +97,14 @@ function App() {
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-900">
-        <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+      <div className="min-h-screen flex items-center justify-center cyber-grid" style={{ background: 'var(--cyber-bg, #06060f)' }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="relative">
+            <div className="absolute inset-0 rounded-full bg-cyan-400/10 blur-md animate-glow" />
+            <Loader2 className="w-6 h-6 animate-spin text-cyan-400/60 relative" />
+          </div>
+          <p className="text-[9px] text-cyan-400/30 font-mono uppercase tracking-[0.2em]">Initializing...</p>
+        </div>
       </div>
     );
   }

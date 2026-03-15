@@ -28,78 +28,78 @@ function playChord(notes: { freq: number; delay: number }[], duration: number, t
 }
 
 export const sounds = {
-  click: () => playTone(800, 0.08, "square", 0.06),
+  click: () => playTone(1200, 0.05, "square", 0.04),
 
-  hover: () => playTone(1200, 0.04, "sine", 0.03),
+  hover: () => playTone(1800, 0.03, "sine", 0.02),
 
   success: () => {
     playChord([
-      { freq: 523, delay: 0 },
-      { freq: 659, delay: 80 },
-      { freq: 784, delay: 160 },
-      { freq: 1047, delay: 240 },
-    ], 0.3, "sine", 0.1);
+      { freq: 800, delay: 0 },
+      { freq: 1000, delay: 60 },
+      { freq: 1200, delay: 120 },
+      { freq: 1600, delay: 180 },
+    ], 0.2, "sine", 0.08);
   },
 
   error: () => {
     playChord([
-      { freq: 400, delay: 0 },
-      { freq: 300, delay: 100 },
-      { freq: 200, delay: 200 },
-    ], 0.25, "sawtooth", 0.06);
+      { freq: 300, delay: 0 },
+      { freq: 200, delay: 80 },
+      { freq: 150, delay: 160 },
+    ], 0.3, "sawtooth", 0.05);
   },
 
   warning: () => {
     playChord([
-      { freq: 600, delay: 0 },
-      { freq: 450, delay: 120 },
-    ], 0.2, "triangle", 0.08);
+      { freq: 800, delay: 0 },
+      { freq: 600, delay: 100 },
+    ], 0.15, "triangle", 0.06);
   },
 
-  navigate: () => playTone(600, 0.06, "sine", 0.05),
+  navigate: () => playTone(900, 0.04, "square", 0.03),
 
   start: () => {
     playChord([
-      { freq: 440, delay: 0 },
-      { freq: 554, delay: 60 },
-      { freq: 659, delay: 120 },
-      { freq: 880, delay: 200 },
-    ], 0.2, "square", 0.06);
+      { freq: 600, delay: 0 },
+      { freq: 800, delay: 50 },
+      { freq: 1000, delay: 100 },
+      { freq: 1400, delay: 160 },
+    ], 0.15, "square", 0.05);
   },
 
   complete: () => {
     playChord([
-      { freq: 523, delay: 0 },
-      { freq: 659, delay: 100 },
-      { freq: 784, delay: 200 },
-      { freq: 1047, delay: 300 },
-      { freq: 1319, delay: 400 },
-    ], 0.4, "sine", 0.12);
+      { freq: 800, delay: 0 },
+      { freq: 1000, delay: 80 },
+      { freq: 1200, delay: 160 },
+      { freq: 1600, delay: 240 },
+      { freq: 2000, delay: 320 },
+    ], 0.3, "sine", 0.08);
   },
 
   notification: () => {
     playChord([
-      { freq: 880, delay: 0 },
-      { freq: 1100, delay: 80 },
-    ], 0.15, "sine", 0.08);
+      { freq: 1200, delay: 0 },
+      { freq: 1500, delay: 60 },
+    ], 0.1, "sine", 0.06);
   },
 
-  toggle: () => playTone(1000, 0.05, "square", 0.04),
+  toggle: () => playTone(1400, 0.04, "square", 0.03),
 
   deposit: () => {
     playChord([
-      { freq: 700, delay: 0 },
-      { freq: 900, delay: 80 },
-      { freq: 1100, delay: 160 },
-      { freq: 1400, delay: 240 },
-    ], 0.3, "sine", 0.1);
+      { freq: 900, delay: 0 },
+      { freq: 1100, delay: 60 },
+      { freq: 1400, delay: 120 },
+      { freq: 1800, delay: 180 },
+    ], 0.2, "sine", 0.07);
   },
 
   logout: () => {
     playChord([
-      { freq: 800, delay: 0 },
-      { freq: 600, delay: 100 },
-      { freq: 400, delay: 200 },
-    ], 0.2, "triangle", 0.06);
+      { freq: 1000, delay: 0 },
+      { freq: 700, delay: 80 },
+      { freq: 400, delay: 160 },
+    ], 0.2, "triangle", 0.05);
   },
 };
