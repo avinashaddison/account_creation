@@ -344,7 +344,16 @@ export default function AutoCreate() {
             {totalCount > 0 && (
               <div className="flex items-center gap-2">
                 <Badge className="bg-white/5 text-zinc-400 border-white/10 text-xs">{doneCount}/{totalCount} done</Badge>
-                {completedCount > 0 && <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">{completedCount} done</Badge>}
+                {batchAccounts.filter(a => a.status === "completed").length > 0 && (
+                  <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">
+                    {batchAccounts.filter(a => a.status === "completed").length} draw_ok
+                  </Badge>
+                )}
+                {batchAccounts.filter(a => a.status === "verified").length > 0 && (
+                  <Badge className="bg-cyan-500/10 text-cyan-400 border-cyan-500/20 text-xs">
+                    {batchAccounts.filter(a => a.status === "verified").length} no_draw
+                  </Badge>
+                )}
                 {failedCount > 0 && <Badge className="bg-red-500/10 text-red-400 border-red-500/20 text-xs">{failedCount} failed</Badge>}
               </div>
             )}
@@ -367,10 +376,10 @@ export default function AutoCreate() {
                 const chipLabel = acc.status === "registering" ? "Registering"
                   : acc.status === "waiting_code" ? "Waiting Code"
                   : acc.status === "verifying" ? "Verifying"
-                  : acc.status === "verified" ? "Verified"
+                  : acc.status === "verified" ? "Verified (No Draw)"
                   : acc.status === "profile_saving" ? "Saving Profile"
                   : acc.status === "draw_registering" ? "Draw Registration"
-                  : acc.status === "completed" ? "Completed"
+                  : acc.status === "completed" ? "Draw OK"
                   : acc.status === "failed" ? "Failed"
                   : "Pending";
                 return (
@@ -401,7 +410,7 @@ export default function AutoCreate() {
               <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-sm gap-2">
                 {isRunning ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin text-red-400" />
+                    <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
                     <span className="text-zinc-500">Waiting for logs...</span>
                   </>
                 ) : (
@@ -412,33 +421,46 @@ export default function AutoCreate() {
                 )}
               </div>
             ) : (
-              <div className="space-y-1 font-mono text-xs">
-                {logs.map((log, i) => (
-                  <div key={i} className="flex gap-2" data-testid={`log-entry-${i}`}>
-                    <span className="text-zinc-700 shrink-0">
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </span>
-                    <span className={
-                      log.message.includes("Full flow complete") || log.message.includes("Draw registered") || log.message.includes("completed")
-                        ? "text-emerald-400 font-semibold"
-                        : log.message.includes("verified") || log.message.includes("successfully") || log.message.includes("SUCCESS")
-                        ? "text-emerald-400"
-                        : log.message.includes("Failed") || log.message.includes("Error") || log.message.includes("Timed out")
-                        ? "text-red-400"
-                        : log.message.includes("code") || log.message.includes("Code")
-                        ? "text-amber-400"
-                        : log.message.includes("draw_registering") || log.message.includes("ticket") || log.message.includes("Ticket")
-                        ? "text-violet-400"
-                        : log.message.includes("profile_saving") || log.message.includes("Profile")
-                        ? "text-blue-400"
-                        : log.message.includes("Status:")
-                        ? "text-sky-400"
-                        : "text-zinc-400"
-                    }>
-                      {log.message}
-                    </span>
-                  </div>
-                ))}
+              <div className="space-y-0.5 font-mono text-xs">
+                {logs.map((log, i) => {
+                  const msg = log.message;
+                  const isDrawOk = msg.includes("DRAW COMPLETE") || msg.includes("success page reached") || msg.includes("mydatasuccess") || msg.includes("Draw registration complete");
+                  const isSuccess = !isDrawOk && (msg.includes("Full flow complete") || msg.includes("completed") || msg.includes("Draw registered"));
+                  const isVerified = !isDrawOk && !isSuccess && (msg.includes("verified") || msg.includes("successfully") || msg.includes("SUCCESS"));
+                  const isDrawFail = msg.includes("DRAW FAILED") || msg.includes("NOT confirmed") || msg.includes("NOT reached") || msg.includes("Draw NOT confirmed") || msg.includes("success page NOT");
+                  const isFail = !isDrawFail && (msg.includes("Failed") || msg.includes("Error") || msg.includes("Timed out") || msg.includes("error:"));
+                  const isCode = msg.includes("code") || msg.includes("Code");
+                  const isDraw = msg.includes("draw_registering") || msg.includes("DRAW") || msg.includes("draw form") || msg.includes("tickets.la28.org") || msg.includes("Ticket") || msg.includes("form fill") || msg.includes("form submitted");
+                  const isProfile = msg.includes("profile_saving") || msg.includes("Profile") || msg.includes("Gigya");
+                  const isStatus = msg.includes("Status:");
+                  const isZenRows = msg.includes("ZenRows") || msg.includes("Akamai") || msg.includes("Access Denied");
+
+                  const colorClass = isDrawOk ? "text-emerald-400 font-bold"
+                    : isSuccess ? "text-emerald-400 font-semibold"
+                    : isDrawFail ? "text-orange-400 font-semibold"
+                    : isFail ? "text-red-400"
+                    : isVerified ? "text-emerald-400"
+                    : isCode ? "text-amber-400"
+                    : isDraw ? "text-violet-400"
+                    : isProfile ? "text-blue-400"
+                    : isZenRows ? "text-rose-300"
+                    : isStatus ? "text-sky-400"
+                    : "text-zinc-400";
+
+                  const prefix = isDrawOk ? "+" : isDrawFail ? "!" : isFail ? "x" : isStatus ? ">" : " ";
+
+                  return (
+                    <div key={i} className={`flex gap-2 py-0.5 ${isDrawOk ? "bg-emerald-400/[0.03] rounded px-1 -mx-1" : isDrawFail ? "bg-orange-400/[0.03] rounded px-1 -mx-1" : isFail ? "bg-red-400/[0.02] rounded px-1 -mx-1" : ""}`} data-testid={`log-entry-${i}`}>
+                      <span className="text-zinc-700 shrink-0 select-none">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                      <span className="text-zinc-700 shrink-0 w-2 text-center select-none">{prefix}</span>
+                      <span className={colorClass}>
+                        {msg}
+                      </span>
+                    </div>
+                  );
+                })}
                 <div ref={logsEndRef} />
               </div>
             )}

@@ -38,6 +38,18 @@ const statusBadge: Record<string, { label: string; variant: "default" | "seconda
   failed: { label: "FAILED", variant: "destructive" },
 };
 
+const statusTooltip: Record<string, string> = {
+  pending: "Waiting to start",
+  registering: "Creating account...",
+  waiting_code: "Waiting for verification code",
+  verifying: "Submitting verification code",
+  verified: "Account verified — draw NOT confirmed",
+  profile_saving: "Setting profile data...",
+  draw_registering: "Filling draw form on tickets.la28.org...",
+  completed: "Draw form submitted + success page confirmed",
+  failed: "Process failed",
+};
+
 const platformLabel: Record<string, { name: string; color: string }> = {
   la28: { name: "LA28", color: "bg-red-500/8 text-red-400 border-red-500/15" },
   ticketmaster: { name: "TM", color: "bg-sky-500/8 text-sky-400 border-sky-500/15" },
@@ -162,6 +174,8 @@ export default function AccountStock() {
     }
   }
 
+  const drawOk = accounts.filter((a) => a.status === "completed");
+  const verifiedOnly = accounts.filter((a) => a.status === "verified");
   const verified = accounts.filter((a) => a.status === "verified" || a.status === "completed");
   const inProgress = accounts.filter((a) => !["verified", "completed", "failed"].includes(a.status));
   const failed = accounts.filter((a) => a.status === "failed");
@@ -209,11 +223,13 @@ export default function AccountStock() {
                 <TableRow key={acc.id} className="border-cyan-500/[0.04] hover:bg-cyan-500/[0.02]" data-testid={`row-account-${acc.id}`}>
                   <TableCell className="text-zinc-600 text-[10px] font-mono">{i + 1}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5" title={statusTooltip[acc.status] || acc.status}>
                       {getStatusIcon(acc.status)}
                       <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-sm border ${
                         acc.status === "completed" ? "bg-emerald-400/8 text-emerald-400 border-emerald-400/15" :
                         acc.status === "verified" ? "bg-cyan-400/8 text-cyan-400 border-cyan-400/15" :
+                        acc.status === "draw_registering" ? "bg-violet-400/8 text-violet-400 border-violet-400/15" :
+                        acc.status === "profile_saving" ? "bg-blue-400/8 text-blue-400 border-blue-400/15" :
                         acc.status === "failed" ? "bg-red-400/8 text-red-400 border-red-400/15" :
                         "bg-amber-400/8 text-amber-400 border-amber-400/15"
                       }`}>{badge.label}</span>
@@ -307,7 +323,13 @@ export default function AccountStock() {
             </h1>
           </div>
           <p className="text-cyan-400/30 mt-1 text-[11px] font-mono pl-7.5">
-            {verified.length} verified / {inProgress.length} active / {failed.length} failed
+            <span className="text-emerald-400/50">{drawOk.length} draw_ok</span>
+            {" / "}
+            <span className="text-cyan-400/50">{verifiedOnly.length} verified</span>
+            {" / "}
+            <span className="text-amber-400/50">{inProgress.length} active</span>
+            {" / "}
+            <span className="text-red-400/50">{failed.length} failed</span>
           </p>
         </div>
         <div className="flex gap-2">

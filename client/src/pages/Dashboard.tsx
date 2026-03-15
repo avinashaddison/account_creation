@@ -26,12 +26,14 @@ type RecentAccount = {
   lastName: string;
   status: string;
   country: string;
+  platform?: string;
   createdAt: string;
 };
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [recentAccounts, setRecentAccounts] = useState<RecentAccount[]>([]);
+  const [allAccounts, setAllAccounts] = useState<RecentAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [smsPoolBalance, setSmsPoolBalance] = useState<string | null>(null);
   const [capSolverBalance, setCapSolverBalance] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export default function Dashboard() {
       }),
       fetch("/api/accounts", { credentials: "include" }).then((r) => {
         if (!r.ok) return [];
-        return r.json();
+        return r.json() as Promise<RecentAccount[]>;
       }),
       fetch("/api/smspool/balance", { credentials: "include" }).then((r) => {
         if (!r.ok) return null;
@@ -59,6 +61,7 @@ export default function Dashboard() {
     ])
       .then(([dashData, accounts, smsData, capData]) => {
         if (dashData) setData(dashData);
+        setAllAccounts(accounts || []);
         setRecentAccounts((accounts || []).slice(0, 8));
         if (smsData?.configured && smsData?.balance) setSmsPoolBalance(smsData.balance);
         if (capData?.balance !== undefined) setCapSolverBalance(String(capData.balance));
@@ -73,6 +76,10 @@ export default function Dashboard() {
   const failed = data?.stats.failed || 0;
   const pending = data?.stats.pending || 0;
   const successRate = total > 0 ? Math.round((verified / total) * 100) : 0;
+
+  const drawOkCount = allAccounts.filter((a) => a.status === "completed").length;
+  const verifiedOnlyCount = allAccounts.filter((a) => a.status === "verified").length;
+  const drawRegCount = allAccounts.filter((a) => a.status === "draw_registering").length;
 
   function copyEmail(email: string) {
     navigator.clipboard.writeText(email);
@@ -267,18 +274,32 @@ export default function Dashboard() {
             <Activity className="w-3 h-3 text-cyan-400/30" /> Pipeline_Distribution
           </h3>
           <div className="h-2 rounded-full overflow-hidden flex" style={{ background: 'rgba(0,240,255,0.04)' }}>
-            {verified > 0 && (
+            {drawOkCount > 0 && (
               <div
                 className="h-full transition-all duration-700"
-                style={{ width: `${(verified / total) * 100}%`, background: 'linear-gradient(90deg, #00ff88, #00f0ff)', boxShadow: '0 0 8px rgba(0,255,136,0.3)' }}
-                title={`Verified: ${verified}`}
+                style={{ width: `${(drawOkCount / total) * 100}%`, background: 'linear-gradient(90deg, #00ff88, #10b981)', boxShadow: '0 0 8px rgba(0,255,136,0.3)' }}
+                title={`Draw OK: ${drawOkCount}`}
               />
             )}
-            {pending > 0 && (
+            {verifiedOnlyCount > 0 && (
               <div
                 className="h-full transition-all duration-700"
-                style={{ width: `${(pending / total) * 100}%`, background: 'linear-gradient(90deg, #ffaa00, #ff8800)', boxShadow: '0 0 8px rgba(255,170,0,0.3)' }}
-                title={`Pending: ${pending}`}
+                style={{ width: `${(verifiedOnlyCount / total) * 100}%`, background: 'linear-gradient(90deg, #00f0ff, #06b6d4)', boxShadow: '0 0 8px rgba(0,240,255,0.3)' }}
+                title={`Verified (no draw): ${verifiedOnlyCount}`}
+              />
+            )}
+            {drawRegCount > 0 && (
+              <div
+                className="h-full transition-all duration-700"
+                style={{ width: `${(drawRegCount / total) * 100}%`, background: 'linear-gradient(90deg, #a855f7, #8b5cf6)', boxShadow: '0 0 8px rgba(168,85,247,0.3)' }}
+                title={`Draw registering: ${drawRegCount}`}
+              />
+            )}
+            {(pending - drawRegCount) > 0 && (
+              <div
+                className="h-full transition-all duration-700"
+                style={{ width: `${((pending - drawRegCount) / total) * 100}%`, background: 'linear-gradient(90deg, #ffaa00, #ff8800)', boxShadow: '0 0 8px rgba(255,170,0,0.3)' }}
+                title={`Processing: ${pending - drawRegCount}`}
               />
             )}
             {failed > 0 && (
@@ -289,12 +310,14 @@ export default function Dashboard() {
               />
             )}
           </div>
-          <div className="flex items-center gap-5 mt-2.5">
+          <div className="flex items-center gap-4 mt-2.5 flex-wrap">
             {[
-              { label: "Verified", count: verified, color: "#00ff88" },
-              { label: "Active", count: pending, color: "#ffaa00" },
+              { label: "Draw OK", count: drawOkCount, color: "#00ff88" },
+              { label: "Verified", count: verifiedOnlyCount, color: "#00f0ff" },
+              { label: "Draw Reg", count: drawRegCount, color: "#a855f7" },
+              { label: "Active", count: Math.max(0, pending - drawRegCount), color: "#ffaa00" },
               { label: "Failed", count: failed, color: "#ff3366" },
-            ].map((s) => (
+            ].filter(s => s.count > 0).map((s) => (
               <div key={s.label} className="flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full" style={{ background: s.color, boxShadow: `0 0 4px ${s.color}` }} />
                 <span className="text-[10px] text-zinc-500 font-mono">{s.label} ({s.count})</span>
@@ -355,6 +378,7 @@ export default function Dashboard() {
                     "bg-amber-400/8 text-amber-400 border border-amber-400/15"
                   }`}>
                     {acc.status === "completed" ? "DRAW_OK" :
+                     acc.status === "verified" ? "NO_DRAW" :
                      acc.status === "profile_saving" ? "PROFILE" :
                      acc.status === "draw_registering" ? "DRAW_REG" :
                      acc.status === "waiting_code" ? "WAIT_CODE" :
