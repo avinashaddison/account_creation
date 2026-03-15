@@ -2116,11 +2116,11 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=60000`;
+      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=120000`;
       console.log("[Draw] Using Browserless STEALTH endpoint with residential proxy (US)");
       console.log("[Draw] Connecting to Browserless Stealth CDP endpoint...");
 
-      browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 60000 });
+      browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 90000 });
       console.log("[Draw] Browserless Stealth connected via CDP!");
 
       const contexts = browser.contexts();
@@ -2147,30 +2147,90 @@ export async function completeDrawViaGigyaBrowser(
         console.log("[Draw] IP check failed (continuing): " + (e.message || '').substring(0, 60));
       }
 
-      log("Step 1: Warming up session on la28.org...");
-      console.log("[Draw] Step 1: Warming up session on la28id.la28.org/login...");
+      log("Step 1: Multi-page warmup browsing session...");
+      console.log("[Draw] Step 1: Starting multi-page warmup to build reCAPTCHA trust...");
+
+      try {
+        console.log("[Draw] Warmup: Opening la28.org homepage...");
+        await page.goto("https://www.la28.org", { waitUntil: "domcontentloaded", timeout: 30000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+        console.log("[Draw] Warmup: Homepage loaded: " + page.url());
+
+        console.log("[Draw] Warmup: Browsing homepage for ~15s...");
+        await page.waitForTimeout(3000 + Math.random() * 2000);
+
+        for (let i = 0; i < 4; i++) {
+          const x = 200 + Math.floor(Math.random() * 800);
+          const y = 150 + Math.floor(Math.random() * 400);
+          try { await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 8) }); } catch {}
+          await page.waitForTimeout(300 + Math.random() * 500);
+        }
+
+        try { await page.evaluate(() => window.scrollBy(0, 300 + Math.random() * 400)); } catch {}
+        await page.waitForTimeout(2000 + Math.random() * 1500);
+        try { await page.evaluate(() => window.scrollBy(0, 200 + Math.random() * 300)); } catch {}
+        await page.waitForTimeout(1500 + Math.random() * 1000);
+        try { await page.evaluate(() => window.scrollBy(0, -(200 + Math.random() * 200))); } catch {}
+        await page.waitForTimeout(1000 + Math.random() * 1000);
+
+        for (let i = 0; i < 3; i++) {
+          const x = 100 + Math.floor(Math.random() * 900);
+          const y = 100 + Math.floor(Math.random() * 500);
+          try { await page.mouse.move(x, y, { steps: 3 + Math.floor(Math.random() * 5) }); } catch {}
+          await page.waitForTimeout(200 + Math.random() * 400);
+        }
+        await page.waitForTimeout(2000 + Math.random() * 1000);
+        console.log("[Draw] Warmup: Homepage browsing complete");
+      } catch (e: any) {
+        console.log("[Draw] Warmup: Homepage error (continuing): " + (e.message || '').substring(0, 80));
+      }
+
+      try {
+        console.log("[Draw] Warmup: Navigating to terms/privacy page...");
+        const termsUrls = [
+          "https://www.la28.org/en/privacy-policy",
+          "https://www.la28.org/en/terms-of-use",
+          "https://www.la28.org/en/about",
+        ];
+        const termsUrl = termsUrls[Math.floor(Math.random() * termsUrls.length)];
+        await page.goto(termsUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+        console.log("[Draw] Warmup: Terms page loaded: " + page.url());
+
+        await page.waitForTimeout(1500 + Math.random() * 1500);
+
+        try { await page.evaluate(() => window.scrollBy(0, 400 + Math.random() * 300)); } catch {}
+        await page.waitForTimeout(1500 + Math.random() * 1000);
+        try { await page.evaluate(() => window.scrollBy(0, 300 + Math.random() * 200)); } catch {}
+        await page.waitForTimeout(1000 + Math.random() * 1000);
+
+        for (let i = 0; i < 3; i++) {
+          const x = 150 + Math.floor(Math.random() * 700);
+          const y = 200 + Math.floor(Math.random() * 400);
+          try { await page.mouse.move(x, y, { steps: 4 + Math.floor(Math.random() * 6) }); } catch {}
+          await page.waitForTimeout(200 + Math.random() * 300);
+        }
+        await page.waitForTimeout(1500 + Math.random() * 1000);
+        console.log("[Draw] Warmup: Terms page browsing complete");
+      } catch (e: any) {
+        console.log("[Draw] Warmup: Terms page error (continuing): " + (e.message || '').substring(0, 80));
+      }
+
+      log("Step 2: Navigating to login page...");
+      console.log("[Draw] Step 2: Navigating to la28id.la28.org/login...");
       for (let warmupAttempt = 0; warmupAttempt < 3; warmupAttempt++) {
         try {
           await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
           try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-          await page.waitForTimeout(3000 + Math.random() * 2000);
-          console.log("[Draw] la28id login loaded (attempt " + (warmupAttempt + 1) + "): " + page.url());
+          await page.waitForTimeout(2000 + Math.random() * 1000);
+          console.log("[Draw] Login page loaded (attempt " + (warmupAttempt + 1) + "): " + page.url());
           break;
         } catch (warmupErr: any) {
-          console.log("[Draw] la28id warmup attempt " + (warmupAttempt + 1) + " error: " + (warmupErr.message || '').substring(0, 80));
+          console.log("[Draw] Login page attempt " + (warmupAttempt + 1) + " error: " + (warmupErr.message || '').substring(0, 80));
           if (warmupAttempt < 2) {
-            await page.waitForTimeout(5000);
+            await page.waitForTimeout(3000);
           }
         }
-      }
-
-      const currentUrl = page.url();
-      if (!currentUrl.includes('la28id.la28.org/login')) {
-        log("Step 2: Navigating to login page...");
-        console.log("[Draw] Step 2: Navigating to la28id.la28.org/login...");
-        await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
-        await page.waitForTimeout(3000 + Math.random() * 2000);
       }
       console.log("[Draw] Login page URL: " + page.url());
 
