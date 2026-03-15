@@ -22,7 +22,7 @@ function getDecodoProxyUrl(port: number = 10001): string {
 }
 
 function getDecodoProxyConfig(port: number = 10001): { server: string; username?: string; password?: string } {
-  const config: any = { server: `http://${DECODO_HOST}:${port}` };
+  const config: { server: string; username?: string; password?: string } = { server: `http://${DECODO_HOST}:${port}` };
   if (DECODO_USER && DECODO_PASS) {
     config.username = DECODO_USER;
     config.password = DECODO_PASS;
