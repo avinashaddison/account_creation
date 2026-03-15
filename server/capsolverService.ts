@@ -1,11 +1,33 @@
 import axios from "axios";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 const CAPSOLVER_API_URL = "https://api.capsolver.com";
 
-function getApiKey(): string {
-  const key = process.env.CAPSOLVER_API_KEY;
-  if (!key) throw new Error("CAPSOLVER_API_KEY environment variable is not set");
-  return key;
+let capsolverApiKeyCache: string | null = null;
+
+async function getApiKey(): Promise<string> {
+  if (capsolverApiKeyCache !== null) return capsolverApiKeyCache;
+
+  try {
+    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'capsolver_api_key'`);
+    if (result.rows.length > 0 && result.rows[0].value) {
+      capsolverApiKeyCache = result.rows[0].value as string;
+      return capsolverApiKeyCache;
+    }
+  } catch {}
+
+  const envKey = process.env.CAPSOLVER_API_KEY;
+  if (envKey) {
+    capsolverApiKeyCache = envKey;
+    return capsolverApiKeyCache;
+  }
+
+  throw new Error("CAPSOLVER_API_KEY not configured. Set it in Settings or as an environment variable.");
+}
+
+export function clearCapsolverApiKeyCache() {
+  capsolverApiKeyCache = null;
 }
 
 export interface CapSolverTaskResult {
@@ -19,7 +41,7 @@ export interface CapSolverTaskResult {
 export async function getCapSolverBalance(): Promise<{ balance: number; error?: string }> {
   try {
     const resp = await axios.post(`${CAPSOLVER_API_URL}/getBalance`, {
-      clientKey: getApiKey(),
+      clientKey: await getApiKey(),
     }, { timeout: 10000 });
     if (resp.data.errorId === 0) {
       return { balance: resp.data.balance };
@@ -196,7 +218,7 @@ export async function solveAntiTurnstile(
 
 async function createAndPollTask(task: Record<string, any>): Promise<CapSolverTaskResult> {
   const createResp = await axios.post(`${CAPSOLVER_API_URL}/createTask`, {
-    clientKey: getApiKey(),
+    clientKey: await getApiKey(),
     task,
   }, { timeout: 30000 });
 
@@ -221,7 +243,7 @@ async function createAndPollTask(task: Record<string, any>): Promise<CapSolverTa
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
     const resultResp = await axios.post(`${CAPSOLVER_API_URL}/getTaskResult`, {
-      clientKey: getApiKey(),
+      clientKey: await getApiKey(),
       taskId,
     }, { timeout: 15000 });
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -56,6 +56,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     ...(user.role === "superadmin" ? [
       { href: "/admin/earnings", label: "Earnings", icon: TrendingUp, tag: "ADM" },
       { href: "/admin/manage-admins", label: "Manage Admins", icon: Users, tag: "ADM" },
+      { href: "/admin/settings", label: "API Settings", icon: Settings, tag: "CFG" },
     ] : []),
   ];
 

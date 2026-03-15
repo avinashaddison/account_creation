@@ -11,7 +11,8 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
-import { getCapSolverBalance } from "./capsolverService";
+import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
+import { clearZenrowsApiKeyCache } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
 
 async function getDefaultBrowserApiUrl(): Promise<string | null> {
@@ -668,6 +669,52 @@ export async function registerRoutes(
       }
       await storage.setSetting("zenrows_api_url", url.trim());
       res.json({ success: true, url: url.trim() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/zenrows-api-key", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("zenrows_rest_api_key");
+      res.json({ key: key || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/zenrows-api-key", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (!key || typeof key !== "string" || key.trim().length < 5) {
+        return res.status(400).json({ error: "Valid ZenRows API key is required" });
+      }
+      await storage.setSetting("zenrows_rest_api_key", key.trim());
+      clearZenrowsApiKeyCache();
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/capsolver-api-key", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("capsolver_api_key");
+      res.json({ key: key || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/capsolver-api-key", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (!key || typeof key !== "string" || key.trim().length < 5) {
+        return res.status(400).json({ error: "Valid CapSolver API key is required" });
+      }
+      await storage.setSetting("capsolver_api_key", key.trim());
+      clearCapsolverApiKeyCache();
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

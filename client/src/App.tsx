@@ -19,6 +19,7 @@ import ManageAdmins from "@/pages/ManageAdmins";
 import Earnings from "@/pages/Earnings";
 import WalletPage from "@/pages/Wallet";
 import Home from "@/pages/Home";
+import Settings from "@/pages/Settings";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -53,6 +54,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
           <>
             <Route path="/admin/earnings" component={Earnings} />
             <Route path="/admin/manage-admins" component={ManageAdmins} />
+            <Route path="/admin/settings" component={Settings} />
           </>
         )}
         <Route component={NotFound} />

@@ -366,6 +366,10 @@ const ZENROWS_DEFAULT_API_KEY = "2f7def46c284b44ea590b7658faf856467dc7e02";
 const ZENROWS_API_BASE = "https://api.zenrows.com/v1/";
 let zenrowsRestApiKeyCache: string | null = null;
 
+export function clearZenrowsApiKeyCache() {
+  zenrowsRestApiKeyCache = null;
+}
+
 async function getZenRowsApiKey(): Promise<string> {
   if (zenrowsRestApiKeyCache !== null) return zenrowsRestApiKeyCache;
 
