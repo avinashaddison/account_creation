@@ -2089,16 +2089,9 @@ export async function completeDrawViaGigyaBrowser(
   const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
 
   let formSubmitted = false;
-  const browserlessToken = process.env.BROWSERLESS_TOKEN;
-  const useLocal = !browserlessToken;
 
-  if (useLocal) {
-    log("Draw via local Chromium (no Browserless configured)...");
-    console.log("[Draw] Starting for " + email + " via local Chromium");
-  } else {
-    log("Draw via Browserless Stealth Chromium...");
-    console.log("[Draw] Starting for " + email + " via Browserless Stealth Chromium (US-based)");
-  }
+  log("Draw via local Chromium + CapSolver token injection...");
+  console.log("[Draw] Starting for " + email + " via local Chromium (no proxy) + CapSolver token injection");
 
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -2119,44 +2112,33 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      if (useLocal) {
-        console.log("[Draw] Launching local Chromium...");
-        browser = await chromium.launch({
-          headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        });
-        const context = await browser.newContext({ ignoreHTTPSErrors: true });
-        page = await context.newPage();
-        page.setDefaultTimeout(60000);
-      } else {
-        const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=60000`;
-        console.log("[Draw] Using Browserless STEALTH endpoint with residential proxy (US)");
-        console.log("[Draw] Connecting to Browserless Stealth CDP endpoint...");
-
-        browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 90000 });
-        console.log("[Draw] Browserless Stealth connected via CDP!");
-
-        const contexts = browser.contexts();
-        let context: any;
-        if (contexts.length > 0) {
-          context = contexts[0];
-        } else {
-          context = await browser.newContext({ ignoreHTTPSErrors: true });
-        }
-
-        const pages = context.pages();
-        page = pages.length > 0 ? pages[0] : await context.newPage();
-        page.setDefaultTimeout(60000);
-      }
-
-      try {
-        const cdpSession = await page.context().newCDPSession(page);
-        await cdpSession.send('Security.setIgnoreCertificateErrors', { ignore: true });
-        console.log("[Draw] CDP: Certificate errors ignored");
-      } catch (cdpErr: any) {
-        console.log("[Draw] CDP: Could not set ignore cert errors: " + (cdpErr.message || '').substring(0, 60));
-      }
-      console.log("[Draw] Using Browserless Stealth context (CDP mode)");
+      console.log("[Draw] Launching local Chromium (no proxy)...");
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+        ],
+      });
+      const context = await browser.newContext({
+        ignoreHTTPSErrors: true,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        viewport: { width: 1366, height: 768 },
+        locale: 'en-US',
+        timezoneId: 'America/Los_Angeles',
+      });
+      await context.addInitScript(`
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+      `);
+      page = await context.newPage();
+      page.setDefaultTimeout(60000);
+      console.log("[Draw] Chromium launched (no proxy, stealth mode)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -2247,18 +2229,50 @@ export async function completeDrawViaGigyaBrowser(
       console.log("[Draw] Step 3: Human behavior simulation...");
       await simulateHumanBehavior(page, email, password);
 
-      log("Step 4: Clicking login button (form-based login)...");
-      console.log("[Draw] Step 4: Attempting form-based login via button click...");
+      log("Step 4: Solving reCAPTCHA via CapSolver + login...");
+      console.log("[Draw] Step 4: Solving reCAPTCHA v3 Enterprise via CapSolver before login...");
 
-      const preLoginRecaptcha = await page.evaluate(() => {
-        const g = (window as any).grecaptcha;
-        if (!g || !g.enterprise || typeof g.enterprise.execute !== 'function') {
-          return { available: false, token: null };
+      const RECAPTCHA_INVISIBLE_KEY = "6Lc8WkwhAAAAAPHXbaEde5PP3Skj9tCZn-A8U555";
+      let capsolverToken: string | null = null;
+      try {
+        const capResult = await solveRecaptchaV3Enterprise(
+          "https://la28id.la28.org/login/",
+          RECAPTCHA_INVISIBLE_KEY,
+          "login",
+          0.7
+        );
+        if (capResult.success && capResult.token) {
+          capsolverToken = capResult.token;
+          console.log("[Draw] CapSolver v3 Enterprise token obtained, length=" + capsolverToken.length);
+          log("CapSolver token obtained (" + capsolverToken.length + " chars)");
+        } else {
+          console.log("[Draw] CapSolver v3 Enterprise failed: " + capResult.error);
+          log("CapSolver failed: " + (capResult.error || "unknown"));
         }
-        return { available: true, token: null };
-      });
-      console.log("[Draw] Pre-login reCAPTCHA check: " + JSON.stringify(preLoginRecaptcha));
+      } catch (capErr: any) {
+        console.log("[Draw] CapSolver error: " + (capErr.message || '').substring(0, 100));
+        log("CapSolver error: " + (capErr.message || '').substring(0, 60));
+      }
 
+      if (capsolverToken) {
+        console.log("[Draw] Injecting CapSolver token into grecaptcha.enterprise.execute override...");
+        await page.evaluate((token: string) => {
+          const g = (window as any).grecaptcha;
+          if (g && g.enterprise) {
+            const origExecute = g.enterprise.execute;
+            g.enterprise.execute = function(...args: any[]) {
+              console.log('[reCAPTCHA-Override] Returning CapSolver token instead of real execute');
+              return Promise.resolve(token);
+            };
+            console.log('[reCAPTCHA-Override] grecaptcha.enterprise.execute overridden with CapSolver token');
+          } else {
+            (window as any).__capsolver_token = token;
+            console.log('[reCAPTCHA-Override] grecaptcha not ready, stored token in __capsolver_token');
+          }
+        }, capsolverToken);
+      }
+
+      console.log("[Draw] Calling gigya.accounts.login...");
       let loginResult = await page.evaluate(`(function() {
         return new Promise(function(resolve) {
           if (typeof gigya === 'undefined' || !gigya.accounts) {
@@ -2287,7 +2301,7 @@ export async function completeDrawViaGigyaBrowser(
               });
             }
           };
-          console.log('[Gigya-Login] Calling gigya.accounts.login (SDK handles reCAPTCHA internally)');
+          console.log('[Gigya-Login] Calling gigya.accounts.login (with CapSolver token injected)');
           gigya.accounts.login(loginParams);
           setTimeout(function() {
             if (resolved) return;
@@ -2303,155 +2317,50 @@ export async function completeDrawViaGigyaBrowser(
         const errMsg = loginResult.errorMessage || '';
         log("Login failed (errorCode=" + errCode + "): " + (errMsg || 'unknown') + ". Attempt " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES);
         console.log("[Draw] Login failed: errorCode=" + errCode + " msg=" + errMsg);
-        if (errCode === 400006) {
-          log("CAPTCHA required (400006). Attempting CapSolver...");
-          console.log("[Draw] CAPTCHA 400006 — trying CapSolver to get reCAPTCHA token...");
-          try {
-            const siteKey = await page.evaluate(() => {
-              const g = (window as any).grecaptcha;
-              const clients = (window as any).___grecaptcha_cfg?.clients;
-              if (clients) {
-                for (const clientId of Object.keys(clients)) {
-                  const client = clients[clientId];
-                  const keys = JSON.stringify(client);
-                  const match = keys.match(/["']sitekey["']\s*:\s*["']([^"']+)["']/i);
-                  if (match) return match[1];
-                }
-              }
-              const el = document.querySelector('.g-recaptcha, [data-sitekey]');
-              if (el) return el.getAttribute('data-sitekey');
-              return null;
-            });
-            const recaptchaSiteKey = siteKey || "6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr";
-            console.log("[Draw] Using reCAPTCHA site key: " + recaptchaSiteKey);
-            log("Solving reCAPTCHA via CapSolver (site key: " + recaptchaSiteKey.substring(0, 10) + "...)");
-
-            const capResult = await solveRecaptchaV2Enterprise(
-              "https://la28id.la28.org/login/",
-              recaptchaSiteKey
-            );
-
-            if (capResult.success && capResult.token) {
-              console.log("[Draw] CapSolver token received, length: " + capResult.token.length);
-              log("CapSolver solved! Retrying login with token...");
-
-              const capLoginResult = await page.evaluate(`(function() {
-                return new Promise(function(resolve) {
-                  gigya.accounts.login({
-                    loginID: ${JSON.stringify(email)},
-                    password: ${JSON.stringify(password)},
-                    captchaToken: "${capResult.token}",
-                    captchaType: "reCaptchaV2",
-                    callback: function(resp) {
-                      resolve({
-                        success: resp.errorCode === 0,
-                        errorCode: resp.errorCode,
-                        errorMessage: resp.errorMessage || '',
-                        uid: resp.UID || ''
-                      });
-                    }
-                  });
-                  setTimeout(function() { resolve({ success: false, errorCode: -2, errorMessage: 'timeout', uid: '' }); }, 30000);
-                });
-              })()`) as any;
-              console.log("[Draw] CapSolver login result: " + JSON.stringify(capLoginResult));
-
-              if (capLoginResult.success) {
-                loginResult = capLoginResult;
-                log("Login with CapSolver token succeeded! UID: " + (capLoginResult.uid || "unknown"));
-              } else {
-                log("CapSolver token login failed: " + capLoginResult.errorMessage);
-              }
-            } else {
-              console.log("[Draw] CapSolver failed: " + capResult.error);
-              log("CapSolver failed: " + (capResult.error || "unknown"));
-            }
-          } catch (capErr: any) {
-            console.log("[Draw] CapSolver error: " + (capErr.message || '').substring(0, 100));
-            log("CapSolver error: " + (capErr.message || '').substring(0, 60));
-          }
-
-          if (!loginResult.success) {
-            try { if (browser) await browser.close(); } catch {}
-            return { success: false, profileSet: false, dataSet: false, error: "Login failed: CAPTCHA required (400006), CapSolver also failed" };
-          }
+        if (errCode === undefined || errCode === null) {
+          console.log("[Draw] Login response had undefined errorCode — likely network/proxy failure. Full keys: " + loginResult.keys);
+          log("Login request failed (network/proxy error). Retrying...");
+          continue;
         }
-        if (errCode === 451002 && attempt === MAX_LOGIN_RETRIES - 1) {
-          console.log("[Draw] 451002 on final Browserless attempt — trying local Chromium fallback...");
-          log("reCAPTCHA score too low on Browserless. Trying local Chromium fallback...");
-          try {
-            if (browser) { try { await browser.close(); } catch {} browser = null; }
-            const localProxyPort = 10001 + ((attempt + 5) % 10);
-            const localBrowser = await chromium.launch({
-              headless: true,
-              proxy: getActiveProxyConfig(localProxyPort),
-              args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-setuid-sandbox'],
-            });
-            const localCtx = await localBrowser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-              viewport: { width: 1366, height: 768 },
-              screen: { width: 1366, height: 768 },
-              locale: 'en-US',
-              timezoneId: 'America/New_York',
-              geolocation: { latitude: 40.7128, longitude: -74.0060 },
-              permissions: ['geolocation'],
-              colorScheme: 'light',
-              hasTouch: false,
-            });
-            await localCtx.addInitScript(`
-              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-              Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-              Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-            `);
-            const localPage = await localCtx.newPage();
-            localPage.setDefaultTimeout(60000);
-            setupRecaptchaLogging(localPage);
+        if ((errCode === 400006 || errCode === 401020) && capsolverToken) {
+          log("CAPTCHA required. Retrying with explicit captchaToken param...");
+          console.log("[Draw] CAPTCHA error " + errCode + " — retrying with explicit captchaToken + captchaType params...");
 
-            console.log("[Draw-LocalFallback] Navigating to la28id login...");
-            await localPage.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-            try { await localPage.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
-            await localPage.waitForTimeout(3000 + Math.random() * 2000);
-
-            await localPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
-            const localRecaptchaReady = await waitForRecaptchaEnterprise(localPage, 10000);
-            console.log("[Draw-LocalFallback] reCAPTCHA ready: " + localRecaptchaReady);
-            await simulateHumanBehavior(localPage, email, password);
-
-            const localLoginResult = await localPage.evaluate(`(function() {
-              return new Promise(function(resolve) {
-                gigya.accounts.login({
-                  loginID: ${JSON.stringify(email)},
-                  password: ${JSON.stringify(password)},
-                  callback: function(resp) {
-                    resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
-                  }
-                });
-                setTimeout(function() { resolve({ success: false, errorCode: -2, errorMessage: 'timeout', uid: '' }); }, 30000);
+          const capLoginResult = await page.evaluate(`(function() {
+            return new Promise(function(resolve) {
+              gigya.accounts.login({
+                loginID: ${JSON.stringify(email)},
+                password: ${JSON.stringify(password)},
+                captchaToken: ${JSON.stringify(capsolverToken)},
+                captchaType: "reCaptchaEnterpriseScore",
+                callback: function(resp) {
+                  resolve({
+                    success: resp.errorCode === 0,
+                    errorCode: resp.errorCode,
+                    errorMessage: resp.errorMessage || '',
+                    errorDetails: resp.errorDetails || '',
+                    uid: resp.UID || ''
+                  });
+                }
               });
-            })()`) as any;
-            console.log("[Draw-LocalFallback] Login result: errorCode=" + localLoginResult.errorCode + " success=" + localLoginResult.success);
-            log("Local Chromium fallback: errorCode=" + localLoginResult.errorCode + " (Browserless was 451002)");
+              setTimeout(function() { resolve({ success: false, errorCode: -2, errorMessage: 'timeout', uid: '' }); }, 30000);
+            });
+          })()`) as any;
+          console.log("[Draw] Explicit captchaToken login result: " + JSON.stringify(capLoginResult));
 
-            if (localLoginResult.success) {
-              browser = localBrowser;
-              page = localPage;
-              loginResult = localLoginResult;
-              log("Local Chromium login succeeded! UID: " + (localLoginResult.uid || "unknown"));
-              console.log("[Draw-LocalFallback] Login succeeded, switching to local browser. UID: " + (localLoginResult.uid || "unknown"));
-            } else {
-              console.log("[Draw-LocalFallback] Also failed: errorCode=" + localLoginResult.errorCode);
-              try { await localBrowser.close(); } catch {}
-              continue;
-            }
-          } catch (localErr: any) {
-            console.log("[Draw-LocalFallback] Error: " + (localErr.message || '').substring(0, 150));
-            log("Local Chromium fallback failed: " + (localErr.message || '').substring(0, 60));
-            continue;
+          if (capLoginResult.success) {
+            loginResult = capLoginResult;
+            log("Login with explicit captchaToken succeeded! UID: " + (capLoginResult.uid || "unknown"));
+          } else {
+            log("Explicit captchaToken login also failed: " + (capLoginResult.errorMessage || capLoginResult.errorDetails));
+            if (attempt < MAX_LOGIN_RETRIES - 1) continue;
+            try { if (browser) await browser.close(); } catch {}
+            return { success: false, profileSet: false, dataSet: false, error: "Login failed: CAPTCHA required (" + errCode + "), CapSolver token rejected" };
           }
         } else {
-          continue;
+          if (attempt < MAX_LOGIN_RETRIES - 1) continue;
+          try { if (browser) await browser.close(); } catch {}
+          return { success: false, profileSet: false, dataSet: false, error: "Login failed: errorCode=" + errCode + " " + errMsg };
         }
       }
 
@@ -3971,27 +3880,22 @@ export async function completeDrawRegistrationViaApi(
     console.log("[Draw-API] CAPTCHA required (400006), attempting CapSolver...");
     log("[GIGYA ACCOUNT] CAPTCHA required. Solving via CapSolver...");
     try {
-      const capResultV2 = await solveRecaptchaV2Enterprise(
+      const brdProxy = "http://brd-customer-hl_86b34e68-zone-residential_proxy3-country-us:r74n9xvshrv7@brd.superproxy.io:33335";
+      const capResult = await solveRecaptchaV2Enterprise(
         "https://la28id.la28.org/login/",
-        "6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr"
+        "6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr",
+        undefined,
+        brdProxy
       );
-      const capResultV3 = capResultV2.success ? capResultV2 : await solveRecaptchaV3Enterprise(
-        "https://la28id.la28.org/login/",
-        "6Lc8WkwhAAAAAPHXbaEde5PP3Skj9tCZn-A8U555",
-        "login",
-        0.7
-      );
-      const capResult = capResultV2.success ? capResultV2 : capResultV3;
-      const captchaType = capResultV2.success ? "reCaptchaV2" : "invisible";
       if (capResult.success && capResult.token) {
-        console.log("[Draw-API] CapSolver token received (type=" + captchaType + "), length: " + capResult.token.length + ". Retrying login...");
+        console.log("[Draw-API] CapSolver token received (with proxy), length: " + capResult.token.length + ". Retrying login...");
         log("[GIGYA ACCOUNT] CapSolver solved! Retrying login with token...");
         const retryParams = new URLSearchParams({
           apiKey: GIGYA_API_KEY,
           loginID: email,
           password: password,
           captchaToken: capResult.token,
-          captchaType: captchaType,
+          captchaType: "reCaptchaV2",
         });
         const retryResp = await fetch(`https://accounts.${GIGYA_DATACENTER}.gigya.com/accounts.login`, { method: "POST", body: retryParams });
         loginData = await retryResp.json() as any;

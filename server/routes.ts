@@ -1088,48 +1088,27 @@ export async function registerRoutes(
     try {
       await storage.updateAccount(account.id, { status: "draw_registering" });
       broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
-      log("Retrying draw registration via REST API (with CapSolver for CAPTCHA)...");
+      log("Retrying draw registration via Chromium + Residential Proxy...");
 
-      const apiResult = await completeDrawRegistrationViaApi(
+      const gigyaResult = await completeDrawViaGigyaBrowser(
         account.email,
         account.la28Password,
         account.zipCode || undefined,
         log
       );
 
-      if (apiResult.success) {
+      if (gigyaResult.success) {
         await storage.updateAccount(account.id, { status: "completed" });
         broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-        log("Draw registration completed successfully via REST API!");
+        log("Draw registration completed successfully!");
+      } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
+        await storage.updateAccount(account.id, { status: "completed" });
+        broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+        log("Partial success (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
       } else {
-        log("REST API draw failed (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "), trying Gigya browser fallback...");
-
-        if (apiResult.profileSet || apiResult.dataSet) {
-          await storage.updateAccount(account.id, { status: "completed" });
-          broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-          log("Partial success via API. Marked as completed.");
-        } else {
-          const gigyaResult = await completeDrawViaGigyaBrowser(
-            account.email,
-            account.la28Password,
-            account.zipCode || undefined,
-            log
-          );
-
-          if (gigyaResult.success) {
-            await storage.updateAccount(account.id, { status: "completed" });
-            broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-            log("Draw registration completed via Gigya browser fallback!");
-          } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
-            await storage.updateAccount(account.id, { status: "completed" });
-            broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-            log("Partial success via browser. Marked as completed.");
-          } else {
-            await storage.updateAccount(account.id, { status: "draw_registering" });
-            broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
-            log("Draw registration failed. Status kept as draw_registering for retry.");
-          }
-        }
+        await storage.updateAccount(account.id, { status: "draw_registering" });
+        broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
+        log("Draw registration failed: " + (gigyaResult.error || "unknown error") + ". Status kept as draw_registering for retry.");
       }
     } catch (err: any) {
       log("Draw retry error: " + err.message.substring(0, 200));
