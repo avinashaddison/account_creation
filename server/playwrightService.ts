@@ -3059,7 +3059,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           } catch {}
           if (!zenrowsUrl) {
-            zenrowsUrl = "wss://browser.zenrows.com?apikey=4c48722d34d24e0d23f1e73e6f5e3ca082663655";
+            zenrowsUrl = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
           }
           if (!zenrowsUrl.includes('proxy_country=')) {
             zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
