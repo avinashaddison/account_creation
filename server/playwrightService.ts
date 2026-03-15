@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveFunCaptcha } from "./capsolverService";
 
 const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
@@ -5301,6 +5301,280 @@ export async function retryDrawRegistration(
     return result;
   } finally {
     try { await browser.close(); } catch {}
+  }
+}
+
+export interface OutlookLoginResult {
+  success: boolean;
+  error?: string;
+  cookies?: Array<{ name: string; value: string; domain: string }>;
+}
+
+export async function loginOutlookAccount(
+  email: string,
+  password: string,
+  log: (msg: string) => void
+): Promise<OutlookLoginResult> {
+  let browser: any = null;
+
+  try {
+    log("Connecting to ZenRows browser...");
+    let zenrowsUrl = "";
+    try {
+      const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+      if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+        zenrowsUrl = zrRow.rows[0].value as string;
+      }
+    } catch {}
+
+    if (!zenrowsUrl) {
+      return { success: false, error: "ZenRows Browser URL not configured. Set it in Settings." };
+    }
+    if (!zenrowsUrl.includes('proxy_country=')) {
+      zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+    }
+
+    browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+    log("ZenRows browser connected");
+
+    const context = browser.contexts()[0] || await browser.newContext();
+    const page = await context.newPage();
+    await page.setDefaultNavigationTimeout(90000);
+    await page.setDefaultTimeout(30000);
+
+    log("Navigating to login.live.com...");
+    await page.goto("https://login.live.com/", { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(2000 + Math.random() * 1500);
+
+    const currentUrl = page.url();
+    log("Page loaded: " + currentUrl.substring(0, 80));
+
+    log("Looking for email input field...");
+    const emailInput = await page.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 15000 });
+    if (!emailInput) {
+      return { success: false, error: "Could not find email input field" };
+    }
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+    await emailInput.click();
+    await page.waitForTimeout(300 + Math.random() * 300);
+
+    log("Typing email address...");
+    for (const char of email) {
+      await page.keyboard.type(char, { delay: 0 });
+      await page.waitForTimeout(30 + Math.random() * 60);
+    }
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+
+    log("Clicking Next...");
+    const nextButton = await page.$('input[type="submit"]#idSIButton9, input[value="Next"]');
+    if (nextButton) {
+      await nextButton.click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+
+    await page.waitForTimeout(3000 + Math.random() * 2000);
+
+    const afterEmailUrl = page.url();
+    log("After email submit: " + afterEmailUrl.substring(0, 80));
+
+    const errorBanner = await page.$('#usernameError, div[role="alert"]');
+    if (errorBanner) {
+      const errorText = await errorBanner.textContent();
+      if (errorText && errorText.trim().length > 0) {
+        log("Error from Microsoft: " + errorText.trim().substring(0, 100));
+        return { success: false, error: "Microsoft error: " + errorText.trim().substring(0, 200) };
+      }
+    }
+
+    let funCaptchaDetected = false;
+    try {
+      const fcFrame = await page.$('iframe[id*="enforcementFrame"], iframe[data-testid*="captcha"], #FunCaptcha');
+      if (fcFrame) {
+        funCaptchaDetected = true;
+      }
+      const fcDiv = await page.$('#hipEnforcementContainer, div[id*="arkose"]');
+      if (fcDiv) {
+        funCaptchaDetected = true;
+      }
+    } catch {}
+
+    if (funCaptchaDetected) {
+      log("FunCaptcha (Arkose Labs) detected! Attempting to solve via CapSolver...");
+      try {
+        const publicKey = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA";
+        const result = await solveFunCaptcha("https://login.live.com/", publicKey);
+        if (result.success && result.token) {
+          log("FunCaptcha solved! Injecting token...");
+          await page.evaluate((token: string) => {
+            const callback = (window as any).ArkoseEnforcement?.callback || (window as any).fc_callback;
+            if (typeof callback === 'function') {
+              callback({ token });
+            }
+            const hiddenInput = document.querySelector('input[name="fc_token"], input[name="hipSolutionToken"]') as HTMLInputElement;
+            if (hiddenInput) {
+              hiddenInput.value = token;
+            }
+          }, result.token);
+          await page.waitForTimeout(2000 + Math.random() * 1000);
+          log("FunCaptcha token injected");
+        } else {
+          log("FunCaptcha solving failed: " + (result.error || "unknown"));
+          return { success: false, error: "FunCaptcha solving failed: " + (result.error || "unknown") };
+        }
+      } catch (fcErr: any) {
+        log("FunCaptcha error: " + (fcErr.message || "").substring(0, 100));
+        return { success: false, error: "FunCaptcha error: " + (fcErr.message || "").substring(0, 100) };
+      }
+    }
+
+    log("Looking for password field...");
+    let passwordInput: any = null;
+    try {
+      passwordInput = await page.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 });
+    } catch {
+      const page2Url = page.url();
+      log("No password field found. Current URL: " + page2Url.substring(0, 100));
+
+      const twoFaCheck = await page.$('#idDiv_SAOTCS_Title, #idDiv_SAOTCAS_Title, div[data-testid="phoneAuthTitle"]');
+      if (twoFaCheck) {
+        return { success: false, error: "Two-factor authentication required. This is not supported." };
+      }
+
+      return { success: false, error: "Password field not found. The account may require additional verification." };
+    }
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+    await passwordInput.click();
+    await page.waitForTimeout(300 + Math.random() * 300);
+
+    log("Typing password...");
+    for (const char of password) {
+      await page.keyboard.type(char, { delay: 0 });
+      await page.waitForTimeout(30 + Math.random() * 60);
+    }
+
+    await page.waitForTimeout(800 + Math.random() * 700);
+
+    log("Clicking Sign In...");
+    const signInButton = await page.$('input[type="submit"]#idSIButton9, input[value="Sign in"], button[type="submit"]');
+    if (signInButton) {
+      await signInButton.click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+
+    await page.waitForTimeout(4000 + Math.random() * 3000);
+
+    const afterPasswordUrl = page.url();
+    log("After sign in: " + afterPasswordUrl.substring(0, 80));
+
+    const passwordError = await page.$('#passwordError, #idTd_PWD_Error');
+    if (passwordError) {
+      const errText = await passwordError.textContent();
+      if (errText && errText.trim().length > 0) {
+        log("Password error: " + errText.trim().substring(0, 100));
+        return { success: false, error: "Wrong password: " + errText.trim().substring(0, 200) };
+      }
+    }
+
+    let funCaptchaDetected2 = false;
+    try {
+      const fcFrame2 = await page.$('iframe[id*="enforcementFrame"], iframe[data-testid*="captcha"], #FunCaptcha');
+      if (fcFrame2) funCaptchaDetected2 = true;
+      const fcDiv2 = await page.$('#hipEnforcementContainer, div[id*="arkose"]');
+      if (fcDiv2) funCaptchaDetected2 = true;
+    } catch {}
+
+    if (funCaptchaDetected2) {
+      log("FunCaptcha appeared after password! Solving...");
+      try {
+        const publicKey = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA";
+        const result = await solveFunCaptcha("https://login.live.com/", publicKey);
+        if (result.success && result.token) {
+          log("FunCaptcha solved!");
+          await page.evaluate((token: string) => {
+            const callback = (window as any).ArkoseEnforcement?.callback || (window as any).fc_callback;
+            if (typeof callback === 'function') callback({ token });
+            const hiddenInput = document.querySelector('input[name="fc_token"], input[name="hipSolutionToken"]') as HTMLInputElement;
+            if (hiddenInput) hiddenInput.value = token;
+          }, result.token);
+          await page.waitForTimeout(3000 + Math.random() * 1000);
+        } else {
+          return { success: false, error: "FunCaptcha solving failed after password: " + (result.error || "unknown") };
+        }
+      } catch (fcErr: any) {
+        return { success: false, error: "FunCaptcha error after password: " + (fcErr.message || "").substring(0, 100) };
+      }
+    }
+
+    const twoFaCheck = await page.$('#idDiv_SAOTCS_Title, #idDiv_SAOTCAS_Title, div[data-testid="phoneAuthTitle"], #idDiv_SAASDS_Title');
+    if (twoFaCheck) {
+      const twoFaText = await twoFaCheck.textContent();
+      log("2FA required: " + (twoFaText || "").trim().substring(0, 100));
+      return { success: false, error: "Two-factor authentication required. This is not supported." };
+    }
+
+    const staySignedIn = await page.$('#idSIButton9, input[value="Yes"], #acceptButton, #idBtn_Back');
+    if (staySignedIn) {
+      const btnText = await staySignedIn.getAttribute("value") || "";
+      const stayTitle = await page.$('#lightbox-cover, #KmsIdTitle');
+      if (stayTitle || btnText === "Yes" || afterPasswordUrl.includes("kmsi")) {
+        log("Handling 'Stay signed in?' prompt...");
+        await staySignedIn.click();
+        await page.waitForTimeout(3000 + Math.random() * 2000);
+      }
+    }
+
+    const finalUrl = page.url();
+    log("Final URL: " + finalUrl.substring(0, 100));
+
+    const isLoggedIn =
+      finalUrl.includes("outlook.live.com") ||
+      finalUrl.includes("outlook.office.com") ||
+      finalUrl.includes("outlook.office365.com") ||
+      finalUrl.includes("microsoft.com") ||
+      finalUrl.includes("live.com") && !finalUrl.includes("login.live.com/login");
+
+    if (isLoggedIn) {
+      log("Extracting session cookies...");
+      const cookies = await context.cookies();
+      const relevantCookies = cookies
+        .filter((c: any) => c.domain.includes("live.com") || c.domain.includes("microsoft.com") || c.domain.includes("outlook.com"))
+        .map((c: any) => ({ name: c.name, value: c.value, domain: c.domain }));
+
+      log(`Login successful! Got ${relevantCookies.length} cookies`);
+      return { success: true, cookies: relevantCookies };
+    } else {
+      const bodyText = await page.textContent("body").catch(() => "");
+      const snippet = (bodyText || "").substring(0, 200).replace(/\s+/g, " ");
+      log("Login may have failed. Page content: " + snippet.substring(0, 100));
+
+      if (finalUrl.includes("login.live.com") || finalUrl.includes("login.microsoftonline.com")) {
+        return { success: false, error: "Login failed. Still on login page after all steps." };
+      }
+
+      const cookies = await context.cookies();
+      const relevantCookies = cookies
+        .filter((c: any) => c.domain.includes("live.com") || c.domain.includes("microsoft.com"))
+        .map((c: any) => ({ name: c.name, value: c.value, domain: c.domain }));
+
+      if (relevantCookies.length > 5) {
+        log(`Possible success — got ${relevantCookies.length} cookies`);
+        return { success: true, cookies: relevantCookies };
+      }
+
+      return { success: false, error: "Login outcome uncertain. Final URL: " + finalUrl.substring(0, 100) };
+    }
+  } catch (err: any) {
+    log("Error: " + (err.message || "").substring(0, 150));
+    return { success: false, error: (err.message || "Unknown error").substring(0, 200) };
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch {}
+    }
   }
 }
 

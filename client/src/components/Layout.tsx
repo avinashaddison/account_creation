@@ -124,7 +124,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
         <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
           {nav.map((item) => {
-            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create" || location === "/admin/brunomars-create"));
+            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create" || location === "/admin/brunomars-create" || location === "/admin/outlook-login"));
             return (
               <Link key={item.href} href={item.href}>
                 <div

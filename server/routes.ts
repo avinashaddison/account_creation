@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -1897,6 +1897,47 @@ export async function registerRoutes(
             broadcastLog(batchId, acc.id, `❌ Presale error: ${bmErr.message?.substring(0, 200)}`, userId);
             await storage.creditWallet(userId, costPerAccount);
           }
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/outlook-login", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+
+      const userId = req.session.userId;
+      const loginId = randomUUID().substring(0, 8);
+      const batchId = `outlook-${loginId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, loginId, batchId, message: "Outlook login started" });
+
+      (async () => {
+        broadcastLog(batchId, loginId, `Starting Outlook login for ${email}...`, userId);
+        try {
+          const result = await loginOutlookAccount(
+            email,
+            password,
+            (msg) => broadcastLog(batchId, loginId, msg, userId)
+          );
+
+          if (result.success) {
+            broadcastLog(batchId, loginId, `Login successful! Got ${result.cookies?.length || 0} session cookies`, userId);
+            broadcast({ type: "outlook_login_result", loginId, batchId, success: true, cookieCount: result.cookies?.length || 0 }, userId);
+          } else {
+            broadcastLog(batchId, loginId, `Login failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "outlook_login_result", loginId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, loginId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "outlook_login_result", loginId, batchId, success: false, error: err.message }, userId);
         }
         broadcastBatchComplete(batchId, userId);
       })();

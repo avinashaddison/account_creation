@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { ArrowRight, Globe, Shield, Zap, Server, Ticket, Trophy, Lock, Cpu, Radio } from "lucide-react";
+import { ArrowRight, Globe, Shield, Zap, Server, Ticket, Trophy, Lock, Cpu, Radio, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
 import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
@@ -84,6 +84,23 @@ const platforms: Platform[] = [
       { label: "Presale", icon: Ticket },
     ],
   },
+  {
+    id: "outlook",
+    name: "Outlook Login",
+    description: "Automated Microsoft/Outlook account login via ZenRows with FunCaptcha solving",
+    href: "/admin/outlook-login",
+    gradient: "from-blue-600/80 via-indigo-700/60 to-blue-900/80",
+    badge: "ACTIVE",
+    badgeColor: "text-emerald-400",
+    borderColor: "rgba(59,130,246,0.2)",
+    comingSoon: false,
+    icon: <Mail className="w-7 h-7 text-white" />,
+    stats: [
+      { label: "Auto Login", icon: Shield },
+      { label: "Captcha Solve", icon: Zap },
+      { label: "ZenRows", icon: Globe },
+    ],
+  },
 ];
 
 export default function CreateServer() {
@@ -140,6 +157,10 @@ export default function CreateServer() {
                     ) : platform.id === "brunomars" ? (
                       <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(168,85,247,0.2)' }}>
                         <span className="text-2xl font-black text-white font-mono">BM</span>
+                      </div>
+                    ) : platform.id === "outlook" ? (
+                      <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(59,130,246,0.2)' }}>
+                        <Mail className="w-7 h-7 text-white" />
                       </div>
                     ) : (
                       <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden p-2" style={{ boxShadow: '0 0 20px rgba(0,255,136,0.2)' }}>
