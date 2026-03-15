@@ -1,10 +1,8 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { execSync, execFile } from "child_process";
 import { promisify } from "util";
-import * as https from "https";
 import * as path from "path";
 import * as fs from "fs";
-import { HttpsProxyAgent } from "https-proxy-agent";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 
@@ -197,13 +195,7 @@ export async function ticketsFormFillWithCookies(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  let proxyUrl = "";
-  try {
-    const proxyRows = await db.execute(sql`SELECT value FROM settings WHERE key = 'iproyal_proxy_url' LIMIT 1`);
-    const rows = proxyRows.rows as any[];
-    if (rows.length > 0 && rows[0].value) proxyUrl = rows[0].value;
-  } catch {}
-  if (!proxyUrl) proxyUrl = "http://jRSA9eevoPMBKCs2:MTDugb6mPndnM5VJ@geo.iproyal.com:12321";
+  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf@us.decodo.com:10001";
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -343,18 +335,7 @@ export async function ticketsFormFillViaCurl(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  let proxyUrl = "";
-  try {
-    const proxyRows = await db.execute(sql`SELECT value FROM settings WHERE key = 'iproyal_proxy_url' LIMIT 1`);
-    const rows = proxyRows.rows as any[];
-    if (rows.length > 0 && rows[0].value) {
-      proxyUrl = rows[0].value;
-    }
-  } catch {}
-
-  if (!proxyUrl) {
-    proxyUrl = "http://jRSA9eevoPMBKCs2:MTDugb6mPndnM5VJ@geo.iproyal.com:12321";
-  }
+  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf@us.decodo.com:10001";
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -866,37 +847,17 @@ async function loginAndSubmitTicketRegistration(
   log("Starting simplified draw registration flow...");
   console.log("[Draw] Starting draw registration for " + email);
 
-  const { storage } = await import("./storage");
-  let effectiveProxyUrl = proxyUrl;
-  if (!effectiveProxyUrl) {
-    const residentialProxy = await storage.getSetting("residential_proxy_url");
-    if (residentialProxy) {
-      effectiveProxyUrl = residentialProxy;
-    } else {
-      log("No proxy configured. Cannot proceed.");
-      return { submitted: false };
-    }
-  }
-
-  const isBrowserAPI = effectiveProxyUrl.startsWith('wss://');
   let proxyBrowser: Browser | null = null;
   let proxyContext: any = null;
   let ticketsPage: Page;
   let capturedOidcUrl: string | null = null;
 
   try {
-    if (isBrowserAPI) {
-      proxyBrowser = await chromium.connectOverCDP(effectiveProxyUrl, { timeout: 60000 });
-      ticketsPage = await proxyBrowser.newPage();
-    } else {
-      const proxyConfig = parseProxyUrl(effectiveProxyUrl);
-      if (!proxyConfig) { log("Invalid proxy URL"); return { submitted: false }; }
-      let pu = proxyConfig.username;
-      if (proxyConfig.host.includes('brd.superproxy.io') && !pu.includes('-country-')) pu += '-country-us';
-      console.log("[Draw] Launching Chromium with residential proxy...");
+    {
+      console.log("[Draw] Launching Chromium with Decodo residential proxy...");
       proxyBrowser = await chromium.launch({
         headless: true,
-        proxy: { server: `http://${proxyConfig.host}:${proxyConfig.port}`, username: pu, password: proxyConfig.password },
+        proxy: { server: 'http://us.decodo.com:10001', username: 'spzg7axtkh', password: 'ua62voA3DQqvi9Zf' },
         args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
       });
       proxyContext = await proxyBrowser.newContext({
@@ -921,12 +882,7 @@ async function loginAndSubmitTicketRegistration(
     } catch (navErr: any) {
       console.log("[Draw] Navigation error: " + navErr.message.substring(0, 150));
       if (navErr.message.includes("robots.txt") || navErr.message.includes("restricted")) {
-        log("Browser blocked by robots.txt. Trying residential proxy...");
-        const residentialProxy = await storage.getSetting("residential_proxy_url");
-        if (residentialProxy && effectiveProxyUrl !== residentialProxy) {
-          try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
-          return loginAndSubmitTicketRegistration(page, email, password, log, residentialProxy, zipCode);
-        }
+        log("Browser blocked. Already using Decodo residential proxy.");
       }
     }
 
@@ -1907,20 +1863,11 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      let proxyServer = "";
-      let proxyUsername = "";
-      let proxyPassword = "";
-      try {
-        const proxyRows = await db.execute(sql`SELECT key, value FROM settings WHERE key = 'residential_proxy_url' LIMIT 1`);
-        if (proxyRows.rows.length > 0 && proxyRows.rows[0].value) {
-          const pUrl = new URL(proxyRows.rows[0].value as string);
-          proxyServer = pUrl.hostname + ":" + pUrl.port;
-          const sessionId = "draw_" + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-          proxyUsername = decodeURIComponent(pUrl.username) + "-country-us-session-" + sessionId;
-          proxyPassword = decodeURIComponent(pUrl.password);
-          console.log("[Draw] Will route Browserless through US residential proxy: " + proxyServer + " session=" + sessionId);
-        }
-      } catch {}
+      const proxyPort = 10001 + (attempt % 10);
+      const proxyServer = "us.decodo.com:" + proxyPort;
+      const proxyUsername = "spzg7axtkh";
+      const proxyPassword = "ua62voA3DQqvi9Zf";
+      console.log("[Draw] Using Decodo residential proxy: " + proxyServer + " (port " + proxyPort + ", sticky session)");
 
       const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"] }));
       const browserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken + "&launch=" + browserlessLaunch + "&blockAds=false";
@@ -1929,7 +1876,7 @@ export async function completeDrawViaGigyaBrowser(
       browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 60000 });
       console.log("[Draw] Browserless connected! Contexts: " + browser.contexts().length);
 
-      const contextOptions: any = {
+      const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         viewport: { width: 1366, height: 768 },
         screen: { width: 1366, height: 768 },
@@ -1941,93 +1888,16 @@ export async function completeDrawViaGigyaBrowser(
         colorScheme: 'light',
         hasTouch: false,
         javaScriptEnabled: true,
-      };
-      if (proxyServer && proxyUsername && proxyPassword) {
-        contextOptions.proxy = {
+        proxy: {
           server: 'http://' + proxyServer,
           username: proxyUsername,
           password: proxyPassword,
-          bypass: '*.google.com,*.gstatic.com,*.recaptcha.net,*.googleapis.com',
-        };
-        console.log("[Draw] Context proxy configured: " + proxyServer + " (US residential, bypass reCAPTCHA)");
-      }
-      const context = await browser.newContext(contextOptions);
-      console.log("[Draw] Created Browserless context" + (proxyServer ? " with residential proxy" : " (direct)"));
+        },
+      });
+      console.log("[Draw] Created Browserless context with Decodo residential proxy (port " + proxyPort + ")");
 
       page = await context.newPage();
       page.setDefaultTimeout(60000);
-
-      if (proxyServer && proxyUsername && proxyPassword) {
-        await page.route("**/accounts.login", async (route: any) => { return handleGigyaPostToGet(route, 'accounts.login'); });
-        await page.route("**/accounts.setAccountInfo", async (route: any) => { return handleGigyaPostToGet(route, 'accounts.setAccountInfo'); });
-        await page.route("**/accounts.getAccountInfo", async (route: any) => { return handleGigyaPostToGet(route, 'accounts.getAccountInfo'); });
-
-        async function handleGigyaPostToGet(route: any, endpoint: string) {
-          if (route.request().method() !== 'POST') {
-            return route.continue();
-          }
-          const postData = route.request().postData() || '';
-          const params = new URLSearchParams(postData);
-          const captchaToken = params.get('captchaToken') || '';
-          const captchaType = params.get('captchaType') || '';
-          console.log("[Draw] Intercepting POST " + endpoint + " → in-browser fetch GET");
-          console.log("[Draw] captchaToken=" + (captchaToken ? captchaToken.substring(0, 30) + "...(" + captchaToken.length + " chars)" : "EMPTY"));
-          console.log("[Draw] captchaType=" + captchaType);
-
-          const essentialParams = new URLSearchParams();
-          const loginID = params.get('loginID');
-          const password = params.get('password');
-          const apiKey = params.get('APIKey') || params.get('apiKey') || '4_w4CcQ6tKu4jTeDPirnKxnA';
-          const sessionExpiration = params.get('sessionExpiration') || '';
-          if (loginID) essentialParams.set('loginID', loginID);
-          if (password) essentialParams.set('password', password);
-          essentialParams.set('APIKey', apiKey);
-          if (captchaToken) essentialParams.set('captchaToken', captchaToken);
-          if (captchaType) essentialParams.set('captchaType', captchaType);
-          if (sessionExpiration) essentialParams.set('sessionExpiration', sessionExpiration);
-          essentialParams.set('format', 'json');
-          for (const [k, v] of params.entries()) {
-            if (['uid', 'regToken', 'profile', 'data', 'preferences'].includes(k)) {
-              essentialParams.set(k, v);
-            }
-          }
-          const targetUrl = "https://la28id.la28id.la28.org/" + endpoint + "?" + essentialParams.toString();
-          console.log("[Draw] fetch GET URL length: " + targetUrl.length);
-
-          try {
-            const fetchResult = await route.request().frame()?.page()?.evaluate(async (url: string) => {
-              try {
-                const resp = await fetch(url, { method: 'GET', credentials: 'include' });
-                const text = await resp.text();
-                return { ok: true, status: resp.status, body: text };
-              } catch (e: any) {
-                return { ok: false, error: e.message || 'fetch failed' };
-              }
-            }, targetUrl);
-
-            if (fetchResult && fetchResult.ok) {
-              try {
-                const parsed = JSON.parse(fetchResult.body);
-                console.log("[Draw] In-browser GET " + endpoint + ": errorCode=" + (parsed.errorCode || 0) + " msg=" + (parsed.errorMessage || '').substring(0, 50) + " flags=" + (parsed.errorFlags || '') + " details=" + (parsed.errorDetails || '').substring(0, 80));
-              } catch {
-                console.log("[Draw] In-browser GET " + endpoint + " non-JSON: " + (fetchResult.body || '').substring(0, 200));
-              }
-              return route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: fetchResult.body,
-              });
-            } else {
-              console.log("[Draw] In-browser fetch " + endpoint + " failed: " + (fetchResult?.error || 'no result'));
-              return route.abort('failed');
-            }
-          } catch (err: any) {
-            console.log("[Draw] In-browser fetch " + endpoint + " error: " + (err.message || '').substring(0, 80));
-            return route.abort('failed');
-          }
-        }
-        console.log("[Draw] Gigya POST→GET in-browser intercept configured (no reCAPTCHA bypass)");
-      }
 
       page.on('requestfailed', (request) => {
         const url = request.url();
@@ -2341,6 +2211,11 @@ export async function completeDrawViaGigyaBrowser(
             permissions: ['geolocation'],
             colorScheme: 'light',
             hasTouch: false,
+            proxy: {
+              server: 'http://us.decodo.com:10001',
+              username: 'spzg7axtkh',
+              password: 'ua62voA3DQqvi9Zf',
+            },
           });
 
           page = await freshCtx.newPage();
@@ -2478,13 +2353,8 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          try {
-            const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url' LIMIT 1`);
-            if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
-              nstConfig.proxy = proxyRow.rows[0].value as string;
-              console.log("[Draw-OIDC] NSTBrowser with proxy");
-            }
-          } catch {}
+          nstConfig.proxy = "http://spzg7axtkh:ua62voA3DQqvi9Zf@us.decodo.com:10001";
+          console.log("[Draw-OIDC] NSTBrowser with Decodo proxy");
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
 
@@ -2775,7 +2645,6 @@ export async function completeDrawViaGigyaBrowser(
       }
 
       const ticketsAuthUrl = interceptedTicketsUrl;
-      const brightDataToken = "5a312bdf-37e2-427b-9504-f357d091aca9";
 
       if (onTicketsPage) {
         console.log("[Draw-OIDC] Browser is on tickets.la28.org! Attempting form fill...");
