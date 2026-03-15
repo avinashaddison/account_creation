@@ -89,17 +89,22 @@ async function simulateHumanBehavior(page: Page, email: string, password: string
       const passField = await page.$(passSelector);
       if (passField) {
         log("Found visible password field, typing...");
-        try { await passField.scrollIntoViewIfNeeded(); } catch {}
-        await page.waitForTimeout(200 + Math.random() * 300);
         try {
-          const box = await passField.boundingBox();
-          if (box) {
-            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
-            await page.waitForTimeout(200 + Math.random() * 200);
-          }
-        } catch {}
-        try { await passField.click(); } catch {}
-        await page.waitForTimeout(200 + Math.random() * 300);
+          await page.keyboard.press("Tab");
+          await page.waitForTimeout(300 + Math.random() * 400);
+        } catch {
+          try { await passField.scrollIntoViewIfNeeded(); } catch {}
+          await page.waitForTimeout(200 + Math.random() * 300);
+          try {
+            const box = await passField.boundingBox();
+            if (box) {
+              await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+              await page.waitForTimeout(200 + Math.random() * 200);
+            }
+          } catch {}
+          try { await passField.click(); } catch {}
+          await page.waitForTimeout(200 + Math.random() * 300);
+        }
 
         for (const char of password) {
           await page.keyboard.type(char, { delay: 0 });
@@ -170,7 +175,11 @@ function setupRecaptchaLogging(page: Page): void {
       const method = request.method();
       const postData = request.postData() || '';
       const hasToken = postData.includes('captchaToken') || postData.includes('riskToken');
-      console.log("[Gigya-Net] REQUEST " + method + " " + url.substring(0, 200) + " hasCaptchaToken=" + hasToken + " bodyLen=" + postData.length);
+      const params = new URLSearchParams(postData);
+      const paramKeys = Array.from(params.keys());
+      const captchaType = params.get('captchaType') || 'none';
+      const tokenLen = (params.get('captchaToken') || '').length;
+      console.log("[Gigya-Net] REQUEST " + method + " " + url.substring(0, 200) + " hasCaptchaToken=" + hasToken + " captchaType=" + captchaType + " tokenLen=" + tokenLen + " bodyLen=" + postData.length + " paramKeys=[" + paramKeys.join(',') + "]");
     }
   });
 
@@ -189,7 +198,15 @@ function setupRecaptchaLogging(page: Page): void {
       response.text().then(body => {
         try {
           const parsed = JSON.parse(body);
-          console.log("[Gigya-Net] errorCode=" + (parsed.errorCode ?? 'N/A') + " statusCode=" + (parsed.statusCode ?? 'N/A') + " errorDetails=" + (parsed.errorDetails || 'none').substring(0, 100));
+          const redacted: Record<string, any> = {};
+          const safeKeys = ['errorCode', 'errorMessage', 'errorDetails', 'statusCode', 'statusReason', 'callId', 'apiVersion', 'time'];
+          for (const k of safeKeys) {
+            if (parsed[k] !== undefined) redacted[k] = typeof parsed[k] === 'string' ? parsed[k].substring(0, 150) : parsed[k];
+          }
+          redacted.responseKeys = Object.keys(parsed).join(',');
+          redacted.hasUID = !!parsed.UID;
+          redacted.hasSessionInfo = !!(parsed.sessionInfo || parsed.login_token);
+          console.log("[Gigya-Net] Response: " + JSON.stringify(redacted));
         } catch {
           console.log("[Gigya-Net] Response length: " + body.length);
         }
@@ -2173,11 +2190,16 @@ export async function completeDrawViaGigyaBrowser(
       });
       console.log("[Draw] reCAPTCHA state: " + JSON.stringify(recaptchaState));
 
-      const initCheck = checkRecaptchaInitialization(page);
+      let initCheck = checkRecaptchaInitialization(page);
       if (!initCheck.ready) {
-        console.log("[Draw] reCAPTCHA initialization incomplete, waiting additional 5s for enterprise.js...");
+        console.log("[Draw] reCAPTCHA initialization incomplete, waiting additional 5s...");
         await page.waitForTimeout(5000);
-        checkRecaptchaInitialization(page);
+        initCheck = checkRecaptchaInitialization(page);
+        if (!initCheck.ready) {
+          console.log("[Draw] reCAPTCHA still not ready after extra wait, retrying attempt...");
+          log("reCAPTCHA initialization incomplete (attempt " + (attempt + 1) + "). Retrying...");
+          continue;
+        }
       }
 
       log("Step 3: Simulating human interaction before login...");
