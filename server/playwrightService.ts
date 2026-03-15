@@ -84,20 +84,20 @@ async function simulateHumanBehavior(page: Page, email: string, password: string
   try {
     log("Starting human-like interaction sequence...");
 
-    await page.waitForTimeout(1500 + Math.random() * 1500);
+    await page.waitForTimeout(500 + Math.random() * 500);
 
-    for (let i = 0; i < 5 + Math.floor(Math.random() * 5); i++) {
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
       const x = 100 + Math.floor(Math.random() * 900);
       const y = 100 + Math.floor(Math.random() * 500);
-      try { await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 10) }); } catch {}
-      await page.waitForTimeout(100 + Math.random() * 300);
+      try { await page.mouse.move(x, y, { steps: 3 + Math.floor(Math.random() * 5) }); } catch {}
+      await page.waitForTimeout(50 + Math.random() * 100);
     }
 
     try {
       await page.evaluate(() => window.scrollBy(0, 150 + Math.random() * 200));
-      await page.waitForTimeout(500 + Math.random() * 500);
-      await page.evaluate(() => window.scrollBy(0, -(100 + Math.random() * 150)));
-      await page.waitForTimeout(500 + Math.random() * 500);
+      await page.waitForTimeout(200 + Math.random() * 200);
+      await page.evaluate(() => window.scrollBy(0, -(100 + Math.random() * 100)));
+      await page.waitForTimeout(200 + Math.random() * 200);
     } catch {}
 
     const emailSelector = 'input[type="email"]:visible, input[name="loginID"]:visible, input[name="email"]:visible, input[data-gigya-name="loginID"]:visible';
@@ -107,25 +107,15 @@ async function simulateHumanBehavior(page: Page, email: string, password: string
       const emailField = await page.$(emailSelector);
       if (emailField) {
         log("Found visible email field, typing...");
-        try { await emailField.scrollIntoViewIfNeeded(); } catch {}
-        await page.waitForTimeout(300 + Math.random() * 400);
-
-        try {
-          const box = await emailField.boundingBox();
-          if (box) {
-            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
-            await page.waitForTimeout(200 + Math.random() * 300);
-          }
-        } catch {}
         try { await emailField.click(); } catch {}
-        await page.waitForTimeout(300 + Math.random() * 500);
+        await page.waitForTimeout(100 + Math.random() * 150);
 
         for (const char of email) {
           await page.keyboard.type(char, { delay: 0 });
-          await page.waitForTimeout(50 + Math.random() * 100);
+          await page.waitForTimeout(30 + Math.random() * 50);
         }
         log("Email typed");
-        await page.waitForTimeout(400 + Math.random() * 600);
+        await page.waitForTimeout(200 + Math.random() * 300);
       } else {
         log("No visible email field found, skipping");
       }
@@ -139,24 +129,15 @@ async function simulateHumanBehavior(page: Page, email: string, password: string
         log("Found visible password field, typing...");
         try {
           await page.keyboard.press("Tab");
-          await page.waitForTimeout(300 + Math.random() * 400);
+          await page.waitForTimeout(150 + Math.random() * 200);
         } catch {
-          try { await passField.scrollIntoViewIfNeeded(); } catch {}
-          await page.waitForTimeout(200 + Math.random() * 300);
-          try {
-            const box = await passField.boundingBox();
-            if (box) {
-              await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
-              await page.waitForTimeout(200 + Math.random() * 200);
-            }
-          } catch {}
           try { await passField.click(); } catch {}
-          await page.waitForTimeout(200 + Math.random() * 300);
+          await page.waitForTimeout(100 + Math.random() * 150);
         }
 
         for (const char of password) {
           await page.keyboard.type(char, { delay: 0 });
-          await page.waitForTimeout(50 + Math.random() * 100);
+          await page.waitForTimeout(30 + Math.random() * 50);
         }
         log("Password typed");
       } else {
@@ -166,14 +147,7 @@ async function simulateHumanBehavior(page: Page, email: string, password: string
       log("Password field interaction failed (non-fatal): " + (e.message || '').substring(0, 60));
     }
 
-    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
-      const x = 200 + Math.floor(Math.random() * 600);
-      const y = 200 + Math.floor(Math.random() * 300);
-      try { await page.mouse.move(x, y, { steps: 3 + Math.floor(Math.random() * 5) }); } catch {}
-      await page.waitForTimeout(100 + Math.random() * 200);
-    }
-
-    const waitTime = 2000 + Math.random() * 3000;
+    const waitTime = 500 + Math.random() * 500;
     log("Pre-login pause: " + Math.round(waitTime) + "ms");
     await page.waitForTimeout(waitTime);
 
@@ -2128,7 +2102,7 @@ export async function completeDrawViaGigyaBrowser(
   let profileSet = false;
   let dataSet = false;
 
-  const MAX_LOGIN_RETRIES = 1;
+  const MAX_LOGIN_RETRIES = 3;
 
   for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -2142,7 +2116,7 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=60000`;
       console.log("[Draw] Using Browserless STEALTH endpoint with residential proxy (US)");
       console.log("[Draw] Connecting to Browserless Stealth CDP endpoint...");
 
