@@ -1930,7 +1930,7 @@ export async function registerRoutes(
 
           if (result.success) {
             broadcastLog(batchId, loginId, `Login successful! Got ${result.cookies?.length || 0} session cookies`, userId);
-            broadcast({ type: "outlook_login_result", loginId, batchId, success: true, cookieCount: result.cookies?.length || 0 }, userId);
+            broadcast({ type: "outlook_login_result", loginId, batchId, success: true, cookies: result.cookies || [], cookieCount: result.cookies?.length || 0 }, userId);
           } else {
             broadcastLog(batchId, loginId, `Login failed: ${result.error || "Unknown error"}`, userId);
             broadcast({ type: "outlook_login_result", loginId, batchId, success: false, error: result.error }, userId);

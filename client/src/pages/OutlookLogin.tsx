@@ -24,7 +24,7 @@ export default function OutlookLogin() {
   const [loginId, setLoginId] = useState<string | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [result, setResult] = useState<{ success: boolean; error?: string; cookieCount?: number } | null>(null);
+  const [result, setResult] = useState<{ success: boolean; error?: string; cookieCount?: number; cookies?: Array<{ name: string; value: string; domain: string }> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -41,7 +41,7 @@ export default function OutlookLogin() {
         setLogs((prev) => [...prev, { message: msg.message, timestamp: msg.timestamp }]);
       }
       if (msg.type === "outlook_login_result" && msg.batchId === batchIdRef.current) {
-        setResult({ success: msg.success, error: msg.error, cookieCount: msg.cookieCount });
+        setResult({ success: msg.success, error: msg.error, cookieCount: msg.cookieCount, cookies: msg.cookies });
         if (msg.success) sounds.complete();
         else sounds.warning();
       }
@@ -202,6 +202,34 @@ export default function OutlookLogin() {
               )}
               {result.error && (
                 <p className="text-xs text-red-400/80 font-mono mt-1.5">{result.error}</p>
+              )}
+              {result.success && result.cookies && result.cookies.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Session Cookies</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 px-2 text-[9px] text-emerald-400/50 hover:text-emerald-300 font-mono"
+                      onClick={() => {
+                        const cookieStr = result.cookies!.map(c => `${c.name}=${c.value}`).join("; ");
+                        navigator.clipboard.writeText(cookieStr);
+                      }}
+                      data-testid="button-copy-cookies"
+                    >
+                      Copy All
+                    </Button>
+                  </div>
+                  <div className="max-h-[120px] overflow-y-auto rounded bg-black/30 p-2 space-y-0.5">
+                    {result.cookies.map((c, i) => (
+                      <div key={i} className="text-[10px] font-mono text-emerald-400/50 truncate" data-testid={`cookie-${i}`}>
+                        <span className="text-zinc-500">{c.domain}</span>
+                        <span className="text-emerald-400/30 mx-1">/</span>
+                        <span className="text-emerald-300/70">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}
