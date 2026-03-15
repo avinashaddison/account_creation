@@ -195,7 +195,7 @@ export async function ticketsFormFillWithCookies(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf@us.decodo.com:10001";
+  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf=t@us.decodo.com:10001";
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -335,7 +335,7 @@ export async function ticketsFormFillViaCurl(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf@us.decodo.com:10001";
+  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf=t@us.decodo.com:10001";
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -857,13 +857,17 @@ async function loginAndSubmitTicketRegistration(
       console.log("[Draw] Launching Chromium with Decodo residential proxy...");
       proxyBrowser = await chromium.launch({
         headless: true,
-        proxy: { server: 'http://us.decodo.com:10001', username: 'spzg7axtkh', password: 'ua62voA3DQqvi9Zf' },
+        proxy: { server: 'http://us.decodo.com:10001', username: 'spzg7axtkh', password: 'ua62voA3DQqvi9Zf=t' },
         args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
       });
       proxyContext = await proxyBrowser.newContext({
         ignoreHTTPSErrors: true,
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        viewport: { width: 1280, height: 900 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        viewport: { width: 1366, height: 768 },
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+        geolocation: { latitude: 40.7128, longitude: -74.0060 },
+        permissions: ['geolocation'],
       });
       ticketsPage = await proxyContext.newPage();
 
@@ -927,7 +931,7 @@ async function loginAndSubmitTicketRegistration(
               maxRedirects: 0,
               validateStatus: (s: number) => true,
               timeout: 15000,
-              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' }
             });
             const oidcLocation = oidcResp.headers['location'] || '';
             console.log("[Draw] OIDC response: " + oidcResp.status + " location=" + oidcLocation.substring(0, 300));
@@ -951,7 +955,7 @@ async function loginAndSubmitTicketRegistration(
                   headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Cookie': cookieStr,
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
                   }
                 });
                 const loginLocation = loginResp.headers['location'] || '';
@@ -975,7 +979,7 @@ async function loginAndSubmitTicketRegistration(
                         maxRedirects: 0,
                         validateStatus: (s: number) => true,
                         timeout: 15000,
-                        headers: { 'Cookie': cookieStr, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }
+                        headers: { 'Cookie': cookieStr, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' }
                       });
                       const nextLoc = followResp.headers['location'] || '';
                       console.log("[Draw] Redirect " + followIdx + ": " + followResp.status + " → " + nextLoc.substring(0, 200));
@@ -1866,7 +1870,7 @@ export async function completeDrawViaGigyaBrowser(
       const proxyPort = 10001 + (attempt % 10);
       const proxyServer = "us.decodo.com:" + proxyPort;
       const proxyUsername = "spzg7axtkh";
-      const proxyPassword = "ua62voA3DQqvi9Zf";
+      const proxyPassword = "ua62voA3DQqvi9Zf=t";
       console.log("[Draw] Using Decodo residential proxy: " + proxyServer + " (port " + proxyPort + ", sticky session)");
 
       const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"] }));
@@ -1877,13 +1881,13 @@ export async function completeDrawViaGigyaBrowser(
       console.log("[Draw] Browserless connected! Contexts: " + browser.contexts().length);
 
       const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         viewport: { width: 1366, height: 768 },
         screen: { width: 1366, height: 768 },
         locale: 'en-US',
-        timezoneId: 'America/Los_Angeles',
+        timezoneId: 'America/New_York',
         ignoreHTTPSErrors: true,
-        geolocation: { latitude: 34.0522, longitude: -118.2437 },
+        geolocation: { latitude: 40.7128, longitude: -74.0060 },
         permissions: ['geolocation'],
         colorScheme: 'light',
         hasTouch: false,
@@ -2202,19 +2206,19 @@ export async function completeDrawViaGigyaBrowser(
           console.log("[Draw-OIDC] Browserless connected for OIDC!");
 
           const freshCtx = await freshBrowser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             viewport: { width: 1366, height: 768 },
             screen: { width: 1366, height: 768 },
             locale: 'en-US',
             timezoneId: 'America/New_York',
-            geolocation: { latitude: 34.0522, longitude: -118.2437 },
+            geolocation: { latitude: 40.7128, longitude: -74.0060 },
             permissions: ['geolocation'],
             colorScheme: 'light',
             hasTouch: false,
             proxy: {
               server: 'http://us.decodo.com:10001',
               username: 'spzg7axtkh',
-              password: 'ua62voA3DQqvi9Zf',
+              password: 'ua62voA3DQqvi9Zf=t',
             },
           });
 
@@ -2353,7 +2357,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          nstConfig.proxy = "http://spzg7axtkh:ua62voA3DQqvi9Zf@us.decodo.com:10001";
+          nstConfig.proxy = "http://spzg7axtkh:ua62voA3DQqvi9Zf=t@us.decodo.com:10001";
           console.log("[Draw-OIDC] NSTBrowser with Decodo proxy");
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
