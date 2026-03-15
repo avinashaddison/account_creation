@@ -1,8 +1,10 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { execSync, execFile } from "child_process";
 import { promisify } from "util";
+import * as https from "https";
 import * as path from "path";
 import * as fs from "fs";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 
@@ -1863,70 +1865,6 @@ async function fillAndSubmitTicketsForm(
   }
 }
 
-async function forwardViaProxy(targetUrl: string, postData: string, proxyUrl: string | null): Promise<string> {
-  const https = await import('https');
-  const http = await import('http');
-  const url = await import('url');
-
-  if (!proxyUrl) {
-    const resp = await fetch(targetUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: postData,
-    });
-    return await resp.text();
-  }
-
-  const proxy = new URL(proxyUrl);
-  const target = new URL(targetUrl);
-
-  return new Promise((resolve, reject) => {
-    const connectReq = http.request({
-      host: proxy.hostname,
-      port: parseInt(proxy.port),
-      method: 'CONNECT',
-      path: target.hostname + ':443',
-      headers: {
-        'Proxy-Authorization': 'Basic ' + Buffer.from(decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password)).toString('base64'),
-      },
-    });
-
-    connectReq.on('connect', (_res: any, socket: any) => {
-      const tlsSocket = (require('tls') as any).connect({
-        host: target.hostname,
-        socket: socket,
-        rejectUnauthorized: false,
-      }, () => {
-        const postBuffer = Buffer.from(postData, 'utf-8');
-        const reqStr = `POST ${target.pathname} HTTP/1.1\r\nHost: ${target.hostname}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${postBuffer.length}\r\nConnection: close\r\n\r\n${postData}`;
-        tlsSocket.write(reqStr);
-      });
-
-      let data = '';
-      tlsSocket.on('data', (chunk: any) => { data += chunk.toString(); });
-      tlsSocket.on('end', () => {
-        const bodyStart = data.indexOf('\r\n\r\n');
-        if (bodyStart >= 0) {
-          const rawBody = data.substring(bodyStart + 4);
-          const jsonStart = rawBody.indexOf('{');
-          if (jsonStart >= 0) {
-            resolve(rawBody.substring(jsonStart));
-          } else {
-            resolve(rawBody);
-          }
-        } else {
-          resolve(data);
-        }
-      });
-      tlsSocket.on('error', (err: any) => reject(err));
-    });
-
-    connectReq.on('error', (err: any) => reject(err));
-    connectReq.setTimeout(30000, () => { connectReq.destroy(); reject(new Error('Proxy CONNECT timeout')); });
-    connectReq.end();
-  });
-}
-
 export async function completeDrawViaGigyaBrowser(
   email: string,
   password: string,
@@ -1941,35 +1879,27 @@ export async function completeDrawViaGigyaBrowser(
   const favTeams = pickRandom(TEAM_NOCS, 2 + Math.floor(Math.random() * 3));
 
   let formSubmitted = false;
-  let residentialProxy: string | null = null;
-  try {
-    const proxyRows = await db.execute(sql`SELECT key, value FROM settings WHERE key IN ('residential_proxy_url', 'iproyal_proxy_url')`);
-    let brightDataProxy: string | null = null;
-    let iproyalProxy: string | null = null;
-    for (const row of proxyRows.rows) {
-      if (row.key === 'iproyal_proxy_url' && row.value) iproyalProxy = row.value as string;
-      if (row.key === 'residential_proxy_url' && row.value) brightDataProxy = row.value as string;
-    }
-    residentialProxy = brightDataProxy || iproyalProxy;
-    console.log("[Draw] Proxy priority: brightdata=" + (brightDataProxy ? "yes" : "no") + " iproyal=" + (iproyalProxy ? "yes" : "no") + " selected=" + (residentialProxy ? new URL(residentialProxy).hostname : "none"));
-  } catch {}
+  const browserlessToken = process.env.BROWSERLESS_TOKEN;
+  if (!browserlessToken) {
+    log("ERROR: BROWSERLESS_TOKEN not set. Cannot proceed.");
+    return { success: false, profileSet: false, dataSet: false, error: "BROWSERLESS_TOKEN environment variable not configured" };
+  }
 
-  const proxyLabel = residentialProxy ? "residential proxy" : "no proxy (direct)";
-  log("Draw via Playwright browser (" + proxyLabel + ")...");
-  console.log("[Draw] Starting for " + email + " via " + proxyLabel);
+  log("Draw via Browserless Stealth Chromium...");
+  console.log("[Draw] Starting for " + email + " via Browserless Stealth Chromium (US-based)");
 
   let browser: Browser | null = null;
   let page: Page | null = null;
   let profileSet = false;
   let dataSet = false;
 
-  const MAX_LOGIN_RETRIES = 5;
+  const MAX_LOGIN_RETRIES = 3;
 
   for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
     if (attempt > 0) {
-      const backoffSec = 30 + attempt * 20;
+      const backoffSec = 15 + attempt * 10;
       console.log("[Draw] Login retry " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES + " — waiting " + backoffSec + "s...");
-      log("Geo-blocked. Retrying in " + backoffSec + "s (attempt " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES + ")...");
+      log("Retrying in " + backoffSec + "s (attempt " + (attempt + 1) + "/" + MAX_LOGIN_RETRIES + ")...");
       await new Promise(r => setTimeout(r, backoffSec * 1000));
       try { if (browser) await browser.close(); } catch {}
       browser = null;
@@ -1977,124 +1907,131 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const launchArgs = [
-        '--disable-blink-features=AutomationControlled',
-        '--ignore-certificate-errors',
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--lang=en-US',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-site-isolation-trials',
-        '--window-size=1920,1080',
-      ];
-      const launchOpts: any = { headless: true, args: [...launchArgs, '--headless=new'] };
-      console.log("[Draw] Launching browser WITHOUT proxy (reCAPTCHA needs direct access)");
-      console.log("[Draw] Gigya API calls will be intercepted and forwarded via residential proxy");
+      let proxyServer = "";
+      let proxyUsername = "";
+      let proxyPassword = "";
+      try {
+        const proxyRows = await db.execute(sql`SELECT key, value FROM settings WHERE key = 'residential_proxy_url' LIMIT 1`);
+        if (proxyRows.rows.length > 0 && proxyRows.rows[0].value) {
+          const pUrl = new URL(proxyRows.rows[0].value as string);
+          proxyServer = pUrl.hostname + ":" + pUrl.port;
+          const sessionId = "draw_" + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+          proxyUsername = decodeURIComponent(pUrl.username) + "-country-us-session-" + sessionId;
+          proxyPassword = decodeURIComponent(pUrl.password);
+          console.log("[Draw] Will route Browserless through US residential proxy: " + proxyServer + " session=" + sessionId);
+        }
+      } catch {}
 
-      browser = await chromium.launch(launchOpts);
-      const context = await browser.newContext({
+      const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"] }));
+      const browserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken + "&launch=" + browserlessLaunch + "&blockAds=false";
+      console.log("[Draw] Connecting to Browserless Stealth Chromium...");
+
+      browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 60000 });
+      console.log("[Draw] Browserless connected! Contexts: " + browser.contexts().length);
+
+      const contextOptions: any = {
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        viewport: { width: 1920, height: 1080 },
-        screen: { width: 1920, height: 1080 },
-        ignoreHTTPSErrors: true,
+        viewport: { width: 1366, height: 768 },
+        screen: { width: 1366, height: 768 },
         locale: 'en-US',
-        timezoneId: 'America/New_York',
+        timezoneId: 'America/Los_Angeles',
+        ignoreHTTPSErrors: true,
         geolocation: { latitude: 34.0522, longitude: -118.2437 },
         permissions: ['geolocation'],
         colorScheme: 'light',
         hasTouch: false,
         javaScriptEnabled: true,
-      });
-
-      await context.addInitScript(`
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
-        Object.defineProperty(navigator, 'connection', { get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }) });
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) =>
-          parameters.name === 'notifications'
-            ? Promise.resolve({ state: Notification.permission })
-            : originalQuery(parameters);
-        if (navigator.plugins.length === 0) {
-          Object.defineProperty(navigator, 'plugins', {
-            get: () => {
-              const plugins = [
-                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-              ];
-              plugins.length = 3;
-              return plugins;
-            }
-          });
-        }
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-          if (parameter === 37445) return 'Intel Inc.';
-          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-          return getParameter.call(this, parameter);
+      };
+      if (proxyServer && proxyUsername && proxyPassword) {
+        contextOptions.proxy = {
+          server: 'http://' + proxyServer,
+          username: proxyUsername,
+          password: proxyPassword,
+          bypass: '*.google.com,*.gstatic.com,*.recaptcha.net,*.googleapis.com',
         };
-      `);
+        console.log("[Draw] Context proxy configured: " + proxyServer + " (US residential, bypass reCAPTCHA)");
+      }
+      const context = await browser.newContext(contextOptions);
+      console.log("[Draw] Created Browserless context" + (proxyServer ? " with residential proxy" : " (direct)"));
 
       page = await context.newPage();
       page.setDefaultTimeout(60000);
 
-      await page.route("**/*", async (route) => {
-        const resourceType = route.request().resourceType();
-        const url = route.request().url();
-        if (resourceType === "media" && !url.includes('recaptcha') && !url.includes('gigya')) return route.abort();
-        if (url.includes('www.google.com/recaptcha/')) {
-          const newUrl = url.replace('www.google.com/recaptcha/', 'www.recaptcha.net/recaptcha/');
-          return route.continue({ url: newUrl });
-        }
-        if (route.request().method() === 'POST' && (url.includes('/accounts.login') || url.includes('/accounts.setAccountInfo') || url.includes('/accounts.getAccountInfo'))) {
-          const endpoint = url.includes('/accounts.login') ? 'accounts.login'
-            : url.includes('/accounts.setAccountInfo') ? 'accounts.setAccountInfo'
-            : 'accounts.getAccountInfo';
-          console.log("[Draw] Intercepting POST to " + endpoint + " — forwarding direct from Node.js (bypasses browser geo-block)");
-          try {
-            const postData = route.request().postData() || '';
-            const origHeaders = route.request().headers();
-            const targetUrl = "https://accounts." + GIGYA_DATACENTER + ".gigya.com/" + endpoint;
-            const forwardHeaders: Record<string, string> = {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            };
-            if (origHeaders['cookie']) forwardHeaders['cookie'] = origHeaders['cookie'];
-            if (origHeaders['origin']) forwardHeaders['origin'] = origHeaders['origin'];
-            if (origHeaders['referer']) forwardHeaders['referer'] = origHeaders['referer'];
-            const directResp = await fetch(targetUrl, {
-              method: 'POST',
-              headers: forwardHeaders,
-              body: postData,
-            });
-            const body = await directResp.text();
-            try {
-              const parsed = JSON.parse(body);
-              console.log("[Draw] Direct " + endpoint + " response: errorCode=" + (parsed.errorCode || 0) + " (" + body.substring(0, 100) + "...)");
-            } catch { console.log("[Draw] Direct " + endpoint + " raw: " + body.substring(0, 100)); }
-            const respHeaders: Record<string, string> = {};
-            directResp.headers.forEach((v, k) => { respHeaders[k] = v; });
-            return route.fulfill({
-              status: directResp.status,
-              contentType: directResp.headers.get('content-type') || 'application/json',
-              headers: respHeaders,
-              body: body,
-            });
-          } catch (directErr: any) {
-            console.log("[Draw] Direct " + endpoint + " error: " + (directErr.message || '').substring(0, 120));
+      if (proxyServer && proxyUsername && proxyPassword) {
+        await page.route("**/accounts.login", async (route: any) => { return handleGigyaPostToGet(route, 'accounts.login'); });
+        await page.route("**/accounts.setAccountInfo", async (route: any) => { return handleGigyaPostToGet(route, 'accounts.setAccountInfo'); });
+        await page.route("**/accounts.getAccountInfo", async (route: any) => { return handleGigyaPostToGet(route, 'accounts.getAccountInfo'); });
+
+        async function handleGigyaPostToGet(route: any, endpoint: string) {
+          if (route.request().method() !== 'POST') {
             return route.continue();
           }
+          const postData = route.request().postData() || '';
+          const params = new URLSearchParams(postData);
+          const captchaToken = params.get('captchaToken') || '';
+          const captchaType = params.get('captchaType') || '';
+          console.log("[Draw] Intercepting POST " + endpoint + " → in-browser fetch GET");
+          console.log("[Draw] captchaToken=" + (captchaToken ? captchaToken.substring(0, 30) + "...(" + captchaToken.length + " chars)" : "EMPTY"));
+          console.log("[Draw] captchaType=" + captchaType);
+
+          const essentialParams = new URLSearchParams();
+          const loginID = params.get('loginID');
+          const password = params.get('password');
+          const apiKey = params.get('APIKey') || params.get('apiKey') || '4_w4CcQ6tKu4jTeDPirnKxnA';
+          const sessionExpiration = params.get('sessionExpiration') || '';
+          if (loginID) essentialParams.set('loginID', loginID);
+          if (password) essentialParams.set('password', password);
+          essentialParams.set('APIKey', apiKey);
+          if (captchaToken) essentialParams.set('captchaToken', captchaToken);
+          if (captchaType) essentialParams.set('captchaType', captchaType);
+          if (sessionExpiration) essentialParams.set('sessionExpiration', sessionExpiration);
+          essentialParams.set('format', 'json');
+          for (const [k, v] of params.entries()) {
+            if (['uid', 'regToken', 'profile', 'data', 'preferences'].includes(k)) {
+              essentialParams.set(k, v);
+            }
+          }
+          const targetUrl = "https://la28id.la28id.la28.org/" + endpoint + "?" + essentialParams.toString();
+          console.log("[Draw] fetch GET URL length: " + targetUrl.length);
+
+          try {
+            const fetchResult = await route.request().frame()?.page()?.evaluate(async (url: string) => {
+              try {
+                const resp = await fetch(url, { method: 'GET', credentials: 'include' });
+                const text = await resp.text();
+                return { ok: true, status: resp.status, body: text };
+              } catch (e: any) {
+                return { ok: false, error: e.message || 'fetch failed' };
+              }
+            }, targetUrl);
+
+            if (fetchResult && fetchResult.ok) {
+              try {
+                const parsed = JSON.parse(fetchResult.body);
+                console.log("[Draw] In-browser GET " + endpoint + ": errorCode=" + (parsed.errorCode || 0) + " msg=" + (parsed.errorMessage || '').substring(0, 50) + " flags=" + (parsed.errorFlags || '') + " details=" + (parsed.errorDetails || '').substring(0, 80));
+              } catch {
+                console.log("[Draw] In-browser GET " + endpoint + " non-JSON: " + (fetchResult.body || '').substring(0, 200));
+              }
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: fetchResult.body,
+              });
+            } else {
+              console.log("[Draw] In-browser fetch " + endpoint + " failed: " + (fetchResult?.error || 'no result'));
+              return route.abort('failed');
+            }
+          } catch (err: any) {
+            console.log("[Draw] In-browser fetch " + endpoint + " error: " + (err.message || '').substring(0, 80));
+            return route.abort('failed');
+          }
         }
-        return route.continue();
-      });
+        console.log("[Draw] Gigya POST→GET in-browser intercept configured (no reCAPTCHA bypass)");
+      }
 
       page.on('requestfailed', (request) => {
         const url = request.url();
-        if (url.includes('gigya') || url.includes('accounts.login')) {
+        if (url.includes('gigya') || url.includes('recaptcha') || url.includes('accounts.login')) {
           console.log("[Draw] REQUEST FAILED: " + url.substring(0, 120) + " reason=" + (request.failure()?.errorText || 'unknown'));
         }
       });
@@ -2105,29 +2042,39 @@ export async function completeDrawViaGigyaBrowser(
         }
       });
 
-      log("Step 1: Loading LA28 ID portal to establish Gigya cookies & session...");
-      console.log("[Draw] Step 1: Loading la28id.la28.org for Gigya cookie warmup...");
       try {
-        await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-        try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
-        await page.waitForTimeout(4000 + Math.random() * 3000);
-        console.log("[Draw] ID portal loaded: " + page.url().substring(0, 100));
-        try {
-          await page.waitForFunction("typeof gigya !== 'undefined'", { timeout: 15000 });
-          console.log("[Draw] Gigya SDK detected on homepage — cookies should be set");
-        } catch {
-          console.log("[Draw] Gigya SDK not found on homepage (will try login page)");
-        }
-      } catch (homeErr: any) {
-        console.log("[Draw] ID portal load error (continuing): " + (homeErr.message || '').substring(0, 80));
+        await page.goto("http://lumtest.com/myip.json", { timeout: 20000 });
+        const ipText = await page.textContent("body");
+        console.log("[Draw] Browser exit IP: " + (ipText || 'unknown'));
+      } catch (e: any) {
+        console.log("[Draw] IP check failed (continuing): " + (e.message || '').substring(0, 60));
       }
 
-      log("Step 2: Navigating to login page...");
-      console.log("[Draw] Step 2: Navigating to login page...");
-      await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
-      try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-      await page.waitForTimeout(3000 + Math.random() * 2000);
+      log("Step 1: Warming up session on la28.org...");
+      console.log("[Draw] Step 1: Warming up session on la28id.la28.org/login...");
+      for (let warmupAttempt = 0; warmupAttempt < 3; warmupAttempt++) {
+        try {
+          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
+          try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
+          await page.waitForTimeout(3000 + Math.random() * 2000);
+          console.log("[Draw] la28id login loaded (attempt " + (warmupAttempt + 1) + "): " + page.url());
+          break;
+        } catch (warmupErr: any) {
+          console.log("[Draw] la28id warmup attempt " + (warmupAttempt + 1) + " error: " + (warmupErr.message || '').substring(0, 80));
+          if (warmupAttempt < 2) {
+            await page.waitForTimeout(5000);
+          }
+        }
+      }
 
+      const currentUrl = page.url();
+      if (!currentUrl.includes('la28id.la28.org/login')) {
+        log("Step 2: Navigating to login page...");
+        console.log("[Draw] Step 2: Navigating to la28id.la28.org/login...");
+        await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
+        await page.waitForTimeout(3000 + Math.random() * 2000);
+      }
       console.log("[Draw] Login page URL: " + page.url());
 
       console.log("[Draw] Waiting for Gigya SDK...");
@@ -2197,9 +2144,9 @@ export async function completeDrawViaGigyaBrowser(
       await page.waitForTimeout(3000);
       try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
 
-      let currentUrl = page.url();
-      if (currentUrl.includes("proxy.html") || currentUrl.includes("consent.html")) {
-        console.log("[Draw] On intermediate page (" + currentUrl.substring(0, 80) + "), navigating back...");
+      let postLoginUrl = page.url();
+      if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
+        console.log("[Draw] On intermediate page (" + postLoginUrl.substring(0, 80) + "), navigating back...");
         try {
           await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
           await page.waitForTimeout(3000);
@@ -2374,198 +2321,137 @@ export async function completeDrawViaGigyaBrowser(
         log("Draw form: Using NSTBrowser cloud anti-detect browser for OIDC...");
         console.log("[Draw-OIDC] Starting OIDC via NSTBrowser for " + email);
       } else if (!page || page.isClosed()) {
-        log("Draw form: Page closed, launching fresh local browser for OIDC...");
-        console.log("[Draw-OIDC] Page closed, launching fresh local browser for " + email);
+        log("Draw form: Page closed, reconnecting Browserless for OIDC...");
+        console.log("[Draw-OIDC] Page closed, reconnecting Browserless for " + email);
 
-        const MAX_GEO_RETRIES = 5;
-        let geoRetryCount = 0;
-        let freshLoginSuccess = false;
+        try {
+          const freshBrowserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken;
+          console.log("[Draw-OIDC] Connecting to Browserless Stealth for OIDC...");
+          const freshBrowser = await chromium.connectOverCDP(freshBrowserlessUrl, { timeout: 60000 });
+          browser = freshBrowser;
+          console.log("[Draw-OIDC] Browserless connected for OIDC!");
 
-        while (geoRetryCount < MAX_GEO_RETRIES && !freshLoginSuccess) {
-          if (geoRetryCount > 0) {
-            const backoffSec = 30 + geoRetryCount * 15;
-            console.log("[Draw-OIDC] Geo-block retry " + (geoRetryCount + 1) + "/" + MAX_GEO_RETRIES + " — waiting " + backoffSec + "s...");
-            log("Geo-blocked (451002). Retrying in " + backoffSec + "s (attempt " + (geoRetryCount + 1) + "/" + MAX_GEO_RETRIES + ")...");
-            await new Promise(r => setTimeout(r, backoffSec * 1000));
-            try { if (browser) await browser.close(); } catch {}
-            browser = null;
-            page = null;
-          }
+          const freshCtx = await freshBrowser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            viewport: { width: 1366, height: 768 },
+            screen: { width: 1366, height: 768 },
+            locale: 'en-US',
+            timezoneId: 'America/New_York',
+            geolocation: { latitude: 34.0522, longitude: -118.2437 },
+            permissions: ['geolocation'],
+            colorScheme: 'light',
+            hasTouch: false,
+          });
 
+          page = await freshCtx.newPage();
+          page.setDefaultTimeout(60000);
+
+          console.log("[Draw-OIDC] Browserless: warming up on www.la28.org...");
           try {
-            const freshLaunchArgs = [
-              '--disable-blink-features=AutomationControlled',
-              '--ignore-certificate-errors',
-              '--no-sandbox',
-              '--disable-dev-shm-usage',
-              '--lang=en-US',
-              '--disable-features=IsolateOrigins,site-per-process',
-              '--disable-site-isolation-trials',
-              '--window-size=1920,1080',
-            ];
-            const freshLaunchOpts: any = { headless: true, args: [...freshLaunchArgs, '--headless=new'] };
-            if (residentialProxy) {
-              try {
-                const pUrl = new URL(residentialProxy);
-                freshLaunchOpts.proxy = {
-                  server: pUrl.protocol + '//' + pUrl.hostname + ':' + pUrl.port,
-                  username: decodeURIComponent(pUrl.username),
-                  password: decodeURIComponent(pUrl.password),
-                };
-                console.log("[Draw-OIDC] Fresh browser using residential proxy: " + pUrl.hostname);
-              } catch {}
-            }
-            const freshBrowser = await chromium.launch(freshLaunchOpts);
-            browser = freshBrowser;
-            const freshCtx = await freshBrowser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-              viewport: { width: 1920, height: 1080 },
-              screen: { width: 1920, height: 1080 },
-              ignoreHTTPSErrors: true,
-              locale: 'en-US',
-              timezoneId: 'America/New_York',
-              geolocation: { latitude: 34.0522, longitude: -118.2437 },
-              permissions: ['geolocation'],
-              colorScheme: 'light',
-              hasTouch: false,
-            });
-            await freshCtx.addInitScript(`
-              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-              Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-              Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-              Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
-              const getParameter = WebGLRenderingContext.prototype.getParameter;
-              WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) return 'Intel Inc.';
-                if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-                return getParameter.call(this, parameter);
-              };
-            `);
-            page = await freshCtx.newPage();
-            page.setDefaultTimeout(60000);
-
-            console.log("[Draw-OIDC] Fresh browser: loading la28id.la28.org for cookie warmup...");
-            try {
-              await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 60000 });
-              try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
-              await page.waitForTimeout(4000 + Math.random() * 3000);
-            } catch {}
-
-            console.log("[Draw-OIDC] Fresh browser: navigating to la28id.la28.org/login...");
-            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+            await page.goto("https://www.la28.org", { waitUntil: "domcontentloaded", timeout: 60000 });
             try { await page.waitForLoadState("networkidle", { timeout: 20000 }); } catch {}
-            await page.waitForTimeout(2000 + Math.random() * 2000);
+            await page.waitForTimeout(3000 + Math.random() * 2000);
+          } catch {}
 
-            await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", undefined, { timeout: 20000 });
-            console.log("[Draw-OIDC] Fresh browser: Gigya SDK loaded, logging in...");
+          console.log("[Draw-OIDC] Browserless: navigating to la28id.la28.org/login...");
+          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 60000 });
+          try { await page.waitForLoadState("networkidle", { timeout: 25000 }); } catch {}
+          await page.waitForTimeout(3000 + Math.random() * 2000);
 
-            const freshLogin = await page.evaluate(`(function(email, pwd) {
-              return new Promise(function(resolve) {
-                gigya.accounts.login({
-                  loginID: email, password: pwd,
-                  callback: function(resp) {
-                    resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
-                  }
-                });
-                setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 20000);
+          await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
+          console.log("[Draw-OIDC] Browserless: Gigya SDK loaded, logging in...");
+
+          const freshLogin = await page.evaluate(`(function(email, pwd) {
+            return new Promise(function(resolve) {
+              gigya.accounts.login({
+                loginID: email, password: pwd,
+                callback: function(resp) {
+                  resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, errorMessage: resp.errorMessage || '', uid: resp.UID || '' });
+                }
               });
-            })(${JSON.stringify(email)}, ${JSON.stringify(password)})`) as any;
-            console.log("[Draw-OIDC] Fresh browser Gigya login: " + JSON.stringify(freshLogin));
+              setTimeout(function() { resolve({ success: false, errorCode: -1, errorMessage: 'timeout', uid: '' }); }, 30000);
+            });
+          })(${JSON.stringify(email)}, ${JSON.stringify(password)})`) as any;
+          console.log("[Draw-OIDC] Browserless login: " + JSON.stringify(freshLogin));
 
-            if (!freshLogin.success) {
-              if (freshLogin.errorCode === 451002) {
-                geoRetryCount++;
-                continue;
-              }
-              throw new Error("Fresh browser Gigya login failed: " + freshLogin.errorMessage);
-            }
-
-            freshLoginSuccess = true;
-
-            await page.waitForTimeout(3000);
-            try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
-
-            let freshUrl = page.url();
-            if (freshUrl.includes("proxy.html") || freshUrl.includes("consent.html")) {
-              console.log("[Draw-OIDC] Fresh browser: on intermediate page, navigating back to login...");
-              await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
-              await page.waitForTimeout(2000);
-            }
-
-            const freshAuth = await page.evaluate(`(function() {
-              return new Promise(function(resolve) {
-                gigya.accounts.getAccountInfo({
-                  callback: function(resp) {
-                    resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' });
-                  }
-                });
-                setTimeout(function() { resolve({ loggedIn: false, uid: '' }); }, 15000);
-              });
-            })()`) as any;
-            console.log("[Draw-OIDC] Fresh browser auth check: " + JSON.stringify(freshAuth));
-
-            if (!freshAuth.loggedIn) {
-              throw new Error("Fresh browser: Not logged in after Gigya login");
-            }
-
-            console.log("[Draw-OIDC] Fresh browser: setting profile + data via Gigya JS SDK...");
-            const freshProfileResult = await page.evaluate(`(function(birthYr, zip) {
-              return new Promise(function(resolve) {
-                gigya.accounts.setAccountInfo({
-                  profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
-                  callback: function(resp) {
-                    resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
-                  }
-                });
-                setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-              });
-            })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
-            console.log("[Draw-OIDC] Fresh browser profile result: " + JSON.stringify(freshProfileResult));
-            if (freshProfileResult.success) profileSet = true;
-
-            const allSportsFresh = [
-              ...favOlympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
-              ...favParalympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
-            ];
-            const teamObjsFresh = favTeams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
-
-            const freshDataResult = await page.evaluate(`(function(sportsStr, teamsStr) {
-              return new Promise(function(resolve) {
-                var sports = JSON.parse(sportsStr);
-                var teams = JSON.parse(teamsStr);
-                gigya.accounts.setAccountInfo({
-                  data: {
-                    personalization: { favoritesDisciplines: sports, favoritesCountries: teams, siteLanguage: 'en' },
-                    entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
-                  },
-                  callback: function(resp) {
-                    resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
-                  }
-                });
-                setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
-              });
-            })(${JSON.stringify(JSON.stringify(allSportsFresh))}, ${JSON.stringify(JSON.stringify(teamObjsFresh))})`) as { success: boolean; error?: string | null };
-            console.log("[Draw-OIDC] Fresh browser data result: " + JSON.stringify(freshDataResult));
-            if (freshDataResult.success) dataSet = true;
-
-            if (profileSet && dataSet && onEarlyComplete) {
-              console.log("[Draw-OIDC] Fresh browser: profile+data set, marking completed early");
-              onEarlyComplete();
-            }
-
-            console.log("[Draw-OIDC] Fresh browser ready for OIDC!");
-            log("Fresh local browser logged in, profile=" + profileSet + " data=" + dataSet + ". Proceeding to OIDC...");
-          } catch (freshErr: any) {
-            console.log("[Draw-OIDC] Fresh browser failed: " + (freshErr.message || '').substring(0, 200));
-            log("Fresh browser OIDC failed: " + (freshErr.message || '').substring(0, 80));
+          if (!freshLogin.success) {
+            throw new Error("Browserless Gigya login failed: errorCode=" + freshLogin.errorCode + " " + freshLogin.errorMessage);
           }
-        }
 
-        if (!freshLoginSuccess && geoRetryCount >= MAX_GEO_RETRIES) {
-          console.log("[Draw-OIDC] All " + MAX_GEO_RETRIES + " geo-block retries exhausted");
-          log("Geo-block: all " + MAX_GEO_RETRIES + " retry attempts failed. Will try ZenRows fallback...");
+          await page.waitForTimeout(3000);
+          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+          let freshUrl = page.url();
+          if (freshUrl.includes("proxy.html") || freshUrl.includes("consent.html")) {
+            console.log("[Draw-OIDC] Browserless: on intermediate page, navigating back...");
+            await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await page.waitForTimeout(2000);
+          }
+
+          const freshAuth = await page.evaluate(`(function() {
+            return new Promise(function(resolve) {
+              gigya.accounts.getAccountInfo({
+                callback: function(resp) {
+                  resolve({ loggedIn: resp.errorCode === 0, uid: resp.UID || '' });
+                }
+              });
+              setTimeout(function() { resolve({ loggedIn: false, uid: '' }); }, 15000);
+            });
+          })()`) as any;
+          console.log("[Draw-OIDC] Browserless auth check: " + JSON.stringify(freshAuth));
+
+          if (!freshAuth.loggedIn) {
+            throw new Error("Browserless: Not logged in after Gigya login");
+          }
+
+          console.log("[Draw-OIDC] Browserless: setting profile + data...");
+          const freshProfileResult = await page.evaluate(`(function(birthYr, zip) {
+            return new Promise(function(resolve) {
+              gigya.accounts.setAccountInfo({
+                profile: { birthYear: parseInt(birthYr), zip: zip, country: 'US' },
+                callback: function(resp) {
+                  resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+                }
+              });
+              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+            });
+          })(${JSON.stringify(String(birthYear))}, ${JSON.stringify(usedZip)})`) as { success: boolean; error?: string | null };
+          if (freshProfileResult.success) profileSet = true;
+
+          const allSportsFresh = [
+            ...favOlympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "OG" })),
+            ...favParalympicSports.map(code => ({ ocsCode: code, odfCode: code, GameType: "PG" })),
+          ];
+          const teamObjsFresh = favTeams.map(code => ({ ocsCode: code, nocCode: code, gameType: "OG" }));
+
+          const freshDataResult = await page.evaluate(`(function(sportsStr, teamsStr) {
+            return new Promise(function(resolve) {
+              var sports = JSON.parse(sportsStr);
+              var teams = JSON.parse(teamsStr);
+              gigya.accounts.setAccountInfo({
+                data: {
+                  personalization: { favoritesDisciplines: sports, favoritesCountries: teams, siteLanguage: 'en' },
+                  entryCampaignandSegregation: { l2028_ticketing: 'true', l2028_fan28: 'true' }
+                },
+                callback: function(resp) {
+                  resolve({ success: resp.errorCode === 0, error: resp.errorCode === 0 ? null : resp.errorMessage });
+                }
+              });
+              setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 15000);
+            });
+          })(${JSON.stringify(JSON.stringify(allSportsFresh))}, ${JSON.stringify(JSON.stringify(teamObjsFresh))})`) as { success: boolean; error?: string | null };
+          if (freshDataResult.success) dataSet = true;
+
+          if (profileSet && dataSet && onEarlyComplete) {
+            console.log("[Draw-OIDC] Browserless: profile+data set, marking completed early");
+            onEarlyComplete();
+          }
+
+          console.log("[Draw-OIDC] Browserless ready for OIDC!");
+          log("Browserless logged in, profile=" + profileSet + " data=" + dataSet + ". Proceeding to OIDC...");
+        } catch (freshErr: any) {
+          console.log("[Draw-OIDC] Browserless OIDC failed: " + (freshErr.message || '').substring(0, 200));
+          log("Browserless OIDC failed: " + (freshErr.message || '').substring(0, 80));
         }
       } else {
         log("Draw form: Navigating OIDC in local browser (same session)...");
@@ -2592,10 +2478,13 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          if (residentialProxy) {
-            nstConfig.proxy = residentialProxy;
-            console.log("[Draw-OIDC] NSTBrowser with iProyal proxy");
-          }
+          try {
+            const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url' LIMIT 1`);
+            if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+              nstConfig.proxy = proxyRow.rows[0].value as string;
+              console.log("[Draw-OIDC] NSTBrowser with proxy");
+            }
+          } catch {}
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
 
@@ -2687,25 +2576,13 @@ export async function completeDrawViaGigyaBrowser(
           nstPage = null;
 
           if (!browser || !page || page.isClosed()) {
-            console.log("[Draw-OIDC] Local browser also unavailable, relaunching...");
-            const fallbackArgs = ['--disable-blink-features=AutomationControlled', '--ignore-certificate-errors', '--no-sandbox', '--disable-dev-shm-usage', '--lang=en-US', '--disable-features=IsolateOrigins,site-per-process', '--window-size=1920,1080'];
-            const fallbackOpts: any = { headless: true, args: [...fallbackArgs, '--headless=new'] };
-            if (residentialProxy) {
-              try {
-                const proxyUrl = new URL(residentialProxy);
-                fallbackOpts.proxy = {
-                  server: proxyUrl.protocol + '//' + proxyUrl.hostname + ':' + proxyUrl.port,
-                  username: decodeURIComponent(proxyUrl.username),
-                  password: decodeURIComponent(proxyUrl.password),
-                };
-              } catch {}
-            }
-            browser = await chromium.launch(fallbackOpts);
+            console.log("[Draw-OIDC] Browser unavailable, reconnecting Browserless for OIDC fallback...");
+            const fallbackBrowserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken;
+            browser = await chromium.connectOverCDP(fallbackBrowserlessUrl, { timeout: 60000 });
             const ctx = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-              viewport: { width: 1920, height: 1080 },
-              screen: { width: 1920, height: 1080 },
-              ignoreHTTPSErrors: true,
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              viewport: { width: 1366, height: 768 },
+              screen: { width: 1366, height: 768 },
               locale: 'en-US',
               timezoneId: 'America/New_York',
               geolocation: { latitude: 34.0522, longitude: -118.2437 },
