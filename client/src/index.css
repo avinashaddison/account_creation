@@ -349,3 +349,9 @@
   background: rgba(0, 229, 255, 0.25);
   color: #fff;
 }
+
+.email-html-content img { max-width: 100%; height: auto; }
+.email-html-content a { color: #7dd3fc; text-decoration: underline; }
+.email-html-content table { max-width: 100%; font-size: 12px; }
+.email-html-content p { margin: 4px 0; }
+.email-html-content h1, .email-html-content h2, .email-html-content h3 { color: #e2e8f0; margin: 8px 0 4px; }

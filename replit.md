@@ -44,6 +44,7 @@ Full admin panel for automated LA28 Olympic account creation with complete ticke
 - **Email Server** (`/admin/email-server`) - Browse Addison emails, copy addresses, view real-time inbox
 - **Billing** (`/admin/billing`) - Cost tracking at $0.11 per account
 - **Wallet** (`/admin/wallet`) - View balance, submit TRC20 payment requests, see payment history
+- **Email Workspace** (`/admin/email-workspace`) - Standalone temp mail generator with real-time inbox scanning, create disposable emails on-demand via mail.tm API
 - **LA28 Registration** (`/admin/home`) - Single account registration with form, auto-fill, live progress logs, and registration history table
 - **Account Create Server** (`/admin/create-server`) - Platform selection page with LA28, Ticketmaster, UEFA, Bruno Mars cards
 - **LA28 Account Creator** (`/admin/la28-create`) - Batch account creation (1-30) with live terminal logs

@@ -1337,6 +1337,78 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/temp-emails", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const domain = await getAvailableDomain();
+      const username = generateRandomUsername();
+      const address = `${username}@${domain}`;
+      const password = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      await createTempEmail(address, password);
+      const saved = await storage.createTempEmail({
+        address,
+        password,
+        label: req.body.label || null,
+        ownerId: userId,
+      });
+      res.json({ id: saved.id, address: saved.address, label: saved.label, ownerId: saved.ownerId, createdAt: saved.createdAt });
+    } catch (err: any) {
+      console.error("[TempEmail] Generate error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/temp-emails", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const role = req.session.role;
+    const emails = role === "superadmin"
+      ? await storage.getAllTempEmails()
+      : await storage.getTempEmailsByOwner(userId);
+    res.json(emails.map(e => ({ id: e.id, address: e.address, label: e.label, ownerId: e.ownerId, createdAt: e.createdAt })));
+  });
+
+  app.get("/api/temp-emails/:id/inbox", requireAuth, async (req, res) => {
+    try {
+      const te = await storage.getTempEmail(req.params.id);
+      if (!te) return res.status(404).json({ error: "Not found" });
+      if (req.session.role !== "superadmin" && te.ownerId !== req.session.userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      const token = await getAuthToken(te.address, te.password);
+      const messages = await fetchMessages(token);
+      const fullMessages = [];
+      for (const msg of messages.slice(0, 30)) {
+        const content = await fetchMessageContent(token, msg.id);
+        const plainText = content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        fullMessages.push({
+          id: msg.id,
+          from: msg.from?.address || msg.from?.name || "unknown",
+          subject: msg.subject || "(no subject)",
+          text: plainText,
+          createdAt: msg.createdAt,
+        });
+      }
+      res.json(fullMessages);
+    } catch (err: any) {
+      console.error("[TempEmail] Inbox error:", err.message);
+      res.json([]);
+    }
+  });
+
+  app.delete("/api/temp-emails/:id", requireAuth, async (req, res) => {
+    try {
+      const te = await storage.getTempEmail(req.params.id);
+      if (!te) return res.status(404).json({ error: "Not found" });
+      if (req.session.role !== "superadmin" && te.ownerId !== req.session.userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      await storage.deleteTempEmail(te.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   async function processTMAccount(
     accountId: string,
     batchId: string,

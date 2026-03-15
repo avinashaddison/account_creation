@@ -80,6 +80,15 @@ export const insertPaymentRequestSchema = createInsertSchema(paymentRequests).om
   createdAt: true,
 });
 
+export const tempEmails = pgTable("temp_emails", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  address: text("address").notNull(),
+  password: text("password").notNull(),
+  label: text("label"),
+  ownerId: varchar("owner_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -95,3 +104,10 @@ export type BillingRecord = typeof billingRecords.$inferSelect;
 export type InsertBilling = z.infer<typeof insertBillingSchema>;
 export type PaymentRequest = typeof paymentRequests.$inferSelect;
 export type InsertPaymentRequest = z.infer<typeof insertPaymentRequestSchema>;
+
+export const insertTempEmailSchema = createInsertSchema(tempEmails).omit({
+  id: true,
+  createdAt: true,
+});
+export type TempEmail = typeof tempEmails.$inferSelect;
+export type InsertTempEmail = z.infer<typeof insertTempEmailSchema>;

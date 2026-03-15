@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu, Settings } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Inbox, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -50,6 +50,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard, tag: "SYS" },
     { href: "/admin/accounts", label: "Account Stock", icon: Archive, tag: "DB" },
     { href: "/admin/email-server", label: "Email Server", icon: Mail, tag: "NET" },
+    { href: "/admin/email-workspace", label: "Email Workspace", icon: Inbox, tag: "TMP" },
     { href: "/admin/billing", label: "Billing", icon: Receipt, tag: "FIN" },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet, tag: "FIN" },
     { href: "/admin/create-server", label: "Create Server", icon: Server, tag: "OPS" },

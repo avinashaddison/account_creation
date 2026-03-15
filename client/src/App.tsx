@@ -15,6 +15,7 @@ import UEFACreate from "@/pages/UEFACreate";
 import BrunoMarsCreate from "@/pages/BrunoMarsCreate";
 import CreateServer from "@/pages/CreateServer";
 import EmailServer from "@/pages/EmailServer";
+import EmailWorkspace from "@/pages/EmailWorkspace";
 import ManageAdmins from "@/pages/ManageAdmins";
 import Earnings from "@/pages/Earnings";
 import WalletPage from "@/pages/Wallet";
@@ -49,6 +50,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/brunomars-create" component={BrunoMarsCreate} />
         <Route path="/admin/auto-create"><Redirect to="/admin/create-server" /></Route>
         <Route path="/admin/email-server" component={EmailServer} />
+        <Route path="/admin/email-workspace" component={EmailWorkspace} />
         <Route path="/admin/wallet" component={WalletPage} />
         {user.role === "superadmin" && (
           <>

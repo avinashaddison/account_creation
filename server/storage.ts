@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -35,6 +35,11 @@ export interface IStorage {
   approvePaymentAtomic(requestId: string): Promise<{ success: boolean; newBalance?: string; error?: string }>;
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
+  createTempEmail(data: InsertTempEmail): Promise<TempEmail>;
+  getTempEmailsByOwner(ownerId: string): Promise<TempEmail[]>;
+  getAllTempEmails(): Promise<TempEmail[]>;
+  getTempEmail(id: string): Promise<TempEmail | undefined>;
+  deleteTempEmail(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -252,6 +257,28 @@ export class DatabaseStorage implements IStorage {
 
   async setSetting(key: string, value: string): Promise<void> {
     await db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
+  }
+
+  async createTempEmail(data: InsertTempEmail): Promise<TempEmail> {
+    const [row] = await db.insert(tempEmails).values(data).returning();
+    return row;
+  }
+
+  async getTempEmailsByOwner(ownerId: string): Promise<TempEmail[]> {
+    return db.select().from(tempEmails).where(eq(tempEmails.ownerId, ownerId)).orderBy(desc(tempEmails.createdAt));
+  }
+
+  async getAllTempEmails(): Promise<TempEmail[]> {
+    return db.select().from(tempEmails).orderBy(desc(tempEmails.createdAt));
+  }
+
+  async getTempEmail(id: string): Promise<TempEmail | undefined> {
+    const [row] = await db.select().from(tempEmails).where(eq(tempEmails.id, id));
+    return row;
+  }
+
+  async deleteTempEmail(id: string): Promise<void> {
+    await db.delete(tempEmails).where(eq(tempEmails.id, id));
   }
 }
 
