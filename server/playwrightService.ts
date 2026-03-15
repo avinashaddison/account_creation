@@ -2454,13 +2454,13 @@ async function fillAndSubmitTicketsForm(
           })()`) as any;
           console.log("[Draw-Form] Empty visible selects: " + JSON.stringify(retryResult));
           
-          log("Form submitted but still shows draw prompt. Fields may need Angular-specific handling.");
-          return true;
+          log("Form submitted but success page NOT reached. Draw registration NOT confirmed.");
+          return false;
         }
       } catch (postErr: any) {
         console.log("[Draw-Form] Post-submit check error: " + postErr.message.substring(0, 100));
-        log("Form submitted (post-submit check failed).");
-        return true;
+        log("Form submitted but could not verify success page. Draw NOT confirmed.");
+        return false;
       }
     } else {
       log("Submit button not found: " + submitClicked.substring(0, 100));
@@ -2917,9 +2917,8 @@ export async function completeDrawViaGigyaBrowser(
         log("Verified: l2028_ticketing=" + verifyResult.ticketing + " fan28=" + verifyResult.fan28 + " birthYear=" + verifyResult.birthYear + " zip=" + verifyResult.zip);
       }
 
-      if (profileSet && dataSet && onEarlyComplete) {
-        console.log("[Draw] Profile+Data confirmed set, marking completed early before OIDC step");
-        onEarlyComplete();
+      if (profileSet && dataSet) {
+        console.log("[Draw] Profile+Data flags set. Proceeding to OIDC + form fill on tickets.la28.org...");
       }
 
       break;
@@ -3060,9 +3059,8 @@ export async function completeDrawViaGigyaBrowser(
           })(${JSON.stringify(JSON.stringify(allSportsFresh))}, ${JSON.stringify(JSON.stringify(teamObjsFresh))})`) as { success: boolean; error?: string | null };
           if (freshDataResult.success) dataSet = true;
 
-          if (profileSet && dataSet && onEarlyComplete) {
-            console.log("[Draw-OIDC] Browserless: profile+data set, marking completed early");
-            onEarlyComplete();
+          if (profileSet && dataSet) {
+            console.log("[Draw-OIDC] Profile+data flags set. Proceeding to form fill on tickets.la28.org...");
           }
 
           console.log("[Draw-OIDC] Browserless ready for OIDC!");
@@ -5221,56 +5219,48 @@ async function doRegistration(
     }
 
     onStatusUpdate("draw_registering");
-    log("[DRAW FLAGS] Setting draw registration via Gigya REST API...");
+    log("[DRAW] Starting draw registration — must fill form on tickets.la28.org and reach success page...");
     let drawSuccess = false;
+    let profileDataSet = false;
 
     try {
       const apiResult = await completeDrawRegistrationViaApi(email, password, usedZipCode, log);
-      if (apiResult.success) {
-        onStatusUpdate("completed");
-        log("[REGISTRATION CONFIRMED] Draw registration complete via API! Profile + draw flags set.");
-        drawSuccess = true;
-      } else if (apiResult.profileSet || apiResult.dataSet) {
-        onStatusUpdate("completed");
-        log("[REGISTRATION CONFIRMED] API partial success: profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + ". Marked completed.");
-        drawSuccess = true;
+      if (apiResult.profileSet || apiResult.dataSet) {
+        profileDataSet = true;
+        log("[DRAW] Gigya profile/data flags set via API (profile=" + apiResult.profileSet + " data=" + apiResult.dataSet + "). Now need form submission on tickets.la28.org...");
       } else {
-        log("[DRAW FLAGS] API registration failed: " + (apiResult.error || "unknown"));
+        log("[DRAW] API profile/data set failed: " + (apiResult.error || "unknown"));
       }
     } catch (apiErr: any) {
       console.log("[Playwright] REST API draw error:", apiErr.message);
-      log("[DRAW FLAGS] API error: " + apiErr.message.substring(0, 80));
+      log("[DRAW] API error: " + apiErr.message.substring(0, 80));
     }
 
-    if (!drawSuccess) {
-      log("[DRAW FLAGS] REST API failed. Attempting browser-based fallback...");
-      try {
-        const earlyComplete = () => {
-          if (!drawSuccess) {
-            drawSuccess = true;
-            onStatusUpdate("completed");
-            log("[REGISTRATION CONFIRMED] Draw registration confirmed via browser fallback.");
-          }
-        };
-        const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log, earlyComplete);
-        if (gigyaResult.success && !drawSuccess) {
-          onStatusUpdate("completed");
-          log("[REGISTRATION CONFIRMED] Draw registration set via browser fallback.");
+    log("[DRAW] Attempting browser-based form fill on tickets.la28.org...");
+    try {
+      const earlyComplete = () => {
+        if (!drawSuccess) {
           drawSuccess = true;
-        } else if ((gigyaResult.profileSet || gigyaResult.dataSet) && !drawSuccess) {
           onStatusUpdate("completed");
-          log("[REGISTRATION CONFIRMED] Browser partial: profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet);
-          drawSuccess = true;
+          log("[DRAW COMPLETE] Form submitted on tickets.la28.org and success page reached!");
         }
-      } catch (drawErr: any) {
-        console.log("[Playwright] Browser fallback error:", drawErr.message);
-        log("Browser fallback failed: " + drawErr.message.substring(0, 80));
+      };
+      const gigyaResult = await completeDrawViaGigyaBrowser(email, password, usedZipCode, log, earlyComplete);
+      if (gigyaResult.formSubmitted && !drawSuccess) {
+        drawSuccess = true;
+        onStatusUpdate("completed");
+        log("[DRAW COMPLETE] Draw registration confirmed — form submitted on tickets.la28.org!");
+      } else if (!drawSuccess) {
+        log("[DRAW] Browser form fill did not complete. formSubmitted=" + gigyaResult.formSubmitted + " oidcLinked=" + gigyaResult.oidcLinked);
       }
+    } catch (drawErr: any) {
+      console.log("[Playwright] Browser draw error:", drawErr.message);
+      log("[DRAW] Browser error: " + drawErr.message.substring(0, 80));
     }
 
     if (!drawSuccess) {
-      log("All draw registration methods failed. Status kept as draw_registering.");
-      onStatusUpdate("draw_registering");
+      log("[DRAW FAILED] Could not fill draw form on tickets.la28.org. Account verified but draw NOT registered.");
+      onStatusUpdate("verified");
     }
 
     await context.close();
