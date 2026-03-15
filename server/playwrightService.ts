@@ -2454,15 +2454,20 @@ export async function completeDrawViaGigyaBrowser(
             const fallbackBrowserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken;
             browser = await chromium.connectOverCDP(fallbackBrowserlessUrl, { timeout: 60000 });
             const ctx = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
               viewport: { width: 1366, height: 768 },
               screen: { width: 1366, height: 768 },
               locale: 'en-US',
               timezoneId: 'America/New_York',
-              geolocation: { latitude: 34.0522, longitude: -118.2437 },
+              geolocation: { latitude: 40.7128, longitude: -74.0060 },
               permissions: ['geolocation'],
               colorScheme: 'light',
               hasTouch: false,
+              proxy: {
+                server: 'http://us.decodo.com:10001',
+                username: 'spzg7axtkh',
+                password: 'ua62voA3DQqvi9Zf=t',
+              },
             });
             await ctx.addInitScript(`
               Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -3955,8 +3960,12 @@ async function doRegistration(
 
   const contextOptions: any = {
     userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    viewport: { width: 1280, height: 720 },
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    viewport: { width: 1366, height: 768 },
+    locale: 'en-US',
+    timezoneId: 'America/New_York',
+    geolocation: { latitude: 40.7128, longitude: -74.0060 },
+    permissions: ['geolocation'],
   };
 
   const usedZipCode = generateUSZip();
