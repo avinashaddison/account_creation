@@ -30,6 +30,168 @@ function getDecodoProxyConfig(port: number = 10001): { server: string; username?
   return config;
 }
 
+async function simulateHumanBehavior(page: Page, email: string, password: string): Promise<void> {
+  const log = (msg: string) => console.log("[HumanSim] " + msg);
+
+  try {
+    log("Starting human-like interaction sequence...");
+
+    await page.waitForTimeout(1500 + Math.random() * 1500);
+
+    for (let i = 0; i < 5 + Math.floor(Math.random() * 5); i++) {
+      const x = 100 + Math.floor(Math.random() * 900);
+      const y = 100 + Math.floor(Math.random() * 500);
+      try { await page.mouse.move(x, y, { steps: 5 + Math.floor(Math.random() * 10) }); } catch {}
+      await page.waitForTimeout(100 + Math.random() * 300);
+    }
+
+    try {
+      await page.evaluate(() => window.scrollBy(0, 150 + Math.random() * 200));
+      await page.waitForTimeout(500 + Math.random() * 500);
+      await page.evaluate(() => window.scrollBy(0, -(100 + Math.random() * 150)));
+      await page.waitForTimeout(500 + Math.random() * 500);
+    } catch {}
+
+    const emailSelector = 'input[type="email"]:visible, input[name="loginID"]:visible, input[name="email"]:visible, input[data-gigya-name="loginID"]:visible';
+    const passSelector = 'input[type="password"]:visible, input[name="password"]:visible, input[data-gigya-name="password"]:visible';
+
+    try {
+      const emailField = await page.$(emailSelector);
+      if (emailField) {
+        log("Found visible email field, typing...");
+        try { await emailField.scrollIntoViewIfNeeded(); } catch {}
+        await page.waitForTimeout(300 + Math.random() * 400);
+
+        try {
+          const box = await emailField.boundingBox();
+          if (box) {
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+            await page.waitForTimeout(200 + Math.random() * 300);
+          }
+        } catch {}
+        try { await emailField.click(); } catch {}
+        await page.waitForTimeout(300 + Math.random() * 500);
+
+        for (const char of email) {
+          await page.keyboard.type(char, { delay: 0 });
+          await page.waitForTimeout(50 + Math.random() * 100);
+        }
+        log("Email typed");
+        await page.waitForTimeout(400 + Math.random() * 600);
+      } else {
+        log("No visible email field found, skipping");
+      }
+    } catch (e: any) {
+      log("Email field interaction failed (non-fatal): " + (e.message || '').substring(0, 60));
+    }
+
+    try {
+      const passField = await page.$(passSelector);
+      if (passField) {
+        log("Found visible password field, typing...");
+        try { await passField.scrollIntoViewIfNeeded(); } catch {}
+        await page.waitForTimeout(200 + Math.random() * 300);
+        try {
+          const box = await passField.boundingBox();
+          if (box) {
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
+            await page.waitForTimeout(200 + Math.random() * 200);
+          }
+        } catch {}
+        try { await passField.click(); } catch {}
+        await page.waitForTimeout(200 + Math.random() * 300);
+
+        for (const char of password) {
+          await page.keyboard.type(char, { delay: 0 });
+          await page.waitForTimeout(50 + Math.random() * 100);
+        }
+        log("Password typed");
+      } else {
+        log("No visible password field found, skipping");
+      }
+    } catch (e: any) {
+      log("Password field interaction failed (non-fatal): " + (e.message || '').substring(0, 60));
+    }
+
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
+      const x = 200 + Math.floor(Math.random() * 600);
+      const y = 200 + Math.floor(Math.random() * 300);
+      try { await page.mouse.move(x, y, { steps: 3 + Math.floor(Math.random() * 5) }); } catch {}
+      await page.waitForTimeout(100 + Math.random() * 200);
+    }
+
+    const waitTime = 2000 + Math.random() * 3000;
+    log("Pre-login pause: " + Math.round(waitTime) + "ms");
+    await page.waitForTimeout(waitTime);
+
+    log("Human simulation complete");
+  } catch (e: any) {
+    log("Simulation error (non-fatal, continuing to login): " + (e.message || '').substring(0, 80));
+  }
+}
+
+async function waitForRecaptchaEnterprise(page: Page, timeoutMs: number = 15000): Promise<boolean> {
+  const log = (msg: string) => console.log("[reCAPTCHA] " + msg);
+
+  try {
+    await page.waitForFunction(
+      () => {
+        const g = (window as any).grecaptcha;
+        return g && g.enterprise && typeof g.enterprise.execute === 'function';
+      },
+      { timeout: timeoutMs }
+    );
+    log("grecaptcha.enterprise.execute is available");
+    return true;
+  } catch {
+    log("grecaptcha.enterprise.execute NOT available after " + timeoutMs + "ms");
+    try {
+      const state = await page.evaluate(() => {
+        const g = (window as any).grecaptcha;
+        return { hasG: !!g, hasEnt: !!(g && g.enterprise), hasExec: !!(g && g.enterprise && typeof g.enterprise.execute === 'function') };
+      });
+      log("reCAPTCHA state: " + JSON.stringify(state));
+    } catch {}
+    return false;
+  }
+}
+
+function setupRecaptchaLogging(page: Page): void {
+  page.on('request', (request) => {
+    const url = request.url();
+    if (url.includes('recaptcha') || url.includes('grecaptcha')) {
+      const method = request.method();
+      const type = request.resourceType();
+      console.log("[reCAPTCHA-Net] " + method + " " + type + " " + url.substring(0, 200));
+    }
+  });
+
+  page.on('response', (response) => {
+    const url = response.url();
+    if (url.includes('recaptcha') || url.includes('grecaptcha')) {
+      console.log("[reCAPTCHA-Net] RESPONSE " + response.status() + " " + url.substring(0, 200));
+    }
+    if (url.includes('accounts.login')) {
+      console.log("[Gigya-Net] RESPONSE " + response.status() + " " + url.substring(0, 200));
+      response.text().then(body => {
+        try {
+          const parsed = JSON.parse(body);
+          console.log("[Gigya-Net] errorCode=" + (parsed.errorCode ?? 'N/A') + " statusCode=" + (parsed.statusCode ?? 'N/A'));
+        } catch {
+          console.log("[Gigya-Net] Response length: " + body.length);
+        }
+      }).catch(() => {});
+    }
+  });
+
+  page.on('requestfailed', (request) => {
+    const url = request.url();
+    if (url.includes('recaptcha') || url.includes('grecaptcha')) {
+      console.log("[reCAPTCHA-Net] FAILED " + url.substring(0, 200) + " reason=" + (request.failure()?.errorText || 'unknown'));
+    }
+  });
+}
+
 async function ensureCurlImpersonate(): Promise<boolean> {
   try {
     const curlBinaryPath = CURL_IMPERSONATE_PATH.replace("curl_chrome116", "curl-impersonate-chrome");
@@ -1057,17 +1219,19 @@ async function loginAndSubmitTicketRegistration(
         console.log("[Draw] On la28id.la28.org login page. Logging in via Gigya...");
         try {
           await ticketsPage.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 15000 });
+          await waitForRecaptchaEnterprise(ticketsPage, 8000);
+          await simulateHumanBehavior(ticketsPage, email, password);
           const loginResult = await ticketsPage.evaluate(`
             new Promise(function(resolve) {
               gigya.accounts.login({
                 loginID: "${safeEmail}",
                 password: "${safePass}",
-                callback: function(r) { resolve({ ok: r.errorCode === 0, uid: r.UID || null, err: r.errorMessage || '' }); }
+                callback: function(r) { resolve({ ok: r.errorCode === 0, uid: r.UID || null, err: r.errorMessage || '', code: r.errorCode }); }
               });
               setTimeout(function() { resolve({ ok: false, err: 'timeout' }); }, 30000);
             })
-          `) as { ok: boolean; uid: string | null; err: string };
-          console.log("[Draw] Gigya login: ok=" + loginResult.ok + " uid=" + (loginResult.uid || 'null') + " err=" + loginResult.err);
+          `) as { ok: boolean; uid: string | null; err: string; code: number };
+          console.log("[Draw] Gigya login: ok=" + loginResult.ok + " uid=" + (loginResult.uid || 'null') + " err=" + loginResult.err + " code=" + loginResult.code);
           if (!loginResult.ok) {
             try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
             return { submitted: false };
@@ -1917,16 +2081,11 @@ export async function completeDrawViaGigyaBrowser(
       page = await context.newPage();
       page.setDefaultTimeout(60000);
 
+      setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
         const url = request.url();
-        if (url.includes('gigya') || url.includes('recaptcha') || url.includes('accounts.login')) {
+        if (url.includes('gigya') || url.includes('accounts.login')) {
           console.log("[Draw] REQUEST FAILED: " + url.substring(0, 120) + " reason=" + (request.failure()?.errorText || 'unknown'));
-        }
-      });
-      page.on('response', (response) => {
-        const url = response.url();
-        if (url.includes('accounts.login') || url.includes('accounts.setAccountInfo')) {
-          console.log("[Draw] RESPONSE: " + response.status() + " " + url.substring(0, 120));
         }
       });
 
@@ -1973,9 +2132,60 @@ export async function completeDrawViaGigyaBrowser(
         log("Gigya SDK did not load. Retrying...");
         continue;
       }
+      console.log("[Draw] Gigya SDK loaded");
 
-      log("Step 3: Logging in via Gigya JS SDK...");
-      console.log("[Draw] Step 3: Gigya SDK loaded, logging in...");
+      const recaptchaReady = await waitForRecaptchaEnterprise(page, 10000);
+      console.log("[Draw] reCAPTCHA Enterprise ready: " + recaptchaReady);
+
+      const recaptchaState = await page.evaluate(() => {
+        const g = (window as any).grecaptcha;
+        return {
+          hasGrecaptcha: typeof g !== 'undefined',
+          hasEnterprise: typeof g !== 'undefined' && typeof g.enterprise !== 'undefined',
+          hasExecute: typeof g !== 'undefined' && typeof g.enterprise !== 'undefined' && typeof g.enterprise.execute === 'function',
+        };
+      });
+      console.log("[Draw] reCAPTCHA state: " + JSON.stringify(recaptchaState));
+
+      log("Step 3: Simulating human interaction before login...");
+      console.log("[Draw] Step 3: Human behavior simulation...");
+      await simulateHumanBehavior(page, email, password);
+
+      log("Step 4: Logging in via Gigya JS SDK...");
+      console.log("[Draw] Step 4: Gigya SDK loaded, logging in...");
+
+      const preLoginRecaptcha = await page.evaluate(() => {
+        const g = (window as any).grecaptcha;
+        if (!g || !g.enterprise || typeof g.enterprise.execute !== 'function') {
+          return { available: false, token: null };
+        }
+        return { available: true, token: null };
+      });
+      console.log("[Draw] Pre-login reCAPTCHA check: " + JSON.stringify(preLoginRecaptcha));
+
+      let manualToken: string | null = null;
+      if (preLoginRecaptcha.available) {
+        try {
+          manualToken = await page.evaluate(async () => {
+            const g = (window as any).grecaptcha;
+            const siteKeys = ['6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr', '6Lc8WkwhAAAAAPHXbaEde5PP3Skj9tCZn-A8U555'];
+            for (const key of siteKeys) {
+              try {
+                const token = await g.enterprise.execute(key, { action: 'login' });
+                if (token && token.length > 10) return token;
+              } catch (e) {}
+            }
+            return null;
+          });
+          if (manualToken) {
+            console.log("[Draw] Manual reCAPTCHA token generated (len=" + manualToken.length + ")");
+          } else {
+            console.log("[Draw] Manual reCAPTCHA token generation failed (will let Gigya handle it internally)");
+          }
+        } catch (e: any) {
+          console.log("[Draw] reCAPTCHA execute error: " + (e.message || '').substring(0, 100));
+        }
+      }
 
       const loginResult = await page.evaluate(`(function() {
         return new Promise(function(resolve) {
@@ -1984,26 +2194,30 @@ export async function completeDrawViaGigyaBrowser(
             return;
           }
           var resolved = false;
-          gigya.accounts.login({
+          var loginParams = {
             loginID: ${JSON.stringify(email)},
             password: ${JSON.stringify(password)},
             callback: function(resp) {
               if (resolved) return;
               resolved = true;
               var keys = [];
-              try { keys = Object.keys(resp).slice(0, 15); } catch(e) {}
+              try { keys = Object.keys(resp).slice(0, 20); } catch(e) {}
               resolve({
                 success: resp.errorCode === 0,
                 errorCode: resp.errorCode,
                 errorMessage: resp.errorMessage || resp.statusMessage || '',
+                errorDetails: resp.errorDetails || '',
                 uid: resp.UID || '',
                 statusCode: resp.statusCode,
                 statusReason: resp.statusReason || '',
                 keys: keys.join(','),
-                raw: JSON.stringify(resp).substring(0, 500)
+                raw: 'redacted'
               });
             }
-          });
+          };
+          ${manualToken ? `loginParams.captchaToken = ${JSON.stringify(manualToken)}; loginParams.captchaType = 'reCaptchaEnterpriseToken';` : ''}
+          console.log('[Gigya-Login] Params: loginID=' + loginParams.loginID + ' hasCaptchaToken=' + !!loginParams.captchaToken);
+          gigya.accounts.login(loginParams);
           setTimeout(function() {
             if (resolved) return;
             resolved = true;
@@ -2248,7 +2462,10 @@ export async function completeDrawViaGigyaBrowser(
           await page.waitForTimeout(3000 + Math.random() * 2000);
 
           await page.waitForFunction("typeof gigya !== 'undefined' && typeof gigya.accounts !== 'undefined'", { timeout: 30000 });
-          console.log("[Draw-OIDC] Browserless: Gigya SDK loaded, logging in...");
+          console.log("[Draw-OIDC] Browserless: Gigya SDK loaded");
+          await waitForRecaptchaEnterprise(page, 8000);
+          await simulateHumanBehavior(page, email, password);
+          console.log("[Draw-OIDC] Browserless: logging in...");
 
           const freshLogin = await page.evaluate(`(function(email, pwd) {
             return new Promise(function(resolve) {
@@ -2412,7 +2629,10 @@ export async function completeDrawViaGigyaBrowser(
           console.log("[Draw-OIDC] NSTBrowser page URL: " + nstPage.url());
 
           await nstPage.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 20000 });
-          console.log("[Draw-OIDC] NSTBrowser: Gigya SDK loaded, logging in...");
+          console.log("[Draw-OIDC] NSTBrowser: Gigya SDK loaded");
+          await waitForRecaptchaEnterprise(nstPage, 8000);
+          await simulateHumanBehavior(nstPage, email, password);
+          console.log("[Draw-OIDC] NSTBrowser: logging in...");
 
           const nstLoginResult = await nstPage.evaluate(({ e, p }: { e: string; p: string }) => {
             return new Promise<any>((resolve) => {
@@ -2489,12 +2709,14 @@ export async function completeDrawViaGigyaBrowser(
             await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 45000 });
             try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
             await page.waitForFunction(() => typeof (window as any).gigya !== 'undefined' && typeof (window as any).gigya.accounts !== 'undefined', { timeout: 20000 });
+            await waitForRecaptchaEnterprise(page, 8000);
+            await simulateHumanBehavior(page, email, password);
 
             const fallbackLogin = await page.evaluate(({ e, p }: { e: string; p: string }) => {
               return new Promise<any>((resolve) => {
                 (window as any).gigya.accounts.login({
                   loginID: e, password: p,
-                  callback: (resp: any) => resolve({ success: resp.errorCode === 0, uid: resp.UID || '' })
+                  callback: (resp: any) => resolve({ success: resp.errorCode === 0, errorCode: resp.errorCode, uid: resp.UID || '' })
                 });
               });
             }, { e: email, p: password });
@@ -2810,17 +3032,22 @@ export async function completeDrawViaGigyaBrowser(
                 continue;
               }
 
+              if (attempt === 1) {
+                await waitForRecaptchaEnterprise(bdPage, 8000);
+                await simulateHumanBehavior(bdPage, email, password);
+              }
+
               const result = await bdPage.evaluate(`
                 new Promise(function(resolve) {
                   var t = setTimeout(function() { resolve({ success: false, error: 'timeout' }); }, 30000);
                   try {
                     window.gigya.accounts.login({
                       loginID: '${safeEmail}', password: '${safePass}',
-                      callback: function(r) { clearTimeout(t); resolve({ success: r.errorCode === 0, error: r.errorMessage || ('Error ' + r.errorCode) }); }
+                      callback: function(r) { clearTimeout(t); resolve({ success: r.errorCode === 0, error: r.errorMessage || ('Error ' + r.errorCode), code: r.errorCode }); }
                     });
                   } catch(e) { clearTimeout(t); resolve({ success: false, error: e.message }); }
                 })
-              `) as { success: boolean; error?: string };
+              `) as { success: boolean; error?: string; code?: number };
               console.log("[ZenRows] Login attempt " + attempt + ": " + JSON.stringify(result));
               if (result.success) return true;
 
@@ -3233,6 +3460,15 @@ export async function completeDrawViaGigyaBrowser(
             lastZrError = '';
             console.log("[ZenRows-Full] Gigya login attempt " + (att + 1) + "/" + ZR_MAX_ATTEMPTS + "...");
             try {
+              if (att === 0) {
+                try {
+                  await bdPg2.waitForFunction("typeof window.gigya !== 'undefined' && typeof window.gigya.accounts !== 'undefined'", { timeout: 15000 });
+                  await waitForRecaptchaEnterprise(bdPg2, 8000);
+                  await simulateHumanBehavior(bdPg2, email, password);
+                } catch (simErr: any) {
+                  console.log("[ZenRows-Full] Pre-login simulation error: " + (simErr.message || '').substring(0, 80));
+                }
+              }
               const loginRes2 = await bdPg2.evaluate(`
                 new Promise(function(resolve) {
                   try {
