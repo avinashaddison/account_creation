@@ -362,7 +362,6 @@ async function curlImpersonate(
   return { statusCode, body, headers, finalUrl };
 }
 
-const ZENROWS_DEFAULT_API_KEY = "2f7def46c284b44ea590b7658faf856467dc7e02";
 const ZENROWS_API_BASE = "https://api.zenrows.com/v1/";
 let zenrowsRestApiKeyCache: string | null = null;
 
@@ -386,8 +385,7 @@ async function getZenRowsApiKey(): Promise<string> {
     }
   } catch {}
 
-  zenrowsRestApiKeyCache = ZENROWS_DEFAULT_API_KEY;
-  return zenrowsRestApiKeyCache;
+  return "";
 }
 
 async function zenRowsRequest(
@@ -3455,7 +3453,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           } catch {}
           if (!zenrowsUrl) {
-            zenrowsUrl = "wss://browser.zenrows.com?apikey=2f7def46c284b44ea590b7658faf856467dc7e02";
+            throw new Error("ZenRows Browser URL not configured. Set it in Settings.");
           }
           if (!zenrowsUrl.includes('proxy_country=')) {
             zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
@@ -4021,7 +4019,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           } catch {}
           if (!zenrowsUrl2) {
-            zenrowsUrl2 = "wss://browser.zenrows.com?apikey=4c48722d34d24e0d23f1e73e6f5e3ca082663655";
+            throw new Error("ZenRows Browser URL not configured. Set it in Settings.");
           }
           if (!zenrowsUrl2.includes('proxy_country=')) {
             zenrowsUrl2 += (zenrowsUrl2.includes('?') ? '&' : '?') + 'proxy_country=us';
