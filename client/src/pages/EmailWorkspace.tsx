@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, Copy, Trash2, Mail, Inbox, Loader2, CheckCircle2, RefreshCw, Sparkles, Clock, Search, Eye } from "lucide-react";
+import { Plus, Copy, Trash2, Mail, Inbox, Loader2, CheckCircle2, RefreshCw, Sparkles, Clock, Search, Eye, Users } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { subscribe } from "@/lib/ws";
 import { sounds } from "@/lib/sounds";
 
 type TempEmailItem = {
@@ -12,7 +13,20 @@ type TempEmailItem = {
   address: string;
   label: string | null;
   createdAt: string;
+  source: "temp";
 };
+
+type AccountEmailItem = {
+  id: string;
+  address: string;
+  firstName: string;
+  lastName: string;
+  status: string;
+  createdAt: string;
+  source: "account";
+};
+
+type EmailItem = TempEmailItem | AccountEmailItem;
 
 type InboxMessage = {
   id: string;
@@ -22,41 +36,80 @@ type InboxMessage = {
   createdAt: string;
 };
 
+type TabType = "all" | "temp" | "account";
+
 export default function EmailWorkspace() {
-  const [emails, setEmails] = useState<TempEmailItem[]>([]);
+  const [tempEmails, setTempEmails] = useState<TempEmailItem[]>([]);
+  const [accountEmails, setAccountEmails] = useState<AccountEmailItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [selectedEmail, setSelectedEmail] = useState<TempEmailItem | null>(null);
+  const [selectedEmail, setSelectedEmail] = useState<EmailItem | null>(null);
   const [inbox, setInbox] = useState<InboxMessage[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [expandedMsg, setExpandedMsg] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState<TabType>("all");
   const { toast } = useToast();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const scanIndicatorRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [scanning, setScanning] = useState(false);
 
-  const fetchEmails = useCallback(() => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
-    fetch("/api/temp-emails", { credentials: "include" })
-      .then((r) => {
-        if (r.status === 401) { handleUnauthorized(); return []; }
-        return r.json();
-      })
-      .then(setEmails)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    try {
+      const [tempRes, accRes] = await Promise.all([
+        fetch("/api/temp-emails", { credentials: "include" }),
+        fetch("/api/emails", { credentials: "include" }),
+      ]);
+      if (tempRes.status === 401 || accRes.status === 401) { handleUnauthorized(); return; }
+      const tempData = await tempRes.json();
+      const accData = await accRes.json();
+      setTempEmails(tempData.map((e: any) => ({ ...e, address: e.address, source: "temp" as const })));
+      setAccountEmails(accData.map((e: any) => ({
+        id: e.id,
+        address: e.email,
+        firstName: e.firstName,
+        lastName: e.lastName,
+        status: e.status,
+        createdAt: e.createdAt,
+        source: "account" as const,
+      })));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    fetchEmails();
+    fetchAll();
+    const unsub = subscribe((msg: any) => {
+      if (msg.type === "account_update") {
+        setAccountEmails((prev) => {
+          const idx = prev.findIndex((e) => e.id === msg.account.id);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], status: msg.account.status };
+            return updated;
+          }
+          return prev;
+        });
+      }
+    });
     return () => {
+      unsub();
       if (pollRef.current) clearInterval(pollRef.current);
-      if (scanIndicatorRef.current) clearInterval(scanIndicatorRef.current);
     };
-  }, [fetchEmails]);
+  }, [fetchAll]);
+
+  const allEmails: EmailItem[] = (() => {
+    const t: EmailItem[] = activeTab === "account" ? [] : tempEmails;
+    const a: EmailItem[] = activeTab === "temp" ? [] : accountEmails;
+    const combined = [...t, ...a];
+    if (!searchTerm) return combined;
+    return combined.filter((e) => e.address.toLowerCase().includes(searchTerm.toLowerCase()));
+  })();
 
   async function generateNewMail() {
     setGenerating(true);
@@ -74,9 +127,10 @@ export default function EmailWorkspace() {
         throw new Error(err.error || "Failed to generate");
       }
       const newEmail = await res.json();
-      setEmails((prev) => [newEmail, ...prev]);
-      setSelectedEmail(newEmail);
-      fetchInbox(newEmail);
+      const item: TempEmailItem = { ...newEmail, source: "temp" };
+      setTempEmails((prev) => [item, ...prev]);
+      setSelectedEmail(item);
+      fetchInbox(item);
       toast({ title: "Email Generated", description: newEmail.address });
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -91,7 +145,7 @@ export default function EmailWorkspace() {
     try {
       const res = await fetch(`/api/temp-emails/${id}`, { method: "DELETE", credentials: "include" });
       if (res.ok) {
-        setEmails((prev) => prev.filter((e) => e.id !== id));
+        setTempEmails((prev) => prev.filter((e) => e.id !== id));
         if (selectedEmail?.id === id) {
           setSelectedEmail(null);
           setInbox([]);
@@ -104,7 +158,7 @@ export default function EmailWorkspace() {
     }
   }
 
-  async function fetchInbox(email: TempEmailItem) {
+  async function fetchInbox(email: EmailItem) {
     setSelectedEmail(email);
     setInboxLoading(true);
     setInbox([]);
@@ -112,8 +166,12 @@ export default function EmailWorkspace() {
 
     if (pollRef.current) clearInterval(pollRef.current);
 
+    const inboxUrl = email.source === "temp"
+      ? `/api/temp-emails/${email.id}/inbox`
+      : `/api/emails/${email.id}/inbox`;
+
     try {
-      const res = await fetch(`/api/temp-emails/${email.id}/inbox`, { credentials: "include" });
+      const res = await fetch(inboxUrl, { credentials: "include" });
       if (res.status === 401) { handleUnauthorized(); return; }
       const messages = await res.json();
       setInbox(messages);
@@ -126,7 +184,7 @@ export default function EmailWorkspace() {
     pollRef.current = setInterval(async () => {
       setScanning(true);
       try {
-        const res = await fetch(`/api/temp-emails/${email.id}/inbox`, { credentials: "include" });
+        const res = await fetch(inboxUrl, { credentials: "include" });
         if (res.ok) {
           const messages = await res.json();
           setInbox((prev) => {
@@ -151,9 +209,11 @@ export default function EmailWorkspace() {
     toast({ title: "Copied", description: "Copied to clipboard" });
   }
 
-  const filteredEmails = emails.filter((e) =>
-    !searchTerm || e.address.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const tabs: { key: TabType; label: string; count: number }[] = [
+    { key: "all", label: "All", count: tempEmails.length + accountEmails.length },
+    { key: "temp", label: "Generated", count: tempEmails.length },
+    { key: "account", label: "Accounts", count: accountEmails.length },
+  ];
 
   return (
     <div className="animate-float-up space-y-5">
@@ -165,13 +225,13 @@ export default function EmailWorkspace() {
             </div>
             Email Workspace
           </h1>
-          <p className="text-xs text-zinc-500 mt-1 font-mono">Generate disposable emails with real-time inbox scanning</p>
+          <p className="text-xs text-zinc-500 mt-1 font-mono">All mailboxes in one place with real-time inbox scanning</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
-            onClick={fetchEmails}
+            onClick={fetchAll}
             className="h-8 px-3 text-zinc-400 hover:text-cyan-300 hover:bg-cyan-500/10 font-mono text-xs"
             data-testid="button-refresh-workspace"
           >
@@ -203,8 +263,25 @@ export default function EmailWorkspace() {
               <span className="text-xs font-mono text-zinc-400">Mailboxes</span>
             </div>
             <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-mono bg-purple-500/10 text-purple-300 border-purple-500/20">
-              {emails.length}
+              {tempEmails.length + accountEmails.length}
             </Badge>
+          </div>
+
+          <div className="flex px-3 pt-2 gap-1" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-2.5 py-1.5 text-[10px] font-mono rounded-t-md transition-all ${
+                  activeTab === tab.key
+                    ? "text-cyan-300 bg-cyan-500/10 border-b-2 border-cyan-400"
+                    : "text-zinc-600 hover:text-zinc-400"
+                }`}
+                data-testid={`tab-${tab.key}`}
+              >
+                {tab.label} ({tab.count})
+              </button>
+            ))}
           </div>
 
           <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
@@ -221,76 +298,116 @@ export default function EmailWorkspace() {
             </div>
           </div>
 
-          <ScrollArea className="h-[calc(100vh-280px)]">
+          <ScrollArea className="h-[calc(100vh-320px)]">
             <div className="p-2 space-y-1">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-5 h-5 animate-spin text-purple-400/40" />
                 </div>
-              ) : filteredEmails.length === 0 ? (
+              ) : allEmails.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-zinc-600">
                   <Mail className="w-8 h-8 mb-2 opacity-30" />
-                  <p className="text-xs font-mono">{emails.length === 0 ? "No mailboxes yet" : "No matches"}</p>
-                  {emails.length === 0 && (
+                  <p className="text-xs font-mono">
+                    {tempEmails.length + accountEmails.length === 0 ? "No mailboxes yet" : "No matches"}
+                  </p>
+                  {tempEmails.length + accountEmails.length === 0 && (
                     <p className="text-[10px] font-mono mt-1 text-zinc-700">Click "Generate New Mail" to start</p>
                   )}
                 </div>
               ) : (
-                filteredEmails.map((em) => (
-                  <div
-                    key={em.id}
-                    className={`group p-2.5 rounded-lg cursor-pointer transition-all duration-150 ${
-                      selectedEmail?.id === em.id
-                        ? "text-white"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                    style={
-                      selectedEmail?.id === em.id
-                        ? { background: 'linear-gradient(135deg, rgba(168,85,247,0.1) 0%, rgba(0,240,255,0.05) 100%)', border: '1px solid rgba(168,85,247,0.2)' }
-                        : { border: '1px solid transparent' }
-                    }
-                    onClick={() => fetchInbox(em)}
-                    data-testid={`temp-email-${em.id}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: selectedEmail?.id === em.id ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${selectedEmail?.id === em.id ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.05)'}` }}>
-                        <Mail className={`w-3 h-3 ${selectedEmail?.id === em.id ? 'text-purple-400' : 'text-zinc-600'}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-mono truncate">{em.address}</p>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <Clock className="w-2.5 h-2.5 text-zinc-600" />
-                          <p className="text-[9px] text-zinc-600 font-mono">{new Date(em.createdAt).toLocaleString()}</p>
+                allEmails.map((em) => {
+                  const isAccount = em.source === "account";
+                  const accEmail = isAccount ? (em as AccountEmailItem) : null;
+                  return (
+                    <div
+                      key={`${em.source}-${em.id}`}
+                      className={`group p-2.5 rounded-lg cursor-pointer transition-all duration-150 ${
+                        selectedEmail?.id === em.id && selectedEmail?.source === em.source
+                          ? "text-white"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                      style={
+                        selectedEmail?.id === em.id && selectedEmail?.source === em.source
+                          ? { background: 'linear-gradient(135deg, rgba(168,85,247,0.1) 0%, rgba(0,240,255,0.05) 100%)', border: '1px solid rgba(168,85,247,0.2)' }
+                          : { border: '1px solid transparent' }
+                      }
+                      onClick={() => fetchInbox(em)}
+                      data-testid={`email-item-${em.source}-${em.id}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{
+                          background: selectedEmail?.id === em.id && selectedEmail?.source === em.source
+                            ? (isAccount ? 'rgba(0,240,255,0.15)' : 'rgba(168,85,247,0.15)')
+                            : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${selectedEmail?.id === em.id && selectedEmail?.source === em.source
+                            ? (isAccount ? 'rgba(0,240,255,0.3)' : 'rgba(168,85,247,0.3)')
+                            : 'rgba(255,255,255,0.05)'}`
+                        }}>
+                          {isAccount ? (
+                            <Users className={`w-3 h-3 ${selectedEmail?.id === em.id && selectedEmail?.source === em.source ? 'text-cyan-400' : 'text-zinc-600'}`} />
+                          ) : (
+                            <Mail className={`w-3 h-3 ${selectedEmail?.id === em.id && selectedEmail?.source === em.source ? 'text-purple-400' : 'text-zinc-600'}`} />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[11px] font-mono truncate">{em.address}</p>
+                            {isAccount && accEmail && (
+                              <Badge
+                                variant={accEmail.status === "completed" ? "default" : accEmail.status === "failed" ? "destructive" : "secondary"}
+                                className="text-[8px] px-1 py-0 font-mono shrink-0"
+                              >
+                                {accEmail.status}
+                              </Badge>
+                            )}
+                            {!isAccount && (
+                              <Badge className="text-[8px] px-1 py-0 font-mono shrink-0 bg-purple-500/15 text-purple-300 border-purple-500/20">
+                                temp
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {isAccount && accEmail ? (
+                              <p className="text-[9px] text-zinc-600 font-mono">{accEmail.firstName} {accEmail.lastName}</p>
+                            ) : (
+                              <>
+                                <Clock className="w-2.5 h-2.5 text-zinc-600" />
+                                <p className="text-[9px] text-zinc-600 font-mono">{new Date(em.createdAt).toLocaleString()}</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyText(em.address, `${em.source}-${em.id}`); }}
+                            className="p-1 rounded hover:bg-cyan-500/10"
+                            data-testid={`button-copy-${em.source}-${em.id}`}
+                          >
+                            {copiedId === `${em.source}-${em.id}` ? (
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3 text-zinc-500" />
+                            )}
+                          </button>
+                          {!isAccount && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteEmail(em.id); }}
+                              className="p-1 rounded hover:bg-red-500/10"
+                              disabled={deletingId === em.id}
+                              data-testid={`button-delete-${em.id}`}
+                            >
+                              {deletingId === em.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />
+                              ) : (
+                                <Trash2 className="w-3 h-3 text-zinc-600 hover:text-red-400" />
+                              )}
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); copyText(em.address, em.id); }}
-                          className="p-1 rounded hover:bg-cyan-500/10"
-                          data-testid={`button-copy-temp-${em.id}`}
-                        >
-                          {copiedId === em.id ? (
-                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3 h-3 text-zinc-500" />
-                          )}
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteEmail(em.id); }}
-                          className="p-1 rounded hover:bg-red-500/10"
-                          disabled={deletingId === em.id}
-                          data-testid={`button-delete-temp-${em.id}`}
-                        >
-                          {deletingId === em.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />
-                          ) : (
-                            <Trash2 className="w-3 h-3 text-zinc-600 hover:text-red-400" />
-                          )}
-                        </button>
-                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </ScrollArea>
@@ -334,7 +451,13 @@ export default function EmailWorkspace() {
 
           {selectedEmail && (
             <div className="px-4 py-2 flex items-center gap-3 text-[10px] font-mono" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)', background: 'rgba(0,0,0,0.2)' }}>
-              <span className="text-zinc-500">Created: {new Date(selectedEmail.createdAt).toLocaleString()}</span>
+              <Badge className={`text-[8px] px-1.5 py-0 font-mono ${selectedEmail.source === "temp" ? "bg-purple-500/15 text-purple-300 border-purple-500/20" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/20"}`}>
+                {selectedEmail.source === "temp" ? "Generated" : "Account"}
+              </Badge>
+              {selectedEmail.source === "account" && (
+                <span className="text-zinc-500">{(selectedEmail as AccountEmailItem).firstName} {(selectedEmail as AccountEmailItem).lastName}</span>
+              )}
+              <span className="text-zinc-600">{new Date(selectedEmail.createdAt).toLocaleString()}</span>
               <div className="flex-1" />
               <div className="flex items-center gap-1">
                 <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
