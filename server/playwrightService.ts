@@ -14,6 +14,13 @@ const DECODO_HOST = process.env.DECODO_PROXY_HOST || "us.decodo.com";
 const DECODO_USER = process.env.DECODO_PROXY_USERNAME || "";
 const DECODO_PASS = process.env.DECODO_PROXY_PASSWORD || "";
 
+const IPROYAL_UNBLOCKER_HOST = "unblocker.iproyal.com";
+const IPROYAL_UNBLOCKER_PORT = 12323;
+const IPROYAL_UNBLOCKER_USER = "Gy1cwo1086864";
+const IPROYAL_UNBLOCKER_PASS = "KklSwl63u3TgeL8F";
+
+let activeProxyProvider: "iproyal" | "decodo" = "iproyal";
+
 function getDecodoProxyUrl(port: number = 10001): string {
   if (DECODO_USER && DECODO_PASS) {
     return `http://${DECODO_USER}:${DECODO_PASS}@${DECODO_HOST}:${port}`;
@@ -28,6 +35,43 @@ function getDecodoProxyConfig(port: number = 10001): { server: string; username?
     config.password = DECODO_PASS;
   }
   return config;
+}
+
+function getIPRoyalProxyUrl(): string {
+  return `http://${IPROYAL_UNBLOCKER_USER}:${IPROYAL_UNBLOCKER_PASS}@${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`;
+}
+
+function getIPRoyalProxyConfig(): { server: string; username: string; password: string } {
+  return {
+    server: `http://${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`,
+    username: IPROYAL_UNBLOCKER_USER,
+    password: IPROYAL_UNBLOCKER_PASS,
+  };
+}
+
+function getIPRoyalBrowserlessLaunchProxy(): string {
+  return `--proxy-server=http://${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`;
+}
+
+function getActiveProxyConfig(port: number = 10001): { server: string; username?: string; password?: string } {
+  if (activeProxyProvider === "iproyal") {
+    return getIPRoyalProxyConfig();
+  }
+  return getDecodoProxyConfig(port);
+}
+
+function getActiveProxyUrl(port: number = 10001): string {
+  if (activeProxyProvider === "iproyal") {
+    return getIPRoyalProxyUrl();
+  }
+  return getDecodoProxyUrl(port);
+}
+
+function getActiveProxyLabel(port: number = 10001): string {
+  if (activeProxyProvider === "iproyal") {
+    return `IPRoyal unblocker (${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT})`;
+  }
+  return `Decodo residential (${DECODO_HOST}:${port})`;
 }
 
 async function simulateHumanBehavior(page: Page, email: string, password: string): Promise<void> {
@@ -420,7 +464,7 @@ export async function ticketsFormFillWithCookies(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = getDecodoProxyUrl();
+  const proxyUrl = getActiveProxyUrl();
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -560,7 +604,7 @@ export async function ticketsFormFillViaCurl(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = getDecodoProxyUrl();
+  const proxyUrl = getActiveProxyUrl();
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -1079,10 +1123,10 @@ async function loginAndSubmitTicketRegistration(
 
   try {
     {
-      console.log("[Draw] Launching Chromium with Decodo residential proxy...");
+      console.log("[Draw] Launching Chromium with " + getActiveProxyLabel() + "...");
       proxyBrowser = await chromium.launch({
         headless: true,
-        proxy: getDecodoProxyConfig(),
+        proxy: getActiveProxyConfig(),
         args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
       });
       proxyContext = await proxyBrowser.newContext({
@@ -2095,11 +2139,17 @@ export async function completeDrawViaGigyaBrowser(
 
     try {
       const proxyPort = 10001 + (attempt % 10);
-      const proxyServer = DECODO_HOST + ":" + proxyPort;
-      console.log("[Draw] Using Decodo residential proxy: " + proxyServer + " (port " + proxyPort + ", sticky session)");
+      const proxyConfig = getActiveProxyConfig(proxyPort);
+      console.log("[Draw] Using proxy: " + getActiveProxyLabel(proxyPort));
 
-      const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"] }));
-      const browserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken + "&launch=" + browserlessLaunch + "&blockAds=false";
+      const launchArgs = ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"];
+      const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: launchArgs }));
+      let browserlessUrl = "wss://production-sfo.browserless.io/chromium/stealth?token=" + browserlessToken + "&launch=" + browserlessLaunch + "&blockAds=false";
+      if (activeProxyProvider === "iproyal") {
+        const proxyUrl = `http://${IPROYAL_UNBLOCKER_USER}:${encodeURIComponent(IPROYAL_UNBLOCKER_PASS)}@${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`;
+        browserlessUrl += "&proxy=" + encodeURIComponent(proxyUrl);
+        console.log("[Draw] Proxy via Browserless ?proxy= param (IPRoyal unblocker)");
+      }
       console.log("[Draw] Connecting to Browserless Stealth Chromium...");
 
       browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 60000 });
@@ -2117,9 +2167,9 @@ export async function completeDrawViaGigyaBrowser(
         colorScheme: 'light',
         hasTouch: false,
         javaScriptEnabled: true,
-        proxy: getDecodoProxyConfig(proxyPort),
+        ...(activeProxyProvider === "decodo" ? { proxy: proxyConfig } : {}),
       });
-      console.log("[Draw] Created Browserless context with Decodo residential proxy (port " + proxyPort + ")");
+      console.log("[Draw] Created Browserless context with " + getActiveProxyLabel(proxyPort));
 
       page = await context.newPage();
       page.setDefaultTimeout(60000);
@@ -2218,30 +2268,6 @@ export async function completeDrawViaGigyaBrowser(
       });
       console.log("[Draw] Pre-login reCAPTCHA check: " + JSON.stringify(preLoginRecaptcha));
 
-      let manualToken: string | null = null;
-      if (preLoginRecaptcha.available) {
-        try {
-          manualToken = await page.evaluate(async () => {
-            const g = (window as any).grecaptcha;
-            const siteKeys = ['6Lee9ZgmAAAAAJJimJxBo-AhvL-3HCtjZ0xvEMnr', '6Lc8WkwhAAAAAPHXbaEde5PP3Skj9tCZn-A8U555'];
-            for (const key of siteKeys) {
-              try {
-                const token = await g.enterprise.execute(key, { action: 'login' });
-                if (token && token.length > 10) return token;
-              } catch (e) {}
-            }
-            return null;
-          });
-          if (manualToken) {
-            console.log("[Draw] Manual reCAPTCHA token generated (len=" + manualToken.length + ")");
-          } else {
-            console.log("[Draw] Manual reCAPTCHA token generation failed (will let Gigya handle it internally)");
-          }
-        } catch (e: any) {
-          console.log("[Draw] reCAPTCHA execute error: " + (e.message || '').substring(0, 100));
-        }
-      }
-
       let loginResult = await page.evaluate(`(function() {
         return new Promise(function(resolve) {
           if (typeof gigya === 'undefined' || !gigya.accounts) {
@@ -2270,8 +2296,7 @@ export async function completeDrawViaGigyaBrowser(
               });
             }
           };
-          ${manualToken ? `loginParams.captchaToken = ${JSON.stringify(manualToken)}; loginParams.captchaType = 'reCaptchaEnterpriseToken';` : ''}
-          console.log('[Gigya-Login] Params: loginID=' + loginParams.loginID + ' hasCaptchaToken=' + !!loginParams.captchaToken);
+          console.log('[Gigya-Login] Params: loginID=' + loginParams.loginID + ' (no manual captchaToken - letting Gigya SDK handle reCAPTCHA internally)');
           gigya.accounts.login(loginParams);
           setTimeout(function() {
             if (resolved) return;
@@ -2300,7 +2325,7 @@ export async function completeDrawViaGigyaBrowser(
             const localProxyPort = 10001 + ((attempt + 5) % 10);
             const localBrowser = await chromium.launch({
               headless: true,
-              proxy: getDecodoProxyConfig(localProxyPort),
+              proxy: getActiveProxyConfig(localProxyPort),
               args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-setuid-sandbox'],
             });
             const localCtx = await localBrowser.newContext({
@@ -2574,7 +2599,7 @@ export async function completeDrawViaGigyaBrowser(
             permissions: ['geolocation'],
             colorScheme: 'light',
             hasTouch: false,
-            proxy: getDecodoProxyConfig(),
+            proxy: getActiveProxyConfig(),
           });
 
           page = await freshCtx.newPage();
@@ -2715,8 +2740,8 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          nstConfig.proxy = getDecodoProxyUrl();
-          console.log("[Draw-OIDC] NSTBrowser with Decodo proxy");
+          nstConfig.proxy = getActiveProxyUrl();
+          console.log("[Draw-OIDC] NSTBrowser with " + getActiveProxyLabel());
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
 
@@ -2824,7 +2849,7 @@ export async function completeDrawViaGigyaBrowser(
               permissions: ['geolocation'],
               colorScheme: 'light',
               hasTouch: false,
-              proxy: getDecodoProxyConfig(),
+              proxy: getActiveProxyConfig(),
             });
             await ctx.addInitScript(`
               Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
