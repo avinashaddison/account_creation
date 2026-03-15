@@ -2128,7 +2128,7 @@ export async function completeDrawViaGigyaBrowser(
   let profileSet = false;
   let dataSet = false;
 
-  const MAX_LOGIN_RETRIES = 3;
+  const MAX_LOGIN_RETRIES = 1;
 
   for (let attempt = 0; attempt < MAX_LOGIN_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -2142,32 +2142,20 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=90`;
-      console.log("[Draw] Using Browserless built-in residential proxy (US)");
-      console.log("[Draw] Connecting to Browserless Playwright endpoint...");
+      const browserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+      console.log("[Draw] Using Browserless STEALTH endpoint with residential proxy (US)");
+      console.log("[Draw] Connecting to Browserless Stealth CDP endpoint...");
 
-      browser = await chromium.connect(browserlessUrl, { timeout: 60000 });
-      console.log("[Draw] Browserless connected!");
+      browser = await chromium.connectOverCDP(browserlessUrl, { timeout: 60000 });
+      console.log("[Draw] Browserless Stealth connected via CDP!");
 
-      const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        viewport: { width: 1366, height: 768 },
-        screen: { width: 1366, height: 768 },
-        locale: 'en-US',
-        timezoneId: 'America/New_York',
-        ignoreHTTPSErrors: true,
-        geolocation: { latitude: 40.7128, longitude: -74.0060 },
-        permissions: ['geolocation'],
-        colorScheme: 'light',
-        hasTouch: false,
-        javaScriptEnabled: true,
-      });
-      console.log("[Draw] Created Browserless context with residential proxy (US)");
+      const contexts = browser.contexts();
+      let context = contexts.length > 0 ? contexts[0] : await browser.newContext();
 
-      console.log("[Draw] Stealth plugin applied via playwright-extra");
-
-      page = await context.newPage();
+      const pages = context.pages();
+      page = pages.length > 0 ? pages[0] : await context.newPage();
       page.setDefaultTimeout(60000);
+      console.log("[Draw] Using Browserless Stealth context (CDP mode)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -2578,25 +2566,16 @@ export async function completeDrawViaGigyaBrowser(
         console.log("[Draw-OIDC] Page closed, reconnecting Browserless for " + email);
 
         try {
-          const freshBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=90`;
-          console.log("[Draw-OIDC] Connecting to Browserless Playwright with residential proxy for OIDC...");
-          const freshBrowser = await chromium.connect(freshBrowserlessUrl, { timeout: 60000 });
+          const freshBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+          console.log("[Draw-OIDC] Connecting to Browserless Stealth CDP with residential proxy for OIDC...");
+          const freshBrowser = await chromium.connectOverCDP(freshBrowserlessUrl, { timeout: 60000 });
           browser = freshBrowser;
-          console.log("[Draw-OIDC] Browserless connected for OIDC!");
+          console.log("[Draw-OIDC] Browserless Stealth connected for OIDC!");
 
-          const freshCtx = await freshBrowser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            viewport: { width: 1366, height: 768 },
-            screen: { width: 1366, height: 768 },
-            locale: 'en-US',
-            timezoneId: 'America/New_York',
-            geolocation: { latitude: 40.7128, longitude: -74.0060 },
-            permissions: ['geolocation'],
-            colorScheme: 'light',
-            hasTouch: false,
-          });
-
-          page = await freshCtx.newPage();
+          const freshContexts = freshBrowser.contexts();
+          const freshCtx = freshContexts.length > 0 ? freshContexts[0] : await freshBrowser.newContext();
+          const freshPages = freshCtx.pages();
+          page = freshPages.length > 0 ? freshPages[0] : await freshCtx.newPage();
           page.setDefaultTimeout(60000);
 
           console.log("[Draw-OIDC] Browserless: warming up on www.la28.org...");
@@ -2830,28 +2809,13 @@ export async function completeDrawViaGigyaBrowser(
           nstPage = null;
 
           if (!browser || !page || page.isClosed()) {
-            console.log("[Draw-OIDC] Browser unavailable, reconnecting Browserless for OIDC fallback...");
-            const fallbackBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/playwright?token=${browserlessToken}&proxy=residential&proxyCountry=us&timeout=90`;
-            browser = await chromium.connect(fallbackBrowserlessUrl, { timeout: 60000 });
-            const ctx = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-              viewport: { width: 1366, height: 768 },
-              screen: { width: 1366, height: 768 },
-              locale: 'en-US',
-              timezoneId: 'America/New_York',
-              geolocation: { latitude: 40.7128, longitude: -74.0060 },
-              permissions: ['geolocation'],
-              colorScheme: 'light',
-              hasTouch: false,
-            });
-            await ctx.addInitScript(`
-              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-              Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-              Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-              Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-            `);
-            page = await ctx.newPage();
+            console.log("[Draw-OIDC] Browser unavailable, reconnecting Browserless Stealth for OIDC fallback...");
+            const fallbackBrowserlessUrl = `wss://production-sfo.browserless.io/chrome/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=us`;
+            browser = await chromium.connectOverCDP(fallbackBrowserlessUrl, { timeout: 60000 });
+            const fbContexts = browser.contexts();
+            const ctx = fbContexts.length > 0 ? fbContexts[0] : await browser.newContext();
+            const fbPages = ctx.pages();
+            page = fbPages.length > 0 ? fbPages[0] : await ctx.newPage();
             page.setDefaultTimeout(60000);
 
             console.log("[Draw-OIDC] Fallback: logging into Gigya in new local browser...");
