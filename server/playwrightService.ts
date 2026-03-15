@@ -10,6 +10,26 @@ const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
 const CURL_COOKIE_DIR = "/tmp/la28_curl_sessions";
 
+const DECODO_HOST = process.env.DECODO_PROXY_HOST || "us.decodo.com";
+const DECODO_USER = process.env.DECODO_PROXY_USERNAME || "";
+const DECODO_PASS = process.env.DECODO_PROXY_PASSWORD || "";
+
+function getDecodoProxyUrl(port: number = 10001): string {
+  if (DECODO_USER && DECODO_PASS) {
+    return `http://${DECODO_USER}:${DECODO_PASS}@${DECODO_HOST}:${port}`;
+  }
+  return `http://${DECODO_HOST}:${port}`;
+}
+
+function getDecodoProxyConfig(port: number = 10001): { server: string; username?: string; password?: string } {
+  const config: any = { server: `http://${DECODO_HOST}:${port}` };
+  if (DECODO_USER && DECODO_PASS) {
+    config.username = DECODO_USER;
+    config.password = DECODO_PASS;
+  }
+  return config;
+}
+
 async function ensureCurlImpersonate(): Promise<boolean> {
   try {
     const curlBinaryPath = CURL_IMPERSONATE_PATH.replace("curl_chrome116", "curl-impersonate-chrome");
@@ -195,7 +215,7 @@ export async function ticketsFormFillWithCookies(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf=t@us.decodo.com:10001";
+  const proxyUrl = getDecodoProxyUrl();
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -335,7 +355,7 @@ export async function ticketsFormFillViaCurl(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = "http://spzg7axtkh:ua62voA3DQqvi9Zf=t@us.decodo.com:10001";
+  const proxyUrl = getDecodoProxyUrl();
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -857,7 +877,7 @@ async function loginAndSubmitTicketRegistration(
       console.log("[Draw] Launching Chromium with Decodo residential proxy...");
       proxyBrowser = await chromium.launch({
         headless: true,
-        proxy: { server: 'http://us.decodo.com:10001', username: 'spzg7axtkh', password: 'ua62voA3DQqvi9Zf=t' },
+        proxy: getDecodoProxyConfig(),
         args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
       });
       proxyContext = await proxyBrowser.newContext({
@@ -1868,9 +1888,7 @@ export async function completeDrawViaGigyaBrowser(
 
     try {
       const proxyPort = 10001 + (attempt % 10);
-      const proxyServer = "us.decodo.com:" + proxyPort;
-      const proxyUsername = "spzg7axtkh";
-      const proxyPassword = "ua62voA3DQqvi9Zf=t";
+      const proxyServer = DECODO_HOST + ":" + proxyPort;
       console.log("[Draw] Using Decodo residential proxy: " + proxyServer + " (port " + proxyPort + ", sticky session)");
 
       const browserlessLaunch = encodeURIComponent(JSON.stringify({ args: ["--ignore-certificate-errors", "--window-size=1366,768", "--lang=en-US"] }));
@@ -1892,11 +1910,7 @@ export async function completeDrawViaGigyaBrowser(
         colorScheme: 'light',
         hasTouch: false,
         javaScriptEnabled: true,
-        proxy: {
-          server: 'http://' + proxyServer,
-          username: proxyUsername,
-          password: proxyPassword,
-        },
+        proxy: getDecodoProxyConfig(proxyPort),
       });
       console.log("[Draw] Created Browserless context with Decodo residential proxy (port " + proxyPort + ")");
 
@@ -2215,11 +2229,7 @@ export async function completeDrawViaGigyaBrowser(
             permissions: ['geolocation'],
             colorScheme: 'light',
             hasTouch: false,
-            proxy: {
-              server: 'http://us.decodo.com:10001',
-              username: 'spzg7axtkh',
-              password: 'ua62voA3DQqvi9Zf=t',
-            },
+            proxy: getDecodoProxyConfig(),
           });
 
           page = await freshCtx.newPage();
@@ -2357,7 +2367,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          nstConfig.proxy = "http://spzg7axtkh:ua62voA3DQqvi9Zf=t@us.decodo.com:10001";
+          nstConfig.proxy = getDecodoProxyUrl();
           console.log("[Draw-OIDC] NSTBrowser with Decodo proxy");
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
@@ -2463,11 +2473,7 @@ export async function completeDrawViaGigyaBrowser(
               permissions: ['geolocation'],
               colorScheme: 'light',
               hasTouch: false,
-              proxy: {
-                server: 'http://us.decodo.com:10001',
-                username: 'spzg7axtkh',
-                password: 'ua62voA3DQqvi9Zf=t',
-              },
+              proxy: getDecodoProxyConfig(),
             });
             await ctx.addInitScript(`
               Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
