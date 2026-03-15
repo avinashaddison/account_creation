@@ -31,7 +31,7 @@ const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 export default function AutoCreate() {
   const [count, setCount] = useState(1);
-  const [proxyList, setProxyList] = useState("");
+  const [proxyList] = useState("");
   const [country, setCountry] = useState("United States");
   const [language, setLanguage] = useState("English");
   const [isRunning, setIsRunning] = useState(false);
@@ -47,9 +47,6 @@ export default function AutoCreate() {
 
   useEffect(() => {
     fetch("/api/auth/me").then(r => r.json()).then(d => { if (d.role) setUserRole(d.role); }).catch(() => {});
-    fetch("/api/settings/browser-proxy", { credentials: "include" }).then(r => r.json()).then(d => {
-      if (d.url) setProxyList(d.url);
-    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -219,27 +216,6 @@ export default function AutoCreate() {
             </div>
 
             <div className="space-y-5">
-              {userRole === "superadmin" && (
-              <div className="space-y-2.5">
-                <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <Globe className="w-3 h-3" /> Residential Proxy List
-                </Label>
-                <textarea
-                  value={proxyList}
-                  onChange={(e) => setProxyList(e.target.value)}
-                  disabled={isRunning}
-                  placeholder={"wss://user:pass@brd.superproxy.io:9222\nor ip:port:user:pass (one per line)"}
-                  rows={4}
-                  className="w-full rounded-md text-sm bg-white/[0.02] border border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono px-3 py-2 resize-y"
-                  data-testid="input-la28-proxy"
-                />
-                <p className="text-[10px] text-zinc-600">
-                  Supports Browser API (wss://) or regular proxy. One per line.
-                  {proxyList.trim() ? ` (${proxyList.trim().split('\n').filter(l => l.trim()).length} proxies loaded)` : ''}
-                </p>
-              </div>
-              )}
-
               <div className="space-y-2.5">
                 <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Hash className="w-3 h-3" /> Number of Accounts
