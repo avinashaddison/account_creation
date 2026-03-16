@@ -6767,17 +6767,21 @@ export async function registerZenrowsAccount(
 
         const loginEmailInput = await page.$('input[type="email"], input[name="email"]');
         const loginPassInput = await page.$('input[type="password"]');
-        if (loginEmailInput && loginPassInput) {
+        if (loginEmailInput) {
           await loginEmailInput.fill(outlookEmail.toLowerCase());
           await page.waitForTimeout(500);
-          await loginPassInput.fill(zenrowsPassword);
-          await page.waitForTimeout(500);
-          const loginBtn = await page.$('button[type="submit"]:has-text("Log In"), button[type="submit"]:has-text("Sign In"), button[type="submit"]');
+          if (loginPassInput) {
+            await loginPassInput.fill(zenrowsPassword);
+            await page.waitForTimeout(500);
+          }
+          const loginBtn = await page.$('button[type="submit"]:has-text("Log In"), button[type="submit"]:has-text("Sign In"), button[type="submit"]:has-text("Send"), button[type="submit"]');
           if (loginBtn) {
             await loginBtn.click();
+            log("Clicked login/magic-link button");
             await page.waitForTimeout(5000 + Math.random() * 3000);
             const afterLoginUrl = page.url();
-            log("After ZenRows login attempt: " + afterLoginUrl.substring(0, 100));
+            const afterLoginBody = await page.textContent("body").catch(() => "");
+            log("After ZenRows login: URL=" + afterLoginUrl.substring(0, 100) + " body=" + (afterLoginBody || "").substring(0, 200));
             if (afterLoginUrl.includes("dashboard") || afterLoginUrl.includes("onboarding") || afterLoginUrl.includes("builder")) {
               log("ZenRows login successful! Account already exists.");
               const apiKey = await page.$$eval('[class*="api"], [data-testid*="api"], code, pre, input[readonly], input[disabled]', (els: any[]) =>
@@ -6790,6 +6794,9 @@ export async function registerZenrowsAccount(
                 return { success: true, apiKey: apiKey[0], zenrowsPassword, message: "Account already existed — logged in and extracted API key" };
               }
               return { success: true, zenrowsPassword, message: "ZenRows account already exists — logged in successfully. Navigate to dashboard to get API key." };
+            }
+            if (!loginPassInput) {
+              log("ZenRows uses passwordless login — magic link sent to email. Will check Outlook.");
             }
           }
         }
@@ -6805,35 +6812,27 @@ export async function registerZenrowsAccount(
 
     log("Step 2/6: Logging into Outlook to get verification email...");
 
-    let outlookBrowser = localBrowser;
-    let usedZenRows = false;
+    // Always launch a fresh browser WITHOUT proxy for Outlook login
+    // (proxies often block or slow Microsoft login pages)
+    try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+    localBrowser = null as any;
 
-    try {
-      if (!zenrowsUrl.includes('proxy_country=')) {
-        zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-      }
-      zenrowsBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 30000 });
-      outlookBrowser = zenrowsBrowser;
-      usedZenRows = true;
-      log("ZenRows browser connected for Outlook");
-    } catch (cdpErr: any) {
-      log("ZenRows CDP unavailable (" + (cdpErr.message || "").substring(0, 60) + "), using local browser for Outlook");
-      if (!localBrowser || !localBrowser.isConnected()) {
-        await ensureBrowserInstalled();
-        localBrowser = await chromium.launch({
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
-        });
-        outlookBrowser = localBrowser;
-      }
-    }
+    await ensureBrowserInstalled();
+    const outlookBrowser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
+      ],
+    });
+    localBrowser = outlookBrowser;
+    log("Fresh browser launched for Outlook (no proxy)");
 
-    const outlookCtx = usedZenRows
-      ? (outlookBrowser!.contexts()[0] || await outlookBrowser!.newContext())
-      : await outlookBrowser!.newContext({
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          viewport: { width: 1920, height: 1080 },
-        });
+    const outlookCtx = await outlookBrowser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1920, height: 1080 },
+      ignoreHTTPSErrors: true,
+    });
     const outlookPage = await outlookCtx.newPage();
     await outlookPage.setDefaultNavigationTimeout(120000);
     await outlookPage.setDefaultTimeout(30000);
@@ -6998,7 +6997,10 @@ export async function registerZenrowsAccount(
           const text = await item.textContent().catch(() => "");
           if ((text || "").toLowerCase().includes("zenrows") || 
               ((text || "").toLowerCase().includes("verify") && (text || "").toLowerCase().includes("email")) ||
-              (text || "").toLowerCase().includes("confirm your")) {
+              (text || "").toLowerCase().includes("confirm your") ||
+              (text || "").toLowerCase().includes("magic link") ||
+              (text || "").toLowerCase().includes("sign in to") ||
+              (text || "").toLowerCase().includes("log in to")) {
             log("Found potential ZenRows email: " + (text || "").replace(/\s+/g, " ").substring(0, 100));
             try {
               await item.click({ force: true, timeout: 5000 });
@@ -7033,9 +7035,11 @@ export async function registerZenrowsAccount(
 
         const zenrowsLinks = allLinks.filter((link: any) =>
           link.href && (
-            (link.href.includes("zenrows") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token") || link.href.includes("activate"))) ||
+            (link.href.includes("zenrows") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token") || link.href.includes("activate") || link.href.includes("login") || link.href.includes("magic"))) ||
             (link.text.toLowerCase().includes("verify") && link.href.includes("zenrows")) ||
             (link.text.toLowerCase().includes("confirm") && link.href.includes("zenrows")) ||
+            (link.text.toLowerCase().includes("sign in") && link.href.includes("zenrows")) ||
+            (link.text.toLowerCase().includes("log in") && link.href.includes("zenrows")) ||
             (link.text.toLowerCase().includes("activate") && !link.href.includes("microsoft") && !link.href.includes("outlook"))
           )
         );
