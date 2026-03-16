@@ -48,7 +48,7 @@ export default defineConfig({
     hmr: false,
     fs: {
       strict: true,
-      deny: ["**/.*"],
+      deny: [".env", ".env.*"],
     },
   },
 });
