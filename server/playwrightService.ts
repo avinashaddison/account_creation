@@ -6159,7 +6159,7 @@ export async function registerZenrowsAccount(
 
     log("Step 1/6: Registering on ZenRows...");
     log("Using email: " + outlookEmail);
-    log("Generated ZenRows password: " + zenrowsPassword.substring(0, 3) + "***");
+    log("Generated ZenRows password: " + zenrowsPassword);
 
     let zenrowsUrl = "";
     try {
