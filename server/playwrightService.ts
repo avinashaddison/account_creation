@@ -570,7 +570,7 @@ function mergeCookieStrings(existing: string, newCookies: Record<string, string>
 async function navigateQueueIt(
   targetUrl: string,
   cookieFile: string,
-  proxyUrl: string,
+  _proxyUrl: string,
   log: (msg: string) => void
 ): Promise<{ passed: boolean; zenRowsCookies?: string }> {
   log("Navigating through Queue-it for tickets.la28.org...");
@@ -607,7 +607,6 @@ async function navigateQueueIt(
 
   const resp1 = await curlImpersonate(targetUrl, {
     cookieFile,
-    proxy: proxyUrl,
     followRedirects: true,
     maxRedirs: 5,
   });
@@ -625,7 +624,7 @@ async function navigateQueueIt(
 
     const resp2 = await curlImpersonate(queueUrl, {
       cookieFile,
-      proxy: proxyUrl,
+
       followRedirects: true,
       maxRedirs: 10,
     });
@@ -643,7 +642,7 @@ async function navigateQueueIt(
 
       const resp3 = await curlImpersonate(queueUrl2, {
         cookieFile,
-        proxy: proxyUrl,
+  
         followRedirects: true,
         maxRedirs: 10,
       });
@@ -677,8 +676,6 @@ export async function ticketsFormFillWithCookies(
     log("curl-impersonate not available, skipping form fill");
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
-
-  const proxyUrl = getActiveProxyUrl();
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -731,7 +728,6 @@ export async function ticketsFormFillWithCookies(
       persistCookiesToFile(zenRowsCookieString, cookieFile);
       regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
         cookieFile,
-        proxy: proxyUrl,
         headers: {
           "Accept": "application/json",
           "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -819,7 +815,7 @@ export async function ticketsFormFillWithCookies(
             submitResp = await curlImpersonate(p.url, {
               method: p.method,
               cookieFile,
-              proxy: proxyUrl,
+        
               headers: submitHeaders,
               body: p.body,
             });
@@ -832,7 +828,7 @@ export async function ticketsFormFillWithCookies(
           submitResp = await curlImpersonate(p.url, {
             method: p.method,
             cookieFile,
-            proxy: proxyUrl,
+      
             headers: submitHeaders,
             body: p.body,
           });
@@ -841,7 +837,7 @@ export async function ticketsFormFillWithCookies(
         submitResp = await curlImpersonate(p.url, {
           method: p.method,
           cookieFile,
-          proxy: proxyUrl,
+    
           headers: submitHeaders,
           body: p.body,
         });
@@ -889,19 +885,17 @@ export async function ticketsFormFillViaCurl(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
-  const proxyUrl = getActiveProxyUrl();
-
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
 
   try {
-    log("Starting tickets.la28.org form fill via curl-impersonate...");
-    console.log("[CurlImp] Session: " + sessionId + ", proxy: " + proxyUrl.substring(0, 40));
+    log("Starting tickets.la28.org form fill via curl-impersonate (ZenRows proxy)...");
+    console.log("[CurlImp] Session: " + sessionId + " (no local proxy, ZenRows REST handles proxy)");
 
     const queueResult = await navigateQueueIt(
       "https://tickets.la28.org/mycustomerdata/",
       cookieFile,
-      proxyUrl,
+      "",
       log
     );
 
@@ -950,7 +944,7 @@ export async function ticketsFormFillViaCurl(
     if (!useZenRows) {
       ssoResp = await curlImpersonate(ssoUrl, {
         cookieFile,
-        proxy: proxyUrl,
+  
         headers: {
           "Accept": "application/json",
           "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -996,7 +990,7 @@ export async function ticketsFormFillViaCurl(
           if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
           regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
             cookieFile,
-            proxy: proxyUrl,
+      
             headers: {
               "Accept": "application/json",
               "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1013,7 +1007,7 @@ export async function ticketsFormFillViaCurl(
         if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
         regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
           cookieFile,
-          proxy: proxyUrl,
+    
           headers: {
             "Accept": "application/json",
             "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1023,7 +1017,7 @@ export async function ticketsFormFillViaCurl(
     } else {
       regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
         cookieFile,
-        proxy: proxyUrl,
+  
         headers: {
           "Accept": "application/json",
           "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1099,7 +1093,7 @@ export async function ticketsFormFillViaCurl(
           submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
             method: "POST",
             cookieFile,
-            proxy: proxyUrl,
+      
             headers: submitHeaders,
             body: submitBody,
           });
@@ -1110,7 +1104,7 @@ export async function ticketsFormFillViaCurl(
         submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
           method: "POST",
           cookieFile,
-          proxy: proxyUrl,
+    
           headers: submitHeaders,
           body: submitBody,
         });
@@ -1119,7 +1113,7 @@ export async function ticketsFormFillViaCurl(
       submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
         method: "POST",
         cookieFile,
-        proxy: proxyUrl,
+  
         headers: submitHeaders,
         body: submitBody,
       });
@@ -1510,39 +1504,24 @@ async function loginAndSubmitTicketRegistration(
   const safeEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const safePass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
 
-  log("Starting simplified draw registration flow...");
-  console.log("[Draw] Starting draw registration for " + email);
+  log("Starting simplified draw registration flow via ZenRows browser...");
+  console.log("[Draw] Starting draw registration for " + email + " (using provided ZenRows page)");
 
-  let proxyBrowser: Browser | null = null;
-  let proxyContext: any = null;
-  let ticketsPage: Page;
+  let ticketsPage: Page = page;
   let capturedOidcUrl: string | null = null;
 
   try {
     {
-      console.log("[Draw] Launching Chromium with " + getActiveProxyLabel() + "...");
-      proxyBrowser = await chromium.launch({
-        headless: true,
-        proxy: getActiveProxyConfig(),
-        args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
-      });
-      proxyContext = await proxyBrowser.newContext({
-        ignoreHTTPSErrors: true,
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        viewport: { width: 1366, height: 768 },
-        locale: 'en-US',
-        timezoneId: 'America/New_York',
-        geolocation: { latitude: 40.7128, longitude: -74.0060 },
-        permissions: ['geolocation'],
-      });
-      ticketsPage = await proxyContext.newPage();
-
-      await ticketsPage.route('**/public-api.eventim.com/**', async (route) => {
-        const url = route.request().url();
-        console.log("[Draw] Intercepted eventim.com request: " + url.substring(0, 200));
-        capturedOidcUrl = url;
-        await route.abort();
-      });
+      try {
+        await ticketsPage.route('**/public-api.eventim.com/**', async (route) => {
+          const url = route.request().url();
+          console.log("[Draw] Intercepted eventim.com request: " + url.substring(0, 200));
+          capturedOidcUrl = url;
+          await route.abort();
+        });
+      } catch (routeErr: any) {
+        console.log("[Draw] Could not set up route interception (ZenRows CDP limitation): " + (routeErr.message || '').substring(0, 100));
+      }
     }
     ticketsPage.setDefaultTimeout(60000);
 
@@ -1571,7 +1550,6 @@ async function loginAndSubmitTicketRegistration(
         }
         if (qw === 39) {
           log("Queue timeout after 120s.");
-          try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
           return { submitted: false };
         }
       }
@@ -1717,7 +1695,6 @@ async function loginAndSubmitTicketRegistration(
           `) as { ok: boolean; uid: string | null; err: string; code: number };
           console.log("[Draw] Gigya login: ok=" + loginResult.ok + " uid=" + (loginResult.uid || 'null') + " err=" + loginResult.err + " code=" + loginResult.code);
           if (!loginResult.ok) {
-            try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
             return { submitted: false };
           }
         } catch (e: any) {
@@ -1851,7 +1828,6 @@ async function loginAndSubmitTicketRegistration(
       });
       console.log("[Draw] Visible elements: " + String(htmlDump).substring(0, 800));
       log("No form elements found on tickets.la28.org. The page did not render the Angular form.");
-      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       return { submitted: false };
     }
 
@@ -2045,19 +2021,16 @@ async function loginAndSubmitTicketRegistration(
       } catch (postErr: any) {
         console.log("[Draw] Post-submit error: " + postErr.message.substring(0, 100));
       }
-      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       log("Draw registration form submitted.");
       return { submitted: true };
     } else {
       log("Submit button not found: " + btnClicked.substring(0, 300));
-      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       return { submitted: false };
     }
 
   } catch (err: any) {
     console.log("[Draw] Error: " + err.message.substring(0, 200));
     log("Draw registration error: " + err.message.substring(0, 150));
-    try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
     return { submitted: false };
   }
 }
@@ -3103,8 +3076,7 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          nstConfig.proxy = getActiveProxyUrl();
-          console.log("[Draw-OIDC] NSTBrowser with " + getActiveProxyLabel());
+          console.log("[Draw-OIDC] NSTBrowser without proxy (ZenRows handles proxy)");
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
 
@@ -5341,16 +5313,20 @@ export async function retryDrawRegistration(
       zenrowsUrl = zrRow.rows[0].value as string;
     }
   } catch {}
-  var connectUrl = zenrowsUrl || proxyUrl;
-  if (connectUrl.includes('zenrows.com') && !connectUrl.includes('proxy_country=')) {
+  if (!zenrowsUrl) {
+    log("ZenRows Browser URL not configured. Set it in Settings.");
+    return { submitted: false };
+  }
+  var connectUrl = zenrowsUrl;
+  if (!connectUrl.includes('proxy_country=')) {
     connectUrl += (connectUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
   }
-  log("Connecting to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser...");
+  log("Connecting to ZenRows browser...");
   const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
   try {
     const page = await browser.newPage();
     page.setDefaultTimeout(120000);
-    log("Connected to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser.");
+    log("Connected to ZenRows browser.");
 
     const result = await loginAndSubmitTicketRegistration(page, email, password, log, connectUrl, zipCode || undefined);
     try { await page.close(); } catch {}
