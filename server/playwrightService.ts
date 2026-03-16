@@ -4706,8 +4706,11 @@ async function getBrowser(): Promise<Browser> {
   launching = true;
   try {
     await ensureBrowserInstalled();
+    const proxyConfig = getActiveProxyConfig();
+    console.log("[Browser] Launching Chromium with residential proxy: " + getActiveProxyLabel());
     browserInstance = await chromium.launch({
       headless: true,
+      proxy: proxyConfig,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -4722,6 +4725,7 @@ async function getBrowser(): Promise<Browser> {
         "--no-zygote",
         "--js-flags=--max-old-space-size=256",
         "--disable-http2",
+        "--ignore-certificate-errors",
       ],
     });
     browserInstance.on("disconnected", () => {
@@ -4987,7 +4991,7 @@ async function doRegistration(
 
   const usedZipCode = generateUSZip();
   log(`Using LA zip code ${usedZipCode} for all steps.`);
-  log("Registration/consent on la28id.la28.org (no proxy needed). Proxy reserved for tickets.la28.org step.");
+  log("Registration/consent on la28id.la28.org via residential proxy.");
 
   const context = await browser.newContext(contextOptions);
 
@@ -5677,15 +5681,19 @@ export async function createOutlookAccount(
     log("Generated password: " + password.substring(0, 3) + "***");
 
     await ensureBrowserInstalled();
+    const outlookProxyConfig = getActiveProxyConfig();
+    console.log("[Outlook] Launching Chromium with residential proxy: " + getActiveProxyLabel());
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+      proxy: outlookProxyConfig,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"],
     });
 
     const context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       viewport: { width: 1920, height: 1080 },
       locale: "en-US",
+      ignoreHTTPSErrors: true,
     });
     const page = await context.newPage();
     await page.setDefaultNavigationTimeout(120000);
@@ -6397,9 +6405,10 @@ export async function registerZenrowsAccount(
           username: decodeURIComponent(proxyUrl.username),
           password: decodeURIComponent(proxyUrl.password),
         };
-        log("Using browser proxy: " + proxyUrl.hostname + ":" + proxyUrl.port + " (user=" + proxyUrl.username.substring(0, 20) + "...)");
+        log("Using custom browser proxy: " + proxyUrl.hostname + ":" + proxyUrl.port);
       } else {
-        log("No browser proxy configured — using direct connection (may be IP-blocked)");
+        launchOpts.proxy = getActiveProxyConfig();
+        log("Using residential proxy: " + getActiveProxyLabel());
       }
       const dedicatedBrowser = await chromium.launch(launchOpts);
       localBrowser = dedicatedBrowser;
@@ -6854,21 +6863,22 @@ export async function registerZenrowsAccount(
 
     log("Step 2/6: Logging into Outlook to get verification email...");
 
-    // Always launch a fresh browser WITHOUT proxy for Outlook login
-    // (proxies often block or slow Microsoft login pages)
     try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
     localBrowser = null as any;
 
     await ensureBrowserInstalled();
+    const outlookProxyConf = getActiveProxyConfig();
+    console.log("[Outlook-TM] Launching Chromium with residential proxy: " + getActiveProxyLabel());
     const outlookBrowser = await chromium.launch({
       headless: true,
+      proxy: outlookProxyConf,
       args: [
         "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
       ],
     });
     localBrowser = outlookBrowser;
-    log("Fresh browser launched for Outlook (no proxy)");
+    log("Fresh browser launched for Outlook (with proxy)");
 
     const outlookCtx = await outlookBrowser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -7210,11 +7220,13 @@ export async function registerZenrowsAccount(
       await ensureBrowserInstalled();
       localBrowser = await chromium.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+        proxy: getActiveProxyConfig(),
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"],
       });
     }
     const verifyCtx = await localBrowser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ignoreHTTPSErrors: true,
     });
     const verifyPage = await verifyCtx.newPage();
     await verifyPage.setDefaultNavigationTimeout(60000);
@@ -7239,11 +7251,13 @@ export async function registerZenrowsAccount(
       await ensureBrowserInstalled();
       localBrowser = await chromium.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+        proxy: getActiveProxyConfig(),
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"],
       });
     }
     const apiCtx = await localBrowser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ignoreHTTPSErrors: true,
     });
     const apiPage = await apiCtx.newPage();
     await apiPage.setDefaultNavigationTimeout(60000);
