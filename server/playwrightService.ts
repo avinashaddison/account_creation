@@ -6345,11 +6345,17 @@ export async function registerZenrowsAccount(
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled",
+        "--ignore-certificate-errors",
       ];
       const launchOpts: any = { headless: true, args: launchArgs };
       if (browserProxyUrl) {
-        launchOpts.proxy = { server: browserProxyUrl };
-        log("Using browser proxy: " + browserProxyUrl.replace(/:[^:@]+@/, ":***@"));
+        const proxyUrl = new URL(browserProxyUrl);
+        launchOpts.proxy = {
+          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+          username: decodeURIComponent(proxyUrl.username),
+          password: decodeURIComponent(proxyUrl.password),
+        };
+        log("Using browser proxy: " + proxyUrl.hostname + ":" + proxyUrl.port + " (user=" + proxyUrl.username.substring(0, 20) + "...)");
       } else {
         log("No browser proxy configured — using direct connection (may be IP-blocked)");
       }
@@ -6360,6 +6366,7 @@ export async function registerZenrowsAccount(
         viewport: { width: 1920, height: 1080 },
         locale: "en-US",
         timezoneId: "America/Los_Angeles",
+        ignoreHTTPSErrors: true,
       });
       page = await context.newPage();
     }
