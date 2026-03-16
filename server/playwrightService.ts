@@ -2497,8 +2497,10 @@ export async function completeDrawViaGigyaBrowser(
 
   let formSubmitted = false;
 
-  log("Draw via local Chromium + CapSolver token injection...");
-  console.log("[Draw] Starting for " + email + " via local Chromium (no proxy) + CapSolver token injection");
+  const proxyUrl = getActiveProxyUrl();
+  const proxyLabel = getActiveProxyLabel();
+  log("Draw via local Chromium + residential proxy + CapSolver...");
+  console.log("[Draw] Starting for " + email + " via local Chromium WITH residential proxy");
 
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -2519,7 +2521,8 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      console.log("[Draw] Launching local Chromium (no proxy)...");
+      const parsedProxy = new URL(proxyUrl);
+      console.log("[Draw] Launching local Chromium with residential proxy: " + proxyLabel);
       browser = await chromium.launch({
         headless: true,
         args: [
@@ -2528,6 +2531,11 @@ export async function completeDrawViaGigyaBrowser(
           '--disable-dev-shm-usage',
           '--disable-blink-features=AutomationControlled',
         ],
+        proxy: {
+          server: `${parsedProxy.protocol}//${parsedProxy.hostname}:${parsedProxy.port}`,
+          username: parsedProxy.username || undefined,
+          password: parsedProxy.password || undefined,
+        },
       });
       const context = await browser.newContext({
         ignoreHTTPSErrors: true,
@@ -2545,7 +2553,7 @@ export async function completeDrawViaGigyaBrowser(
       `);
       page = await context.newPage();
       page.setDefaultTimeout(60000);
-      console.log("[Draw] Chromium launched (no proxy, stealth mode)");
+      console.log("[Draw] Chromium launched with residential proxy, stealth mode");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
