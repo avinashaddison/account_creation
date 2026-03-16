@@ -39,6 +39,7 @@ The application features a modern full-stack architecture.
 
 **Feature Specifications:**
 -   **Account Status Flow:** `pending` → `registering` → `waiting_code` → `verifying` → `verified` → `profile_saving` → `draw_registering` → `completed` / `failed`.
+    -   **Draw Confirmation Email Check:** After draw registration succeeds ("completed"), the system polls the inbox (up to ~100 seconds) for the official "Confirmed! You are registered for the LA28 Ticket Draw" email from LA28 Tickets. Implemented via `pollForDrawConfirmation()` in `server/mailService.ts`. Applied in both the initial `processAccount` flow and the `retry-draw` endpoint in `server/routes.ts`.
 -   **Multi-Admin Support:** Superadmin can manage admins, while admins have isolated data views and account creation limits based on wallet balance.
     -   **Service Access Control:** Superadmin can toggle which services (la28, ticketmaster, uefa, brunomars, outlook, zenrows) each admin can access via the "Service Access" tab in Manage Admins. Enforced at both frontend (route guards via `useServiceGuard` hook, locked cards in CreateServer) and backend (`requireServiceAccess` middleware on all service API endpoints). The `allowedServices` text array column on the `users` table stores permitted services per admin.
 -   **Email Workspace:** Unified interface for generating temporary emails, viewing inboxes, and real-time status updates.

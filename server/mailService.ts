@@ -97,6 +97,33 @@ export async function pollForVerificationCode(token: string, maxAttempts: number
   return null;
 }
 
+export async function pollForDrawConfirmation(token: string, maxAttempts: number = 20, intervalMs: number = 5000): Promise<boolean> {
+  for (let i = 0; i < maxAttempts; i++) {
+    console.log(`[Mail] Polling for draw confirmation email... attempt ${i + 1}/${maxAttempts}`);
+    try {
+      const messages = await fetchMessages(token);
+      for (const msg of messages) {
+        const subject = (msg.subject || "").toLowerCase();
+        const from = (msg.from?.address || msg.from?.name || "").toLowerCase();
+        if (
+          (subject.includes("confirmed") && subject.includes("la28")) ||
+          (subject.includes("registered") && subject.includes("ticket draw")) ||
+          (subject.includes("confirmed") && subject.includes("ticket draw")) ||
+          (from.includes("la28") && subject.includes("confirmed"))
+        ) {
+          console.log(`[Mail] Draw confirmation email found! Subject: ${msg.subject}`);
+          return true;
+        }
+      }
+    } catch (err: any) {
+      console.log(`[Mail] Error polling for confirmation: ${err.message}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  console.log("[Mail] Timed out waiting for draw confirmation email");
+  return false;
+}
+
 export function generateRandomUsername(): string {
   const adjectives = ["swift", "brave", "cool", "epic", "fast", "keen", "bold", "wild", "pure", "true"];
   const nouns = ["tiger", "eagle", "wolf", "hawk", "bear", "lion", "fox", "deer", "lynx", "ram"];

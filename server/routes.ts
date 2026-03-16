@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
+import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
 import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
@@ -207,6 +207,21 @@ async function processAccount(
       else finalStatus = "verified";
       const updateData: any = { status: finalStatus };
       if (result.zipCode) updateData.zipCode = result.zipCode;
+
+      if (finalStatus === "completed") {
+        broadcastLog(batchId, accountId, `📧 Checking inbox for LA28 draw confirmation email...`, ownerId);
+        try {
+          const confirmed = await pollForDrawConfirmation(token, 20, 5000);
+          if (confirmed) {
+            broadcastLog(batchId, accountId, `✅ Draw confirmation email received! Registration verified by LA28.`, ownerId);
+          } else {
+            broadcastLog(batchId, accountId, `⚠️ Draw confirmation email not found yet. Draw was submitted but email not received within timeout.`, ownerId);
+          }
+        } catch (confirmErr: any) {
+          broadcastLog(batchId, accountId, `⚠️ Could not check for confirmation email: ${confirmErr.message}`, ownerId);
+        }
+      }
+
       const updated = await storage.updateAccount(accountId, updateData);
       if (updated) broadcastAccountUpdate(updated, ownerId);
       const successMsg = finalStatus === "completed"
@@ -1191,14 +1206,29 @@ export async function registerRoutes(
         log
       );
 
-      if (gigyaResult.success) {
+      if (gigyaResult.success || gigyaResult.profileSet || gigyaResult.dataSet) {
         await storage.updateAccount(account.id, { status: "completed" });
         broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-        log("Draw registration completed successfully!");
-      } else if (gigyaResult.profileSet || gigyaResult.dataSet) {
-        await storage.updateAccount(account.id, { status: "completed" });
-        broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-        log("Partial success (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
+        if (gigyaResult.success) {
+          log("Draw registration completed successfully!");
+        } else {
+          log("Partial success (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
+        }
+        try {
+          const emailPassword = account.emailPassword || account.la28Password;
+          if (account.email && emailPassword) {
+            log("📧 Checking inbox for LA28 draw confirmation email...");
+            const mailToken = await getAuthToken(account.email, emailPassword);
+            const confirmed = await pollForDrawConfirmation(mailToken, 20, 5000);
+            if (confirmed) {
+              log("✅ Draw confirmation email received! Registration verified by LA28.");
+            } else {
+              log("⚠️ Draw confirmation email not found yet. Draw was submitted but email not received within timeout.");
+            }
+          }
+        } catch (confirmErr: any) {
+          log("⚠️ Could not check for confirmation email: " + confirmErr.message);
+        }
       } else {
         await storage.updateAccount(account.id, { status: "draw_registering" });
         broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
