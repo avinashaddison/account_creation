@@ -26,6 +26,28 @@ chromium.use(StealthPlugin());
 
 let activeProxyProvider: "iproyal" | "decodo" = "iproyal";
 
+function generateSoaxProxyUrl(templateUrl: string): string {
+  const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  return templateUrl.replace('SESSION_PLACEHOLDER', sessionId);
+}
+
+async function getSoaxProxyForAccount(): Promise<string | null> {
+  try {
+    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
+    if (result.rows.length > 0 && result.rows[0].value) {
+      const template = result.rows[0].value as string;
+      if (template.includes('proxy.soax.com')) {
+        const proxyUrl = generateSoaxProxyUrl(template);
+        console.log("[Proxy] Generated SOAX proxy with unique session: " + proxyUrl.substring(0, 60) + "...");
+        return proxyUrl;
+      }
+    }
+  } catch (err: any) {
+    console.log("[Proxy] Failed to get SOAX proxy: " + err.message);
+  }
+  return null;
+}
+
 function getDecodoProxyUrl(port: number = 10001): string {
   if (DECODO_USER && DECODO_PASS) {
     return `http://${DECODO_USER}:${DECODO_PASS}@${DECODO_HOST}:${port}`;
@@ -2530,8 +2552,8 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      console.log("[Draw] Launching local Chromium (no proxy)...");
-      browser = await chromium.launch({
+      const drawProxy = await getSoaxProxyForAccount();
+      const launchOpts: any = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -2539,7 +2561,22 @@ export async function completeDrawViaGigyaBrowser(
           '--disable-dev-shm-usage',
           '--disable-blink-features=AutomationControlled',
         ],
-      });
+      };
+      if (drawProxy) {
+        const parsed = parseProxyUrl(drawProxy);
+        if (parsed) {
+          launchOpts.proxy = {
+            server: `http://${parsed.host}:${parsed.port}`,
+            username: parsed.username,
+            password: parsed.password,
+          };
+          console.log("[Draw] Launching Chromium with SOAX proxy: " + parsed.host + ":" + parsed.port);
+          log("Using SOAX residential proxy for draw (unique IP)");
+        }
+      } else {
+        console.log("[Draw] Launching local Chromium (no proxy)...");
+      }
+      browser = await chromium.launch(launchOpts);
       const context = await browser.newContext({
         ignoreHTTPSErrors: true,
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -2556,7 +2593,7 @@ export async function completeDrawViaGigyaBrowser(
       `);
       page = await context.newPage();
       page.setDefaultTimeout(60000);
-      console.log("[Draw] Chromium launched (no proxy, stealth mode)");
+      console.log("[Draw] Chromium launched (" + (drawProxy ? "SOAX proxy" : "no proxy") + ", stealth mode)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -4649,16 +4686,49 @@ async function ensureBrowserInstalled(): Promise<void> {
   }
 }
 
-async function getBrowser(): Promise<Browser> {
-  if (browserInstance && browserInstance.isConnected()) {
+async function getBrowser(proxyUrl?: string): Promise<Browser> {
+  if (!proxyUrl && browserInstance && browserInstance.isConnected()) {
     return browserInstance;
   }
 
-  if (launching) {
+  if (!proxyUrl && launching) {
     for (let i = 0; i < 10; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       if (browserInstance && browserInstance.isConnected()) return browserInstance;
     }
+  }
+
+  if (proxyUrl) {
+    await ensureBrowserInstalled();
+    const parsed = parseProxyUrl(proxyUrl);
+    const launchOpts: any = {
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--no-first-run",
+        "--no-zygote",
+        "--js-flags=--max-old-space-size=256",
+        "--disable-http2",
+      ],
+    };
+    if (parsed) {
+      launchOpts.proxy = {
+        server: `http://${parsed.host}:${parsed.port}`,
+        username: parsed.username,
+        password: parsed.password,
+      };
+      console.log("[Browser] Launching with SOAX proxy: " + parsed.host + ":" + parsed.port);
+    }
+    const b = await chromium.launch(launchOpts);
+    return b;
   }
 
   launching = true;
@@ -4927,8 +4997,17 @@ async function doRegistration(
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string; zipCode?: string }> {
   let browser: Browser;
+  let soaxProxy: string | null = null;
+  let usingProxy = false;
   try {
-    browser = await getBrowser();
+    soaxProxy = await getSoaxProxyForAccount();
+    if (soaxProxy) {
+      log("Using SOAX residential proxy for registration (unique IP per account)");
+      browser = await getBrowser(soaxProxy);
+      usingProxy = true;
+    } else {
+      browser = await getBrowser();
+    }
   } catch (err: any) {
     return { success: false, error: `Failed to launch browser: ${err.message}` };
   }
@@ -4945,7 +5024,11 @@ async function doRegistration(
 
   const usedZipCode = generateUSZip();
   log(`Using LA zip code ${usedZipCode} for all steps.`);
-  log("Registration/consent on la28id.la28.org (no proxy needed). Proxy reserved for tickets.la28.org step.");
+  if (usingProxy) {
+    log("Residential proxy active — unique IP for this account.");
+  } else {
+    log("No proxy configured — using server IP.");
+  }
 
   const context = await browser.newContext(contextOptions);
 
@@ -5284,10 +5367,16 @@ async function doRegistration(
     }
 
     await context.close();
+    if (usingProxy) {
+      try { await browser.close(); } catch {}
+    }
     return { success: true, pageContent: finalText.substring(0, 500), zipCode: usedZipCode };
   } catch (err: any) {
     console.error("[Playwright] Error:", err.message);
     try { await context.close(); } catch {}
+    if (usingProxy) {
+      try { await browser.close(); } catch {}
+    }
     return { success: false, error: err.message };
   }
 }
@@ -5300,6 +5389,7 @@ export async function retryDrawRegistration(
   log: (msg: string) => void
 ): Promise<{ submitted: boolean }> {
   log("Starting retry draw registration for " + email);
+  log("Retrying draw registration via Chromium + Residential Proxy...");
   let zenrowsUrl = "";
   try {
     const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);

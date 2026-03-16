@@ -31,7 +31,7 @@ The application features a modern full-stack architecture.
     -   **Primary Draw Registration:** Gigya REST API for setting profile information (birthYear, zip, country), favorites (disciplines, countries), and draw flags (`l2028_ticketing`, `l2028_fan28`). This method avoids direct interaction with `tickets.la28.org`.
     -   **Fallback:** Browser-based OIDC/ZenRows flow via `connectOverCDP` for `tickets.la28.org` form fill, used if the REST API fails.
 -   **Bot Detection Bypass:** Utilizes `curl-impersonate` binaries (mimicking Chrome 116 TLS fingerprint) to bypass Akamai bot detection for direct HTTP requests.
--   **Proxy Management:** Integrates with ZenRows Browser API and Bright Data for robust browser automation and proxy rotation.
+-   **Proxy Management:** Integrates with ZenRows Browser API, Bright Data, and SOAX residential proxies for robust browser automation and proxy rotation. SOAX proxy (configured via `soax_proxy_template` DB setting) provides unique rotating IPs per account — each browser launch generates a unique session ID to get a fresh US residential IP. Proxy is wired into `getBrowser()`, `doRegistration()`, and `completeDrawViaGigyaBrowser()` via Playwright's native proxy option.
 
 **Wallet System:**
 -   **Functionality:** Tracks account creation costs, configurable by superadmin.
