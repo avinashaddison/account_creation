@@ -372,19 +372,26 @@ export function clearZenrowsApiKeyCache() {
 async function getZenRowsApiKey(): Promise<string> {
   if (zenrowsRestApiKeyCache !== null) return zenrowsRestApiKeyCache;
 
+  const ZENROWS_KEY_RE = /^[0-9][a-f0-9]{39,}$/;
+
   if (process.env.ZENROWS_API_KEY) {
-    zenrowsRestApiKeyCache = process.env.ZENROWS_API_KEY;
-    return zenrowsRestApiKeyCache;
+    const envKey = process.env.ZENROWS_API_KEY;
+    if (ZENROWS_KEY_RE.test(envKey)) {
+      zenrowsRestApiKeyCache = envKey;
+      return zenrowsRestApiKeyCache;
+    }
+    console.log("[ZenRows] Env ZENROWS_API_KEY rejected: length=" + envKey.length + ", format invalid");
   }
 
   try {
     const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_rest_api_key'`);
     if (result.rows.length > 0 && result.rows[0].value) {
       const key = result.rows[0].value as string;
-      if (key.length >= 30) {
+      if (ZENROWS_KEY_RE.test(key)) {
         zenrowsRestApiKeyCache = key;
         return zenrowsRestApiKeyCache;
       }
+      console.log("[ZenRows] Stored zenrows_rest_api_key rejected: length=" + key.length + ", format invalid (expected 41-char hex starting with digit)");
     }
   } catch {}
 
