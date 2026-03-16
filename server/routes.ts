@@ -697,7 +697,11 @@ export async function registerRoutes(
       if (!key || typeof key !== "string" || key.trim().length < 5) {
         return res.status(400).json({ error: "Valid ZenRows API key is required" });
       }
-      await storage.setSetting("zenrows_rest_api_key", key.trim());
+      const trimmedKey = key.trim();
+      if (!/^[0-9][a-f0-9]{39,}$/.test(trimmedKey)) {
+        return res.status(400).json({ error: "ZenRows API key format invalid. Expected 41-char hex string starting with a digit (e.g. 0abc...def). Got length=" + trimmedKey.length });
+      }
+      await storage.setSetting("zenrows_rest_api_key", trimmedKey);
       clearZenrowsApiKeyCache();
       res.json({ success: true });
     } catch (err: any) {

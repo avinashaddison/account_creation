@@ -392,7 +392,7 @@ async function getZenRowsApiKey(): Promise<string> {
     const urlResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
     if (urlResult.rows.length > 0 && urlResult.rows[0].value) {
       const url = urlResult.rows[0].value as string;
-      const keyMatch = url.match(/apikey=([a-f0-9]{30,})/i);
+      const keyMatch = url.match(/apikey=([0-9][a-f0-9]{39,})/i);
       if (keyMatch) {
         zenrowsRestApiKeyCache = keyMatch[1];
         return zenrowsRestApiKeyCache;
@@ -7250,37 +7250,30 @@ export async function registerZenrowsAccount(
     log("Builder page loaded: " + apiPage.url().substring(0, 100));
 
     let apiKey = "";
-    const zenrowsKeyRegex = /\b[0-9][a-f0-9]{39,}\b/;
-    const fallbackKeyRegex = /\b[a-f0-9]{32,50}\b/;
+    const ZENROWS_KEY_RE = /^[0-9][a-f0-9]{39,}$/;
 
     try {
       apiKey = await apiPage.evaluate(() => {
-        const zenrowsRe = /^[0-9][a-f0-9]{39,}$/;
-        const fallbackRe = /^[a-f0-9]{32,50}$/;
-        let fallbackKey = "";
+        const keyRe = /^[0-9][a-f0-9]{39,}$/;
         const inputs = document.querySelectorAll('input[readonly], input[type="text"]');
         for (const input of inputs) {
           const val = (input as HTMLInputElement).value;
-          if (val && zenrowsRe.test(val)) return val;
-          if (val && val.length >= 32 && fallbackRe.test(val) && !fallbackKey) fallbackKey = val;
+          if (val && keyRe.test(val)) return val;
         }
         const codeElements = document.querySelectorAll('code, pre, [class*="api"], [class*="key"]');
         for (const el of codeElements) {
           const text = (el.textContent || "").trim();
-          if (zenrowsRe.test(text)) return text;
-          if (text.length >= 32 && fallbackRe.test(text) && !fallbackKey) fallbackKey = text;
+          if (keyRe.test(text)) return text;
         }
         const bodyText = document.body.innerText || "";
         const match = bodyText.match(/\b[0-9][a-f0-9]{39,}\b/);
         if (match) return match[0];
-        const fallbackMatch = bodyText.match(/\b[a-f0-9]{32,50}\b/);
-        if (fallbackMatch && !fallbackKey) fallbackKey = fallbackMatch[0];
-        return fallbackKey;
+        return "";
       });
     } catch {}
 
     if (apiKey) {
-      log("API key candidate: " + apiKey.substring(0, 8) + "... (length=" + apiKey.length + ", matches format=" + zenrowsKeyRegex.test(apiKey) + ")");
+      log("API key candidate: " + apiKey.substring(0, 8) + "... (length=" + apiKey.length + ", valid=" + ZENROWS_KEY_RE.test(apiKey) + ")");
     }
 
     if (!apiKey) {
@@ -7289,9 +7282,7 @@ export async function registerZenrowsAccount(
         if (copyBtn) {
           log("Found Copy button, trying to extract API key from nearby elements...");
           apiKey = await apiPage.evaluate(() => {
-            const zenrowsRe = /^[0-9][a-f0-9]{39,}$/;
-            const fallbackRe = /^[a-f0-9]{32,50}$/;
-            let fallbackKey = "";
+            const keyRe = /^[0-9][a-f0-9]{39,}$/;
             const copyBtns = Array.from(document.querySelectorAll('button'));
             for (const btn of copyBtns) {
               if ((btn.textContent || "").toLowerCase().includes("copy")) {
@@ -7300,19 +7291,17 @@ export async function registerZenrowsAccount(
                   const inputs = parent.querySelectorAll('input, code, span, div');
                   for (const el of inputs) {
                     const text = ((el as HTMLInputElement).value || el.textContent || "").trim();
-                    if (zenrowsRe.test(text)) return text;
-                    if (text.length >= 32 && fallbackRe.test(text) && !fallbackKey) fallbackKey = text;
+                    if (keyRe.test(text)) return text;
                   }
                 }
                 const prev = btn.previousElementSibling;
                 if (prev) {
                   const text = ((prev as HTMLInputElement).value || prev.textContent || "").trim();
-                  if (zenrowsRe.test(text)) return text;
-                  if (text.length >= 32 && fallbackRe.test(text) && !fallbackKey) fallbackKey = text;
+                  if (keyRe.test(text)) return text;
                 }
               }
             }
-            return fallbackKey;
+            return "";
           });
         }
       } catch {}
@@ -7323,11 +7312,6 @@ export async function registerZenrowsAccount(
       const hexMatch = (allText || "").match(/\b[0-9][a-f0-9]{39,}\b/);
       if (hexMatch) {
         apiKey = hexMatch[0];
-      } else {
-        const fallbackMatch = (allText || "").match(/\b[a-f0-9]{32,50}\b/);
-        if (fallbackMatch) {
-          apiKey = fallbackMatch[0];
-        }
       }
     }
 
