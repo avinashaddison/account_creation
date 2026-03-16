@@ -6445,7 +6445,7 @@ export async function registerZenrowsAccount(
           username: decodeURIComponent(proxyUrl.username),
           password: decodeURIComponent(proxyUrl.password),
         };
-        log("Using browser proxy: " + proxyUrl.hostname + ":" + proxyUrl.port + " (user=" + proxyUrl.username.substring(0, 20) + "...)");
+        log("Using Addison Residential proxy for browser automation");
       } else {
         log("No browser proxy configured — using direct connection (may be IP-blocked)");
       }
@@ -7071,13 +7071,24 @@ export async function registerZenrowsAccount(
       log(`Searching for ZenRows verification email (attempt ${attempt + 1}/12)...`);
 
       try {
-        const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], [role="treeitem"][aria-selected], div[aria-label*="message"] div[tabindex="0"], div[class*="customScrollBar"] div[role="option"]');
+        const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], div[aria-label*="message"] div[tabindex="0"], div[class*="customScrollBar"] div[role="option"], div[class*="lvHighlightAllClass"], div[class*="hcpHN"] div[role="option"], div[class*="jGG6V"]');
         const filteredItems = [];
+        const folderNames = ["inbox", "sent items", "drafts", "junk email", "deleted items", "archive", "folders", "favorites", "notes", "file", "navigation", "groups"];
         for (const item of emailItems) {
           const text = await item.textContent().catch(() => "");
-          const t = (text || "").trim();
-          if (t.length > 10 && !t.startsWith("File") && !t.startsWith("Navigation") && t !== "Favorites" && t !== "Inbox" && t !== "Sent Items" && t !== "Drafts" && !t.startsWith("Folders")) {
+          const t = (text || "").trim().toLowerCase();
+          if (t.length > 10 && !folderNames.some(fn => t === fn || t.startsWith(fn + "selected") || t.match(new RegExp("^" + fn + "\\d")))) {
             filteredItems.push(item);
+          }
+        }
+        if (filteredItems.length === 0) {
+          const allClickable = await outlookPage.$$('div[tabindex="0"][role="option"], div[tabindex="0"][data-convid], div[class*="EeHm8"] div[tabindex="0"], div[role="row"]');
+          for (const item of allClickable) {
+            const text = await item.textContent().catch(() => "");
+            const t = (text || "").trim();
+            if (t.length > 15 && !folderNames.some(fn => t.toLowerCase() === fn)) {
+              filteredItems.push(item);
+            }
           }
         }
         log(`Found ${filteredItems.length} email items in inbox (raw: ${emailItems.length})`);
@@ -7107,6 +7118,20 @@ export async function registerZenrowsAccount(
               break;
             } else {
               log("Email click failed, trying next candidate...");
+            }
+          }
+        }
+        if (!emailClicked) {
+          const unreadItems = await outlookPage.$$('[aria-label*="Unread"], div[class*="unread"], div[class*="Unread"], [data-is-unread="true"]');
+          if (unreadItems.length > 0) {
+            log("Found " + unreadItems.length + " unread email(s), clicking first...");
+            try {
+              await unreadItems[0].click({ force: true, timeout: 5000 });
+              emailClicked = true;
+              log("Clicked unread email");
+              await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
+            } catch {
+              try { await outlookPage.evaluate((el: any) => el.click(), unreadItems[0]); emailClicked = true; } catch {}
             }
           }
         }
