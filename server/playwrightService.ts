@@ -2571,7 +2571,7 @@ export async function completeDrawViaGigyaBrowser(
             password: parsed.password,
           };
           console.log("[Draw] Launching Chromium with SOAX proxy: " + parsed.host + ":" + parsed.port);
-          log("Using SOAX residential proxy for draw (unique IP)");
+          log("Using Addison Residential proxy for draw (unique IP)");
         }
       } else {
         console.log("[Draw] Launching local Chromium (no proxy)...");
@@ -5002,7 +5002,7 @@ async function doRegistration(
   try {
     soaxProxy = await getSoaxProxyForAccount();
     if (soaxProxy) {
-      log("Using SOAX residential proxy for registration (unique IP per account)");
+      log("Using Addison Residential proxy for registration (unique IP per account)");
       browser = await getBrowser(soaxProxy);
       usingProxy = true;
     } else {
@@ -5025,7 +5025,7 @@ async function doRegistration(
   const usedZipCode = generateUSZip();
   log(`Using LA zip code ${usedZipCode} for all steps.`);
   if (usingProxy) {
-    log("Residential proxy active — unique IP for this account.");
+    log("Addison Residential proxy active — unique IP for this account.");
   } else {
     log("No proxy configured — using server IP.");
   }
