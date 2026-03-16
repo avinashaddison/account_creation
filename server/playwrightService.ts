@@ -6283,7 +6283,8 @@ export async function registerZenrowsAccount(
 
     await emailInput.click();
     await page.waitForTimeout(300 + Math.random() * 300);
-    for (const char of outlookEmail) {
+    const emailToType = outlookEmail.toLowerCase();
+    for (const char of emailToType) {
       await page.keyboard.type(char, { delay: 0 });
       await page.waitForTimeout(20 + Math.random() * 40);
     }
@@ -6536,7 +6537,16 @@ export async function registerZenrowsAccount(
                           pageLower.includes("in use");
     const hasError = pageLower.includes("error") || pageLower.includes("invalid");
 
-    if (afterSignupUrl.includes("/phone/input") || afterSignupUrl.includes("/verify") || afterSignupUrl.includes("/confirm")) {
+    let signupFailed = false;
+    const toastErrors = await page.$$eval('[role="alert"], .toast, .notification, [class*="alert"], [class*="toast"], [class*="error"], [class*="Error"]', (els: any[]) =>
+      els.map((e: any) => (e.textContent || "").trim().substring(0, 150)).filter((t: string) => t.length > 0)
+    ).catch(() => []);
+    const hasInvalidEmail = toastErrors.some((t: string) => t.toLowerCase().includes("invalid email"));
+
+    if (hasInvalidEmail) {
+      log("ZenRows rejected the email as invalid. The email format may not be accepted.");
+      signupFailed = true;
+    } else if (afterSignupUrl.includes("/phone/input") || afterSignupUrl.includes("/verify") || afterSignupUrl.includes("/confirm")) {
       log("ZenRows redirected to verification/phone page: " + afterSignupUrl.substring(0, 100));
     } else if (needsVerification) {
       log("ZenRows requires email verification");
@@ -6547,8 +6557,15 @@ export async function registerZenrowsAccount(
     } else if (hasError) {
       const errorSnippet = (pageContent || "").substring(0, 200).replace(/\s+/g, " ");
       log("Signup error detected: " + errorSnippet);
+      signupFailed = true;
     } else {
       log("After signup state: URL=" + afterSignupUrl.substring(0, 80));
+    }
+
+    if (signupFailed) {
+      try { await page.close(); } catch {}
+      try { await context.close(); } catch {}
+      return { success: false, error: "ZenRows signup failed — the email may be invalid or already in use. Try a different Outlook email." };
     }
 
     try { await page.close(); } catch {}
@@ -6620,18 +6637,79 @@ export async function registerZenrowsAccount(
       log("Password field not found. Page text: " + (loginPageText || "").substring(0, 200).replace(/\s+/g, " "));
       log("Login URL: " + outlookPage.url().substring(0, 120));
 
-      const setupBtn = await outlookPage.$('#idSIButton9, input[type="submit"], button[type="submit"], #acceptButton, #iNext');
-      if (setupBtn) {
-        await setupBtn.click();
-        await outlookPage.waitForTimeout(3000);
-        log("Clicked setup/continue button, retrying password field...");
+      const allClickables = await outlookPage.$$eval('a, button, span[role="link"], div[role="link"], [role="button"]', (els: any[]) =>
+        els.map((e: any) => ({ tag: e.tagName, id: e.id, text: (e.textContent || '').trim().substring(0, 60), href: (e as any).href || '' }))
+      ).catch(() => []);
+      log("Clickable elements: " + JSON.stringify(allClickables.filter((e: any) => e.text.length > 0)).substring(0, 500));
+
+      const usePasswordLink = await outlookPage.$('a:has-text("Use your password"), a[id*="password"], #idA_PWD_SwitchToPassword, a#idA_PWD_SwitchToPassword');
+      if (usePasswordLink) {
         try {
-          olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
-        } catch {}
+          await usePasswordLink.click();
+          log("Clicked 'Use your password' link via selector");
+          await outlookPage.waitForTimeout(3000 + Math.random() * 1500);
+          try {
+            olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
+          } catch {}
+        } catch (clickErr: any) {
+          log("Selector click failed: " + (clickErr.message || "").substring(0, 60));
+        }
+      }
+      if (!olPassInput) {
+        try {
+          await outlookPage.locator('text=Use your password').first().click({ force: true, timeout: 5000 });
+          log("Clicked 'Use your password' via locator with force");
+          await outlookPage.waitForTimeout(4000 + Math.random() * 2000);
+          try {
+            olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
+            log("Password field appeared after clicking 'Use your password'");
+          } catch {
+            log("Password field still not found after locator click");
+
+            const pageAfter = await outlookPage.textContent("body").catch(() => "");
+            log("Page after password link click: " + (pageAfter || "").substring(0, 200).replace(/\s+/g, " "));
+          }
+        } catch (locErr: any) {
+          log("Locator click failed: " + (locErr.message || "").substring(0, 80));
+
+          try {
+            await outlookPage.evaluate(() => {
+              const allEls = document.querySelectorAll('*');
+              for (const el of allEls) {
+                if (el.children.length === 0) {
+                  const text = (el.textContent || '').trim().toLowerCase();
+                  if (text === 'use your password') {
+                    const parent = el.parentElement;
+                    if (parent) (parent as HTMLElement).click();
+                    (el as HTMLElement).click();
+                    break;
+                  }
+                }
+              }
+            });
+            log("Clicked 'Use your password' via leaf element + parent evaluate");
+            await outlookPage.waitForTimeout(4000 + Math.random() * 2000);
+            try {
+              olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
+            } catch {}
+          } catch {}
+        }
       }
 
       if (!olPassInput) {
-        throw new Error("Cannot find password field during Outlook login. The account may not have been fully created.");
+        const setupBtn = await outlookPage.$('#idSIButton9, input[type="submit"], button[type="submit"], #acceptButton, #iNext');
+        if (setupBtn) {
+          await setupBtn.click();
+          await outlookPage.waitForTimeout(3000);
+          log("Clicked setup/continue button, retrying password field...");
+          try {
+            olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
+          } catch {}
+        }
+      }
+
+      if (!olPassInput) {
+        throw new Error("Cannot find password field during Outlook login. Page may require email verification or account setup.");
       }
     }
     if (olPassInput) {
@@ -6675,14 +6753,38 @@ export async function registerZenrowsAccount(
         const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], [aria-label*="message"], div[data-convid], tr[aria-label], div.customScrollBar div[tabindex]');
         log(`Found ${emailItems.length} email items in inbox`);
 
+        let emailClicked = false;
         for (const item of emailItems) {
           const text = await item.textContent().catch(() => "");
-          if ((text || "").toLowerCase().includes("zenrows") || (text || "").toLowerCase().includes("verify") || (text || "").toLowerCase().includes("confirm your")) {
-            log("Found potential ZenRows email! Clicking...");
-            await item.click();
-            await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
-            break;
+          if ((text || "").toLowerCase().includes("zenrows") || 
+              ((text || "").toLowerCase().includes("verify") && (text || "").toLowerCase().includes("email")) ||
+              (text || "").toLowerCase().includes("confirm your")) {
+            log("Found potential ZenRows email: " + (text || "").replace(/\s+/g, " ").substring(0, 100));
+            try {
+              await item.click({ force: true, timeout: 5000 });
+              emailClicked = true;
+            } catch {
+              try {
+                await outlookPage.evaluate((el: any) => el.click(), item);
+                emailClicked = true;
+              } catch {}
+            }
+            if (emailClicked) {
+              log("Email clicked successfully");
+              await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
+              break;
+            } else {
+              log("Email click failed, trying next candidate...");
+            }
           }
+        }
+        if (!emailClicked && emailItems.length > 0) {
+          const firstTexts = [];
+          for (let i = 0; i < Math.min(5, emailItems.length); i++) {
+            const t = await emailItems[i].textContent().catch(() => "");
+            firstTexts.push((t || "").replace(/\s+/g, " ").substring(0, 80));
+          }
+          log("First emails: " + JSON.stringify(firstTexts));
         }
 
         const allLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
@@ -6717,9 +6819,9 @@ export async function registerZenrowsAccount(
             const junkItems = await outlookPage.$$('[role="listbox"] [role="option"], [aria-label*="message"], div[data-convid], tr[aria-label], div.customScrollBar div[tabindex]');
             for (const item of junkItems) {
               const text = await item.textContent().catch(() => "");
-              if ((text || "").toLowerCase().includes("zenrows") || (text || "").toLowerCase().includes("verify")) {
+              if ((text || "").toLowerCase().includes("zenrows") || ((text || "").toLowerCase().includes("verify") && (text || "").toLowerCase().includes("email"))) {
                 log("Found ZenRows email in junk folder! Clicking...");
-                await item.click();
+                try { await item.click({ force: true, timeout: 5000 }); } catch { await outlookPage.evaluate((el: any) => el.click(), item).catch(() => {}); }
                 await outlookPage.waitForTimeout(3000);
                 const junkLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
                   links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
