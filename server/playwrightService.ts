@@ -6176,37 +6176,68 @@ export async function registerZenrowsAccount(
       zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
     }
 
-    log("Launching browser for ZenRows registration...");
+    log("Launching browser for ZenRows registration via ZenRows proxy...");
 
-    await ensureBrowserInstalled();
-    const dedicatedBrowser = await chromium.launch({
-      headless: true,
-      args: [
+    let zenrowsBrowserForSignup: any = null;
+    let usedZenRowsForSignup = false;
+    let context: any;
+    let page: any;
+
+    let browserProxyUrl = "";
+    try {
+      const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+      if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+        browserProxyUrl = proxyRow.rows[0].value as string;
+      }
+    } catch {}
+
+    try {
+      let signupZenrowsUrl = zenrowsUrl;
+      if (!signupZenrowsUrl.includes('proxy_country=')) {
+        signupZenrowsUrl += (signupZenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+      }
+      zenrowsBrowserForSignup = await chromium.connectOverCDP(signupZenrowsUrl, { timeout: 30000 });
+      usedZenRowsForSignup = true;
+      log("Connected to ZenRows proxy browser for signup");
+      context = zenrowsBrowserForSignup.contexts()[0] || await zenrowsBrowserForSignup.newContext();
+      page = await context.newPage();
+    } catch (cdpErr: any) {
+      log("ZenRows CDP unavailable for signup (" + (cdpErr.message || "").substring(0, 60) + "), launching local browser" + (browserProxyUrl ? " with proxy" : ""));
+      await ensureBrowserInstalled();
+      const launchArgs = [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled",
-      ],
-    });
-    localBrowser = dedicatedBrowser;
-    log("Browser launched");
+      ];
+      const launchOpts: any = { headless: true, args: launchArgs };
+      if (browserProxyUrl) {
+        launchOpts.proxy = { server: browserProxyUrl };
+        log("Using browser proxy: " + browserProxyUrl.replace(/:[^:@]+@/, ":***@"));
+      }
+      const dedicatedBrowser = await chromium.launch(launchOpts);
+      localBrowser = dedicatedBrowser;
+      context = await dedicatedBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1920, height: 1080 },
+        locale: "en-US",
+        timezoneId: "America/Los_Angeles",
+      });
+      page = await context.newPage();
+    }
+    log("Browser launched" + (usedZenRowsForSignup ? " (ZenRows proxy)" : browserProxyUrl ? " (with proxy)" : " (local, no proxy)"));
 
-    const context = await dedicatedBrowser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      viewport: { width: 1920, height: 1080 },
-      locale: "en-US",
-      timezoneId: "America/Los_Angeles",
-    });
-    const page = await context.newPage();
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
 
-    await page.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-      (window as any).chrome = { runtime: {} };
-    });
+    if (!usedZenRowsForSignup) {
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        (window as any).chrome = { runtime: {} };
+      });
+    }
 
     log("Navigating to ZenRows register page...");
     try {
