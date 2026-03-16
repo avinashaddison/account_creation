@@ -106,7 +106,7 @@ export default function EmailWorkspace() {
   const allEmails: EmailItem[] = (() => {
     const t: EmailItem[] = activeTab === "account" ? [] : tempEmails;
     const a: EmailItem[] = activeTab === "temp" ? [] : accountEmails;
-    const combined = [...t, ...a];
+    const combined = [...t, ...a].sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
     if (!searchTerm) return combined;
     return combined.filter((e) => e.address.toLowerCase().includes(searchTerm.toLowerCase()));
   })();
