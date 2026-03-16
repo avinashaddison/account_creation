@@ -372,7 +372,7 @@ export function clearZenrowsApiKeyCache() {
 async function getZenRowsApiKey(): Promise<string> {
   if (zenrowsRestApiKeyCache !== null) return zenrowsRestApiKeyCache;
 
-  const ZENROWS_KEY_RE = /^[0-9][a-f0-9]{39,}$/;
+  const ZENROWS_KEY_RE = /^[a-f0-9]{40,}$/;
 
   if (process.env.ZENROWS_API_KEY) {
     const envKey = process.env.ZENROWS_API_KEY;
@@ -399,7 +399,7 @@ async function getZenRowsApiKey(): Promise<string> {
     const urlResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
     if (urlResult.rows.length > 0 && urlResult.rows[0].value) {
       const url = urlResult.rows[0].value as string;
-      const keyMatch = url.match(/apikey=([0-9][a-f0-9]{39,})/i);
+      const keyMatch = url.match(/apikey=([a-f0-9]{40,})/i);
       if (keyMatch) {
         zenrowsRestApiKeyCache = keyMatch[1];
         return zenrowsRestApiKeyCache;
@@ -6171,26 +6171,20 @@ async function tryZenRowsRestSignup(
     return { success: false, error: "No valid ZenRows API key for REST proxy" };
   }
 
-  log("Attempting ZenRows signup via REST API proxy...");
+  log("Attempting ZenRows signup via direct HTTP...");
   
   try {
     const registerPageUrl = "https://app.zenrows.com/register";
-    const params = new URLSearchParams({
-      apikey: apiKey,
-      url: registerPageUrl,
-      premium_proxy: "true",
-      js_render: "true",
-      wait: "5000",
-    });
     
-    log("Fetching register page via ZenRows REST API...");
-    const getResp = await fetch(`https://api.zenrows.com/v1/?${params.toString()}`, {
+    log("Fetching register page directly...");
+    const getResp = await fetch(registerPageUrl, {
       method: "GET",
       headers: {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       },
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(30000),
     });
     
     const pageHtml = await getResp.text();
@@ -6212,11 +6206,20 @@ async function tryZenRowsRestSignup(
     log("Found CSRF token: " + csrfToken.substring(0, 10) + "...");
     
     let cookies = "";
-    const setCookieHeaders = getResp.headers.get("set-cookie") || getResp.headers.get("Zr-Cookies") || "";
-    if (setCookieHeaders) {
-      const cookiePairs = setCookieHeaders.split(/[;,]/).filter(c => c.includes("=") && !c.includes("path=") && !c.includes("expires=") && !c.includes("domain=") && !c.includes("max-age=")).map(c => c.trim());
-      cookies = cookiePairs.join("; ");
-      log("Cookies: " + (cookies.length > 0 ? cookies.substring(0, 50) + "..." : "none"));
+    try {
+      const rawCookies = getResp.headers.getSetCookie ? getResp.headers.getSetCookie() : [];
+      if (rawCookies.length > 0) {
+        cookies = rawCookies.map(c => c.split(";")[0].trim()).filter(c => c.includes("=")).join("; ");
+      }
+      if (!cookies) {
+        const setCookieHeader = getResp.headers.get("set-cookie") || "";
+        if (setCookieHeader) {
+          cookies = setCookieHeader.split(",").map(c => c.split(";")[0].trim()).filter(c => c.includes("=")).join("; ");
+        }
+      }
+      log("Cookies: " + (cookies.length > 0 ? cookies.substring(0, 80) + "..." : "none"));
+    } catch (cookieErr: any) {
+      log("Cookie extraction error: " + (cookieErr.message || "").substring(0, 80));
     }
     
     const formData = new URLSearchParams({
@@ -6226,25 +6229,19 @@ async function tryZenRowsRestSignup(
       password: password,
     });
     
-    log("Posting signup form via ZenRows REST API...");
-    const postParams = new URLSearchParams({
-      apikey: apiKey,
-      url: registerPageUrl,
-      premium_proxy: "true",
-    });
-    if (cookies) {
-      postParams.set("custom_cookies", cookies);
-    }
-    
-    const postResp = await fetch(`https://api.zenrows.com/v1/?${postParams.toString()}`, {
+    log("Posting signup form directly...");
+    const postResp = await fetch(registerPageUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Origin": "https://app.zenrows.com",
         "Referer": "https://app.zenrows.com/register",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Cookie": cookies || "",
       },
       body: formData.toString(),
-      signal: AbortSignal.timeout(60000),
+      redirect: "manual",
+      signal: AbortSignal.timeout(30000),
     });
     
     const postBody = await postResp.text();
@@ -6328,17 +6325,8 @@ export async function registerZenrowsAccount(
 
     if (!restSignupDone) {
 
-    if (!zenrowsUrl) {
-      return { success: false, error: "ZenRows Browser URL not configured. Set it in Settings." };
-    }
-    if (!zenrowsUrl.includes('proxy_country=')) {
-      zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-    }
+    log("Launching local browser for ZenRows registration...");
 
-    log("Launching browser for ZenRows registration via ZenRows proxy...");
-
-    let zenrowsBrowserForSignup: any = null;
-    let usedZenRowsForSignup = false;
     let context: any;
     let page: any;
 
@@ -6350,18 +6338,7 @@ export async function registerZenrowsAccount(
       }
     } catch {}
 
-    try {
-      let signupZenrowsUrl = zenrowsUrl;
-      if (!signupZenrowsUrl.includes('proxy_country=')) {
-        signupZenrowsUrl += (signupZenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-      }
-      zenrowsBrowserForSignup = await chromium.connectOverCDP(signupZenrowsUrl, { timeout: 30000 });
-      usedZenRowsForSignup = true;
-      log("Connected to ZenRows proxy browser for signup");
-      context = zenrowsBrowserForSignup.contexts()[0] || await zenrowsBrowserForSignup.newContext();
-      page = await context.newPage();
-    } catch (cdpErr: any) {
-      log("ZenRows CDP unavailable for signup (" + (cdpErr.message || "").substring(0, 60) + "), launching local browser" + (browserProxyUrl ? " with proxy" : ""));
+    {
       await ensureBrowserInstalled();
       const launchArgs = [
         "--no-sandbox",
@@ -6373,6 +6350,8 @@ export async function registerZenrowsAccount(
       if (browserProxyUrl) {
         launchOpts.proxy = { server: browserProxyUrl };
         log("Using browser proxy: " + browserProxyUrl.replace(/:[^:@]+@/, ":***@"));
+      } else {
+        log("No browser proxy configured — using direct connection (may be IP-blocked)");
       }
       const dedicatedBrowser = await chromium.launch(launchOpts);
       localBrowser = dedicatedBrowser;
@@ -6384,19 +6363,17 @@ export async function registerZenrowsAccount(
       });
       page = await context.newPage();
     }
-    log("Browser launched" + (usedZenRowsForSignup ? " (ZenRows proxy)" : browserProxyUrl ? " (with proxy)" : " (local, no proxy)"));
+    log("Browser launched" + (browserProxyUrl ? " (with proxy)" : " (local, no proxy)"));
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
 
-    if (!usedZenRowsForSignup) {
-      await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        (window as any).chrome = { runtime: {} };
-      });
-    }
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      (window as any).chrome = { runtime: {} };
+    });
 
     log("Navigating to ZenRows register page...");
     try {
@@ -7257,11 +7234,11 @@ export async function registerZenrowsAccount(
     log("Builder page loaded: " + apiPage.url().substring(0, 100));
 
     let apiKey = "";
-    const ZENROWS_KEY_RE = /^[0-9][a-f0-9]{39,}$/;
+    const ZENROWS_KEY_RE = /^[a-f0-9]{40,}$/;
 
     try {
       apiKey = await apiPage.evaluate(() => {
-        const keyRe = /^[0-9][a-f0-9]{39,}$/;
+        const keyRe = /^[a-f0-9]{40,}$/;
         const inputs = document.querySelectorAll('input[readonly], input[type="text"]');
         for (const input of inputs) {
           const val = (input as HTMLInputElement).value;
@@ -7273,7 +7250,7 @@ export async function registerZenrowsAccount(
           if (keyRe.test(text)) return text;
         }
         const bodyText = document.body.innerText || "";
-        const match = bodyText.match(/\b[0-9][a-f0-9]{39,}\b/);
+        const match = bodyText.match(/\b[a-f0-9]{40,}\b/);
         if (match) return match[0];
         return "";
       });
@@ -7289,7 +7266,7 @@ export async function registerZenrowsAccount(
         if (copyBtn) {
           log("Found Copy button, trying to extract API key from nearby elements...");
           apiKey = await apiPage.evaluate(() => {
-            const keyRe = /^[0-9][a-f0-9]{39,}$/;
+            const keyRe = /^[a-f0-9]{40,}$/;
             const copyBtns = Array.from(document.querySelectorAll('button'));
             for (const btn of copyBtns) {
               if ((btn.textContent || "").toLowerCase().includes("copy")) {
@@ -7316,7 +7293,7 @@ export async function registerZenrowsAccount(
 
     if (!apiKey) {
       const allText = await apiPage.textContent("body").catch(() => "");
-      const hexMatch = (allText || "").match(/\b[0-9][a-f0-9]{39,}\b/);
+      const hexMatch = (allText || "").match(/\b[a-f0-9]{40,}\b/);
       if (hexMatch) {
         apiKey = hexMatch[0];
       }

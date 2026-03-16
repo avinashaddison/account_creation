@@ -123,6 +123,7 @@ function broadcast(data: any, ownerId?: string) {
 
 function broadcastLog(batchId: string, accountId: string, message: string, ownerId?: string) {
   addBatchLog(batchId, accountId, message);
+  console.log(`[${batchId}/${accountId}] ${message}`);
   broadcast({ type: "log", batchId, accountId, message, timestamp: new Date().toISOString() }, ownerId);
 }
 
@@ -698,8 +699,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Valid ZenRows API key is required" });
       }
       const trimmedKey = key.trim();
-      if (!/^[0-9][a-f0-9]{39,}$/.test(trimmedKey)) {
-        return res.status(400).json({ error: "ZenRows API key format invalid. Expected 41-char hex string starting with a digit (e.g. 0abc...def). Got length=" + trimmedKey.length });
+      if (!/^[a-f0-9]{40,}$/.test(trimmedKey)) {
+        return res.status(400).json({ error: "ZenRows API key format invalid. Expected 40+ char hex string (e.g. b00d07ad...). Got length=" + trimmedKey.length });
       }
       await storage.setSetting("zenrows_rest_api_key", trimmedKey);
       clearZenrowsApiKeyCache();
@@ -1975,7 +1976,7 @@ export async function registerRoutes(
             broadcastLog(batchId, regId, `ZenRows API Key extracted successfully`, userId);
             try {
               const caller = await storage.getUser(userId);
-              if (caller && caller.role === "superadmin" && /^[0-9][a-f0-9]{39,}$/.test(result.apiKey)) {
+              if (caller && caller.role === "superadmin" && /^[a-f0-9]{40,}$/.test(result.apiKey)) {
                 await storage.setSetting("zenrows_rest_api_key", result.apiKey);
                 clearZenrowsApiKeyCache();
                 broadcastLog(batchId, regId, `API key auto-saved to settings (length=${result.apiKey.length})`, userId);
