@@ -4706,11 +4706,9 @@ async function getBrowser(): Promise<Browser> {
   launching = true;
   try {
     await ensureBrowserInstalled();
-    const proxyConfig = getActiveProxyConfig();
-    console.log("[Browser] Launching Chromium with residential proxy: " + getActiveProxyLabel());
+    console.log("[Browser] Launching shared Chromium (la28id.la28.org registration — proxy not needed here)");
     browserInstance = await chromium.launch({
       headless: true,
-      proxy: proxyConfig,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -4725,7 +4723,6 @@ async function getBrowser(): Promise<Browser> {
         "--no-zygote",
         "--js-flags=--max-old-space-size=256",
         "--disable-http2",
-        "--ignore-certificate-errors",
       ],
     });
     browserInstance.on("disconnected", () => {
@@ -4991,7 +4988,7 @@ async function doRegistration(
 
   const usedZipCode = generateUSZip();
   log(`Using LA zip code ${usedZipCode} for all steps.`);
-  log("Registration/consent on la28id.la28.org via residential proxy.");
+  log("Registration/consent on la28id.la28.org. Proxy used for tickets.la28.org draw step.");
 
   const context = await browser.newContext(contextOptions);
 
