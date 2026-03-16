@@ -5701,6 +5701,7 @@ export async function createOutlookAccount(
   log: (msg: string) => void
 ): Promise<OutlookCreateResult> {
   let browser: any = null;
+  let usingProxy = false;
 
   const firstNames = ["James","Emma","Liam","Olivia","Noah","Ava","William","Sophia","Lucas","Mia","Henry","Charlotte","Alexander","Amelia","Benjamin","Harper","Daniel","Evelyn","Matthew","Abigail"];
   const lastNames = ["Anderson","Thomas","Jackson","White","Harris","Martin","Thompson","Garcia","Martinez","Robinson","Clark","Rodriguez","Lewis","Lee","Walker","Hall","Allen","Young","King","Wright"];
@@ -5724,17 +5725,37 @@ export async function createOutlookAccount(
     log("Generated email: " + email);
     log("Generated password: " + password.substring(0, 3) + "***");
 
-    await ensureBrowserInstalled();
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
-    });
+    const soaxProxy = await getSoaxProxyForAccount();
+    if (soaxProxy) {
+      log("Using Addison Residential proxy for account creation");
+      browser = await getBrowser(soaxProxy);
+      usingProxy = true;
+    } else {
+      log("No proxy available, launching direct browser");
+      await ensureBrowserInstalled();
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-features=IsolateOrigins,site-per-process",
+        ],
+      });
+    }
 
     const context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       viewport: { width: 1920, height: 1080 },
       locale: "en-US",
     });
+
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+    });
+
     const page = await context.newPage();
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
@@ -6058,140 +6079,190 @@ export async function createOutlookAccount(
 
     log("Checking for captcha...");
     let captchaSolved = false;
-    for (let captchaAttempt = 0; captchaAttempt < 3; captchaAttempt++) {
-      let funCaptchaDetected = false;
-      try {
-        const fcFrame = await page.$('iframe[id*="enforcementFrame"], iframe[data-testid*="captcha"], #FunCaptcha, iframe[title*="arkose"]');
-        if (fcFrame) funCaptchaDetected = true;
-        const fcDiv = await page.$('#hipEnforcementContainer, div[id*="arkose"], #hipTemplateContainer');
-        if (fcDiv) funCaptchaDetected = true;
 
-        if (!funCaptchaDetected) {
-          const bodyText = await page.textContent("body").catch(() => "");
-          if ((bodyText || "").toLowerCase().includes("prove you're human") || (bodyText || "").toLowerCase().includes("press and hold")) {
-            log("'Press and hold' challenge page detected, trying to interact...");
+    for (let captchaAttempt = 0; captchaAttempt < 5; captchaAttempt++) {
+      const bodyText = await page.textContent("body").catch(() => "");
+      const bodyLowerCheck = (bodyText || "").toLowerCase();
 
-            const hsFrame = page.frames().find(f => f.url().includes('hsprotect.net') || f.url().includes('human'));
-            if (hsFrame) {
-              log("Found HSProtect/PerimeterX iframe: " + hsFrame.url().substring(0, 80));
+      const isPerimeterX = bodyLowerCheck.includes("prove you're human") || bodyLowerCheck.includes("press and hold");
 
-              for (let holdAttempt = 0; holdAttempt < 3 && !captchaSolved; holdAttempt++) {
-                log("Press-and-hold attempt " + (holdAttempt + 1) + "/3...");
+      const fcFrame = await page.$('iframe[id*="enforcementFrame"], iframe[data-testid*="captcha"], #FunCaptcha, iframe[title*="arkose"]').catch(() => null);
+      const fcDiv = await page.$('#hipEnforcementContainer, div[id*="arkose"], #hipTemplateContainer').catch(() => null);
+      const isFunCaptcha = !!(fcFrame || fcDiv);
 
-                await page.waitForTimeout(2000 + holdAttempt * 1000);
-
-                const pxCaptcha = await hsFrame.$('#px-captcha');
-                if (pxCaptcha) {
-                  const box = await pxCaptcha.boundingBox();
-                  if (box && box.width > 10 && box.height > 10) {
-                    log("px-captcha box: " + JSON.stringify(box));
-                    const cx = box.x + box.width / 2;
-                    const cy = box.y + box.height / 2;
-
-                    await page.mouse.move(cx, cy, { steps: 5 });
-                    await page.waitForTimeout(200 + Math.random() * 300);
-                    await page.mouse.down();
-                    log("Mouse down on #px-captcha, holding for ~10s...");
-
-                    const holdTime = 8000 + Math.random() * 4000;
-                    const steps = 20;
-                    for (let s = 0; s < steps; s++) {
-                      await page.waitForTimeout(holdTime / steps);
-                      const jx = cx + (Math.random() - 0.5) * 2;
-                      const jy = cy + (Math.random() - 0.5) * 2;
-                      await page.mouse.move(jx, jy);
-                    }
-
-                    await page.mouse.up();
-                    log("Mouse up after hold, waiting for result...");
-                    await page.waitForTimeout(5000 + Math.random() * 3000);
-
-                    const afterHoldText = await page.textContent("body").catch(() => "");
-                    if (!(afterHoldText || "").toLowerCase().includes("prove you're human") && !(afterHoldText || "").toLowerCase().includes("press and hold")) {
-                      log("PerimeterX press-and-hold solved! Page moved past challenge");
-                      captchaSolved = true;
-                      break;
-                    }
-
-                    const frameHtml = await hsFrame.$eval('#px-captcha', (el: any) => el.innerHTML).catch(() => "");
-                    log("After hold, px-captcha inner: " + (frameHtml || "").substring(0, 200));
-                  } else {
-                    log("px-captcha has no valid bounding box: " + JSON.stringify(box));
-
-                    await page.waitForTimeout(3000);
-                    const retryBox = await pxCaptcha.boundingBox();
-                    if (retryBox && retryBox.width > 10) {
-                      log("px-captcha appeared after wait: " + JSON.stringify(retryBox));
-                      continue;
-                    }
-                  }
-                } else {
-                  log("No #px-captcha element found in iframe");
-                }
-              }
-            }
-
-            if (!captchaSolved) {
-              funCaptchaDetected = true;
-              log("Could not solve PerimeterX/HSProtect challenge via press-and-hold");
-            }
-          }
-        }
-      } catch {}
-
-      if (!funCaptchaDetected) {
+      if (!isPerimeterX && !isFunCaptcha) {
         log("No captcha detected");
         captchaSolved = true;
         break;
       }
 
-      log("FunCaptcha detected (attempt " + (captchaAttempt + 1) + "/3), solving via CapSolver...");
-      try {
-        const publicKey = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA";
-        let subdomain: string | undefined;
-        try {
-          const iframeSrcs = await page.$$eval('iframe', (els: any[]) =>
-            els.map((e: any) => e.src || '').filter((s: string) => s.includes('arkoselabs') || s.includes('funcaptcha'))
-          );
-          if (iframeSrcs.length > 0) {
-            const url = new URL(iframeSrcs[0]);
-            subdomain = url.origin;
-            log("FunCaptcha subdomain detected: " + subdomain);
+      if (isPerimeterX) {
+        log("PerimeterX press-and-hold challenge detected (attempt " + (captchaAttempt + 1) + "/5)...");
+
+        const hsFrame = page.frames().find((f: any) => f.url().includes('hsprotect.net') || f.url().includes('human'));
+        if (hsFrame) {
+          log("Found PerimeterX iframe: " + hsFrame.url().substring(0, 80));
+
+          await page.evaluate(() => {
+            const iframes = document.querySelectorAll('iframe[src*="hsprotect"]');
+            iframes.forEach((iframe: any) => {
+              iframe.style.position = 'fixed';
+              iframe.style.left = '100px';
+              iframe.style.top = '200px';
+              iframe.style.width = '400px';
+              iframe.style.height = '200px';
+              iframe.style.zIndex = '99999';
+            });
+          }).catch(() => {});
+          await page.waitForTimeout(500);
+
+          await hsFrame.evaluate(() => {
+            const el = document.getElementById('px-captcha');
+            if (el) {
+              el.style.width = '300px';
+              el.style.height = '60px';
+              el.style.position = 'relative';
+              el.style.left = '0';
+              el.style.top = '0';
+              el.style.display = 'block';
+              el.style.visibility = 'visible';
+              el.style.opacity = '1';
+            }
+          }).catch(() => {});
+          await page.waitForTimeout(1000);
+
+          const pxCaptcha = await hsFrame.$('#px-captcha').catch(() => null);
+          if (pxCaptcha) {
+            let box = await pxCaptcha.boundingBox().catch(() => null);
+            log("px-captcha box: " + JSON.stringify(box));
+
+            if (!box || box.x < 0 || box.width < 10) {
+              const iframeEl = await page.$('iframe[src*="hsprotect"]').catch(() => null);
+              if (iframeEl) {
+                const iframeBox = await iframeEl.boundingBox().catch(() => null);
+                log("iframe box: " + JSON.stringify(iframeBox));
+                if (iframeBox && iframeBox.width > 10 && iframeBox.x >= 0) {
+                  box = { x: iframeBox.x + 20, y: iframeBox.y + 20, width: iframeBox.width - 40, height: iframeBox.height - 40 };
+                  log("Using iframe position as fallback: " + JSON.stringify(box));
+                }
+              }
+            }
+
+            if (box && box.width >= 1 && box.x >= 0) {
+              const cx = box.x + box.width / 2;
+              const cy = box.y + box.height / 2;
+
+              await page.mouse.move(cx - 50, cy - 30, { steps: 3 });
+              await page.waitForTimeout(300 + Math.random() * 500);
+              await page.mouse.move(cx, cy, { steps: 5 });
+              await page.waitForTimeout(200 + Math.random() * 300);
+              await page.mouse.down();
+              log("Mouse down on px-captcha, holding for ~12s...");
+
+              const holdTime = 10000 + Math.random() * 5000;
+              const steps = 30;
+              for (let s = 0; s < steps; s++) {
+                await page.waitForTimeout(holdTime / steps);
+                const jx = cx + (Math.random() - 0.5) * 4;
+                const jy = cy + (Math.random() - 0.5) * 4;
+                await page.mouse.move(jx, jy);
+              }
+
+              await page.mouse.up();
+              log("Mouse up after hold, waiting for result...");
+              await page.waitForTimeout(5000 + Math.random() * 3000);
+
+              const afterHoldText = await page.textContent("body").catch(() => "");
+              const afterLower = (afterHoldText || "").toLowerCase();
+              if (!afterLower.includes("prove you're human") && !afterLower.includes("press and hold")) {
+                log("PerimeterX challenge solved! Page moved past challenge");
+                captchaSolved = true;
+                break;
+              }
+              log("Still on challenge page after hold attempt " + (captchaAttempt + 1));
+            } else {
+              log("px-captcha still has no usable bounding box");
+
+              await hsFrame.evaluate(() => {
+                const el = document.getElementById('px-captcha');
+                if (el) {
+                  const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 150, clientY: 30 });
+                  el.dispatchEvent(mousedown);
+                }
+              }).catch(() => {});
+              log("Dispatched mousedown via JS, holding 12s...");
+              await page.waitForTimeout(12000 + Math.random() * 3000);
+              await hsFrame.evaluate(() => {
+                const el = document.getElementById('px-captcha');
+                if (el) {
+                  const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 150, clientY: 30 });
+                  el.dispatchEvent(mouseup);
+                }
+              }).catch(() => {});
+              log("Dispatched mouseup via JS");
+              await page.waitForTimeout(5000 + Math.random() * 3000);
+
+              const afterJsText = await page.textContent("body").catch(() => "");
+              if (!(afterJsText || "").toLowerCase().includes("press and hold") && !(afterJsText || "").toLowerCase().includes("prove you're human")) {
+                log("PerimeterX solved via JS dispatch!");
+                captchaSolved = true;
+                break;
+              }
+            }
+          } else {
+            log("No #px-captcha element in iframe");
           }
-        } catch {}
-        if (!subdomain) {
-          subdomain = "https://client-api.arkoselabs.com";
-        }
-        const result = await solveFunCaptcha("https://signup.live.com/", publicKey, undefined, subdomain);
-        if (result.success && result.token) {
-          log("FunCaptcha solved! Injecting token...");
-          await page.evaluate((token: string) => {
-            const callback = (window as any).ArkoseEnforcement?.callback || (window as any).fc_callback;
-            if (typeof callback === "function") {
-              callback({ token });
-            }
-            const hiddenInput = document.querySelector('input[name="fc_token"], input[name="hipSolutionToken"], input[name="HipSolutionToken"]') as HTMLInputElement;
-            if (hiddenInput) {
-              hiddenInput.value = token;
-            }
-            const verifyBtn = document.querySelector('input[type="submit"], #iSignupAction') as HTMLElement;
-            if (verifyBtn) verifyBtn.click();
-          }, result.token);
-          await page.waitForTimeout(5000 + Math.random() * 3000);
-          log("FunCaptcha token injected, waiting for result...");
-          captchaSolved = true;
-          break;
         } else {
-          log("FunCaptcha solving failed: " + (result.error || "unknown"));
+          log("PerimeterX detected but no iframe found");
         }
-      } catch (fcErr: any) {
-        log("FunCaptcha error: " + (fcErr.message || "").substring(0, 100));
+
+        await page.waitForTimeout(2000 + Math.random() * 2000);
+        continue;
       }
-      await page.waitForTimeout(2000);
+
+      if (isFunCaptcha) {
+        log("FunCaptcha detected (attempt " + (captchaAttempt + 1) + "/5), solving via CapSolver...");
+        try {
+          const publicKey = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA";
+          let subdomain: string | undefined;
+          try {
+            const iframeSrcs = await page.$$eval('iframe', (els: any[]) =>
+              els.map((e: any) => e.src || '').filter((s: string) => s.includes('arkoselabs') || s.includes('funcaptcha'))
+            );
+            if (iframeSrcs.length > 0) {
+              const url = new URL(iframeSrcs[0]);
+              subdomain = url.origin;
+              log("FunCaptcha subdomain: " + subdomain);
+            }
+          } catch {}
+          if (!subdomain) subdomain = "https://client-api.arkoselabs.com";
+
+          const result = await solveFunCaptcha("https://signup.live.com/", publicKey, undefined, subdomain);
+          if (result.success && result.token) {
+            log("FunCaptcha solved! Injecting token...");
+            await page.evaluate((token: string) => {
+              const callback = (window as any).ArkoseEnforcement?.callback || (window as any).fc_callback;
+              if (typeof callback === "function") callback({ token });
+              const hiddenInput = document.querySelector('input[name="fc_token"], input[name="hipSolutionToken"], input[name="HipSolutionToken"]') as HTMLInputElement;
+              if (hiddenInput) hiddenInput.value = token;
+              const verifyBtn = document.querySelector('input[type="submit"], #iSignupAction') as HTMLElement;
+              if (verifyBtn) verifyBtn.click();
+            }, result.token);
+            await page.waitForTimeout(5000 + Math.random() * 3000);
+            captchaSolved = true;
+            break;
+          } else {
+            log("FunCaptcha solving failed: " + (result.error || "unknown"));
+          }
+        } catch (fcErr: any) {
+          log("FunCaptcha error: " + (fcErr.message || "").substring(0, 100));
+        }
+        await page.waitForTimeout(2000);
+      }
     }
 
     if (!captchaSolved) {
-      return { success: false, error: "Could not solve FunCaptcha after 3 attempts" };
+      return { success: false, error: "Could not solve captcha challenge after 5 attempts" };
     }
 
     await page.waitForTimeout(3000 + Math.random() * 2000);
@@ -6235,7 +6306,11 @@ export async function createOutlookAccount(
     log("Error creating Outlook account: " + (err.message || "").substring(0, 200));
     return { success: false, error: (err.message || "Unknown error").substring(0, 300) };
   } finally {
-    if (browser) { try { await browser.close(); } catch {} }
+    if (usingProxy && browser) {
+      try { await browser.close(); } catch {}
+    } else if (!usingProxy && browser) {
+      try { await browser.close(); } catch {}
+    }
   }
 }
 
