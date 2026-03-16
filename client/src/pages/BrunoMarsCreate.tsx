@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useServiceGuard } from "@/lib/useServiceGuard";
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ function getStepInfo(status: string): { label: string; color: string; icon: Reac
 }
 
 export default function BrunoMarsCreate() {
+  const { checking } = useServiceGuard("brunomars");
   const [count, setCount] = useState(1);
   const [proxyUrl, setProxyUrl] = useState("");
   const [isRunning, setIsRunning] = useState(false);
@@ -167,6 +169,8 @@ export default function BrunoMarsCreate() {
   const completed = accounts.filter(a => a.status === "completed").length;
   const failed = accounts.filter(a => a.status === "failed").length;
   const processing = accounts.filter(a => !["completed", "failed", "pending"].includes(a.status)).length;
+
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-5">

@@ -40,6 +40,7 @@ The application features a modern full-stack architecture.
 **Feature Specifications:**
 -   **Account Status Flow:** `pending` → `registering` → `waiting_code` → `verifying` → `verified` → `profile_saving` → `draw_registering` → `completed` / `failed`.
 -   **Multi-Admin Support:** Superadmin can manage admins, while admins have isolated data views and account creation limits based on wallet balance.
+    -   **Service Access Control:** Superadmin can toggle which services (la28, ticketmaster, uefa, brunomars, outlook, zenrows) each admin can access via the "Service Access" tab in Manage Admins. Enforced at both frontend (route guards via `useServiceGuard` hook, locked cards in CreateServer) and backend (`requireServiceAccess` middleware on all service API endpoints). The `allowedServices` text array column on the `users` table stores permitted services per admin.
 -   **Email Workspace:** Unified interface for generating temporary emails, viewing inboxes, and real-time status updates.
 -   **Batch Creation:** Supports batch account creation with real-time logging.
 -   **Specific Platform Integrations:**

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useServiceGuard } from "@/lib/useServiceGuard";
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ type LogEntry = { accountId: string; message: string; timestamp: string };
 type BatchAccount = { id: string; firstName: string; lastName: string; status: string };
 
 export default function UEFACreate() {
+  const { checking } = useServiceGuard("uefa");
   const [count, setCount] = useState(1);
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -93,6 +95,8 @@ export default function UEFACreate() {
       setIsRunning(false);
     }
   }
+
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-5">

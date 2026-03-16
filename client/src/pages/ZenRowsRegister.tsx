@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useServiceGuard } from "@/lib/useServiceGuard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,7 @@ type Result = {
 };
 
 export default function ZenRowsRegister() {
+  const { checking } = useServiceGuard("zenrows");
   const [showAuto, setShowAuto] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -110,6 +112,8 @@ export default function ZenRowsRegister() {
     }
     startRegistration(email.trim(), password.trim());
   }, [email, password, startRegistration]);
+
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-6">

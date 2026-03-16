@@ -45,6 +45,20 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
   return res.status(403).json({ error: "Super admin access required" });
 }
 
+function requireServiceAccess(serviceId: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (req.session && req.session.role === "superadmin") return next();
+    if (!req.session?.userId) return res.status(401).json({ error: "Not authenticated" });
+    const user = await storage.getUser(req.session.userId);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const allowed: string[] = (user as any).allowedServices || [];
+    if (!allowed.includes(serviceId)) {
+      return res.status(403).json({ error: `Access denied: ${serviceId} service not enabled for your account` });
+    }
+    return next();
+  };
+}
+
 const FREE_ACCOUNT_LIMIT = 0;
 const TRC20_ADDRESS = "TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB";
 const WHATSAPP_NUMBER = "420604332586";
@@ -497,6 +511,7 @@ export async function registerRoutes(
       freeAccountsUsed: user.freeAccountsUsed,
       walletBalance: user.walletBalance,
       panelName: user.panelName || "Addison Panel",
+      allowedServices: user.allowedServices,
     });
   });
 
@@ -525,6 +540,7 @@ export async function registerRoutes(
         role: u.role,
         freeAccountsUsed: u.freeAccountsUsed,
         walletBalance: u.walletBalance,
+        allowedServices: u.allowedServices,
       }));
       res.json(safeUsers);
     } catch (err: any) {
@@ -583,6 +599,24 @@ export async function registerRoutes(
       if (user.role === "superadmin") return res.status(400).json({ error: "Cannot change super admin password from here" });
       await storage.updateUserPassword(req.params.id, hashPassword(password));
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/users/:id/services", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { allowedServices } = req.body;
+      if (!Array.isArray(allowedServices)) {
+        return res.status(400).json({ error: "allowedServices must be an array" });
+      }
+      const validServices = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows"];
+      const filtered = allowedServices.filter((s: string) => validServices.includes(s));
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.role === "superadmin") return res.status(400).json({ error: "Cannot restrict super admin services" });
+      await db.update(users).set({ allowedServices: filtered }).where(eq(users.id, req.params.id));
+      res.json({ success: true, allowedServices: filtered });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -840,7 +874,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/create-batch", requireAuth, async (req, res) => {
+  app.post("/api/create-batch", requireAuth, requireServiceAccess("la28"), async (req, res) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -1499,7 +1533,7 @@ export async function registerRoutes(
     }
   }
 
-  app.post("/api/tm-create-batch", requireAuth, async (req, res) => {
+  app.post("/api/tm-create-batch", requireAuth, requireServiceAccess("ticketmaster"), async (req, res) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -1661,7 +1695,7 @@ export async function registerRoutes(
     }
   }
 
-  app.post("/api/uefa-create-batch", requireAuth, async (req, res) => {
+  app.post("/api/uefa-create-batch", requireAuth, requireServiceAccess("uefa"), async (req, res) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -1734,7 +1768,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/brunomars-create-batch", requireAuth, async (req, res) => {
+  app.post("/api/brunomars-create-batch", requireAuth, requireServiceAccess("brunomars"), async (req, res) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUser(userId);
@@ -1910,7 +1944,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/outlook-login", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/outlook-login", requireAuth, requireServiceAccess("outlook"), async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
       if (!email || !password) {
@@ -1951,7 +1985,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/zenrows-register", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/zenrows-register", requireAuth, requireServiceAccess("zenrows"), async (req: Request, res: Response) => {
     try {
       const { outlookEmail, outlookPassword } = req.body;
 

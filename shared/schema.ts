@@ -7,6 +7,9 @@ export const roleEnum = pgEnum("role", ["superadmin", "admin", "user"]);
 export const accountStatusEnum = pgEnum("account_status", ["pending", "registering", "waiting_code", "verifying", "verified", "profile_saving", "draw_registering", "completed", "failed", "filling_form", "selecting_events", "submitting", "presale_loading", "presale_filling", "presale_events", "presale_submitting"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["pending", "approved", "rejected"]);
 
+export const ALL_SERVICES = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows"] as const;
+export type ServiceId = typeof ALL_SERVICES[number];
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
@@ -17,6 +20,7 @@ export const users = pgTable("users", {
   walletBalance: numeric("wallet_balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
   panelName: text("panel_name").notNull().default("Addison Panel"),
   createdBy: varchar("created_by"),
+  allowedServices: text("allowed_services").array().notNull().default(sql`ARRAY['la28','ticketmaster','uefa','brunomars','outlook','zenrows']::text[]`),
 });
 
 export const accounts = pgTable("accounts", {

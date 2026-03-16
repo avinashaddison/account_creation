@@ -6,10 +6,20 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings, KeyRound, Globe } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Users, UserPlus, Trash2, Loader2, Wallet, CheckCircle2, XCircle, Clock, DollarSign, Settings, KeyRound, Globe, Shield } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { sounds } from "@/lib/sounds";
 import { useToast } from "@/hooks/use-toast";
+
+const ALL_SERVICES = [
+  { id: "la28", label: "LA28 Olympic", color: "text-red-400" },
+  { id: "ticketmaster", label: "Ticketmaster", color: "text-blue-400" },
+  { id: "uefa", label: "UEFA", color: "text-emerald-400" },
+  { id: "brunomars", label: "Bruno Mars", color: "text-purple-400" },
+  { id: "outlook", label: "Outlook Login", color: "text-sky-400" },
+  { id: "zenrows", label: "ZenRows", color: "text-green-400" },
+];
 
 type AdminUser = {
   id: string;
@@ -18,6 +28,7 @@ type AdminUser = {
   role: string;
   freeAccountsUsed: number;
   walletBalance: string;
+  allowedServices: string[];
 };
 
 type PaymentRequest = {
@@ -264,6 +275,30 @@ export default function ManageAdmins() {
     }
   }
 
+  async function toggleService(adminId: string, serviceId: string, currentServices: string[]) {
+    const newServices = currentServices.includes(serviceId)
+      ? currentServices.filter(s => s !== serviceId)
+      : [...currentServices, serviceId];
+    try {
+      const res = await fetch(`/api/admin/users/${adminId}/services`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowedServices: newServices }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        setAdmins(prev => prev.map(a => a.id === adminId ? { ...a, allowedServices: newServices } : a));
+        sounds.notification();
+        toast({ title: "Updated", description: `Service access updated` });
+      } else {
+        const data = await res.json();
+        toast({ title: "Error", description: data.error, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to update services", variant: "destructive" });
+    }
+  }
+
   const regularAdmins = admins.filter(a => a.role !== "superadmin");
   const pendingPayments = payments.filter(p => p.status === "pending");
 
@@ -399,6 +434,9 @@ export default function ManageAdmins() {
             {pendingPayments.length > 0 && (
               <Badge variant="destructive" className="ml-2 text-xs px-1.5">{pendingPayments.length}</Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="services" data-testid="tab-services">
+            <Shield className="w-4 h-4 mr-1" /> Service Access
           </TabsTrigger>
         </TabsList>
 
@@ -628,6 +666,61 @@ export default function ManageAdmins() {
                       ))}
                     </TableBody>
                   </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="services">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Shield className="w-5 h-5" />
+                Service Access Control
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">Control which services each admin can access. Superadmin always has full access.</p>
+              {regularAdmins.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">No admins to configure</p>
+              ) : (
+                <div className="space-y-6">
+                  {regularAdmins.map((admin) => (
+                    <div key={admin.id} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4" data-testid={`service-access-${admin.id}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-sm font-semibold text-zinc-200">{admin.username}</span>
+                        <span className="text-xs text-zinc-500">({admin.email})</span>
+                        <Badge variant="secondary" className="text-[10px] ml-auto">
+                          {(admin.allowedServices || []).length}/{ALL_SERVICES.length} enabled
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {ALL_SERVICES.map((svc) => {
+                          const enabled = (admin.allowedServices || []).includes(svc.id);
+                          return (
+                            <div
+                              key={svc.id}
+                              className={`flex items-center justify-between rounded-lg border px-3 py-2.5 transition-colors ${
+                                enabled
+                                  ? "border-white/10 bg-white/[0.03]"
+                                  : "border-white/[0.04] bg-white/[0.01] opacity-60"
+                              }`}
+                            >
+                              <span className={`text-xs font-medium ${enabled ? svc.color : "text-zinc-600"}`}>
+                                {svc.label}
+                              </span>
+                              <Switch
+                                checked={enabled}
+                                onCheckedChange={() => toggleService(admin.id, svc.id, admin.allowedServices || [])}
+                                data-testid={`switch-service-${admin.id}-${svc.id}`}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

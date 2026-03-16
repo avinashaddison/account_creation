@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useServiceGuard } from "@/lib/useServiceGuard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,7 @@ type BatchAccount = {
 const QUICK_AMOUNTS = [1, 5, 10, 25, 50, 100];
 
 export default function AutoCreate() {
+  const { checking } = useServiceGuard("la28");
   const [count, setCount] = useState(1);
   const [proxyList] = useState("");
   const [country, setCountry] = useState("United States");
@@ -187,6 +189,8 @@ export default function AutoCreate() {
   const doneCount = completedCount + failedCount;
   const accountPrice = useAccountPrice();
   const estimatedCost = (count * accountPrice).toFixed(2);
+
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-6 animate-float-up">
