@@ -6284,11 +6284,20 @@ export async function registerZenrowsAccount(
     await emailInput.click();
     await page.waitForTimeout(300 + Math.random() * 300);
     const emailToType = outlookEmail.toLowerCase();
-    for (const char of emailToType) {
-      await page.keyboard.type(char, { delay: 0 });
-      await page.waitForTimeout(20 + Math.random() * 40);
+    await emailInput.fill(emailToType);
+    await page.waitForTimeout(300);
+    const filledValue = await emailInput.inputValue().catch(() => "");
+    if (filledValue !== emailToType) {
+      log("fill() result mismatch: got '" + filledValue + "', trying type()...");
+      await emailInput.fill("");
+      await page.waitForTimeout(200);
+      for (const char of emailToType) {
+        await page.keyboard.type(char, { delay: 0 });
+        await page.waitForTimeout(20 + Math.random() * 40);
+      }
     }
-    log("Email filled");
+    const finalEmailValue = await emailInput.inputValue().catch(() => "");
+    log("Email filled: " + finalEmailValue);
 
     await page.waitForTimeout(500 + Math.random() * 500);
 
@@ -6538,14 +6547,16 @@ export async function registerZenrowsAccount(
     const hasError = pageLower.includes("error") || pageLower.includes("invalid");
 
     let signupFailed = false;
-    const toastErrors = await page.$$eval('[role="alert"], .toast, .notification, [class*="alert"], [class*="toast"], [class*="error"], [class*="Error"]', (els: any[]) =>
+    const toastErrors = await page.$$eval('[role="alert"], .toast, .notification, [class*="alert"], [class*="toast"], [class*="error"], [class*="Error"], [class*="invalid"], [class*="Invalid"], p[class*="text-red"], p[class*="text-destructive"], span[class*="text-red"], span[class*="text-destructive"], [aria-live="polite"], [aria-live="assertive"]', (els: any[]) =>
       els.map((e: any) => (e.textContent || "").trim().substring(0, 150)).filter((t: string) => t.length > 0)
     ).catch(() => []);
+    if (toastErrors.length > 0) {
+      log("Alerts/toasts: " + toastErrors.join(" | ").substring(0, 300));
+    }
     const hasInvalidEmail = toastErrors.some((t: string) => t.toLowerCase().includes("invalid email"));
 
     if (hasInvalidEmail) {
-      log("ZenRows rejected the email as invalid. The email format may not be accepted.");
-      signupFailed = true;
+      log("ZenRows shows 'Invalid email address' — will try ZenRows login as fallback (account may already exist).");
     } else if (afterSignupUrl.includes("/phone/input") || afterSignupUrl.includes("/verify") || afterSignupUrl.includes("/confirm")) {
       log("ZenRows redirected to verification/phone page: " + afterSignupUrl.substring(0, 100));
     } else if (needsVerification) {
@@ -6566,6 +6577,51 @@ export async function registerZenrowsAccount(
       try { await page.close(); } catch {}
       try { await context.close(); } catch {}
       return { success: false, error: "ZenRows signup failed — the email may be invalid or already in use. Try a different Outlook email." };
+    }
+
+    if (hasInvalidEmail || alreadyExists) {
+      log("Trying ZenRows login directly...");
+      try {
+        await page.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.waitForTimeout(3000 + Math.random() * 2000);
+
+        const loginCfCheck = await page.textContent("body").catch(() => "");
+        if ((loginCfCheck || "").length < 50 || (loginCfCheck || "").includes("challenge")) {
+          log("Cloudflare on login page, waiting...");
+          await page.waitForTimeout(10000);
+        }
+
+        const loginEmailInput = await page.$('input[type="email"], input[name="email"]');
+        const loginPassInput = await page.$('input[type="password"]');
+        if (loginEmailInput && loginPassInput) {
+          await loginEmailInput.fill(outlookEmail.toLowerCase());
+          await page.waitForTimeout(500);
+          await loginPassInput.fill(zenrowsPassword);
+          await page.waitForTimeout(500);
+          const loginBtn = await page.$('button[type="submit"]:has-text("Log In"), button[type="submit"]:has-text("Sign In"), button[type="submit"]');
+          if (loginBtn) {
+            await loginBtn.click();
+            await page.waitForTimeout(5000 + Math.random() * 3000);
+            const afterLoginUrl = page.url();
+            log("After ZenRows login attempt: " + afterLoginUrl.substring(0, 100));
+            if (afterLoginUrl.includes("dashboard") || afterLoginUrl.includes("onboarding") || afterLoginUrl.includes("builder")) {
+              log("ZenRows login successful! Account already exists.");
+              const apiKey = await page.$$eval('[class*="api"], [data-testid*="api"], code, pre, input[readonly], input[disabled]', (els: any[]) =>
+                els.map((e: any) => (e.textContent || e.value || "").trim()).filter((t: string) => t.length > 20 && t.length < 80)
+              ).catch(() => []);
+              try { await page.close(); } catch {}
+              try { await context.close(); } catch {}
+              if (apiKey.length > 0) {
+                log("Found API key: " + apiKey[0].substring(0, 8) + "***");
+                return { success: true, apiKey: apiKey[0], zenrowsPassword, message: "Account already existed — logged in and extracted API key" };
+              }
+              return { success: true, zenrowsPassword, message: "ZenRows account already exists — logged in successfully. Navigate to dashboard to get API key." };
+            }
+          }
+        }
+      } catch (loginErr: any) {
+        log("ZenRows login attempt error: " + (loginErr.message || "").substring(0, 80));
+      }
     }
 
     try { await page.close(); } catch {}
@@ -6750,11 +6806,19 @@ export async function registerZenrowsAccount(
       log(`Searching for ZenRows verification email (attempt ${attempt + 1}/12)...`);
 
       try {
-        const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], [aria-label*="message"], div[data-convid], tr[aria-label], div.customScrollBar div[tabindex]');
-        log(`Found ${emailItems.length} email items in inbox`);
+        const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], [role="treeitem"][aria-selected], div[aria-label*="message"] div[tabindex="0"], div[class*="customScrollBar"] div[role="option"]');
+        const filteredItems = [];
+        for (const item of emailItems) {
+          const text = await item.textContent().catch(() => "");
+          const t = (text || "").trim();
+          if (t.length > 10 && !t.startsWith("File") && !t.startsWith("Navigation") && t !== "Favorites" && t !== "Inbox" && t !== "Sent Items" && t !== "Drafts" && !t.startsWith("Folders")) {
+            filteredItems.push(item);
+          }
+        }
+        log(`Found ${filteredItems.length} email items in inbox (raw: ${emailItems.length})`);
 
         let emailClicked = false;
-        for (const item of emailItems) {
+        for (const item of filteredItems) {
           const text = await item.textContent().catch(() => "");
           if ((text || "").toLowerCase().includes("zenrows") || 
               ((text || "").toLowerCase().includes("verify") && (text || "").toLowerCase().includes("email")) ||
@@ -6791,14 +6855,36 @@ export async function registerZenrowsAccount(
           links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
         );
 
-        for (const link of allLinks) {
-          if (link.href && (
-            link.href.includes("zenrows.com") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token")) ||
-            link.text.toLowerCase().includes("verify") && link.href.includes("zenrows")
-          )) {
-            verifyLink = link.href;
-            log("Found verification link: " + verifyLink.substring(0, 120));
-            break;
+        const zenrowsLinks = allLinks.filter((link: any) =>
+          link.href && (
+            (link.href.includes("zenrows") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token") || link.href.includes("activate"))) ||
+            (link.text.toLowerCase().includes("verify") && link.href.includes("zenrows")) ||
+            (link.text.toLowerCase().includes("confirm") && link.href.includes("zenrows")) ||
+            (link.text.toLowerCase().includes("activate") && !link.href.includes("microsoft") && !link.href.includes("outlook"))
+          )
+        );
+        if (zenrowsLinks.length > 0) {
+          verifyLink = zenrowsLinks[0].href;
+          log("Found verification link: " + verifyLink.substring(0, 120));
+        }
+
+        if (!verifyLink && emailClicked) {
+          const readingPaneLinks = allLinks.filter((link: any) =>
+            link.href &&
+            !link.href.includes("outlook.live.com") &&
+            !link.href.includes("microsoft.com") &&
+            !link.href.includes("office.com") &&
+            !link.href.includes("aka.ms") &&
+            !link.href.startsWith("mailto:") &&
+            link.href.startsWith("http")
+          );
+          if (readingPaneLinks.length > 0) {
+            log("External links in email: " + JSON.stringify(readingPaneLinks.slice(0, 5).map((l: any) => l.href.substring(0, 80))));
+            const zenLink = readingPaneLinks.find((l: any) => l.href.includes("zenrows"));
+            if (zenLink) {
+              verifyLink = zenLink.href;
+              log("Found ZenRows link in email: " + verifyLink.substring(0, 120));
+            }
           }
         }
 
@@ -6811,27 +6897,39 @@ export async function registerZenrowsAccount(
           log("Found 'zenrows' in page text near: " + snippet.replace(/\s+/g, " ").substring(0, 120));
         }
 
-        if (!verifyLink && attempt === 3) {
-          log("Checking 'Other' folder...");
+        if (!verifyLink && (attempt === 1 || attempt === 3 || attempt === 6)) {
+          log("Checking junk/other folder (attempt " + (attempt + 1) + ")...");
           try {
             await outlookPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
             await outlookPage.waitForTimeout(4000);
-            const junkItems = await outlookPage.$$('[role="listbox"] [role="option"], [aria-label*="message"], div[data-convid], tr[aria-label], div.customScrollBar div[tabindex]');
+            const junkRaw = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], [aria-label*="message list"] [role="treeitem"], [aria-label*="Message list"] div[role="option"]');
+            const junkItems = [];
+            for (const ji of junkRaw) {
+              const jt = await ji.textContent().catch(() => "");
+              if ((jt || "").trim().length > 10 && !(jt || "").trim().startsWith("File") && !(jt || "").trim().startsWith("Navigation")) junkItems.push(ji);
+            }
+            log(`Junk folder: ${junkItems.length} email items`);
             for (const item of junkItems) {
               const text = await item.textContent().catch(() => "");
               if ((text || "").toLowerCase().includes("zenrows") || ((text || "").toLowerCase().includes("verify") && (text || "").toLowerCase().includes("email"))) {
-                log("Found ZenRows email in junk folder! Clicking...");
+                log("Found ZenRows email in junk folder: " + (text || "").replace(/\s+/g, " ").substring(0, 100));
                 try { await item.click({ force: true, timeout: 5000 }); } catch { await outlookPage.evaluate((el: any) => el.click(), item).catch(() => {}); }
-                await outlookPage.waitForTimeout(3000);
+                await outlookPage.waitForTimeout(5000);
                 const junkLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
                   links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
                 );
-                for (const link of junkLinks) {
-                  if (link.href && link.href.includes("zenrows.com") && (link.href.includes("verify") || link.href.includes("confirm") || link.href.includes("token"))) {
+                const externalJunkLinks = junkLinks.filter((l: any) => l.href && l.href.startsWith("http") && !l.href.includes("outlook.live.com") && !l.href.includes("microsoft.com") && !l.href.includes("office.com") && !l.href.includes("aka.ms") && !l.href.startsWith("mailto:"));
+                log("External links in junk email: " + JSON.stringify(externalJunkLinks.slice(0, 8).map((l: any) => ({ href: l.href.substring(0, 120), text: l.text.substring(0, 40) }))));
+                for (const link of externalJunkLinks) {
+                  if (link.href && (link.href.includes("zenrows") || link.text.toLowerCase().includes("verify") || link.text.toLowerCase().includes("confirm") || link.text.toLowerCase().includes("activate"))) {
                     verifyLink = link.href;
-                    log("Found verification link in junk: " + verifyLink.substring(0, 120));
+                    log("Found verification link in junk: " + verifyLink.substring(0, 150));
                     break;
                   }
+                }
+                if (!verifyLink && externalJunkLinks.length > 0) {
+                  verifyLink = externalJunkLinks[0].href;
+                  log("Using first external link from junk as verification: " + verifyLink.substring(0, 150));
                 }
                 break;
               }
