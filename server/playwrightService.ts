@@ -2497,8 +2497,8 @@ export async function completeDrawViaGigyaBrowser(
 
   let formSubmitted = false;
 
-  log("Draw via local Chromium + CapSolver token injection...");
-  console.log("[Draw] Starting for " + email + " via local Chromium (no proxy) + CapSolver token injection");
+  log("Draw via local Chromium + residential proxy + CapSolver token injection...");
+  console.log("[Draw] Starting for " + email + " via local Chromium + residential proxy + CapSolver token injection");
 
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -2519,16 +2519,35 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      console.log("[Draw] Launching local Chromium (no proxy)...");
-      browser = await chromium.launch({
+      let browserProxyUrl = "";
+      try {
+        const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+        if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+          browserProxyUrl = proxyRow.rows[0].value as string;
+        }
+      } catch {}
+      const launchOpts: any = {
         headless: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-blink-features=AutomationControlled',
+          '--ignore-certificate-errors',
         ],
-      });
+      };
+      if (browserProxyUrl) {
+        const proxyUrl = new URL(browserProxyUrl);
+        launchOpts.proxy = {
+          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+          username: decodeURIComponent(proxyUrl.username),
+          password: decodeURIComponent(proxyUrl.password),
+        };
+        console.log("[Draw] Launching Chromium with residential proxy: " + proxyUrl.hostname + ":" + proxyUrl.port);
+      } else {
+        console.log("[Draw] No browser_proxy_url in settings — launching without proxy");
+      }
+      browser = await chromium.launch(launchOpts);
       const context = await browser.newContext({
         ignoreHTTPSErrors: true,
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -2545,7 +2564,7 @@ export async function completeDrawViaGigyaBrowser(
       `);
       page = await context.newPage();
       page.setDefaultTimeout(60000);
-      console.log("[Draw] Chromium launched (no proxy, stealth mode)");
+      console.log("[Draw] Chromium launched (" + (browserProxyUrl ? "with residential proxy" : "no proxy") + ", stealth mode)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -2778,12 +2797,126 @@ export async function completeDrawViaGigyaBrowser(
       try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
 
       let postLoginUrl = page.url();
-      if (postLoginUrl.includes("proxy.html") || postLoginUrl.includes("consent.html")) {
-        console.log("[Draw] On intermediate page (" + postLoginUrl.substring(0, 80) + "), navigating back...");
+      if (postLoginUrl.includes("consent.html")) {
+        console.log("[Draw] On consent page (" + postLoginUrl.substring(0, 120) + "), handling consent...");
         try {
-          await page.goto("https://la28id.la28.org/login/", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(2000);
+
+          const cookieBanner = await page.$('#onetrust-accept-btn-handler');
+          if (cookieBanner) {
+            console.log("[Draw] Dismissing OneTrust cookie banner...");
+            await cookieBanner.click();
+            await page.waitForTimeout(1000);
+          }
+
+          const consentPageInfo = await page.evaluate(`(function() {
+            var allInputs = document.querySelectorAll('input[type="checkbox"]');
+            var gigyaInputs = [];
+            allInputs.forEach(function(cb) {
+              var name = cb.getAttribute('name') || cb.getAttribute('data-gigya-name') || '';
+              gigyaInputs.push({ name: name, checked: cb.checked, visible: cb.offsetWidth > 0 });
+            });
+            var submitBtns = [];
+            document.querySelectorAll('.gigya-input-submit, input[type="submit"], button[type="submit"], input[value="Submit"], input[value="Save"]').forEach(function(btn) {
+              submitBtns.push({ tag: btn.tagName, value: btn.value || btn.textContent || '', visible: btn.offsetWidth > 0 });
+            });
+            var pageText = document.body ? document.body.innerText.substring(0, 500) : '';
+            return { checkboxes: gigyaInputs, submitButtons: submitBtns, text: pageText, hasGigya: typeof gigya !== 'undefined' };
+          })()`);
+          console.log("[Draw] Consent page info: " + JSON.stringify(consentPageInfo).substring(0, 500));
+
+          const consentResult = await page.evaluate(`(function() {
+            return new Promise(function(resolve) {
+              var checkboxes = document.querySelectorAll('input[type="checkbox"]');
+              var checked = 0;
+              checkboxes.forEach(function(cb) {
+                if (!cb.checked) {
+                  cb.checked = true;
+                  cb.dispatchEvent(new Event('change', { bubbles: true }));
+                  cb.dispatchEvent(new Event('input', { bubbles: true }));
+                  cb.dispatchEvent(new Event('click', { bubbles: true }));
+                  checked++;
+                }
+              });
+
+              var submitted = false;
+              var submitBtn = document.querySelector('.gigya-input-submit');
+              if (!submitBtn) submitBtn = document.querySelector('input[type="submit"][value="Submit"]');
+              if (!submitBtn) submitBtn = document.querySelector('input[type="submit"]');
+              if (!submitBtn) submitBtn = document.querySelector('button[type="submit"]');
+              if (submitBtn) {
+                submitBtn.click();
+                submitted = true;
+              }
+              resolve({ checked: checked, submitted: submitted, submitTag: submitBtn ? submitBtn.tagName + '.' + (submitBtn.value || submitBtn.className || '') : 'none' });
+            });
+          })()`);
+          console.log("[Draw] Consent form result: " + JSON.stringify(consentResult));
+
+          await page.waitForTimeout(5000);
+          try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+
+          const afterConsentUrl = page.url();
+          console.log("[Draw] After consent handling, URL: " + afterConsentUrl.substring(0, 120));
+
+          if (afterConsentUrl.includes("consent.html")) {
+            console.log("[Draw] Still on consent. Trying Gigya accounts.setAccountInfo to accept preferences...");
+            const apiConsent = await page.evaluate(`(function() {
+              return new Promise(function(resolve) {
+                if (typeof gigya === 'undefined') { resolve({ done: false, reason: 'no gigya' }); return; }
+                gigya.accounts.setAccountInfo({
+                  preferences: {
+                    terms: { LA2028siteTerms: { isConsentGranted: true } },
+                    privacy: { LA2028privacyPolicy: { isConsentGranted: true } },
+                    confirmationAge: { isConsentGranted: true },
+                    ProfilingConsent: { isConsentGranted: true }
+                  },
+                  callback: function(resp) {
+                    resolve({ done: resp.errorCode === 0, errorCode: resp.errorCode, error: resp.errorMessage || '' });
+                  }
+                });
+                setTimeout(function() { resolve({ done: false, reason: 'timeout' }); }, 15000);
+              });
+            })()`);
+            console.log("[Draw] Gigya API consent result: " + JSON.stringify(apiConsent));
+            if (apiConsent && (apiConsent as any).done) {
+              console.log("[Draw] Consent accepted via API! Navigating to main page...");
+              try {
+                await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 30000 });
+                await page.waitForTimeout(3000);
+              } catch {}
+            }
+          }
+        } catch (consentErr: any) {
+          console.log("[Draw] Consent handling error: " + consentErr.message.substring(0, 100));
+        }
+      } else if (postLoginUrl.includes("proxy.html")) {
+        console.log("[Draw] On proxy.html, waiting for redirect...");
+        try {
+          await page.waitForTimeout(5000);
+          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+        } catch {}
+      }
+
+      postLoginUrl = page.url();
+      if (postLoginUrl.includes("consent.html") || postLoginUrl.includes("proxy.html") || postLoginUrl.includes("chrome-error")) {
+        console.log("[Draw] Still on intermediate/error page after consent handling: " + postLoginUrl.substring(0, 120));
+        console.log("[Draw] Navigating to la28id main page...");
+        try {
+          await page.goto("https://la28id.la28.org/", { waitUntil: "domcontentloaded", timeout: 30000 });
           await page.waitForTimeout(3000);
         } catch {}
+      } else {
+        console.log("[Draw] Post-consent page: " + postLoginUrl.substring(0, 120));
+      }
+
+      postLoginUrl = page.url();
+      if (postLoginUrl.includes("tickets.la28.org")) {
+        console.log("[Draw] Already on tickets.la28.org after consent! Login+OIDC completed automatically.");
+        log("Login + OIDC completed! Already on tickets.la28.org");
+        profileSet = true;
+        dataSet = true;
+        break;
       }
 
       try {
@@ -2812,7 +2945,7 @@ export async function completeDrawViaGigyaBrowser(
       console.log("[Draw] Auth check: " + JSON.stringify(authCheck));
 
       if (!authCheck.loggedIn) {
-        log("Session lost after redirect. Retrying...");
+        log("Session lost after consent. Retrying...");
         continue;
       }
 
@@ -3237,6 +3370,211 @@ export async function completeDrawViaGigyaBrowser(
 
       if (!page || page.isClosed()) {
         throw new Error("Browser page is closed, cannot proceed with OIDC");
+      }
+
+      const alreadyOnTickets = page && !page.isClosed() && page.url().includes("tickets.la28.org") && !page.url().includes("next.tickets.la28.org");
+      if (alreadyOnTickets) {
+        console.log("[Draw-OIDC] Already on tickets.la28.org from consent flow! Skipping OIDC navigation.");
+        log("Already on tickets.la28.org — skipping OIDC, proceeding to form fill...");
+        oidcLinked = true;
+
+        try {
+          console.log("[Draw-OIDC] Waiting for tickets page to settle after consent redirect...");
+          await page.waitForTimeout(8000);
+          try { await page.waitForLoadState("domcontentloaded", { timeout: 15000 }); } catch {}
+          try { await page.waitForLoadState("networkidle", { timeout: 10000 }); } catch {}
+
+          const settledUrl = page.url();
+          console.log("[Draw-OIDC] Settled URL after consent: " + settledUrl.substring(0, 120));
+
+          if (settledUrl.includes("next.tickets.la28.org")) {
+            console.log("[Draw-OIDC] In Queue-it queue after consent redirect. Waiting up to 4 minutes...");
+            log("In Queue-it queue, waiting...");
+            const qStart = Date.now();
+            while (Date.now() - qStart < 240000) {
+              await page.waitForTimeout(5000);
+              const qUrl = page.url();
+              if (!qUrl.includes("next.tickets.la28.org")) {
+                console.log("[Draw-OIDC] Queue passed! Now at: " + qUrl.substring(0, 120));
+                break;
+              }
+            }
+          }
+
+          const currentTicketsUrl = page.url();
+          if (currentTicketsUrl.includes("tickets.la28.org") && !currentTicketsUrl.includes("mycustomerdata") && !currentTicketsUrl.includes("next.tickets")) {
+            console.log("[Draw-OIDC] On tickets.la28.org root, navigating to mycustomerdata...");
+            let rootPageText = "";
+            try {
+              rootPageText = await page.evaluate(`(document.body.innerText || '').substring(0, 500)`) as string;
+              console.log("[Draw-OIDC] Root page text: " + rootPageText.substring(0, 300));
+            } catch {}
+
+            const akamaiBlocked = rootPageText.toLowerCase().includes("access denied") || rootPageText.toLowerCase().includes("don't have permission");
+            if (akamaiBlocked) {
+              console.log("[Draw-OIDC] Akamai WAF blocked proxy IP on tickets.la28.org! Extracting cookies for fresh proxy browser...");
+            }
+
+            let navSuccess = false;
+
+            if (!akamaiBlocked) {
+              console.log("[Draw-OIDC] Trying client-side JS navigation to mycustomerdata...");
+              try {
+                await page.evaluate(`window.location.href = 'https://tickets.la28.org/mycustomerdata/?#/myCustomerData'`);
+                await page.waitForTimeout(3000);
+                try { await page.waitForLoadState("domcontentloaded", { timeout: 30000 }); } catch {}
+                try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+                await page.waitForTimeout(5000);
+                const jsNavUrl = page.url();
+                console.log("[Draw-OIDC] After JS nav: " + jsNavUrl.substring(0, 120));
+                if (jsNavUrl.includes("mycustomerdata") || jsNavUrl.includes("next.tickets")) {
+                  navSuccess = true;
+                }
+              } catch (jsNavErr: any) {
+                console.log("[Draw-OIDC] JS nav error: " + (jsNavErr.message || '').substring(0, 100));
+              }
+
+              if (!navSuccess) {
+                console.log("[Draw-OIDC] JS nav didn't work. Trying page.goto...");
+                try {
+                  await page.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+                  try { await page.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+                  await page.waitForTimeout(5000);
+                  console.log("[Draw-OIDC] After page.goto: " + page.url().substring(0, 120));
+                  navSuccess = true;
+                } catch (navErr: any) {
+                  console.log("[Draw-OIDC] page.goto failed: " + (navErr.message || '').substring(0, 100));
+                }
+              }
+            }
+
+            if (!navSuccess) {
+              console.log("[Draw-OIDC] Nav failed. Extracting cookies for fresh proxy browser...");
+              try {
+                const cookies = await page.context().cookies();
+                console.log("[Draw-OIDC] Extracted " + cookies.length + " cookies");
+                
+                await page.context().browser()?.close();
+
+                const freshLaunchOpts: any = {
+                  headless: true,
+                  args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"],
+                };
+                if (browserProxyUrl) {
+                  const freshProxyUrl = new URL(browserProxyUrl);
+                  freshLaunchOpts.proxy = {
+                    server: `${freshProxyUrl.protocol}//${freshProxyUrl.hostname}:${freshProxyUrl.port}`,
+                    username: decodeURIComponent(freshProxyUrl.username),
+                    password: decodeURIComponent(freshProxyUrl.password),
+                  };
+                  console.log("[Draw-OIDC] Fresh browser with proxy: " + freshProxyUrl.hostname);
+                }
+                const freshBrowser = await chromium.launch(freshLaunchOpts);
+                const freshContext = await freshBrowser.newContext({
+                  ignoreHTTPSErrors: true,
+                  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                  viewport: { width: 1366, height: 768 },
+                  locale: 'en-US',
+                  timezoneId: 'America/Los_Angeles',
+                });
+                await freshContext.addCookies(cookies);
+                const freshPage = await freshContext.newPage();
+                console.log("[Draw-OIDC] Fresh proxy browser created, navigating...");
+
+                try {
+                  await freshPage.goto("https://tickets.la28.org/mycustomerdata/?#/myCustomerData", { waitUntil: "domcontentloaded", timeout: 60000 });
+                  try { await freshPage.waitForLoadState("networkidle", { timeout: 15000 }); } catch {}
+                  await freshPage.waitForTimeout(5000);
+                  const freshUrl = freshPage.url();
+                  console.log("[Draw-OIDC] Fresh browser URL: " + freshUrl.substring(0, 120));
+                  const freshText = await freshPage.evaluate(`(document.body.innerText || '').substring(0, 300)`) as string;
+                  console.log("[Draw-OIDC] Fresh browser text: " + freshText.substring(0, 200));
+
+                  if (freshText.toLowerCase().includes("access denied")) {
+                    console.log("[Draw-OIDC] Fresh proxy also blocked by Akamai. Will fall through to ZenRows.");
+                    try { await freshBrowser.close(); } catch {}
+                  } else {
+                    if (freshUrl.includes("next.tickets.la28.org")) {
+                      console.log("[Draw-OIDC] Fresh browser in Queue-it, waiting...");
+                      const qS = Date.now();
+                      while (Date.now() - qS < 240000) {
+                        await freshPage.waitForTimeout(5000);
+                        if (!freshPage.url().includes("next.tickets.la28.org")) break;
+                      }
+                    }
+                    page = freshPage;
+                    navSuccess = true;
+                  }
+                } catch (freshNavErr: any) {
+                  console.log("[Draw-OIDC] Fresh browser nav failed: " + (freshNavErr.message || '').substring(0, 100));
+                  try { await freshBrowser.close(); } catch {}
+                }
+              } catch (cookieErr: any) {
+                console.log("[Draw-OIDC] Cookie extraction error: " + (cookieErr.message || '').substring(0, 100));
+              }
+            }
+
+            const postNavUrl = page.url();
+            if (postNavUrl.includes("next.tickets.la28.org")) {
+              console.log("[Draw-OIDC] In Queue-it, waiting...");
+              const qS = Date.now();
+              while (Date.now() - qS < 240000) {
+                await page.waitForTimeout(5000);
+                if (!page.url().includes("next.tickets.la28.org")) break;
+              }
+            }
+          }
+
+          let checkUrl2 = page.url();
+          if (checkUrl2.includes("next.tickets.la28.org")) {
+            console.log("[Draw-OIDC] In Queue-it queue after consent shortcut. Waiting...");
+            log("In Queue-it queue, waiting...");
+            const qStart2 = Date.now();
+            while (Date.now() - qStart2 < 240000) {
+              await page.waitForTimeout(5000);
+              checkUrl2 = page.url();
+              if (!checkUrl2.includes("next.tickets.la28.org")) {
+                console.log("[Draw-OIDC] Queue passed! Now at: " + checkUrl2.substring(0, 120));
+                break;
+              }
+            }
+          }
+
+          await page.waitForTimeout(3000);
+          const formResult = await fillAndSubmitTicketsForm(
+            page, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
+          );
+          if (formResult) {
+            const verifyUrl = page.url();
+            const verifyText = await page.evaluate(`(document.body.innerText || '').substring(0, 1500)`) as string;
+            const verifyTextLower = verifyText.toLowerCase();
+            const urlOk = verifyUrl.includes('mydatasuccess') || verifyUrl.includes('myCustomerDataSuccess');
+            const textOk = (verifyTextLower.includes('registered') && verifyTextLower.includes('draw')) ||
+                           (verifyTextLower.includes('your status') && verifyTextLower.includes('registered for the draw')) ||
+                           (verifyTextLower.includes('your changes have been saved') && verifyTextLower.includes('registration has been submitted'));
+            if (urlOk || (textOk && !verifyTextLower.includes('enter the draw by completing'))) {
+              formSubmitted = true;
+              log("Draw form submitted and success page verified!");
+              console.log("[Draw-OIDC] SUCCESS via consent shortcut! Form submitted.");
+            } else {
+              console.log("[Draw-OIDC] Consent shortcut: form returned true but success page NOT verified. URL: " + verifyUrl.substring(0, 100) + " Text: " + verifyText.substring(0, 200));
+              log("Form submitted but success page NOT verified.");
+            }
+          } else {
+            log("On tickets page (consent shortcut) but form fill did not complete.");
+          }
+        } catch (csErr: any) {
+          console.log("[Draw-OIDC] Consent shortcut form error: " + (csErr.message || '').substring(0, 150));
+          log("Consent shortcut form error: " + (csErr.message || '').substring(0, 80));
+        }
+      }
+
+      if (alreadyOnTickets && formSubmitted) {
+        console.log("[Draw-OIDC] Form already submitted via consent shortcut. Skipping OIDC section.");
+        throw Object.assign(new Error("SKIP_OIDC"), { skipOidc: true });
+      }
+      if (alreadyOnTickets && !formSubmitted) {
+        console.log("[Draw-OIDC] Already on tickets from consent but form not submitted. Will try OIDC form fill.");
       }
 
       log("Step 2: Navigating to OIDC auth URL (Keycloak → tickets.la28.org)...");
@@ -4464,8 +4802,12 @@ export async function completeDrawViaGigyaBrowser(
         }
       }
     } catch (oidcErr: any) {
-      console.log("[Draw-OIDC] Error (non-fatal): " + (oidcErr.message || '').substring(0, 200));
-      log("Draw form skipped: " + (oidcErr.message || '').substring(0, 80));
+      if (oidcErr.skipOidc) {
+        console.log("[Draw-OIDC] OIDC skipped — form already submitted via consent shortcut.");
+      } else {
+        console.log("[Draw-OIDC] Error (non-fatal): " + (oidcErr.message || '').substring(0, 200));
+        log("Draw form skipped: " + (oidcErr.message || '').substring(0, 80));
+      }
     }
 
     if (nstBrowser) {
