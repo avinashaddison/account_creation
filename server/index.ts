@@ -22,12 +22,13 @@ declare module "express-session" {
   }
 }
 
-if (!process.env.DATABASE_URL) {
+const effectiveDatabaseUrl = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
+if (!effectiveDatabaseUrl) {
   console.error("FATAL: DATABASE_URL environment variable is not set");
   process.exit(1);
 }
 
-const pgPool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pgPool = new pg.Pool({ connectionString: effectiveDatabaseUrl });
 
 const PgStore = connectPgSimple(session);
 

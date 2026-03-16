@@ -55,6 +55,7 @@ LA28_PROXY_URL = "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay
 DECODO_PROXY_USERNAME = "spzg7axtkh"
 DECODO_PROXY_PASSWORD = "ua62voA3DQqvi9Zf=t"
 DECODO_PROXY_HOST = "us.decodo.com"
+NEON_DATABASE_URL = "postgresql://neondb_owner:npg_Tfz7wIh8sHai@ep-odd-pine-ak31fs42.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require"
 
 [postMerge]
 path = "scripts/post-merge.sh"

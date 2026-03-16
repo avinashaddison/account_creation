@@ -167,7 +167,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async debitWallet(userId: string, amount: number): Promise<boolean> {
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL });
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -191,7 +191,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async creditWallet(userId: string, amount: number): Promise<boolean> {
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL });
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -215,7 +215,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async approvePaymentAtomic(requestId: string): Promise<{ success: boolean; newBalance?: string; error?: string }> {
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL });
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
