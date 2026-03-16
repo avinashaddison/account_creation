@@ -363,42 +363,7 @@ async function curlImpersonate(
 }
 
 const ZENROWS_API_BASE = "https://api.zenrows.com/v1/";
-const ZENROWS_PROXY_HOST = "proxy.zenrows.com";
-const ZENROWS_PROXY_PORT = 8001;
 let zenrowsRestApiKeyCache: string | null = null;
-
-async function launchBrowserWithZenRowsProxy(log?: (msg: string) => void): Promise<{ browser: any; context: any; page: Page }> {
-  await ensureBrowserInstalled();
-  const apiKey = await getZenRowsApiKey();
-  if (!apiKey) {
-    throw new Error("ZenRows API key not configured. Set it in Settings.");
-  }
-  const logMsg = log || ((m: string) => console.log("[ZenRows-Proxy] " + m));
-  logMsg("Launching browser with ZenRows residential proxy...");
-
-  const browser = await chromium.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--ignore-certificate-errors",
-    ],
-    proxy: {
-      server: `http://${ZENROWS_PROXY_HOST}:${ZENROWS_PROXY_PORT}`,
-      username: apiKey,
-      password: "",
-    },
-  });
-
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  page.setDefaultNavigationTimeout(120000);
-  page.setDefaultTimeout(60000);
-  logMsg("Browser launched with ZenRows proxy (residential IP)");
-  return { browser, context, page };
-}
 
 export function clearZenrowsApiKeyCache() {
   zenrowsRestApiKeyCache = null;
@@ -605,7 +570,7 @@ function mergeCookieStrings(existing: string, newCookies: Record<string, string>
 async function navigateQueueIt(
   targetUrl: string,
   cookieFile: string,
-  _proxyUrl: string,
+  proxyUrl: string,
   log: (msg: string) => void
 ): Promise<{ passed: boolean; zenRowsCookies?: string }> {
   log("Navigating through Queue-it for tickets.la28.org...");
@@ -642,6 +607,7 @@ async function navigateQueueIt(
 
   const resp1 = await curlImpersonate(targetUrl, {
     cookieFile,
+    proxy: proxyUrl,
     followRedirects: true,
     maxRedirs: 5,
   });
@@ -659,7 +625,7 @@ async function navigateQueueIt(
 
     const resp2 = await curlImpersonate(queueUrl, {
       cookieFile,
-
+      proxy: proxyUrl,
       followRedirects: true,
       maxRedirs: 10,
     });
@@ -677,7 +643,7 @@ async function navigateQueueIt(
 
       const resp3 = await curlImpersonate(queueUrl2, {
         cookieFile,
-  
+        proxy: proxyUrl,
         followRedirects: true,
         maxRedirs: 10,
       });
@@ -711,6 +677,8 @@ export async function ticketsFormFillWithCookies(
     log("curl-impersonate not available, skipping form fill");
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
+
+  const proxyUrl = getActiveProxyUrl();
 
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
@@ -763,6 +731,7 @@ export async function ticketsFormFillWithCookies(
       persistCookiesToFile(zenRowsCookieString, cookieFile);
       regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
         cookieFile,
+        proxy: proxyUrl,
         headers: {
           "Accept": "application/json",
           "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -850,7 +819,7 @@ export async function ticketsFormFillWithCookies(
             submitResp = await curlImpersonate(p.url, {
               method: p.method,
               cookieFile,
-        
+              proxy: proxyUrl,
               headers: submitHeaders,
               body: p.body,
             });
@@ -863,7 +832,7 @@ export async function ticketsFormFillWithCookies(
           submitResp = await curlImpersonate(p.url, {
             method: p.method,
             cookieFile,
-      
+            proxy: proxyUrl,
             headers: submitHeaders,
             body: p.body,
           });
@@ -872,7 +841,7 @@ export async function ticketsFormFillWithCookies(
         submitResp = await curlImpersonate(p.url, {
           method: p.method,
           cookieFile,
-    
+          proxy: proxyUrl,
           headers: submitHeaders,
           body: p.body,
         });
@@ -920,17 +889,19 @@ export async function ticketsFormFillViaCurl(
     return { success: false, formSubmitted: false, error: "curl-impersonate not found" };
   }
 
+  const proxyUrl = getActiveProxyUrl();
+
   const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   const cookieFile = path.join(CURL_COOKIE_DIR, `${sessionId}.txt`);
 
   try {
-    log("Starting tickets.la28.org form fill via curl-impersonate (ZenRows proxy)...");
-    console.log("[CurlImp] Session: " + sessionId + " (no local proxy, ZenRows REST handles proxy)");
+    log("Starting tickets.la28.org form fill via curl-impersonate...");
+    console.log("[CurlImp] Session: " + sessionId + ", proxy: " + proxyUrl.substring(0, 40));
 
     const queueResult = await navigateQueueIt(
       "https://tickets.la28.org/mycustomerdata/",
       cookieFile,
-      "",
+      proxyUrl,
       log
     );
 
@@ -979,7 +950,7 @@ export async function ticketsFormFillViaCurl(
     if (!useZenRows) {
       ssoResp = await curlImpersonate(ssoUrl, {
         cookieFile,
-  
+        proxy: proxyUrl,
         headers: {
           "Accept": "application/json",
           "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1025,7 +996,7 @@ export async function ticketsFormFillViaCurl(
           if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
           regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
             cookieFile,
-      
+            proxy: proxyUrl,
             headers: {
               "Accept": "application/json",
               "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1042,7 +1013,7 @@ export async function ticketsFormFillViaCurl(
         if (zenRowsCookies) persistCookiesToFile(zenRowsCookies, cookieFile);
         regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
           cookieFile,
-    
+          proxy: proxyUrl,
           headers: {
             "Accept": "application/json",
             "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1052,7 +1023,7 @@ export async function ticketsFormFillViaCurl(
     } else {
       regResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
         cookieFile,
-  
+        proxy: proxyUrl,
         headers: {
           "Accept": "application/json",
           "Referer": "https://tickets.la28.org/mycustomerdata/",
@@ -1128,7 +1099,7 @@ export async function ticketsFormFillViaCurl(
           submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
             method: "POST",
             cookieFile,
-      
+            proxy: proxyUrl,
             headers: submitHeaders,
             body: submitBody,
           });
@@ -1139,7 +1110,7 @@ export async function ticketsFormFillViaCurl(
         submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
           method: "POST",
           cookieFile,
-    
+          proxy: proxyUrl,
           headers: submitHeaders,
           body: submitBody,
         });
@@ -1148,7 +1119,7 @@ export async function ticketsFormFillViaCurl(
       submitResp = await curlImpersonate("https://tickets.la28.org/api/login/registration", {
         method: "POST",
         cookieFile,
-  
+        proxy: proxyUrl,
         headers: submitHeaders,
         body: submitBody,
       });
@@ -1539,24 +1510,39 @@ async function loginAndSubmitTicketRegistration(
   const safeEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const safePass = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
 
-  log("Starting simplified draw registration flow via ZenRows browser...");
-  console.log("[Draw] Starting draw registration for " + email + " (using provided ZenRows page)");
+  log("Starting simplified draw registration flow...");
+  console.log("[Draw] Starting draw registration for " + email);
 
-  let ticketsPage: Page = page;
+  let proxyBrowser: Browser | null = null;
+  let proxyContext: any = null;
+  let ticketsPage: Page;
   let capturedOidcUrl: string | null = null;
 
   try {
     {
-      try {
-        await ticketsPage.route('**/public-api.eventim.com/**', async (route) => {
-          const url = route.request().url();
-          console.log("[Draw] Intercepted eventim.com request: " + url.substring(0, 200));
-          capturedOidcUrl = url;
-          await route.abort();
-        });
-      } catch (routeErr: any) {
-        console.log("[Draw] Could not set up route interception (ZenRows CDP limitation): " + (routeErr.message || '').substring(0, 100));
-      }
+      console.log("[Draw] Launching Chromium with " + getActiveProxyLabel() + "...");
+      proxyBrowser = await chromium.launch({
+        headless: true,
+        proxy: getActiveProxyConfig(),
+        args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
+      });
+      proxyContext = await proxyBrowser.newContext({
+        ignoreHTTPSErrors: true,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        viewport: { width: 1366, height: 768 },
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+        geolocation: { latitude: 40.7128, longitude: -74.0060 },
+        permissions: ['geolocation'],
+      });
+      ticketsPage = await proxyContext.newPage();
+
+      await ticketsPage.route('**/public-api.eventim.com/**', async (route) => {
+        const url = route.request().url();
+        console.log("[Draw] Intercepted eventim.com request: " + url.substring(0, 200));
+        capturedOidcUrl = url;
+        await route.abort();
+      });
     }
     ticketsPage.setDefaultTimeout(60000);
 
@@ -1585,6 +1571,7 @@ async function loginAndSubmitTicketRegistration(
         }
         if (qw === 39) {
           log("Queue timeout after 120s.");
+          try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
           return { submitted: false };
         }
       }
@@ -1730,6 +1717,7 @@ async function loginAndSubmitTicketRegistration(
           `) as { ok: boolean; uid: string | null; err: string; code: number };
           console.log("[Draw] Gigya login: ok=" + loginResult.ok + " uid=" + (loginResult.uid || 'null') + " err=" + loginResult.err + " code=" + loginResult.code);
           if (!loginResult.ok) {
+            try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
             return { submitted: false };
           }
         } catch (e: any) {
@@ -1863,6 +1851,7 @@ async function loginAndSubmitTicketRegistration(
       });
       console.log("[Draw] Visible elements: " + String(htmlDump).substring(0, 800));
       log("No form elements found on tickets.la28.org. The page did not render the Angular form.");
+      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       return { submitted: false };
     }
 
@@ -2056,16 +2045,19 @@ async function loginAndSubmitTicketRegistration(
       } catch (postErr: any) {
         console.log("[Draw] Post-submit error: " + postErr.message.substring(0, 100));
       }
+      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       log("Draw registration form submitted.");
       return { submitted: true };
     } else {
       log("Submit button not found: " + btnClicked.substring(0, 300));
+      try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
       return { submitted: false };
     }
 
   } catch (err: any) {
     console.log("[Draw] Error: " + err.message.substring(0, 200));
     log("Draw registration error: " + err.message.substring(0, 150));
+    try { if (proxyBrowser) await proxyBrowser.close(); } catch {}
     return { submitted: false };
   }
 }
@@ -3111,7 +3103,8 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          console.log("[Draw-OIDC] NSTBrowser without proxy (ZenRows handles proxy)");
+          nstConfig.proxy = getActiveProxyUrl();
+          console.log("[Draw-OIDC] NSTBrowser with " + getActiveProxyLabel());
 
           const query = new URLSearchParams({ config: JSON.stringify(nstConfig) });
 
@@ -3483,16 +3476,31 @@ export async function completeDrawViaGigyaBrowser(
         oidcLinked = true;
         console.log("[Draw-OIDC] OIDC identity linking confirmed via auth code redirect chain");
         console.log("[Draw-OIDC] Auth code URL captured: " + ticketsAuthUrl.substring(0, 150));
-        log("OIDC linked. Opening full flow via ZenRows proxy browser...");
+        log("OIDC linked. Opening full flow via ZenRows Browser...");
 
         let bdBrowser: any = null;
         try {
-          console.log("[ZenRows] Launching local browser with ZenRows proxy...");
-          const zrLaunch = await launchBrowserWithZenRowsProxy((m) => log(m));
-          bdBrowser = zrLaunch.browser;
-          const bdContext = zrLaunch.context;
-          const bdPage = zrLaunch.page;
-          console.log("[ZenRows] Connected via proxy!");
+          let zenrowsUrl = "";
+          try {
+            const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+            if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+              zenrowsUrl = zrRow.rows[0].value as string;
+            }
+          } catch {}
+          if (!zenrowsUrl) {
+            throw new Error("ZenRows Browser URL not configured. Set it in Settings.");
+          }
+          if (!zenrowsUrl.includes('proxy_country=')) {
+            zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+          }
+          console.log("[ZenRows] Connecting...");
+          bdBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+          console.log("[ZenRows] Connected!");
+
+          const bdContext = bdBrowser.contexts()[0] || await bdBrowser.newContext();
+          const bdPage = await bdContext.newPage();
+          await bdPage.setDefaultNavigationTimeout(120000);
+          await bdPage.setDefaultTimeout(60000);
 
           const safeEmail = email.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
           const safePass = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
@@ -3623,70 +3631,88 @@ export async function completeDrawViaGigyaBrowser(
             return false;
           };
 
-          // Step 1: Transfer ALL cookies from local browser to ZenRows browser
-          console.log("[ZenRows] Step 1: Transferring ALL cookies from local browser...");
-          log("Transferring session to ZenRows proxy...");
+          // Step 1: Login to Gigya via REST API and inject session cookie into ZenRows browser
+          console.log("[ZenRows] Step 1: Login to Gigya first...");
+          log("Logging into Gigya via ZenRows...");
 
-          let allCookiesTransferred = 0;
+          // Extract Gigya session cookie from local browser (which already logged in successfully)
+          let localLoginToken: string | null = null;
           try {
-            const allDomains = [
-              'https://la28id.la28.org', 'https://la28.org', 'https://www.la28.org',
-              'https://tickets.la28.org', 'https://next.tickets.la28.org',
-              'https://public-api.eventim.com', 'https://api.eventim.com',
-              'https://la28id.la28id.la28.org'
-            ];
-            const allLocalCookies = await page.context().cookies(allDomains);
-            console.log("[ZenRows] Found " + allLocalCookies.length + " cookies from local browser");
-            if (allLocalCookies.length > 0) {
-              const cookiesToAdd = allLocalCookies.map((c: any) => ({
-                name: c.name,
-                value: c.value,
-                domain: c.domain,
-                path: c.path || '/',
-                secure: c.secure !== false,
-                sameSite: (c.sameSite || 'None') as any,
-                ...(c.expires && c.expires > 0 ? { expires: c.expires } : {}),
-              }));
-              try {
-                await bdContext.addCookies(cookiesToAdd);
-                allCookiesTransferred = cookiesToAdd.length;
-                console.log("[ZenRows] Injected " + allCookiesTransferred + " cookies into ZenRows browser");
-                const cookieNames = cookiesToAdd.map((c: any) => c.name).join(', ');
-                console.log("[ZenRows] Cookie names: " + cookieNames.substring(0, 300));
-              } catch (injectErr: any) {
-                console.log("[ZenRows] Bulk cookie inject failed: " + (injectErr.message || '').substring(0, 80));
-                for (const c of cookiesToAdd) {
-                  try { await bdContext.addCookies([c]); allCookiesTransferred++; } catch {}
-                }
-                console.log("[ZenRows] Individually injected " + allCookiesTransferred + " cookies");
+            console.log("[ZenRows] Extracting Gigya session cookie from local browser...");
+            const localCookies = await page.context().cookies(['https://la28id.la28.org', 'https://la28.org']);
+            const gltCookie = localCookies.find((c: any) => c.name.startsWith('glt_'));
+            if (gltCookie) {
+              localLoginToken = gltCookie.value;
+              console.log("[ZenRows] Got login token from local browser: " + localLoginToken.substring(0, 20) + "... (name=" + gltCookie.name + ")");
+            } else {
+              console.log("[ZenRows] No glt_ cookie found in local browser. Available cookies: " + localCookies.map((c: any) => c.name).join(', '));
+              // Try extracting from Gigya SDK directly
+              const sdkToken = await page.evaluate(`
+                (function() {
+                  try {
+                    var cookies = document.cookie.split(';');
+                    for (var i = 0; i < cookies.length; i++) {
+                      var c = cookies[i].trim();
+                      if (c.startsWith('glt_')) return c.split('=').slice(1).join('=');
+                    }
+                  } catch(e) {}
+                  return null;
+                })()
+              `);
+              if (sdkToken) {
+                localLoginToken = sdkToken as string;
+                console.log("[ZenRows] Got login token via document.cookie: " + localLoginToken.substring(0, 20) + "...");
               }
             }
           } catch (cookieErr: any) {
             console.log("[ZenRows] Cookie extraction error: " + (cookieErr.message || '').substring(0, 80));
           }
 
-          let loggedIn = allCookiesTransferred > 0;
-          if (loggedIn) {
-            console.log("[ZenRows] Session cookies transferred! Using captured auth URL...");
+          if (localLoginToken) {
+            // Inject session cookies into ZenRows browser
+            console.log("[ZenRows] Injecting session cookies into ZenRows browser...");
+            const cookieDomains = ['.la28.org', '.la28id.la28.org', 'la28id.la28.org'];
+            for (const domain of cookieDomains) {
+              try {
+                await bdContext.addCookies([
+                  { name: 'glt_4_w4CcQ6tKu4jTeDPirnKxnA', value: localLoginToken, domain, path: '/', secure: true, sameSite: 'None' as any },
+                ]);
+              } catch {}
+            }
+            console.log("[ZenRows] Session cookies injected! Skipping SDK login, going straight to OIDC...");
+            // Visit la28id.la28.org briefly to establish the cookie on that domain
+            try { await bdPage.goto('https://la28id.la28.org/', { waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+            await bdPage.waitForTimeout(3000);
           } else {
-            console.log("[ZenRows] No cookies transferred, will try SDK login as fallback...");
+            console.log("[ZenRows] No local login token found, will try SDK login as fallback...");
+          }
+
+          let loggedIn = !!localLoginToken; // If local browser token was injected, we're already logged in
+          if (!loggedIn) {
+            // Fallback: try SDK-based login if cookie injection didn't work
             try { await bdPage.goto('https://la28id.la28.org/login/', { waitUntil: 'domcontentloaded', timeout: 60000 }); } catch {}
             await bdPage.waitForTimeout(3000);
             try { await bdPage.waitForLoadState('networkidle', { timeout: 15000 }); } catch {}
             await bdPage.waitForTimeout(5000);
             loggedIn = await doGigyaLogin();
           }
-          console.log("[ZenRows] Login result: " + loggedIn + " (cookies transferred: " + allCookiesTransferred + ")");
+          console.log("[ZenRows] Login result: " + loggedIn + (localLoginToken ? " (via local browser cookie injection)" : " (via SDK)"));
 
           if (loggedIn) {
-            // Use the captured auth code URL from the OIDC flow (avoids Queue-it)
-            const targetUrl = ticketsAuthUrl || 'https://tickets.la28.org/mycustomerdata/';
-            console.log("[ZenRows] Step 2: Navigate to " + targetUrl.substring(0, 100) + " ...");
-            log("Opening tickets.la28.org draw page via ZenRows proxy...");
+            // Step 2: Navigate to OIDC auth URL directly (Keycloak endpoint)
+            // This triggers the full OIDC flow: Keycloak → proxy.html → (already logged in) → redirect back
+            const oidcUrl = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+              response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid',
+              kc_idp_hint: 'gigya', ui_locales: 'en',
+              redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+            }).toString();
+
+            console.log("[ZenRows] Step 2: Navigate to OIDC auth URL...");
+            log("Opening OIDC auth flow...");
             try {
-              await bdPage.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+              await bdPage.goto(oidcUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
             } catch {}
-            await bdPage.waitForTimeout(8000);
+            await bdPage.waitForTimeout(5000);
             await waitQueueIt();
 
             let curUrl = bdPage.url();
@@ -4025,17 +4051,32 @@ export async function completeDrawViaGigyaBrowser(
         log("OIDC linking evidence found (broker endpoint hit). Draw form not accessible.");
       } else {
         console.log("[Draw-OIDC] No broker URL captured. OIDC flow may not have completed.");
-        console.log("[Draw-OIDC] Falling back to ZenRows proxy for full flow (login + OIDC + form)...");
-        log("OIDC flow incomplete locally. Trying full flow via ZenRows proxy...");
+        console.log("[Draw-OIDC] Falling back to ZenRows for full flow (login + OIDC + form)...");
+        log("OIDC flow incomplete locally. Trying full flow via ZenRows...");
 
         let bdBrowser2: any = null;
         try {
-          console.log("[ZenRows-Full] Launching local browser with ZenRows proxy...");
-          const zrLaunch2 = await launchBrowserWithZenRowsProxy((m) => log(m));
-          bdBrowser2 = zrLaunch2.browser;
-          const bdCtx2 = zrLaunch2.context;
-          const bdPg2 = zrLaunch2.page;
-          console.log("[ZenRows-Full] Connected via proxy!");
+          let zenrowsUrl2 = "";
+          try {
+            const zrRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+            if (zrRow2.rows.length > 0 && zrRow2.rows[0].value) {
+              zenrowsUrl2 = zrRow2.rows[0].value as string;
+            }
+          } catch {}
+          if (!zenrowsUrl2) {
+            throw new Error("ZenRows Browser URL not configured. Set it in Settings.");
+          }
+          if (!zenrowsUrl2.includes('proxy_country=')) {
+            zenrowsUrl2 += (zenrowsUrl2.includes('?') ? '&' : '?') + 'proxy_country=us';
+          }
+          console.log("[ZenRows-Full] Connecting...");
+          bdBrowser2 = await chromium.connectOverCDP(zenrowsUrl2, { timeout: 60000 });
+          console.log("[ZenRows-Full] Connected!");
+
+          const bdCtx2 = bdBrowser2.contexts()[0] || await bdBrowser2.newContext();
+          const bdPg2 = await bdCtx2.newPage();
+          await bdPg2.setDefaultNavigationTimeout(120000);
+          await bdPg2.setDefaultTimeout(60000);
 
           const safeEmail2 = email.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
           const safePass2 = password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
@@ -4054,42 +4095,34 @@ export async function completeDrawViaGigyaBrowser(
             }
           };
 
-          console.log("[ZenRows-Full] Step 1: Transferring ALL cookies from local browser...");
+          console.log("[ZenRows-Full] Step 1: Login to Gigya...");
 
-          let fullCookiesTransferred = 0;
+          // Extract Gigya session cookie from local browser
+          let localToken2: string | null = null;
           try {
-            const allDomains2 = [
-              'https://la28id.la28.org', 'https://la28.org', 'https://www.la28.org',
-              'https://tickets.la28.org', 'https://next.tickets.la28.org',
-              'https://public-api.eventim.com', 'https://api.eventim.com',
-              'https://la28id.la28id.la28.org'
-            ];
-            const allCookies2 = await page.context().cookies(allDomains2);
-            console.log("[ZenRows-Full] Found " + allCookies2.length + " cookies from local browser");
-            if (allCookies2.length > 0) {
-              const toAdd2 = allCookies2.map((c: any) => ({
-                name: c.name, value: c.value, domain: c.domain,
-                path: c.path || '/', secure: c.secure !== false,
-                sameSite: (c.sameSite || 'None') as any,
-                ...(c.expires && c.expires > 0 ? { expires: c.expires } : {}),
-              }));
-              try {
-                await bdCtx2.addCookies(toAdd2);
-                fullCookiesTransferred = toAdd2.length;
-              } catch {
-                for (const c of toAdd2) {
-                  try { await bdCtx2.addCookies([c]); fullCookiesTransferred++; } catch {}
-                }
-              }
-              console.log("[ZenRows-Full] Injected " + fullCookiesTransferred + " cookies");
+            console.log("[ZenRows-Full] Extracting Gigya session from local browser...");
+            const cookies2 = await page.context().cookies(['https://la28id.la28.org', 'https://la28.org']);
+            const glt2 = cookies2.find((c: any) => c.name.startsWith('glt_'));
+            if (glt2) {
+              localToken2 = glt2.value;
+              console.log("[ZenRows-Full] Got login token: " + localToken2.substring(0, 20) + "...");
+            } else {
+              const st2 = await page.evaluate(`(function(){try{var cs=document.cookie.split(';');for(var i=0;i<cs.length;i++){var c=cs[i].trim();if(c.startsWith('glt_'))return c.split('=').slice(1).join('=');}}catch(e){}return null;})()`);
+              if (st2) { localToken2 = st2 as string; console.log("[ZenRows-Full] Got token via document.cookie"); }
             }
           } catch (ce2: any) {
             console.log("[ZenRows-Full] Cookie extraction error: " + (ce2.message || '').substring(0, 80));
           }
 
-          var gigyaLogin2 = fullCookiesTransferred > 0;
-          if (gigyaLogin2) {
-            console.log("[ZenRows-Full] All session cookies injected, skipping SDK login");
+          var gigyaLogin2 = false;
+          if (localToken2) {
+            for (const d of ['.la28.org', '.la28id.la28.org', 'la28id.la28.org']) {
+              try { await bdCtx2.addCookies([{ name: 'glt_4_w4CcQ6tKu4jTeDPirnKxnA', value: localToken2, domain: d, path: '/', secure: true, sameSite: 'None' as any }]); } catch {}
+            }
+            try { await bdPg2.goto('https://la28id.la28.org/', { waitUntil: 'domcontentloaded', timeout: 30000 }); } catch {}
+            await bdPg2.waitForTimeout(3000);
+            gigyaLogin2 = true;
+            console.log("[ZenRows-Full] Session cookies injected, skipping SDK login");
           }
 
           if (!gigyaLogin2) {
@@ -4225,12 +4258,17 @@ export async function completeDrawViaGigyaBrowser(
               console.log("[ZenRows-Full] Data set: " + JSON.stringify(dataRes2));
             } catch {}
 
-            console.log("[ZenRows-Full] Step 2: Navigate directly to tickets.la28.org/mycustomerdata/ ...");
+            console.log("[ZenRows-Full] Step 2: Navigate to OIDC auth URL...");
+            const oidcUrl2 = 'https://public-api.eventim.com/identity/auth/realms/la28-org/protocol/openid-connect/auth?' + new URLSearchParams({
+              response_type: 'code', client_id: 'web-sso__la28-org', scope: 'openid profile email',
+              kc_idp_hint: 'gigya', ui_locales: 'en',
+              redirect_uri: 'https://tickets.la28.org/mycustomerdata/'
+            }).toString();
 
             try {
-              await bdPg2.goto('https://tickets.la28.org/mycustomerdata/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+              await bdPg2.goto(oidcUrl2, { waitUntil: 'domcontentloaded', timeout: 120000 });
             } catch {}
-            await bdPg2.waitForTimeout(8000);
+            await bdPg2.waitForTimeout(5000);
             await waitQueueIt2();
 
             var curUrl2 = bdPg2.url();
@@ -5296,10 +5334,25 @@ export async function retryDrawRegistration(
   log: (msg: string) => void
 ): Promise<{ submitted: boolean }> {
   log("Starting retry draw registration for " + email);
-  log("Launching browser with ZenRows proxy...");
-  const { browser, page } = await launchBrowserWithZenRowsProxy((m) => log(m));
+  let zenrowsUrl = "";
   try {
-    const result = await loginAndSubmitTicketRegistration(page, email, password, log, undefined, zipCode || undefined);
+    const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+    if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+      zenrowsUrl = zrRow.rows[0].value as string;
+    }
+  } catch {}
+  var connectUrl = zenrowsUrl || proxyUrl;
+  if (connectUrl.includes('zenrows.com') && !connectUrl.includes('proxy_country=')) {
+    connectUrl += (connectUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+  }
+  log("Connecting to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser...");
+  const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
+  try {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(120000);
+    log("Connected to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser.");
+
+    const result = await loginAndSubmitTicketRegistration(page, email, password, log, connectUrl, zipCode || undefined);
     try { await page.close(); } catch {}
     return result;
   } finally {
@@ -5321,11 +5374,27 @@ export async function loginOutlookAccount(
   let browser: any = null;
 
   try {
-    log("Launching browser with ZenRows proxy for Outlook login...");
-    const zrLaunch = await launchBrowserWithZenRowsProxy((m) => log(m));
-    browser = zrLaunch.browser;
-    const context = zrLaunch.context;
-    const page = zrLaunch.page;
+    log("Connecting to ZenRows browser...");
+    let zenrowsUrl = "";
+    try {
+      const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+      if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+        zenrowsUrl = zrRow.rows[0].value as string;
+      }
+    } catch {}
+
+    if (!zenrowsUrl) {
+      return { success: false, error: "ZenRows Browser URL not configured. Set it in Settings." };
+    }
+    if (!zenrowsUrl.includes('proxy_country=')) {
+      zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+    }
+
+    browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+    log("ZenRows browser connected");
+
+    const context = browser.contexts()[0] || await browser.newContext();
+    const page = await context.newPage();
     await page.setDefaultNavigationTimeout(90000);
     await page.setDefaultTimeout(30000);
 
