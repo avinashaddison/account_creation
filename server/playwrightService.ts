@@ -6500,11 +6500,33 @@ export async function registerZenrowsAccount(
     }
 
     await page.waitForTimeout(8000 + Math.random() * 3000);
-    const afterSignupUrl = page.url();
+    let afterSignupUrl = page.url();
     log("After signup: " + afterSignupUrl.substring(0, 100));
 
-    const pageContent = await page.textContent("body").catch(() => "");
-    const pageLower = (pageContent || "").toLowerCase();
+    let pageContent = await page.textContent("body").catch(() => "");
+    let pageLower = (pageContent || "").toLowerCase();
+
+    if (afterSignupUrl.includes("/register") && !pageLower.includes("verify") && !pageLower.includes("check your")) {
+      log("Still on register page — checking for redirect or error...");
+      const allToasts = await page.$$eval('[role="alert"], .toast, .notification, [class*="alert"], [class*="toast"], [class*="error"], [class*="Error"]', (els: any[]) =>
+        els.map((e: any) => (e.textContent || "").trim().substring(0, 150))
+      ).catch(() => []);
+      if (allToasts.length > 0) {
+        log("Alerts/toasts: " + allToasts.join(" | ").substring(0, 300));
+      }
+
+      const pageSnippet = (pageContent || "").substring(0, 400).replace(/\s+/g, " ");
+      log("Page content after signup attempt: " + pageSnippet.substring(0, 300));
+
+      await page.waitForTimeout(5000);
+      afterSignupUrl = page.url();
+      pageContent = await page.textContent("body").catch(() => "");
+      pageLower = (pageContent || "").toLowerCase();
+      if (afterSignupUrl !== page.url()) {
+        log("Delayed redirect to: " + afterSignupUrl.substring(0, 100));
+      }
+    }
+
     const needsVerification = pageLower.includes("verify") ||
                               pageLower.includes("check your email") ||
                               pageLower.includes("confirmation");
@@ -6514,23 +6536,19 @@ export async function registerZenrowsAccount(
                           pageLower.includes("in use");
     const hasError = pageLower.includes("error") || pageLower.includes("invalid");
 
-    if (alreadyExists) {
-      log("Account may already exist — trying login directly");
-    } else if (needsVerification || afterSignupUrl.includes("verify") || afterSignupUrl.includes("confirm")) {
+    if (afterSignupUrl.includes("/phone/input") || afterSignupUrl.includes("/verify") || afterSignupUrl.includes("/confirm")) {
+      log("ZenRows redirected to verification/phone page: " + afterSignupUrl.substring(0, 100));
+    } else if (needsVerification) {
       log("ZenRows requires email verification");
+    } else if (alreadyExists) {
+      log("Account may already exist — trying login directly");
     } else if (afterSignupUrl.includes("dashboard") || afterSignupUrl.includes("onboarding")) {
       log("Signup succeeded — redirected to dashboard/onboarding");
     } else if (hasError) {
       const errorSnippet = (pageContent || "").substring(0, 200).replace(/\s+/g, " ");
       log("Signup error detected: " + errorSnippet);
     } else {
-      log("Page after signup: " + (pageContent || "").substring(0, 200).replace(/\s+/g, " "));
-      const allToasts = await page.$$eval('[role="alert"], .toast, .notification, [class*="alert"], [class*="toast"]', (els: any[]) =>
-        els.map((e: any) => (e.textContent || "").substring(0, 150))
-      ).catch(() => []);
-      if (allToasts.length > 0) {
-        log("Toasts/alerts on page: " + allToasts.join(" | ").substring(0, 200));
-      }
+      log("After signup state: URL=" + afterSignupUrl.substring(0, 80));
     }
 
     try { await page.close(); } catch {}
