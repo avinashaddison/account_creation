@@ -380,8 +380,23 @@ async function getZenRowsApiKey(): Promise<string> {
   try {
     const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_rest_api_key'`);
     if (result.rows.length > 0 && result.rows[0].value) {
-      zenrowsRestApiKeyCache = result.rows[0].value as string;
-      return zenrowsRestApiKeyCache;
+      const key = result.rows[0].value as string;
+      if (key.length >= 30) {
+        zenrowsRestApiKeyCache = key;
+        return zenrowsRestApiKeyCache;
+      }
+    }
+  } catch {}
+
+  try {
+    const urlResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+    if (urlResult.rows.length > 0 && urlResult.rows[0].value) {
+      const url = urlResult.rows[0].value as string;
+      const keyMatch = url.match(/apikey=([a-f0-9]{30,})/i);
+      if (keyMatch) {
+        zenrowsRestApiKeyCache = keyMatch[1];
+        return zenrowsRestApiKeyCache;
+      }
     }
   } catch {}
 
@@ -6135,6 +6150,132 @@ export interface ZenrowsRegistrationResult {
   outlookPassword?: string;
 }
 
+async function tryZenRowsRestSignup(
+  email: string,
+  password: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; needsVerification?: boolean; error?: string }> {
+  let apiKey = "";
+  try {
+    apiKey = await getZenRowsApiKey();
+  } catch {}
+  
+  if (!apiKey || apiKey.length < 30) {
+    return { success: false, error: "No valid ZenRows API key for REST proxy" };
+  }
+
+  log("Attempting ZenRows signup via REST API proxy...");
+  
+  try {
+    const registerPageUrl = "https://app.zenrows.com/register";
+    const params = new URLSearchParams({
+      apikey: apiKey,
+      url: registerPageUrl,
+      premium_proxy: "true",
+      js_render: "true",
+      wait: "5000",
+    });
+    
+    log("Fetching register page via ZenRows REST API...");
+    const getResp = await fetch(`https://api.zenrows.com/v1/?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      signal: AbortSignal.timeout(60000),
+    });
+    
+    const pageHtml = await getResp.text();
+    log("Register page response: " + getResp.status + " (length=" + pageHtml.length + ")");
+    
+    if (getResp.status !== 200) {
+      log("REST API error: " + pageHtml.substring(0, 200));
+      return { success: false, error: "ZenRows REST API returned " + getResp.status + ": " + pageHtml.substring(0, 100) };
+    }
+    
+    const csrfMatch = pageHtml.match(/csrf-token.*?content="([^"]+)"/);
+    if (!csrfMatch) {
+      log("Could not find CSRF token in register page");
+      log("Page preview: " + pageHtml.substring(0, 300));
+      return { success: false, error: "No CSRF token found on register page" };
+    }
+    
+    const csrfToken = csrfMatch[1];
+    log("Found CSRF token: " + csrfToken.substring(0, 10) + "...");
+    
+    let cookies = "";
+    const setCookieHeaders = getResp.headers.get("set-cookie") || getResp.headers.get("Zr-Cookies") || "";
+    if (setCookieHeaders) {
+      const cookiePairs = setCookieHeaders.split(/[;,]/).filter(c => c.includes("=") && !c.includes("path=") && !c.includes("expires=") && !c.includes("domain=") && !c.includes("max-age=")).map(c => c.trim());
+      cookies = cookiePairs.join("; ");
+      log("Cookies: " + (cookies.length > 0 ? cookies.substring(0, 50) + "..." : "none"));
+    }
+    
+    const formData = new URLSearchParams({
+      _token: csrfToken,
+      tz: "UTC",
+      email: email,
+      password: password,
+    });
+    
+    log("Posting signup form via ZenRows REST API...");
+    const postParams = new URLSearchParams({
+      apikey: apiKey,
+      url: registerPageUrl,
+      premium_proxy: "true",
+    });
+    if (cookies) {
+      postParams.set("custom_cookies", cookies);
+    }
+    
+    const postResp = await fetch(`https://api.zenrows.com/v1/?${postParams.toString()}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://app.zenrows.com",
+        "Referer": "https://app.zenrows.com/register",
+      },
+      body: formData.toString(),
+      signal: AbortSignal.timeout(60000),
+    });
+    
+    const postBody = await postResp.text();
+    log("Signup POST response: " + postResp.status + " (length=" + postBody.length + ")");
+    
+    if (postBody.includes("Too many accounts")) {
+      log("IP still blocked even through REST API proxy");
+      return { success: false, error: "Too many accounts detected (even through proxy)" };
+    }
+    
+    if (postBody.includes("Invalid email") || postBody.includes("invalid email")) {
+      log("ZenRows rejected the email as invalid");
+      return { success: false, error: "ZenRows rejected email as invalid" };
+    }
+    
+    if (postBody.includes("already") || postBody.includes("exists")) {
+      log("Account may already exist");
+      return { success: false, error: "Account may already exist" };
+    }
+    
+    const hasVerifyIndicator = postBody.includes("verify your email") || postBody.includes("Verify your email") || postBody.includes("check your email") || postBody.includes("verification email");
+    const hasRedirectIndicator = postResp.status === 302 || postResp.status === 301;
+    const hasBuilderPage = postBody.includes("/builder") || postBody.includes("dashboard");
+    
+    if (hasVerifyIndicator || hasRedirectIndicator || hasBuilderPage) {
+      log("Signup appears successful — verification email expected (verify=" + hasVerifyIndicator + ", redirect=" + hasRedirectIndicator + ", builder=" + hasBuilderPage + ")");
+      return { success: true, needsVerification: true };
+    }
+    
+    log("Signup result unclear (status=" + postResp.status + ", body length=" + postBody.length + "): " + postBody.substring(0, 300));
+    return { success: false, error: "Signup result unclear: status=" + postResp.status };
+    
+  } catch (err: any) {
+    log("REST signup error: " + (err.message || "").substring(0, 150));
+    return { success: false, error: "REST signup failed: " + (err.message || "").substring(0, 100) };
+  }
+}
+
 export async function registerZenrowsAccount(
   outlookEmail: string | null,
   outlookPassword: string | null,
@@ -6161,6 +6302,15 @@ export async function registerZenrowsAccount(
     log("Using email: " + outlookEmail);
     log("Generated ZenRows password: " + zenrowsPassword);
 
+    let restSignupDone = false;
+    const restResult = await tryZenRowsRestSignup(outlookEmail, zenrowsPassword, log);
+    if (restResult.success) {
+      log("REST API signup succeeded — skipping browser-based signup");
+      restSignupDone = true;
+    } else {
+      log("REST API signup failed: " + (restResult.error || "unknown") + " — falling back to browser signup");
+    }
+
     let zenrowsUrl = "";
     try {
       const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
@@ -6168,6 +6318,8 @@ export async function registerZenrowsAccount(
         zenrowsUrl = zrRow.rows[0].value as string;
       }
     } catch {}
+
+    if (!restSignupDone) {
 
     if (!zenrowsUrl) {
       return { success: false, error: "ZenRows Browser URL not configured. Set it in Settings." };
@@ -6658,6 +6810,8 @@ export async function registerZenrowsAccount(
     try { await page.close(); } catch {}
     try { await context.close(); } catch {}
 
+    } // end if (!restSignupDone)
+
     log("Step 2/6: Logging into Outlook to get verification email...");
 
     let outlookBrowser = localBrowser;
@@ -7096,25 +7250,38 @@ export async function registerZenrowsAccount(
     log("Builder page loaded: " + apiPage.url().substring(0, 100));
 
     let apiKey = "";
+    const zenrowsKeyRegex = /\b[0-9][a-f0-9]{39,}\b/;
+    const fallbackKeyRegex = /\b[a-f0-9]{32,50}\b/;
 
     try {
       apiKey = await apiPage.evaluate(() => {
+        const zenrowsRe = /^[0-9][a-f0-9]{39,}$/;
+        const fallbackRe = /^[a-f0-9]{32,50}$/;
+        let fallbackKey = "";
         const inputs = document.querySelectorAll('input[readonly], input[type="text"]');
         for (const input of inputs) {
           const val = (input as HTMLInputElement).value;
-          if (val && val.length > 20 && /^[a-f0-9]+$/.test(val)) return val;
+          if (val && zenrowsRe.test(val)) return val;
+          if (val && val.length >= 32 && fallbackRe.test(val) && !fallbackKey) fallbackKey = val;
         }
         const codeElements = document.querySelectorAll('code, pre, [class*="api"], [class*="key"]');
         for (const el of codeElements) {
           const text = (el.textContent || "").trim();
-          if (text.length > 20 && /^[a-f0-9]+$/.test(text)) return text;
+          if (zenrowsRe.test(text)) return text;
+          if (text.length >= 32 && fallbackRe.test(text) && !fallbackKey) fallbackKey = text;
         }
         const bodyText = document.body.innerText || "";
-        const match = bodyText.match(/\b[a-f0-9]{30,}\b/);
+        const match = bodyText.match(/\b[0-9][a-f0-9]{39,}\b/);
         if (match) return match[0];
-        return "";
+        const fallbackMatch = bodyText.match(/\b[a-f0-9]{32,50}\b/);
+        if (fallbackMatch && !fallbackKey) fallbackKey = fallbackMatch[0];
+        return fallbackKey;
       });
     } catch {}
+
+    if (apiKey) {
+      log("API key candidate: " + apiKey.substring(0, 8) + "... (length=" + apiKey.length + ", matches format=" + zenrowsKeyRegex.test(apiKey) + ")");
+    }
 
     if (!apiKey) {
       try {
@@ -7122,6 +7289,9 @@ export async function registerZenrowsAccount(
         if (copyBtn) {
           log("Found Copy button, trying to extract API key from nearby elements...");
           apiKey = await apiPage.evaluate(() => {
+            const zenrowsRe = /^[0-9][a-f0-9]{39,}$/;
+            const fallbackRe = /^[a-f0-9]{32,50}$/;
+            let fallbackKey = "";
             const copyBtns = Array.from(document.querySelectorAll('button'));
             for (const btn of copyBtns) {
               if ((btn.textContent || "").toLowerCase().includes("copy")) {
@@ -7130,17 +7300,19 @@ export async function registerZenrowsAccount(
                   const inputs = parent.querySelectorAll('input, code, span, div');
                   for (const el of inputs) {
                     const text = ((el as HTMLInputElement).value || el.textContent || "").trim();
-                    if (text.length > 20 && /^[a-f0-9]+$/.test(text)) return text;
+                    if (zenrowsRe.test(text)) return text;
+                    if (text.length >= 32 && fallbackRe.test(text) && !fallbackKey) fallbackKey = text;
                   }
                 }
                 const prev = btn.previousElementSibling;
                 if (prev) {
                   const text = ((prev as HTMLInputElement).value || prev.textContent || "").trim();
-                  if (text.length > 20 && /^[a-f0-9]+$/.test(text)) return text;
+                  if (zenrowsRe.test(text)) return text;
+                  if (text.length >= 32 && fallbackRe.test(text) && !fallbackKey) fallbackKey = text;
                 }
               }
             }
-            return "";
+            return fallbackKey;
           });
         }
       } catch {}
@@ -7148,9 +7320,14 @@ export async function registerZenrowsAccount(
 
     if (!apiKey) {
       const allText = await apiPage.textContent("body").catch(() => "");
-      const hexMatch = (allText || "").match(/\b[a-f0-9]{30,50}\b/);
+      const hexMatch = (allText || "").match(/\b[0-9][a-f0-9]{39,}\b/);
       if (hexMatch) {
         apiKey = hexMatch[0];
+      } else {
+        const fallbackMatch = (allText || "").match(/\b[a-f0-9]{32,50}\b/);
+        if (fallbackMatch) {
+          apiKey = fallbackMatch[0];
+        }
       }
     }
 

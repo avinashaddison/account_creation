@@ -1969,6 +1969,18 @@ export async function registerRoutes(
 
           if (result.success && result.apiKey) {
             broadcastLog(batchId, regId, `ZenRows API Key extracted successfully`, userId);
+            try {
+              const caller = await storage.getUser(userId);
+              if (caller && caller.role === "superadmin" && /^[0-9][a-f0-9]{39,}$/.test(result.apiKey)) {
+                await storage.setSetting("zenrows_rest_api_key", result.apiKey);
+                clearZenrowsApiKeyCache();
+                broadcastLog(batchId, regId, `API key auto-saved to settings (length=${result.apiKey.length})`, userId);
+              } else if (caller && caller.role === "superadmin") {
+                broadcastLog(batchId, regId, `API key format non-standard (length=${result.apiKey.length}), not auto-saved`, userId);
+              }
+            } catch (saveErr: any) {
+              broadcastLog(batchId, regId, `Warning: Could not auto-save API key: ${saveErr.message}`, userId);
+            }
             broadcast({ type: "zenrows_register_result", regId, batchId, success: true, apiKey: result.apiKey, outlookEmail: result.outlookEmail, outlookPassword: result.outlookPassword }, userId);
           } else {
             broadcastLog(batchId, regId, `Registration failed: ${result.error || "Unknown error"}`, userId);
