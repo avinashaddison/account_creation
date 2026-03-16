@@ -6612,7 +6612,7 @@ export async function registerZenrowsAccount(
               try { await page.close(); } catch {}
               try { await context.close(); } catch {}
               if (apiKey.length > 0) {
-                log("Found API key: " + apiKey[0].substring(0, 8) + "***");
+                log("Found API key: " + apiKey[0]);
                 return { success: true, apiKey: apiKey[0], zenrowsPassword, message: "Account already existed — logged in and extracted API key" };
               }
               return { success: true, zenrowsPassword, message: "ZenRows account already exists — logged in successfully. Navigate to dashboard to get API key." };
@@ -7128,7 +7128,7 @@ export async function registerZenrowsAccount(
 
     if (apiKey) {
       log("Step 6/6: Complete!");
-      log("API Key found: " + apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4));
+      log("API Key found: " + apiKey);
       return { success: true, apiKey, outlookEmail: outlookEmail!, outlookPassword: outlookPassword! };
     } else {
       log("Could not extract API key from builder page");
