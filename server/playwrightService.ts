@@ -5598,8 +5598,10 @@ export async function createOutlookAccount(
   const randomStr = Math.random().toString(36).substring(2, 8) + Math.floor(Math.random() * 900 + 100);
   const emailUsername = (firstName.toLowerCase() + lastName.toLowerCase().charAt(0) + randomStr).substring(0, 20);
   const email = emailUsername + "@outlook.com";
+  const chars = "abcdefghijklmnopqrstuvwxyz";
+  const randChars = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   const password = firstName.charAt(0).toUpperCase() + lastName.charAt(0).toLowerCase() +
-    Math.random().toString(36).substring(2, 8) + "!" + Math.floor(Math.random() * 900 + 100);
+    randChars + "!" + Math.floor(Math.random() * 9000 + 1000);
 
   const birthYear = 1985 + Math.floor(Math.random() * 15);
   const birthMonth = Math.floor(Math.random() * 12) + 1;
@@ -5645,46 +5647,70 @@ export async function createOutlookAccount(
     }
     log("Email username typed: " + emailUsername);
 
+    let passInput = await page.$('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword');
+    if (passInput) {
+      log("Password field on same page as email — filling both before submit");
+      await passInput.click();
+      await page.waitForTimeout(300);
+      for (const char of password) {
+        await page.keyboard.type(char, { delay: 0 });
+        await page.waitForTimeout(20 + Math.random() * 40);
+      }
+      log("Password typed");
+    }
+
     await page.waitForTimeout(500 + Math.random() * 500);
     const nextBtn = await page.$('input[type="submit"], #iSignupAction, #iNext');
     if (nextBtn) await nextBtn.click();
     else await page.keyboard.press("Enter");
 
-    await page.waitForTimeout(3000 + Math.random() * 2000);
+    await page.waitForTimeout(4000 + Math.random() * 2000);
 
-    const emailError = await page.$('#MemberNameError, div[id*="Error"]');
+    const emailError = await page.$('#MemberNameError');
     if (emailError) {
       const errText = await emailError.textContent().catch(() => "");
-      if (errText && errText.trim().length > 0) {
+      if (errText && errText.trim().length > 0 && !errText.toLowerCase().includes("password")) {
         log("Email error: " + errText.trim().substring(0, 100));
         return { success: false, error: "Email error: " + errText.trim() };
       }
     }
 
-    log("Looking for password field...");
-    const passInput = await page.waitForSelector('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword', { timeout: 15000 });
+    const passError = await page.$('#PasswordError');
+    if (passError) {
+      const errText = await passError.textContent().catch(() => "");
+      if (errText && errText.trim().length > 0) {
+        log("Password error: " + errText.trim().substring(0, 100));
+        return { success: false, error: "Password error: " + errText.trim() };
+      }
+    }
+
     if (!passInput) {
-      const currentContent = await page.textContent("body").catch(() => "");
-      log("No password field. Page: " + (currentContent || "").substring(0, 150).replace(/\s+/g, " "));
-      return { success: false, error: "Password field not found on signup page" };
+      log("Looking for password field on next page...");
+      passInput = await page.waitForSelector('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword', { timeout: 15000 }).catch(() => null);
+      if (!passInput) {
+        const currentContent = await page.textContent("body").catch(() => "");
+        log("No password field. Page: " + (currentContent || "").substring(0, 150).replace(/\s+/g, " "));
+        return { success: false, error: "Password field not found on signup page" };
+      }
+      await passInput.click();
+      await page.waitForTimeout(300);
+      for (const char of password) {
+        await page.keyboard.type(char, { delay: 0 });
+        await page.waitForTimeout(20 + Math.random() * 40);
+      }
+      log("Password typed");
+
+      await page.waitForTimeout(500 + Math.random() * 500);
+      const passNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
+      if (passNext) await passNext.click();
+      else await page.keyboard.press("Enter");
+
+      await page.waitForTimeout(3000 + Math.random() * 2000);
     }
-    await passInput.click();
-    await page.waitForTimeout(300);
-    for (const char of password) {
-      await page.keyboard.type(char, { delay: 0 });
-      await page.waitForTimeout(20 + Math.random() * 40);
-    }
-    log("Password typed");
 
-    await page.waitForTimeout(500 + Math.random() * 500);
-    const passNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
-    if (passNext) await passNext.click();
-    else await page.keyboard.press("Enter");
+    log("After email/password: " + page.url().substring(0, 80));
 
-    await page.waitForTimeout(3000 + Math.random() * 2000);
-    log("After password: " + page.url().substring(0, 80));
-
-    const nameInput = await page.$('input[name="FirstName"], #FirstName, #iFirstName');
+    const nameInput = await page.$('input[name="FirstName"], #FirstName, #iFirstName, input[aria-label*="first" i], input[placeholder*="first" i]');
     if (nameInput) {
       log("Name fields found, filling...");
       await nameInput.click();
@@ -5694,7 +5720,7 @@ export async function createOutlookAccount(
         await page.waitForTimeout(15 + Math.random() * 30);
       }
 
-      const lastInput = await page.$('input[name="LastName"], #LastName, #iLastName');
+      const lastInput = await page.$('input[name="LastName"], #LastName, #iLastName, input[aria-label*="last" i], input[placeholder*="last" i]');
       if (lastInput) {
         await lastInput.click();
         await page.waitForTimeout(200);
@@ -5712,41 +5738,46 @@ export async function createOutlookAccount(
       await page.waitForTimeout(3000 + Math.random() * 2000);
     }
 
-    const dobSection = await page.$('select[name="BirthMonth"], #BirthMonth, select#BirthMonth, #ibirthmonthcombo');
+    const pageForDob = await page.textContent("body").catch(() => "");
+    const hasDobPage = (pageForDob || "").toLowerCase().includes("birthdate") || (pageForDob || "").toLowerCase().includes("birth") || (pageForDob || "").toLowerCase().includes("date of birth") || (pageForDob || "").toLowerCase().includes("country");
+
+    if (hasDobPage) {
+      log("DOB/country page detected, looking for form elements...");
+
+      const allFormEls = await page.$$eval('select, input, button[role="combobox"], [role="listbox"], [role="combobox"], div[class*="dropdown"], div[aria-haspopup]', (els: any[]) =>
+        els.map((e: any) => ({
+          tag: e.tagName,
+          id: e.id,
+          name: e.name || '',
+          ariaLabel: e.getAttribute('aria-label') || '',
+          role: e.getAttribute('role') || '',
+          type: e.type || '',
+          optionCount: e.tagName === 'SELECT' ? e.options?.length : 0,
+          text: (e.textContent || '').substring(0, 40).trim(),
+        }))
+      ).catch(() => []);
+      log("Form elements: " + JSON.stringify(allFormEls).substring(0, 500));
+    }
+
+    const dobSection = await page.$('select[name="BirthMonth"], #BirthMonth, select#BirthMonth, #ibirthmonthcombo, select[id*="irth"], select[aria-label*="month" i]');
     if (dobSection) {
       log("Date of birth section found...");
 
-      const monthSelect = await page.$('select[name="BirthMonth"], #BirthMonth, select#BirthMonth');
+      const monthSelect = await page.$('select[name="BirthMonth"], #BirthMonth, select#BirthMonth, select[id*="irth"][id*="onth" i], select[aria-label*="month" i]');
       if (monthSelect) {
         await monthSelect.selectOption(String(birthMonth));
         await page.waitForTimeout(300);
-      } else {
-        const monthInput = await page.$('#BirthMonth, #ibirthmonthcombo');
-        if (monthInput) {
-          await monthInput.click();
-          await page.waitForTimeout(200);
-          const monthOption = await page.$(`option[value="${birthMonth}"], li[data-value="${birthMonth}"]`);
-          if (monthOption) await monthOption.click();
-        }
       }
 
       await page.waitForTimeout(300);
-      const daySelect = await page.$('select[name="BirthDay"], #BirthDay, select#BirthDay');
+      const daySelect = await page.$('select[name="BirthDay"], #BirthDay, select#BirthDay, select[id*="irth"][id*="ay" i], select[aria-label*="day" i]');
       if (daySelect) {
         await daySelect.selectOption(String(birthDay));
         await page.waitForTimeout(300);
-      } else {
-        const dayInput = await page.$('#BirthDay, #ibirthdaycombo');
-        if (dayInput) {
-          await dayInput.click();
-          await page.waitForTimeout(200);
-          const dayOption = await page.$(`option[value="${birthDay}"], li[data-value="${birthDay}"]`);
-          if (dayOption) await dayOption.click();
-        }
       }
 
       await page.waitForTimeout(300);
-      const yearInput = await page.$('input[name="BirthYear"], #BirthYear, input#BirthYear');
+      const yearInput = await page.$('input[name="BirthYear"], #BirthYear, input#BirthYear, input[id*="irth"][id*="ear" i], input[aria-label*="year" i]');
       if (yearInput) {
         await yearInput.click();
         await yearInput.fill("");
@@ -5759,11 +5790,158 @@ export async function createOutlookAccount(
 
       log("DOB filled: " + birthMonth + "/" + birthDay + "/" + birthYear);
 
+      const countrySelect = await page.$('select[name*="ountry" i], select[id*="ountry" i], #Country, select[aria-label*="country" i], select[aria-label*="region" i]');
+      if (countrySelect) {
+        await countrySelect.selectOption("US").catch(async () => {
+          try { await countrySelect.selectOption("United States"); } catch {}
+        });
+        await page.waitForTimeout(300);
+        log("Country set to US");
+      }
+
       await page.waitForTimeout(500 + Math.random() * 500);
       const dobNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
       if (dobNext) await dobNext.click();
       else await page.keyboard.press("Enter");
-      await page.waitForTimeout(3000 + Math.random() * 2000);
+      await page.waitForTimeout(4000 + Math.random() * 2000);
+      log("After DOB submit: " + page.url().substring(0, 80));
+    } else if (hasDobPage) {
+      log("DOB page detected, trying custom dropdown approach...");
+      try {
+        const monthNames = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+        await page.evaluate(() => {
+          const monthBtn = document.querySelector('#BirthMonthDropdown') as HTMLElement;
+          if (monthBtn) monthBtn.click();
+        });
+        await page.waitForTimeout(1500);
+
+        let monthPicked = false;
+        const monthOpts = await page.$$('[role="option"], [role="menuitem"], li[id*="irth"]');
+        for (const opt of monthOpts) {
+          const txt = await opt.textContent().catch(() => "");
+          if ((txt || "").trim() === monthNames[birthMonth]) {
+            await opt.evaluate((el: any) => el.click());
+            monthPicked = true;
+            break;
+          }
+        }
+        if (!monthPicked && monthOpts.length > 0) {
+          if (birthMonth <= monthOpts.length) {
+            await monthOpts[birthMonth - 1].evaluate((el: any) => el.click());
+            monthPicked = true;
+          }
+        }
+        if (monthPicked) {
+          log("Month selected: " + monthNames[birthMonth]);
+        } else {
+          log("Could not select month, trying keyboard...");
+          await page.keyboard.press("Escape");
+        }
+        await page.waitForTimeout(500);
+
+        await page.evaluate(() => {
+          const dayBtn = document.querySelector('#BirthDayDropdown') as HTMLElement;
+          if (dayBtn) dayBtn.click();
+        });
+        await page.waitForTimeout(1500);
+
+        let dayPicked = false;
+        const dayOpts = await page.$$('[role="option"], [role="menuitem"], li[id*="irth"]');
+        for (const opt of dayOpts) {
+          const txt = await opt.textContent().catch(() => "");
+          if ((txt || "").trim() === String(birthDay)) {
+            await opt.evaluate((el: any) => el.click());
+            dayPicked = true;
+            break;
+          }
+        }
+        if (!dayPicked && dayOpts.length > 0 && birthDay <= dayOpts.length) {
+          await dayOpts[birthDay - 1].evaluate((el: any) => el.click());
+          dayPicked = true;
+        }
+        if (dayPicked) {
+          log("Day selected: " + birthDay);
+        } else {
+          log("Could not select day");
+          await page.keyboard.press("Escape");
+        }
+        await page.waitForTimeout(500);
+
+        const yearInput = await page.$('input[name="BirthYear"], input[aria-label="Birth year"], input[type="number"]');
+        if (yearInput) {
+          await yearInput.evaluate((el: any) => { el.focus(); el.value = ''; });
+          await page.waitForTimeout(200);
+          await yearInput.fill(String(birthYear));
+          await page.waitForTimeout(300);
+          log("Year filled: " + birthYear);
+        }
+
+        log("DOB filled: " + birthMonth + "/" + birthDay + "/" + birthYear);
+
+        await page.waitForTimeout(500 + Math.random() * 500);
+        await page.evaluate(() => {
+          const btn = document.querySelector('input[type="submit"], #iSignupAction, #iNext, button[type="submit"]') as HTMLElement;
+          if (btn) btn.click();
+        });
+        await page.waitForTimeout(5000 + Math.random() * 2000);
+        log("After DOB submit: " + page.url().substring(0, 80));
+
+        const postDobText = await page.textContent("body").catch(() => "");
+        if ((postDobText || "").toLowerCase().includes("add your name") || (postDobText || "").toLowerCase().includes("first name")) {
+          log("Name page appeared after DOB, filling name...");
+
+          const nameFields = await page.$$eval('input[type="text"], input:not([type])', (els: any[]) =>
+            els.map((e: any) => ({ id: e.id, name: e.name, ariaLabel: e.getAttribute('aria-label') || '', placeholder: e.placeholder || '', type: e.type }))
+          ).catch(() => []);
+          log("Name inputs: " + JSON.stringify(nameFields).substring(0, 300));
+
+          const fn = await page.$('input[name="FirstName"], #FirstName, input[aria-label*="first" i], input[aria-label*="First" i], input[placeholder*="first" i], input[placeholder*="First" i]');
+          if (fn) {
+            await fn.evaluate((el: any) => { el.focus(); el.value = ''; });
+            await page.waitForTimeout(200);
+            await fn.fill(firstName);
+            log("First name filled: " + firstName);
+          } else {
+            const textInputs = await page.$$('input[type="text"], input:not([type])');
+            if (textInputs.length >= 1) {
+              await textInputs[0].evaluate((el: any) => { el.focus(); el.value = ''; });
+              await textInputs[0].fill(firstName);
+              log("First name filled via generic input[0]: " + firstName);
+            }
+          }
+
+          await page.waitForTimeout(300);
+          const ln = await page.$('input[name="LastName"], #LastName, input[aria-label*="last" i], input[aria-label*="Last" i], input[placeholder*="last" i], input[placeholder*="Last" i]');
+          if (ln) {
+            await ln.evaluate((el: any) => { el.focus(); el.value = ''; });
+            await page.waitForTimeout(200);
+            await ln.fill(lastName);
+            log("Last name filled: " + lastName);
+          } else {
+            const textInputs = await page.$$('input[type="text"], input:not([type])');
+            if (textInputs.length >= 2) {
+              await textInputs[1].evaluate((el: any) => { el.focus(); el.value = ''; });
+              await textInputs[1].fill(lastName);
+              log("Last name filled via generic input[1]: " + lastName);
+            }
+          }
+
+          log("Name filled: " + firstName + " " + lastName);
+          await page.waitForTimeout(500 + Math.random() * 500);
+          await page.evaluate(() => {
+            const btn = document.querySelector('input[type="submit"], #iSignupAction, #iNext, button[type="submit"]') as HTMLElement;
+            if (btn) btn.click();
+          });
+          await page.waitForTimeout(5000 + Math.random() * 2000);
+          log("After name submit: " + page.url().substring(0, 80));
+
+          const afterNameText = await page.textContent("body").catch(() => "");
+          log("After name page: " + (afterNameText || "").substring(0, 150).replace(/\s+/g, " "));
+        }
+      } catch (dobErr: any) {
+        log("DOB fill error: " + (dobErr.message || "").substring(0, 100));
+      }
     }
 
     log("Checking for captcha...");
@@ -5775,6 +5953,78 @@ export async function createOutlookAccount(
         if (fcFrame) funCaptchaDetected = true;
         const fcDiv = await page.$('#hipEnforcementContainer, div[id*="arkose"], #hipTemplateContainer');
         if (fcDiv) funCaptchaDetected = true;
+
+        if (!funCaptchaDetected) {
+          const bodyText = await page.textContent("body").catch(() => "");
+          if ((bodyText || "").toLowerCase().includes("prove you're human") || (bodyText || "").toLowerCase().includes("press and hold")) {
+            log("'Press and hold' challenge page detected, trying to interact...");
+
+            const hsFrame = page.frames().find(f => f.url().includes('hsprotect.net') || f.url().includes('human'));
+            if (hsFrame) {
+              log("Found HSProtect/PerimeterX iframe: " + hsFrame.url().substring(0, 80));
+
+              for (let holdAttempt = 0; holdAttempt < 3 && !captchaSolved; holdAttempt++) {
+                log("Press-and-hold attempt " + (holdAttempt + 1) + "/3...");
+
+                await page.waitForTimeout(2000 + holdAttempt * 1000);
+
+                const pxCaptcha = await hsFrame.$('#px-captcha');
+                if (pxCaptcha) {
+                  const box = await pxCaptcha.boundingBox();
+                  if (box && box.width > 10 && box.height > 10) {
+                    log("px-captcha box: " + JSON.stringify(box));
+                    const cx = box.x + box.width / 2;
+                    const cy = box.y + box.height / 2;
+
+                    await page.mouse.move(cx, cy, { steps: 5 });
+                    await page.waitForTimeout(200 + Math.random() * 300);
+                    await page.mouse.down();
+                    log("Mouse down on #px-captcha, holding for ~10s...");
+
+                    const holdTime = 8000 + Math.random() * 4000;
+                    const steps = 20;
+                    for (let s = 0; s < steps; s++) {
+                      await page.waitForTimeout(holdTime / steps);
+                      const jx = cx + (Math.random() - 0.5) * 2;
+                      const jy = cy + (Math.random() - 0.5) * 2;
+                      await page.mouse.move(jx, jy);
+                    }
+
+                    await page.mouse.up();
+                    log("Mouse up after hold, waiting for result...");
+                    await page.waitForTimeout(5000 + Math.random() * 3000);
+
+                    const afterHoldText = await page.textContent("body").catch(() => "");
+                    if (!(afterHoldText || "").toLowerCase().includes("prove you're human") && !(afterHoldText || "").toLowerCase().includes("press and hold")) {
+                      log("PerimeterX press-and-hold solved! Page moved past challenge");
+                      captchaSolved = true;
+                      break;
+                    }
+
+                    const frameHtml = await hsFrame.$eval('#px-captcha', (el: any) => el.innerHTML).catch(() => "");
+                    log("After hold, px-captcha inner: " + (frameHtml || "").substring(0, 200));
+                  } else {
+                    log("px-captcha has no valid bounding box: " + JSON.stringify(box));
+
+                    await page.waitForTimeout(3000);
+                    const retryBox = await pxCaptcha.boundingBox();
+                    if (retryBox && retryBox.width > 10) {
+                      log("px-captcha appeared after wait: " + JSON.stringify(retryBox));
+                      continue;
+                    }
+                  }
+                } else {
+                  log("No #px-captcha element found in iframe");
+                }
+              }
+            }
+
+            if (!captchaSolved) {
+              funCaptchaDetected = true;
+              log("Could not solve PerimeterX/HSProtect challenge via press-and-hold");
+            }
+          }
+        }
       } catch {}
 
       if (!funCaptchaDetected) {
@@ -5786,7 +6036,21 @@ export async function createOutlookAccount(
       log("FunCaptcha detected (attempt " + (captchaAttempt + 1) + "/3), solving via CapSolver...");
       try {
         const publicKey = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA";
-        const result = await solveFunCaptcha("https://signup.live.com/", publicKey);
+        let subdomain: string | undefined;
+        try {
+          const iframeSrcs = await page.$$eval('iframe', (els: any[]) =>
+            els.map((e: any) => e.src || '').filter((s: string) => s.includes('arkoselabs') || s.includes('funcaptcha'))
+          );
+          if (iframeSrcs.length > 0) {
+            const url = new URL(iframeSrcs[0]);
+            subdomain = url.origin;
+            log("FunCaptcha subdomain detected: " + subdomain);
+          }
+        } catch {}
+        if (!subdomain) {
+          subdomain = "https://client-api.arkoselabs.com";
+        }
+        const result = await solveFunCaptcha("https://signup.live.com/", publicKey, undefined, subdomain);
         if (result.success && result.token) {
           log("FunCaptcha solved! Injecting token...");
           await page.evaluate((token: string) => {
@@ -5825,9 +6089,9 @@ export async function createOutlookAccount(
     const bodyText = await page.textContent("body").catch(() => "");
     const bodyLower = (bodyText || "").toLowerCase();
 
-    if (currentUrl.includes("signup") && (bodyLower.includes("error") || bodyLower.includes("try again"))) {
+    if (currentUrl.includes("signup") && (bodyLower.includes("error") || bodyLower.includes("try again") || bodyLower.includes("can't create your account") || bodyLower.includes("unusual activity") || bodyLower.includes("we're having trouble"))) {
       const errSnippet = (bodyText || "").substring(0, 200).replace(/\s+/g, " ");
-      log("Signup may have failed: " + errSnippet);
+      log("Signup failed: " + errSnippet);
       return { success: false, error: "Signup error: " + errSnippet.substring(0, 150) };
     }
 
@@ -5850,6 +6114,10 @@ export async function createOutlookAccount(
 
     const pageSnippet = (bodyText || "").substring(0, 300).replace(/\s+/g, " ");
     log("Uncertain result. URL: " + currentUrl.substring(0, 100) + " | Page: " + pageSnippet.substring(0, 150));
+
+    if (bodyLower.includes("prove you're human") || bodyLower.includes("press and hold") || bodyLower.includes("can't create")) {
+      return { success: false, error: "Outlook signup stuck on challenge page. Account not created." };
+    }
     return { success: true, email, password };
   } catch (err: any) {
     log("Error creating Outlook account: " + (err.message || "").substring(0, 200));
@@ -6326,7 +6594,28 @@ export async function registerZenrowsAccount(
     await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
     log("After email submit: " + outlookPage.url().substring(0, 80));
 
-    const olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 });
+    let olPassInput = null;
+    try {
+      olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 });
+    } catch (passErr: any) {
+      const loginPageText = await outlookPage.textContent("body").catch(() => "");
+      log("Password field not found. Page text: " + (loginPageText || "").substring(0, 200).replace(/\s+/g, " "));
+      log("Login URL: " + outlookPage.url().substring(0, 120));
+
+      const setupBtn = await outlookPage.$('#idSIButton9, input[type="submit"], button[type="submit"], #acceptButton, #iNext');
+      if (setupBtn) {
+        await setupBtn.click();
+        await outlookPage.waitForTimeout(3000);
+        log("Clicked setup/continue button, retrying password field...");
+        try {
+          olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
+        } catch {}
+      }
+
+      if (!olPassInput) {
+        throw new Error("Cannot find password field during Outlook login. The account may not have been fully created.");
+      }
+    }
     if (olPassInput) {
       await olPassInput.click();
       await outlookPage.waitForTimeout(300);

@@ -169,7 +169,8 @@ export async function solveHCaptcha(
 export async function solveFunCaptcha(
   websiteURL: string,
   websitePublicKey: string,
-  proxy?: string
+  proxy?: string,
+  funcaptchaApiJSSubdomain?: string
 ): Promise<CapSolverTaskResult> {
   try {
     const taskType = proxy ? "FunCaptchaTask" : "FunCaptchaTaskProxyLess";
@@ -178,12 +179,15 @@ export async function solveFunCaptcha(
       websiteURL,
       websitePublicKey,
     };
+    if (funcaptchaApiJSSubdomain) {
+      task.funcaptchaApiJSSubdomain = funcaptchaApiJSSubdomain;
+    }
     if (proxy) {
       const parsed = parseProxy(proxy);
       Object.assign(task, parsed);
     }
 
-    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL}`);
+    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL} publicKey=${websitePublicKey} subdomain=${funcaptchaApiJSSubdomain || 'none'}`);
     return await createAndPollTask(task);
   } catch (err: any) {
     console.log(`[CapSolver] FunCaptcha error: ${err.message}`);
@@ -217,14 +221,22 @@ export async function solveAntiTurnstile(
 }
 
 async function createAndPollTask(task: Record<string, any>): Promise<CapSolverTaskResult> {
-  const createResp = await axios.post(`${CAPSOLVER_API_URL}/createTask`, {
-    clientKey: await getApiKey(),
-    task,
-  }, { timeout: 30000 });
+  let createResp;
+  try {
+    createResp = await axios.post(`${CAPSOLVER_API_URL}/createTask`, {
+      clientKey: await getApiKey(),
+      task,
+    }, { timeout: 30000 });
+  } catch (axiosErr: any) {
+    const respData = axiosErr.response?.data;
+    const errMsg = respData?.errorDescription || respData?.errorCode || axiosErr.message || "Request failed";
+    console.log(`[CapSolver] Task creation HTTP error: ${axiosErr.response?.status} - ${JSON.stringify(respData || {}).substring(0, 200)}`);
+    return { success: false, error: errMsg };
+  }
 
   if (createResp.data.errorId !== 0) {
     const errMsg = createResp.data.errorDescription || "Task creation failed";
-    console.log(`[CapSolver] Task creation error: ${errMsg}`);
+    console.log(`[CapSolver] Task creation error: ${errMsg} (code: ${createResp.data.errorCode})`);
     return { success: false, error: errMsg };
   }
 
