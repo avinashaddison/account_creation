@@ -1949,29 +1949,27 @@ export async function registerRoutes(
   app.post("/api/zenrows-register", requireAuth, async (req: Request, res: Response) => {
     try {
       const { outlookEmail, outlookPassword } = req.body;
-      if (!outlookEmail || !outlookPassword) {
-        return res.status(400).json({ error: "Outlook email and password are required" });
-      }
 
       const userId = req.session.userId;
       const regId = randomUUID().substring(0, 8);
       const batchId = `zenrows-reg-${regId}`;
 
       batchOwners.set(batchId, userId);
-      res.json({ success: true, regId, batchId, message: "ZenRows registration started" });
+      const mode = outlookEmail && outlookPassword ? "existing Outlook account" : "auto-create Outlook account";
+      res.json({ success: true, regId, batchId, message: `ZenRows registration started (${mode})` });
 
       (async () => {
-        broadcastLog(batchId, regId, `Starting ZenRows account registration flow...`, userId);
+        broadcastLog(batchId, regId, `Starting ZenRows account registration flow (${mode})...`, userId);
         try {
           const result = await registerZenrowsAccount(
-            outlookEmail,
-            outlookPassword,
+            outlookEmail || null,
+            outlookPassword || null,
             (msg) => broadcastLog(batchId, regId, msg, userId)
           );
 
           if (result.success && result.apiKey) {
             broadcastLog(batchId, regId, `ZenRows API Key extracted successfully`, userId);
-            broadcast({ type: "zenrows_register_result", regId, batchId, success: true, apiKey: result.apiKey }, userId);
+            broadcast({ type: "zenrows_register_result", regId, batchId, success: true, apiKey: result.apiKey, outlookEmail: result.outlookEmail, outlookPassword: result.outlookPassword }, userId);
           } else {
             broadcastLog(batchId, regId, `Registration failed: ${result.error || "Unknown error"}`, userId);
             broadcast({ type: "zenrows_register_result", regId, batchId, success: false, error: result.error }, userId);

@@ -5578,15 +5578,298 @@ export async function loginOutlookAccount(
   }
 }
 
+export interface OutlookCreateResult {
+  success: boolean;
+  error?: string;
+  email?: string;
+  password?: string;
+}
+
+export async function createOutlookAccount(
+  log: (msg: string) => void
+): Promise<OutlookCreateResult> {
+  let browser: any = null;
+
+  const firstNames = ["James","Emma","Liam","Olivia","Noah","Ava","William","Sophia","Lucas","Mia","Henry","Charlotte","Alexander","Amelia","Benjamin","Harper","Daniel","Evelyn","Matthew","Abigail"];
+  const lastNames = ["Anderson","Thomas","Jackson","White","Harris","Martin","Thompson","Garcia","Martinez","Robinson","Clark","Rodriguez","Lewis","Lee","Walker","Hall","Allen","Young","King","Wright"];
+  const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+
+  const randomStr = Math.random().toString(36).substring(2, 8) + Math.floor(Math.random() * 900 + 100);
+  const emailUsername = (firstName.toLowerCase() + lastName.toLowerCase().charAt(0) + randomStr).substring(0, 20);
+  const email = emailUsername + "@outlook.com";
+  const password = firstName.charAt(0).toUpperCase() + lastName.charAt(0).toLowerCase() +
+    Math.random().toString(36).substring(2, 8) + "!" + Math.floor(Math.random() * 900 + 100);
+
+  const birthYear = 1985 + Math.floor(Math.random() * 15);
+  const birthMonth = Math.floor(Math.random() * 12) + 1;
+  const birthDay = Math.floor(Math.random() * 28) + 1;
+
+  try {
+    log("Creating new Outlook account...");
+    log("Generated email: " + email);
+    log("Generated password: " + password.substring(0, 3) + "***");
+
+    await ensureBrowserInstalled();
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+    });
+
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1920, height: 1080 },
+      locale: "en-US",
+    });
+    const page = await context.newPage();
+    await page.setDefaultNavigationTimeout(120000);
+    await page.setDefaultTimeout(30000);
+
+    log("Navigating to Microsoft signup...");
+    await page.goto("https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+    await page.waitForTimeout(3000 + Math.random() * 2000);
+    log("Signup page loaded: " + page.url().substring(0, 80));
+
+    const emailInput = await page.waitForSelector('input[type="email"], input[name="MemberName"], #MemberName, #iSignupMemberName', { timeout: 15000 });
+    if (!emailInput) {
+      return { success: false, error: "Could not find email input on signup page" };
+    }
+    await emailInput.click();
+    await page.waitForTimeout(300);
+    for (const char of emailUsername) {
+      await page.keyboard.type(char, { delay: 0 });
+      await page.waitForTimeout(20 + Math.random() * 40);
+    }
+    log("Email username typed: " + emailUsername);
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+    const nextBtn = await page.$('input[type="submit"], #iSignupAction, #iNext');
+    if (nextBtn) await nextBtn.click();
+    else await page.keyboard.press("Enter");
+
+    await page.waitForTimeout(3000 + Math.random() * 2000);
+
+    const emailError = await page.$('#MemberNameError, div[id*="Error"]');
+    if (emailError) {
+      const errText = await emailError.textContent().catch(() => "");
+      if (errText && errText.trim().length > 0) {
+        log("Email error: " + errText.trim().substring(0, 100));
+        return { success: false, error: "Email error: " + errText.trim() };
+      }
+    }
+
+    log("Looking for password field...");
+    const passInput = await page.waitForSelector('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword', { timeout: 15000 });
+    if (!passInput) {
+      const currentContent = await page.textContent("body").catch(() => "");
+      log("No password field. Page: " + (currentContent || "").substring(0, 150).replace(/\s+/g, " "));
+      return { success: false, error: "Password field not found on signup page" };
+    }
+    await passInput.click();
+    await page.waitForTimeout(300);
+    for (const char of password) {
+      await page.keyboard.type(char, { delay: 0 });
+      await page.waitForTimeout(20 + Math.random() * 40);
+    }
+    log("Password typed");
+
+    await page.waitForTimeout(500 + Math.random() * 500);
+    const passNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
+    if (passNext) await passNext.click();
+    else await page.keyboard.press("Enter");
+
+    await page.waitForTimeout(3000 + Math.random() * 2000);
+    log("After password: " + page.url().substring(0, 80));
+
+    const nameInput = await page.$('input[name="FirstName"], #FirstName, #iFirstName');
+    if (nameInput) {
+      log("Name fields found, filling...");
+      await nameInput.click();
+      await page.waitForTimeout(200);
+      for (const char of firstName) {
+        await page.keyboard.type(char, { delay: 0 });
+        await page.waitForTimeout(15 + Math.random() * 30);
+      }
+
+      const lastInput = await page.$('input[name="LastName"], #LastName, #iLastName');
+      if (lastInput) {
+        await lastInput.click();
+        await page.waitForTimeout(200);
+        for (const char of lastName) {
+          await page.keyboard.type(char, { delay: 0 });
+          await page.waitForTimeout(15 + Math.random() * 30);
+        }
+      }
+      log("Name filled: " + firstName + " " + lastName);
+
+      await page.waitForTimeout(500 + Math.random() * 500);
+      const nameNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
+      if (nameNext) await nameNext.click();
+      else await page.keyboard.press("Enter");
+      await page.waitForTimeout(3000 + Math.random() * 2000);
+    }
+
+    const dobSection = await page.$('select[name="BirthMonth"], #BirthMonth, select#BirthMonth, #ibirthmonthcombo');
+    if (dobSection) {
+      log("Date of birth section found...");
+
+      const monthSelect = await page.$('select[name="BirthMonth"], #BirthMonth, select#BirthMonth');
+      if (monthSelect) {
+        await monthSelect.selectOption(String(birthMonth));
+        await page.waitForTimeout(300);
+      } else {
+        const monthInput = await page.$('#BirthMonth, #ibirthmonthcombo');
+        if (monthInput) {
+          await monthInput.click();
+          await page.waitForTimeout(200);
+          const monthOption = await page.$(`option[value="${birthMonth}"], li[data-value="${birthMonth}"]`);
+          if (monthOption) await monthOption.click();
+        }
+      }
+
+      await page.waitForTimeout(300);
+      const daySelect = await page.$('select[name="BirthDay"], #BirthDay, select#BirthDay');
+      if (daySelect) {
+        await daySelect.selectOption(String(birthDay));
+        await page.waitForTimeout(300);
+      } else {
+        const dayInput = await page.$('#BirthDay, #ibirthdaycombo');
+        if (dayInput) {
+          await dayInput.click();
+          await page.waitForTimeout(200);
+          const dayOption = await page.$(`option[value="${birthDay}"], li[data-value="${birthDay}"]`);
+          if (dayOption) await dayOption.click();
+        }
+      }
+
+      await page.waitForTimeout(300);
+      const yearInput = await page.$('input[name="BirthYear"], #BirthYear, input#BirthYear');
+      if (yearInput) {
+        await yearInput.click();
+        await yearInput.fill("");
+        await page.waitForTimeout(200);
+        for (const char of String(birthYear)) {
+          await page.keyboard.type(char, { delay: 0 });
+          await page.waitForTimeout(30 + Math.random() * 50);
+        }
+      }
+
+      log("DOB filled: " + birthMonth + "/" + birthDay + "/" + birthYear);
+
+      await page.waitForTimeout(500 + Math.random() * 500);
+      const dobNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
+      if (dobNext) await dobNext.click();
+      else await page.keyboard.press("Enter");
+      await page.waitForTimeout(3000 + Math.random() * 2000);
+    }
+
+    log("Checking for captcha...");
+    let captchaSolved = false;
+    for (let captchaAttempt = 0; captchaAttempt < 3; captchaAttempt++) {
+      let funCaptchaDetected = false;
+      try {
+        const fcFrame = await page.$('iframe[id*="enforcementFrame"], iframe[data-testid*="captcha"], #FunCaptcha, iframe[title*="arkose"]');
+        if (fcFrame) funCaptchaDetected = true;
+        const fcDiv = await page.$('#hipEnforcementContainer, div[id*="arkose"], #hipTemplateContainer');
+        if (fcDiv) funCaptchaDetected = true;
+      } catch {}
+
+      if (!funCaptchaDetected) {
+        log("No captcha detected");
+        captchaSolved = true;
+        break;
+      }
+
+      log("FunCaptcha detected (attempt " + (captchaAttempt + 1) + "/3), solving via CapSolver...");
+      try {
+        const publicKey = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA";
+        const result = await solveFunCaptcha("https://signup.live.com/", publicKey);
+        if (result.success && result.token) {
+          log("FunCaptcha solved! Injecting token...");
+          await page.evaluate((token: string) => {
+            const callback = (window as any).ArkoseEnforcement?.callback || (window as any).fc_callback;
+            if (typeof callback === "function") {
+              callback({ token });
+            }
+            const hiddenInput = document.querySelector('input[name="fc_token"], input[name="hipSolutionToken"], input[name="HipSolutionToken"]') as HTMLInputElement;
+            if (hiddenInput) {
+              hiddenInput.value = token;
+            }
+            const verifyBtn = document.querySelector('input[type="submit"], #iSignupAction') as HTMLElement;
+            if (verifyBtn) verifyBtn.click();
+          }, result.token);
+          await page.waitForTimeout(5000 + Math.random() * 3000);
+          log("FunCaptcha token injected, waiting for result...");
+          captchaSolved = true;
+          break;
+        } else {
+          log("FunCaptcha solving failed: " + (result.error || "unknown"));
+        }
+      } catch (fcErr: any) {
+        log("FunCaptcha error: " + (fcErr.message || "").substring(0, 100));
+      }
+      await page.waitForTimeout(2000);
+    }
+
+    if (!captchaSolved) {
+      return { success: false, error: "Could not solve FunCaptcha after 3 attempts" };
+    }
+
+    await page.waitForTimeout(3000 + Math.random() * 2000);
+    const currentUrl = page.url();
+    log("After captcha/submit: " + currentUrl.substring(0, 100));
+
+    const bodyText = await page.textContent("body").catch(() => "");
+    const bodyLower = (bodyText || "").toLowerCase();
+
+    if (currentUrl.includes("signup") && (bodyLower.includes("error") || bodyLower.includes("try again"))) {
+      const errSnippet = (bodyText || "").substring(0, 200).replace(/\s+/g, " ");
+      log("Signup may have failed: " + errSnippet);
+      return { success: false, error: "Signup error: " + errSnippet.substring(0, 150) };
+    }
+
+    const stayBtn = await page.$('#acceptButton, #idSIButton9, input[value="Yes"]');
+    if (stayBtn) {
+      await stayBtn.click();
+      await page.waitForTimeout(3000 + Math.random() * 2000);
+      log("Handled post-signup prompt");
+    }
+
+    const welcomeText = bodyLower.includes("welcome") || bodyLower.includes("almost done") ||
+                        bodyLower.includes("verify") || currentUrl.includes("proofs") ||
+                        currentUrl.includes("outlook") || currentUrl.includes("office");
+
+    if (welcomeText || !currentUrl.includes("signup.live.com/signup")) {
+      log("Outlook account created successfully!");
+      log("Email: " + email);
+      return { success: true, email, password };
+    }
+
+    const pageSnippet = (bodyText || "").substring(0, 300).replace(/\s+/g, " ");
+    log("Uncertain result. URL: " + currentUrl.substring(0, 100) + " | Page: " + pageSnippet.substring(0, 150));
+    return { success: true, email, password };
+  } catch (err: any) {
+    log("Error creating Outlook account: " + (err.message || "").substring(0, 200));
+    return { success: false, error: (err.message || "Unknown error").substring(0, 300) };
+  } finally {
+    if (browser) { try { await browser.close(); } catch {} }
+  }
+}
+
 export interface ZenrowsRegistrationResult {
   success: boolean;
   error?: string;
   apiKey?: string;
+  outlookEmail?: string;
+  outlookPassword?: string;
 }
 
 export async function registerZenrowsAccount(
-  outlookEmail: string,
-  outlookPassword: string,
+  outlookEmail: string | null,
+  outlookPassword: string | null,
   log: (msg: string) => void
 ): Promise<ZenrowsRegistrationResult> {
   let localBrowser: any = null;
@@ -5595,7 +5878,18 @@ export async function registerZenrowsAccount(
   const zenrowsPassword = "Zr" + Math.random().toString(36).substring(2, 10) + "!" + Math.floor(Math.random() * 900 + 100);
 
   try {
-    log("Step 1/5: Registering on ZenRows...");
+    if (!outlookEmail || !outlookPassword) {
+      log("Step 0/6: Creating fresh Outlook account...");
+      const outlookResult = await createOutlookAccount(log);
+      if (!outlookResult.success || !outlookResult.email || !outlookResult.password) {
+        return { success: false, error: "Failed to create Outlook account: " + (outlookResult.error || "Unknown error") };
+      }
+      outlookEmail = outlookResult.email;
+      outlookPassword = outlookResult.password;
+      log("Outlook account ready: " + outlookEmail);
+    }
+
+    log("Step 1/6: Registering on ZenRows...");
     log("Using email: " + outlookEmail);
     log("Generated ZenRows password: " + zenrowsPassword.substring(0, 3) + "***");
 
@@ -5974,7 +6268,7 @@ export async function registerZenrowsAccount(
     try { await page.close(); } catch {}
     try { await context.close(); } catch {}
 
-    log("Step 2/5: Logging into Outlook to get verification email...");
+    log("Step 2/6: Logging into Outlook to get verification email...");
 
     let outlookBrowser = localBrowser;
     let usedZenRows = false;
@@ -6061,7 +6355,7 @@ export async function registerZenrowsAccount(
       }
     }
 
-    log("Step 3/5: Navigating to Outlook inbox...");
+    log("Step 3/6: Navigating to Outlook inbox...");
     await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 120000 });
     await outlookPage.waitForTimeout(5000 + Math.random() * 3000);
     log("Inbox loaded: " + outlookPage.url().substring(0, 80));
@@ -6178,7 +6472,7 @@ export async function registerZenrowsAccount(
       return { success: false, error: "Could not find ZenRows verification email after 12 attempts. The email may not have arrived yet." };
     }
 
-    log("Step 4/5: Clicking verification link...");
+    log("Step 4/6: Clicking verification link...");
     try { await outlookPage.close(); } catch {}
     try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
     zenrowsBrowser = null;
@@ -6211,7 +6505,7 @@ export async function registerZenrowsAccount(
     try { await verifyPage.close(); } catch {}
     try { await verifyCtx.close(); } catch {}
 
-    log("Step 5/5: Logging into ZenRows to get API key...");
+    log("Step 5/6: Logging into ZenRows to get API key...");
     if (!localBrowser || !localBrowser.isConnected()) {
       await ensureBrowserInstalled();
       localBrowser = await chromium.launch({
@@ -6326,8 +6620,9 @@ export async function registerZenrowsAccount(
     try { await apiCtx.close(); } catch {}
 
     if (apiKey) {
+      log("Step 6/6: Complete!");
       log("API Key found: " + apiKey.substring(0, 6) + "..." + apiKey.substring(apiKey.length - 4));
-      return { success: true, apiKey };
+      return { success: true, apiKey, outlookEmail: outlookEmail!, outlookPassword: outlookPassword! };
     } else {
       log("Could not extract API key from builder page");
       return { success: false, error: "Registered and verified but could not extract API key from builder page" };
