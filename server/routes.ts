@@ -1206,21 +1206,16 @@ export async function registerRoutes(
         log
       );
 
-      if (gigyaResult.success || gigyaResult.profileSet || gigyaResult.dataSet) {
-        await storage.updateAccount(account.id, { status: "completed" });
-        broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
-        if (gigyaResult.success) {
-          log("Draw registration completed successfully!");
-        } else {
-          log("Partial success (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + "). Marked as completed.");
-        }
+      if (gigyaResult.formSubmitted) {
+        log("Draw registration completed successfully!");
+        let emailConfirmed = false;
         try {
           const emailPassword = account.emailPassword || account.la28Password;
           if (account.email && emailPassword) {
             log("📧 Checking inbox for LA28 draw confirmation email...");
             const mailToken = await getAuthToken(account.email, emailPassword);
-            const confirmed = await pollForDrawConfirmation(mailToken, 20, 5000);
-            if (confirmed) {
+            emailConfirmed = await pollForDrawConfirmation(mailToken, 20, 5000);
+            if (emailConfirmed) {
               log("✅ Draw confirmation email received! Registration verified by LA28.");
             } else {
               log("⚠️ Draw confirmation email not found yet. Draw was submitted but email not received within timeout.");
@@ -1228,6 +1223,30 @@ export async function registerRoutes(
           }
         } catch (confirmErr: any) {
           log("⚠️ Could not check for confirmation email: " + confirmErr.message);
+        }
+        await storage.updateAccount(account.id, { status: "completed" });
+        broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+      } else if (gigyaResult.success || gigyaResult.profileSet || gigyaResult.dataSet) {
+        log("Profile/data set (profile=" + gigyaResult.profileSet + " data=" + gigyaResult.dataSet + ") but draw form was NOT submitted on tickets.la28.org.");
+        let emailConfirmed = false;
+        try {
+          const emailPassword = account.emailPassword || account.la28Password;
+          if (account.email && emailPassword) {
+            log("📧 Checking inbox for LA28 draw confirmation email...");
+            const mailToken = await getAuthToken(account.email, emailPassword);
+            emailConfirmed = await pollForDrawConfirmation(mailToken, 20, 5000);
+            if (emailConfirmed) {
+              log("✅ Draw confirmation email received! Draw actually registered.");
+            }
+          }
+        } catch (confirmErr: any) {}
+        if (emailConfirmed) {
+          await storage.updateAccount(account.id, { status: "completed" });
+          broadcastAccountUpdate({ ...account, status: "completed" }, account.ownerId || undefined);
+        } else {
+          await storage.updateAccount(account.id, { status: "draw_registering" });
+          broadcastAccountUpdate({ ...account, status: "draw_registering" }, account.ownerId || undefined);
+          log("⚠️ Draw form NOT submitted. Status kept as draw_registering — use Retry Draw to try again.");
         }
       } else {
         await storage.updateAccount(account.id, { status: "draw_registering" });
