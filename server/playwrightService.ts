@@ -2446,33 +2446,22 @@ async function fillAndSubmitTicketsForm(
         })()`) as any;
         console.log("[Draw-Form] Post-submit validation: " + JSON.stringify(postSubmitErrors));
 
-        const isSuccess = afterUrl.includes('mydatasuccess') ||
-                          afterUrl.includes('myCustomerDataSuccess') ||
-                          afterSubmitText.toLowerCase().includes('success') || 
-                          afterSubmitText.toLowerCase().includes('congratulations') ||
-                          afterSubmitText.toLowerCase().includes('you are registered') ||
-                          afterSubmitText.toLowerCase().includes('confirmed') ||
-                          afterSubmitText.toLowerCase().includes('thank you') ||
-                          afterSubmitText.toLowerCase().includes('you have successfully');
+        const urlIsSuccess = afterUrl.includes('mydatasuccess') || afterUrl.includes('myCustomerDataSuccess');
+        const textLower = afterSubmitText.toLowerCase();
+        const textIsSuccess = (textLower.includes('success') && textLower.includes('registration')) ||
+                              (textLower.includes('registered') && textLower.includes('draw')) ||
+                              (textLower.includes('your status') && textLower.includes('registered for the draw')) ||
+                              (textLower.includes('your changes have been saved') && textLower.includes('registration has been submitted'));
         
-        if (isSuccess) {
-          log("SUCCESS! Draw registration complete on tickets.la28.org!");
+        if (urlIsSuccess) {
+          log("SUCCESS! Draw registration complete — mydatasuccess page confirmed!");
+          return true;
+        } else if (textIsSuccess && !textLower.includes('enter the draw by completing')) {
+          log("SUCCESS! Draw registration complete — success text confirmed on tickets.la28.org!");
           return true;
         } else {
-          console.log("[Draw-Form] Form still shows 'enter the draw'. Checking if Angular registered changes...");
-          
-          const retryResult = await page.evaluate(`(() => {
-            var selects = document.querySelectorAll('select');
-            var emptyVisible = [];
-            for (var i = 0; i < selects.length; i++) {
-              var s = selects[i];
-              if (s.offsetParent !== null && (!s.value || s.value.includes('null'))) {
-                emptyVisible.push({ id: s.id.substring(0, 40), val: s.value });
-              }
-            }
-            return { emptyVisibleSelects: emptyVisible };
-          })()`) as any;
-          console.log("[Draw-Form] Empty visible selects: " + JSON.stringify(retryResult));
+          console.log("[Draw-Form] No success indicators. URL: " + afterUrl.substring(0, 100));
+          console.log("[Draw-Form] Text snippet: " + afterSubmitText.substring(0, 300));
           
           log("Form submitted but success page NOT reached. Draw registration NOT confirmed.");
           return false;
@@ -3407,8 +3396,20 @@ export async function completeDrawViaGigyaBrowser(
             page, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
           );
           if (formResult) {
-            formSubmitted = true;
-            log("Draw form submitted directly in browser!");
+            const verifyUrl = page.url();
+            const verifyText = await page.evaluate(`(document.body.innerText || '').substring(0, 1500)`) as string;
+            const verifyTextLower = verifyText.toLowerCase();
+            const urlOk = verifyUrl.includes('mydatasuccess') || verifyUrl.includes('myCustomerDataSuccess');
+            const textOk = (verifyTextLower.includes('registered') && verifyTextLower.includes('draw')) ||
+                           (verifyTextLower.includes('your status') && verifyTextLower.includes('registered for the draw')) ||
+                           (verifyTextLower.includes('your changes have been saved') && verifyTextLower.includes('registration has been submitted'));
+            if (urlOk || (textOk && !verifyTextLower.includes('enter the draw by completing'))) {
+              formSubmitted = true;
+              log("Draw form submitted and success page verified!");
+            } else {
+              console.log("[Draw-OIDC] Form returned true but success page NOT verified. URL: " + verifyUrl.substring(0, 100) + " Text: " + verifyText.substring(0, 200));
+              log("Form submitted but success page NOT verified. Draw NOT confirmed.");
+            }
           } else {
             log("On tickets page but form fill did not complete.");
           }
@@ -3448,8 +3449,20 @@ export async function completeDrawViaGigyaBrowser(
               page, birthYear, usedZip, favOlympicSports, favParalympicSports, favTeams, log
             );
             if (formResult) {
-              formSubmitted = true;
-              log("Draw form submitted directly in browser!");
+              const verifyUrl2 = page.url();
+              const verifyText2 = await page.evaluate(`(document.body.innerText || '').substring(0, 1500)`) as string;
+              const verifyText2Lower = verifyText2.toLowerCase();
+              const urlOk2 = verifyUrl2.includes('mydatasuccess') || verifyUrl2.includes('myCustomerDataSuccess');
+              const textOk2 = (verifyText2Lower.includes('registered') && verifyText2Lower.includes('draw')) ||
+                              (verifyText2Lower.includes('your status') && verifyText2Lower.includes('registered for the draw')) ||
+                              (verifyText2Lower.includes('your changes have been saved') && verifyText2Lower.includes('registration has been submitted'));
+              if (urlOk2 || (textOk2 && !verifyText2Lower.includes('enter the draw by completing'))) {
+                formSubmitted = true;
+                log("Draw form submitted and success page verified!");
+              } else {
+                console.log("[Draw-OIDC] Nav2: Form returned true but success NOT verified. URL: " + verifyUrl2.substring(0, 100));
+                log("Form submitted but success page NOT verified. Draw NOT confirmed.");
+              }
             }
           } else {
             console.log("[Draw-OIDC] Could not reach tickets page. URL: " + page.url().substring(0, 120));
@@ -4002,13 +4015,23 @@ export async function completeDrawViaGigyaBrowser(
             const afterUrl = bdPage.url();
             console.log("[ZenRows] After submit URL: " + afterUrl);
 
-            if (afterUrl.includes('mydatasuccess')) {
+            if (afterUrl.includes('mydatasuccess') || afterUrl.includes('myCustomerDataSuccess')) {
               console.log("[ZenRows] SUCCESS! Redirected to /mydatasuccess/");
               log("SUCCESS! Draw registration complete — redirected to mydatasuccess!");
               formSubmitted = true;
             } else if (formResult) {
-              formSubmitted = true;
-              log("Form submitted on tickets.la28.org via ZenRows.");
+              const afterText = await bdPage.evaluate(`(document.body.innerText || '').substring(0, 1500)`) as string;
+              const afterTextLower = afterText.toLowerCase();
+              const zenTextSuccess = (afterTextLower.includes('registered') && afterTextLower.includes('draw')) ||
+                                     (afterTextLower.includes('your status') && afterTextLower.includes('registered for the draw')) ||
+                                     (afterTextLower.includes('your changes have been saved') && afterTextLower.includes('registration has been submitted'));
+              if (zenTextSuccess && !afterTextLower.includes('enter the draw by completing')) {
+                formSubmitted = true;
+                log("SUCCESS! Draw form submitted and success text confirmed via ZenRows.");
+              } else {
+                console.log("[ZenRows] Form submitted but NO success indicators. Text: " + afterText.substring(0, 300));
+                log("Form submitted but success page NOT reached via ZenRows. Draw NOT confirmed.");
+              }
             }
           } else {
             console.log("[ZenRows] Form not found. Page text: " + bdText.substring(0, 200));
@@ -4407,11 +4430,23 @@ export async function completeDrawViaGigyaBrowser(
               var afterUrl2 = bdPg2.url();
               console.log("[ZenRows-Full] After submit URL: " + afterUrl2);
 
-              if (afterUrl2.includes('mydatasuccess')) {
-                console.log("[ZenRows-Full] SUCCESS!");
+              if (afterUrl2.includes('mydatasuccess') || afterUrl2.includes('myCustomerDataSuccess')) {
+                console.log("[ZenRows-Full] SUCCESS! Redirected to mydatasuccess!");
                 formSubmitted = true;
+                log("SUCCESS! Draw registration complete — mydatasuccess page confirmed via ZenRows!");
               } else if (formRes2) {
-                formSubmitted = true;
+                const afterText2 = await bdPg2.evaluate(`(document.body.innerText || '').substring(0, 1500)`) as string;
+                const afterText2Lower = afterText2.toLowerCase();
+                const zenText2Success = (afterText2Lower.includes('registered') && afterText2Lower.includes('draw')) ||
+                                        (afterText2Lower.includes('your status') && afterText2Lower.includes('registered for the draw')) ||
+                                        (afterText2Lower.includes('your changes have been saved') && afterText2Lower.includes('registration has been submitted'));
+                if (zenText2Success && !afterText2Lower.includes('enter the draw by completing')) {
+                  formSubmitted = true;
+                  log("SUCCESS! Draw form submitted and success text confirmed via ZenRows-Full.");
+                } else {
+                  console.log("[ZenRows-Full] Form submitted but NO success indicators. Text: " + afterText2.substring(0, 300));
+                  log("Form submitted but success page NOT reached via ZenRows-Full. Draw NOT confirmed.");
+                }
               }
             } else {
               console.log("[ZenRows-Full] Form did not load. Marking OIDC as linked anyway.");
@@ -4442,14 +4477,13 @@ export async function completeDrawViaGigyaBrowser(
       browser = null;
     }
 
-    const success = profileSet && dataSet;
+    const success = formSubmitted;
     return { success, profileSet, dataSet, oidcLinked, formSubmitted };
   } catch (err: any) {
     console.log("[Draw-Gigya] OIDC/ZenRows error: " + err.message.substring(0, 200));
     log("OIDC/ZenRows error: " + err.message.substring(0, 100));
     try { if (browser) await browser.close(); } catch {}
-    const success = profileSet && dataSet;
-    return { success, profileSet, dataSet, error: err.message };
+    return { success: false, profileSet, dataSet, formSubmitted: false, error: err.message };
   }
 }
 
@@ -4613,10 +4647,10 @@ export async function completeDrawRegistrationViaApi(
   const elapsed = Date.now() - apiStart;
   const success = profileSet && dataSet;
   if (success) {
-    console.log("[Draw-API] Complete in " + elapsed + "ms");
-    log("[REGISTRATION CONFIRMED] Draw registration complete via API in " + (elapsed / 1000).toFixed(1) + "s!");
+    console.log("[Draw-API] Profile/data flags set in " + elapsed + "ms");
+    log("[Draw-API] Profile + data flags set via API in " + (elapsed / 1000).toFixed(1) + "s. Still need form submission on tickets.la28.org!");
   } else {
-    log("[REGISTRATION CONFIRMED] Partial: profile=" + profileSet + " data=" + dataSet + " (" + (elapsed / 1000).toFixed(1) + "s)");
+    log("[Draw-API] Partial: profile=" + profileSet + " data=" + dataSet + " (" + (elapsed / 1000).toFixed(1) + "s)");
   }
 
   return { success, profileSet, dataSet };
