@@ -85,14 +85,31 @@ const platforms: Platform[] = [
     ],
   },
   {
-    id: "outlook",
-    name: "Outlook Login",
-    description: "Automated Microsoft/Outlook account login via ZenRows with FunCaptcha solving",
-    href: "/admin/outlook-login",
+    id: "outlook-create",
+    name: "Create Outlook",
+    description: "Auto-create Microsoft/Outlook accounts with random identity, captcha solving & batch support",
+    href: "/admin/outlook-create",
     gradient: "from-blue-600/80 via-indigo-700/60 to-blue-900/80",
     badge: "ACTIVE",
     badgeColor: "text-emerald-400",
     borderColor: "rgba(59,130,246,0.2)",
+    comingSoon: false,
+    icon: <Mail className="w-7 h-7 text-white" />,
+    stats: [
+      { label: "Auto Create", icon: Shield },
+      { label: "Captcha Solve", icon: Zap },
+      { label: "Batch (1-10)", icon: Globe },
+    ],
+  },
+  {
+    id: "outlook",
+    name: "Outlook Login",
+    description: "Automated Microsoft/Outlook account login via ZenRows with FunCaptcha solving",
+    href: "/admin/outlook-login",
+    gradient: "from-sky-600/80 via-blue-700/60 to-indigo-900/80",
+    badge: "ACTIVE",
+    badgeColor: "text-emerald-400",
+    borderColor: "rgba(56,189,248,0.2)",
     comingSoon: false,
     icon: <Mail className="w-7 h-7 text-white" />,
     stats: [
@@ -194,8 +211,12 @@ export default function CreateServer() {
                       <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(168,85,247,0.2)' }}>
                         <span className="text-2xl font-black text-white font-mono">BM</span>
                       </div>
-                    ) : platform.id === "outlook" ? (
+                    ) : platform.id === "outlook-create" ? (
                       <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(59,130,246,0.2)' }}>
+                        <Mail className="w-7 h-7 text-white" />
+                      </div>
+                    ) : platform.id === "outlook" ? (
+                      <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(56,189,248,0.2)' }}>
                         <Mail className="w-7 h-7 text-white" />
                       </div>
                     ) : (

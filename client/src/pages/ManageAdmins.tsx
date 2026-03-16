@@ -17,7 +17,7 @@ const ALL_SERVICES = [
   { id: "ticketmaster", label: "Ticketmaster", color: "text-blue-400" },
   { id: "uefa", label: "UEFA", color: "text-emerald-400" },
   { id: "brunomars", label: "Bruno Mars", color: "text-purple-400" },
-  { id: "outlook", label: "Outlook Login", color: "text-sky-400" },
+  { id: "outlook", label: "Outlook (Create + Login)", color: "text-sky-400" },
   { id: "zenrows", label: "ZenRows", color: "text-green-400" },
 ];
 

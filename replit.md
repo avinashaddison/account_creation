@@ -48,6 +48,8 @@ The application features a modern full-stack architecture.
     -   **Ticketmaster:** Account creation with email and phone verification. Addresses specific challenges like password field manipulation and CAPTCHA solving.
     -   **Bruno Mars Presale:** Combined flow with Ticketmaster account creation to register for presales.
     -   **UEFA:** Account creation with email verification.
+    -   **Outlook Create:** Automated Microsoft/Outlook account creation with random identity generation (name, email, DOB), FunCaptcha solving via CapSolver, and batch support (up to 10 accounts). Accessible via `/admin/outlook-create`. Uses the `outlook` service access permission.
+    -   **Outlook Login:** Automated Outlook/Microsoft account login via ZenRows browser with FunCaptcha solving. Accessible via `/admin/outlook-login`.
 
 ## External Dependencies
 -   **Email Service:** mail.tm API (branded as "Addison Mail") for temporary email address generation and inbox access.

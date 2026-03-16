@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -1967,6 +1967,48 @@ export async function registerRoutes(
             await storage.creditWallet(userId, costPerAccount);
           }
         }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/outlook-create", requireAuth, requireServiceAccess("outlook"), async (req: Request, res: Response) => {
+    try {
+      const { count } = req.body;
+      const total = Math.min(Math.max(parseInt(count) || 1, 1), 10);
+
+      const userId = req.session.userId;
+      const batchId = `outlook-create-${randomUUID().substring(0, 8)}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId, count: total, message: `Creating ${total} Outlook account(s)` });
+
+      (async () => {
+        const results: Array<{ email: string; password: string }> = [];
+        for (let i = 0; i < total; i++) {
+          const accountNum = `${i + 1}/${total}`;
+          broadcastLog(batchId, `acc-${i}`, `[${accountNum}] Creating Outlook account...`, userId);
+          try {
+            const result = await createOutlookAccount(
+              (msg) => broadcastLog(batchId, `acc-${i}`, `[${accountNum}] ${msg}`, userId)
+            );
+            if (result.success && result.email && result.password) {
+              results.push({ email: result.email, password: result.password });
+              broadcastLog(batchId, `acc-${i}`, `[${accountNum}] Account created: ${result.email}`, userId);
+              broadcast({ type: "outlook_create_result", batchId, index: i, success: true, email: result.email, password: result.password }, userId);
+            } else {
+              broadcastLog(batchId, `acc-${i}`, `[${accountNum}] Failed: ${result.error || "Unknown error"}`, userId);
+              broadcast({ type: "outlook_create_result", batchId, index: i, success: false, error: result.error }, userId);
+            }
+          } catch (err: any) {
+            broadcastLog(batchId, `acc-${i}`, `[${accountNum}] Error: ${(err.message || "").substring(0, 150)}`, userId);
+            broadcast({ type: "outlook_create_result", batchId, index: i, success: false, error: err.message }, userId);
+          }
+        }
+        broadcastLog(batchId, "summary", `Completed: ${results.length}/${total} accounts created`, userId);
+        broadcast({ type: "outlook_create_complete", batchId, total, created: results.length, accounts: results }, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {
