@@ -146,14 +146,6 @@ export default function CreateServer() {
       });
       return;
     }
-    if (userRole !== "superadmin" && !allowedServices.includes(platform.id)) {
-      toast({
-        title: "Access Denied",
-        description: `You don't have access to ${platform.name}. Contact your super admin.`,
-        variant: "destructive",
-      });
-      return;
-    }
     navigate(platform.href);
   }
 
@@ -175,17 +167,15 @@ export default function CreateServer() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {platforms.map((platform) => {
-          const locked = isLocked(platform.id);
-          return (
+        {platforms.filter((platform) => !isLocked(platform.id)).map((platform) => (
           <div
             key={platform.id}
             onClick={() => handleClick(platform)}
-            className={`group relative ${locked ? "cursor-not-allowed" : "cursor-pointer"}`}
+            className="group relative cursor-pointer"
             data-testid={`card-platform-${platform.id}`}
           >
-            <div className="relative rounded-xl overflow-hidden" style={{ border: `1px solid ${locked ? "rgba(100,100,100,0.15)" : platform.borderColor}` }}>
-              <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} ${platform.comingSoon || locked ? "opacity-20" : "opacity-50 group-hover:opacity-70"} transition-all duration-300`} />
+            <div className="relative rounded-xl overflow-hidden" style={{ border: `1px solid ${platform.borderColor}` }}>
+              <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} ${platform.comingSoon ? "opacity-30" : "opacity-50 group-hover:opacity-70"} transition-all duration-300`} />
               <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(13,17,23,0.6) 0%, rgba(13,17,23,0.92) 100%)' }} />
               <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
@@ -213,20 +203,11 @@ export default function CreateServer() {
                         <img src={uefaLogo} alt="UEFA" className="w-11 h-11 object-contain" />
                       </div>
                     )}
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm" style={{ background: 'rgba(0,0,0,0.4)', border: `1px solid ${locked ? 'rgba(255,60,60,0.15)' : 'rgba(0,240,255,0.1)'}` }}>
-                      {locked ? (
-                        <>
-                          <Lock className="w-2.5 h-2.5 text-red-400" />
-                          <span className="text-[9px] font-mono text-red-400 uppercase tracking-wider">LOCKED</span>
-                        </>
-                      ) : (
-                        <>
-                          <Radio className="w-2.5 h-2.5 text-emerald-400 animate-glow" />
-                          <span className={`text-[9px] font-mono ${platform.badgeColor} uppercase tracking-wider`}>
-                            {platform.badge}
-                          </span>
-                        </>
-                      )}
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm" style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(0,240,255,0.1)' }}>
+                      <Radio className="w-2.5 h-2.5 text-emerald-400 animate-glow" />
+                      <span className={`text-[9px] font-mono ${platform.badgeColor} uppercase tracking-wider`}>
+                        {platform.badge}
+                      </span>
                     </div>
                   </div>
 
@@ -243,9 +224,9 @@ export default function CreateServer() {
                       </div>
                     ))}
                   </div>
-                  <div className="w-8 h-8 rounded-md flex items-center justify-center transition-all duration-300" style={{ background: locked ? 'rgba(255,60,60,0.05)' : 'rgba(0,240,255,0.05)', border: `1px solid ${locked ? 'rgba(255,60,60,0.15)' : 'rgba(0,240,255,0.15)'}` }}>
-                    {platform.comingSoon || locked ? (
-                      <Lock className={`w-3.5 h-3.5 ${locked ? "text-red-500" : "text-zinc-500"}`} />
+                  <div className="w-8 h-8 rounded-md flex items-center justify-center transition-all duration-300" style={{ background: 'rgba(0,240,255,0.05)', border: '1px solid rgba(0,240,255,0.15)' }}>
+                    {platform.comingSoon ? (
+                      <Lock className="w-3.5 h-3.5 text-zinc-500" />
                     ) : (
                       <ArrowRight className="w-3.5 h-3.5 text-cyan-400 group-hover:translate-x-0.5 transition-transform duration-300" />
                     )}
@@ -254,8 +235,7 @@ export default function CreateServer() {
               </div>
             </div>
           </div>
-          );
-        })}
+        ))}
       </div>
     </div>
   );
