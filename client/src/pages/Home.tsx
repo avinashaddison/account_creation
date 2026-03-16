@@ -39,6 +39,9 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   waiting_code: { label: "Waiting for Code", color: "bg-blue-500/10 text-blue-400 border-blue-500/20" },
   verifying: { label: "Verifying", color: "bg-purple-500/10 text-purple-400 border-purple-500/20" },
   verified: { label: "Verified", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
+  profile_saving: { label: "Saving Profile", color: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" },
+  draw_registering: { label: "Draw Registering", color: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
+  completed: { label: "Completed", color: "bg-green-500/10 text-green-400 border-green-500/20" },
   failed: { label: "Failed", color: "bg-red-500/10 text-red-400 border-red-500/20" },
 };
 
@@ -356,9 +359,9 @@ export default function Home() {
               {isRunning && (
                 <div className="flex items-center gap-2 justify-center">
                   <Badge className={`${statusInfo.color} text-xs`} data-testid="badge-current-status">
-                    {currentStatus === "pending" || currentStatus === "registering" || currentStatus === "waiting_code" || currentStatus === "verifying" ? (
+                    {currentStatus === "pending" || currentStatus === "registering" || currentStatus === "waiting_code" || currentStatus === "verifying" || currentStatus === "profile_saving" || currentStatus === "draw_registering" ? (
                       <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                    ) : currentStatus === "verified" ? (
+                    ) : currentStatus === "verified" || currentStatus === "completed" ? (
                       <CheckCircle2 className="w-3 h-3 mr-1" />
                     ) : currentStatus === "failed" ? (
                       <XCircle className="w-3 h-3 mr-1" />
@@ -402,12 +405,18 @@ export default function Home() {
                       {new Date(log.timestamp).toLocaleTimeString()}
                     </span>
                     <span className={
-                      log.message.includes("verified") || log.message.includes("successfully")
+                      log.message.includes("Full flow complete") || log.message.includes("Draw registered") || log.message.includes("completed")
+                        ? "text-green-400 font-semibold"
+                        : log.message.includes("verified") || log.message.includes("successfully")
                         ? "text-emerald-400"
                         : log.message.includes("Failed") || log.message.includes("Error") || log.message.includes("Timed out")
                         ? "text-red-400"
                         : log.message.includes("code") || log.message.includes("Code")
                         ? "text-amber-400"
+                        : log.message.includes("draw_registering") || log.message.includes("Draw") || log.message.includes("tickets.la28.org")
+                        ? "text-violet-400"
+                        : log.message.includes("profile_saving") || log.message.includes("Profile") || log.message.includes("Gigya")
+                        ? "text-indigo-400"
                         : log.message.includes("Status:")
                         ? "text-red-400"
                         : "text-zinc-400"
@@ -474,7 +483,7 @@ export default function Home() {
                       <td className="py-2.5 px-3 text-zinc-500 font-mono text-xs">{reg.la28Password}</td>
                       <td className="py-2.5 px-3">
                         <Badge className={`${st.color} text-[10px]`}>
-                          {reg.status === "verified" && <CheckCircle2 className="w-3 h-3 mr-1" />}
+                          {(reg.status === "verified" || reg.status === "completed") && <CheckCircle2 className="w-3 h-3 mr-1" />}
                           {reg.status === "failed" && <XCircle className="w-3 h-3 mr-1" />}
                           {st.label}
                         </Badge>
