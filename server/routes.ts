@@ -16,6 +16,8 @@ import { clearZenrowsApiKeyCache } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
 
 async function getDefaultBrowserApiUrl(): Promise<string | null> {
+  const residential = await storage.getSetting("residential_proxy_url");
+  if (residential) return residential;
   const saved = await storage.getSetting("browser_proxy_url");
   return saved || null;
 }
@@ -458,9 +460,13 @@ export async function registerRoutes(
       await storage.setSetting("account_price", "0.24");
       console.log("[Auth] Default account price set: $0.24");
     }
-    const proxy = await storage.getSetting("browser_proxy_url");
-    if (!proxy) {
-      console.log("[Auth] No browser proxy URL set. Please configure it in Settings.");
+    const residentialProxy = await storage.getSetting("residential_proxy_url");
+    if (!residentialProxy) {
+      console.log("[Auth] No residential proxy URL set. Please configure it in Settings.");
+    }
+    const browserEngine = await storage.getSetting("browser_proxy_url");
+    if (!browserEngine) {
+      console.log("[Auth] No browser engine URL set. Please configure it in Settings.");
     }
 
   }
@@ -1832,7 +1838,8 @@ export async function registerRoutes(
     password: string,
     addisonEmail: string,
     addisonEmailPassword: string,
-    ownerId: string
+    ownerId: string,
+    proxyUrl?: string
   ) {
     try {
       broadcastLog(batchId, accountId, `Creating temp email: ${addisonEmail}`, ownerId);
@@ -1860,7 +1867,8 @@ export async function registerRoutes(
             broadcastLog(batchId, accountId, `Timed out waiting for code`, ownerId);
           }
           return code;
-        }
+        },
+        proxyUrl
       );
 
       if (result.success) {
@@ -1947,15 +1955,18 @@ export async function registerRoutes(
         created.push(account);
       }
 
+      const baseProxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
+
       batchOwners.set(batchId, userId);
       res.json({ batchId, accounts: created, count: numAccounts });
 
       (async () => {
         for (const acc of created) {
+          const proxyUrl = uniqueProxySession(baseProxyUrl);
           broadcastLog(batchId, acc.id, `Starting UEFA registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processUEFAAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.email, acc.emailPassword, userId
+            acc.email, acc.emailPassword, userId, proxyUrl
           );
         }
         broadcastBatchComplete(batchId, userId);

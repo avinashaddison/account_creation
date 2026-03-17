@@ -1,5 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { execSync } from "child_process";
+import { connectViaZenRows } from "./playwrightService";
 
 let browserInstance: Browser | null = null;
 let launching = false;
@@ -76,7 +77,8 @@ export async function uefaFullRegistrationFlow(
   lastName: string,
   password: string,
   onStatusUpdate: (status: string) => void,
-  getVerificationCode: () => Promise<string | null>
+  getVerificationCode: () => Promise<string | null>,
+  proxyUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   const maxRetries = 2;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -88,7 +90,7 @@ export async function uefaFullRegistrationFlow(
       }
       await new Promise((r) => setTimeout(r, 2000));
     }
-    const result = await doUefaRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode);
+    const result = await doUefaRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, proxyUrl);
     if (result.error?.includes("browser has been closed") || result.error?.includes("crashed")) {
       if (browserInstance) { try { await browserInstance.close(); } catch {} browserInstance = null; }
       continue;
@@ -104,13 +106,22 @@ async function doUefaRegistration(
   lastName: string,
   password: string,
   onStatusUpdate: (status: string) => void,
-  getVerificationCode: () => Promise<string | null>
+  getVerificationCode: () => Promise<string | null>,
+  proxyUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   let browser: Browser;
+  let usingProxy = false;
   try {
-    browser = await getBrowser();
-  } catch (err: any) {
-    return { success: false, error: `Failed to launch browser: ${err.message}` };
+    browser = await connectViaZenRows(undefined, proxyUrl);
+    usingProxy = true;
+    console.log("[UEFA] Connected via Addison Proxy (residential proxy)");
+  } catch (zenErr: any) {
+    console.log("[UEFA] Addison Proxy failed: " + zenErr.message + ", falling back to local browser");
+    try {
+      browser = await getBrowser();
+    } catch (err: any) {
+      return { success: false, error: `Failed to launch browser: ${err.message}` };
+    }
   }
 
   const context = await browser.newContext({

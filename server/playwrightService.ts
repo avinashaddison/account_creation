@@ -56,7 +56,7 @@ function buildCDPUrlWithProxy(cdpUrl: string, proxyUrl: string | null): string {
   return `${cdpUrl}${separator}proxy=${encodeURIComponent(httpProxy)}`;
 }
 
-async function connectViaZenRows(log?: (msg: string) => void, customProxy?: string): Promise<Browser> {
+export async function connectViaZenRows(log?: (msg: string) => void, customProxy?: string): Promise<Browser> {
   let cdpUrl = await getZenRowsCDPUrl();
   const residentialProxy = customProxy || await getResidentialProxyUrl();
   cdpUrl = buildCDPUrlWithProxy(cdpUrl, residentialProxy);
