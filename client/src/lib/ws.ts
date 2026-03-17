@@ -1,5 +1,25 @@
 type MessageHandler = (data: any) => void;
 
+const proxyReplacements: [RegExp, string][] = [
+  [/zenrows/gi, "Addison Proxy"],
+  [/ZenRows/g, "Addison Proxy"],
+  [/zenrow/gi, "Addison Proxy"],
+  [/browser\.zenrows\.com/gi, "proxy.addison.internal"],
+];
+
+function sanitizeProxyRefs(obj: any): void {
+  if (!obj || typeof obj !== "object") return;
+  for (const key of Object.keys(obj)) {
+    if (typeof obj[key] === "string") {
+      for (const [pattern, replacement] of proxyReplacements) {
+        obj[key] = obj[key].replace(pattern, replacement);
+      }
+    } else if (typeof obj[key] === "object") {
+      sanitizeProxyRefs(obj[key]);
+    }
+  }
+}
+
 let ws: WebSocket | null = null;
 let handlers: Set<MessageHandler> = new Set();
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -17,6 +37,7 @@ function connect() {
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      sanitizeProxyRefs(data);
       handlers.forEach((h) => h(data));
     } catch {}
   };

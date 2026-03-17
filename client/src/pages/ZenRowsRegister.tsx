@@ -130,7 +130,7 @@ export default function ZenRowsRegister() {
               <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(16,185,129,0.1) 100%)', border: '1px solid rgba(34,197,94,0.2)' }}>
                 <Globe className="w-4 h-4 text-emerald-400" />
               </div>
-              <h1 className="text-lg font-bold text-white font-mono tracking-tight" data-testid="text-page-title">ZenRows Register</h1>
+              <h1 className="text-lg font-bold text-white font-mono tracking-tight" data-testid="text-page-title">Proxy Register</h1>
             </div>
             <p className="text-[10px] text-emerald-400/30 font-mono mt-0.5 tracking-wide">AUTO-CREATE ZENROWS ACCOUNT & EXTRACT API KEY</p>
           </div>
@@ -152,7 +152,7 @@ export default function ZenRowsRegister() {
             </div>
 
             <p className="text-xs text-zinc-400 font-mono leading-relaxed">
-              Automatically creates a fresh Outlook account, registers it on ZenRows, verifies via email, and extracts the API key. No manual input needed.
+              Automatically creates a fresh Outlook account, registers it on our proxy service, verifies via email, and extracts the API key. No manual input needed.
             </p>
 
             {error && !showManual && (
@@ -190,7 +190,7 @@ export default function ZenRowsRegister() {
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-emerald-400/40 mt-0.5">2</span>
-                  Registers a new ZenRows account with that email
+                  Registers a new proxy account with that email
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-emerald-400/40 mt-0.5">3</span>
@@ -198,7 +198,7 @@ export default function ZenRowsRegister() {
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-emerald-400/40 mt-0.5">4</span>
-                  Extracts the ZenRows API key and saves it
+                  Extracts the proxy API key and saves it
                 </li>
               </ul>
             </div>
@@ -221,7 +221,7 @@ export default function ZenRowsRegister() {
             {showManual && (
               <div className="px-5 pb-5 space-y-3">
                 <p className="text-[11px] text-zinc-500 font-mono leading-relaxed">
-                  Already have an Outlook account? Enter it here to register on ZenRows directly.
+                  Already have an Outlook account? Enter it here to register on our proxy directly.
                 </p>
 
                 <div className="space-y-1.5">
@@ -324,7 +324,7 @@ export default function ZenRowsRegister() {
 
               {result.success && result.apiKey && (
                 <div className="mt-3 space-y-1.5">
-                  <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">ZenRows API Key</span>
+                  <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Proxy API Key</span>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 text-xs font-mono text-emerald-300 bg-black/30 px-3 py-2 rounded-lg truncate" data-testid="text-api-key">
                       {result.apiKey}

@@ -243,7 +243,7 @@ export default function OutlookLogin() {
             <ul className="space-y-1.5 text-[11px] text-zinc-500 font-mono">
               <li className="flex items-start gap-2">
                 <span className="text-emerald-400/30 mt-0.5">*</span>
-                Uses ZenRows residential browser to bypass bot detection
+                Uses Addison Proxy residential browser to bypass bot detection
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-emerald-400/30 mt-0.5">*</span>

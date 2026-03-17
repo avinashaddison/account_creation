@@ -104,7 +104,7 @@ const platforms: Platform[] = [
   {
     id: "outlook",
     name: "Outlook Login",
-    description: "Automated Microsoft/Outlook account login via ZenRows with FunCaptcha solving",
+    description: "Automated Microsoft/Outlook account login via Addison Proxy with FunCaptcha solving",
     href: "/admin/outlook-login",
     gradient: "from-sky-600/80 via-blue-700/60 to-indigo-900/80",
     badge: "ACTIVE",
@@ -115,13 +115,13 @@ const platforms: Platform[] = [
     stats: [
       { label: "Auto Login", icon: Shield },
       { label: "Captcha Solve", icon: Zap },
-      { label: "ZenRows", icon: Globe },
+      { label: "Addison Proxy", icon: Globe },
     ],
   },
   {
     id: "zenrows",
-    name: "ZenRows Register",
-    description: "Auto-create ZenRows accounts via Outlook email verification & extract API keys",
+    name: "Proxy Register",
+    description: "Auto-create proxy accounts via Outlook email verification & extract API keys",
     href: "/admin/zenrows-register",
     gradient: "from-emerald-600/80 via-teal-700/60 to-green-900/80",
     badge: "ACTIVE",

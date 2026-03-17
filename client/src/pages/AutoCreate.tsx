@@ -413,7 +413,7 @@ export default function AutoCreate() {
                   const isDraw = msg.includes("draw_registering") || msg.includes("DRAW") || msg.includes("draw form") || msg.includes("tickets.la28.org") || msg.includes("Ticket") || msg.includes("form fill") || msg.includes("form submitted");
                   const isProfile = msg.includes("profile_saving") || msg.includes("Profile") || msg.includes("Gigya");
                   const isStatus = msg.includes("Status:");
-                  const isZenRows = msg.includes("ZenRows") || msg.includes("Akamai") || msg.includes("Access Denied");
+                  const isZenRows = msg.includes("Addison Proxy") || msg.includes("Akamai") || msg.includes("Access Denied");
 
                   const colorClass = isDrawOk ? "text-emerald-400 font-bold"
                     : isSuccess ? "text-emerald-400 font-semibold"

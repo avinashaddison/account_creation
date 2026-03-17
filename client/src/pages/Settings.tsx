@@ -24,25 +24,25 @@ type ApiKeyField = {
 const apiKeyFields: ApiKeyField[] = [
   {
     id: "zenrows",
-    label: "ZenRows API Key",
+    label: "Addison Proxy API Key",
     description: "Premium proxy for bypassing Akamai bot protection on tickets.la28.org",
     icon: <Globe className="w-4 h-4" />,
     getEndpoint: "/api/settings/zenrows-api-key",
     putEndpoint: "/api/admin/zenrows-api-key",
     fieldName: "key",
-    placeholder: "Enter ZenRows API key...",
+    placeholder: "Enter proxy API key...",
     borderColor: "rgba(0,255,65,0.15)",
     iconColor: "text-emerald-400",
   },
   {
     id: "zenrows-proxy",
-    label: "ZenRows Browser URL",
-    description: "WebSocket URL for ZenRows browser proxy (wss://browser.zenrows.com?apikey=...)",
+    label: "Addison Proxy Browser URL",
+    description: "WebSocket URL for Addison Proxy browser (wss://...)",
     icon: <Cpu className="w-4 h-4" />,
     getEndpoint: "/api/settings/zenrows-proxy",
     putEndpoint: "/api/admin/zenrows-proxy",
     fieldName: "url",
-    placeholder: "wss://browser.zenrows.com?apikey=...",
+    placeholder: "wss://proxy.addison.internal?apikey=...",
     borderColor: "rgba(0,255,65,0.1)",
     iconColor: "text-emerald-400/70",
   },
@@ -249,7 +249,7 @@ export default function Settings() {
       <div className="rounded-lg px-4 py-3" style={{ background: 'rgba(0,255,65,0.02)', border: '1px solid rgba(0,255,65,0.06)' }}>
         <p className="text-[10px] text-emerald-400/25 font-mono leading-relaxed">
           <span className="text-emerald-400/40">[INFO]</span> API keys are stored encrypted in the database and take effect immediately.
-          Changes to ZenRows and CapSolver keys will clear cached values on the server.
+          Changes to Addison Proxy and CapSolver keys will clear cached values on the server.
         </p>
       </div>
     </div>

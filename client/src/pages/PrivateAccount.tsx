@@ -88,7 +88,7 @@ export default function PrivateAccount() {
         });
         if (data.success) {
           fetchZenrows();
-          toast({ title: "ZenRows API Key Generated", description: `API key created using ${data.outlookEmail || "Outlook account"}` });
+          toast({ title: "Proxy API Key Generated", description: `API key created using ${data.outlookEmail || "Outlook account"}` });
           sounds.navigate();
         } else {
           toast({ title: "Registration Failed", description: data.error || "Unknown error", variant: "destructive" });
@@ -201,7 +201,7 @@ export default function PrivateAccount() {
         credentials: "include",
       });
       if (res.ok) {
-        toast({ title: "API Key added", description: "ZenRows API key saved successfully" });
+        toast({ title: "API Key added", description: "Proxy API key saved successfully" });
         sounds.navigate();
         setNewZenrowsKey("");
         setNewZenrowsEmail("");
@@ -252,10 +252,10 @@ export default function PrivateAccount() {
           batchId: data.batchId,
           outlookEmail: acc.email,
           status: "running",
-          logs: ["Starting ZenRows registration with " + acc.email + "..."],
+          logs: ["Starting proxy registration with " + acc.email + "..."],
         },
       }));
-      toast({ title: "Registration Started", description: `Registering ZenRows with ${acc.email}` });
+      toast({ title: "Registration Started", description: `Registering proxy with ${acc.email}` });
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to start registration", variant: "destructive" });
       setRegisteringAccountIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
@@ -335,7 +335,7 @@ export default function PrivateAccount() {
                 <Key className="w-5 h-5 text-purple-400" />
               </div>
               <div>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">ZenRows API Stock</p>
+                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Proxy API Stock</p>
                 <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-zenrows-count">{zenrowsKeys.length}</p>
               </div>
               <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
@@ -357,7 +357,7 @@ export default function PrivateAccount() {
                     {job.status === "success" && <Check className="w-4 h-4 text-emerald-400" />}
                     {job.status === "failed" && <X className="w-4 h-4 text-red-400" />}
                     <span className="text-xs font-mono text-emerald-50">
-                      ZenRows Registration — {job.outlookEmail}
+                      Proxy Registration — {job.outlookEmail}
                     </span>
                     <Badge variant="outline" className={`text-[9px] font-mono ${
                       job.status === "running" ? "border-purple-500/20 text-purple-400" :
@@ -420,7 +420,7 @@ export default function PrivateAccount() {
           data-testid="tab-zenrows"
         >
           <Key className="w-3.5 h-3.5 mr-1.5" />
-          ZenRows API Stock
+          Proxy API Stock
         </Button>
       </div>
 
@@ -541,7 +541,7 @@ export default function PrivateAccount() {
                               ) : (
                                 <Zap className="w-3 h-3 mr-1" />
                               )}
-                              {registeringAccountIds.has(acc.id) ? "Registering..." : "ZenRows"}
+                              {registeringAccountIds.has(acc.id) ? "Registering..." : "Register"}
                             </Button>
                             <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteOutlook(acc.id)} data-testid={`button-delete-outlook-${acc.id}`}>
                               <Trash2 className="w-3 h-3" />
@@ -564,7 +564,7 @@ export default function PrivateAccount() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-mono text-emerald-50 flex items-center gap-2">
                 <Key className="w-4 h-4 text-purple-400" />
-                ZenRows API Key Stock
+                Addison Proxy Key Stock
                 <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/15 text-emerald-400/60 ml-2">{zenrowsKeys.length} total</Badge>
               </CardTitle>
               <Button
@@ -582,7 +582,7 @@ export default function PrivateAccount() {
 
           {addZenrowsOpen && (
             <div className="mx-6 mb-4 p-4 rounded-lg border border-purple-500/10" style={{ background: "rgba(255,176,0,0.02)" }}>
-              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-3">Add ZenRows API Key</p>
+              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-3">Add Proxy API Key</p>
               <div className="space-y-3 mb-3">
                 <Input
                   placeholder="API Key (40+ char hex string)"
@@ -618,8 +618,8 @@ export default function PrivateAccount() {
             {zenrowsKeys.length === 0 ? (
               <div className="text-center py-12">
                 <Key className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
-                <p className="text-sm text-zinc-500 font-mono">No ZenRows API keys yet</p>
-                <p className="text-xs text-zinc-600 font-mono mt-1">Keys are auto-saved when created via ZenRows Register</p>
+                <p className="text-sm text-zinc-500 font-mono">No proxy API keys yet</p>
+                <p className="text-xs text-zinc-600 font-mono mt-1">Keys are auto-saved when created via Proxy Register</p>
               </div>
             ) : (
               <div className="rounded-lg border border-emerald-500/8 overflow-hidden">
