@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2, CheckCircle2, XCircle, Terminal, ArrowLeft,
-  Mail, Lock, Key, Zap, Globe, ChevronDown, ChevronUp, Copy
+  Mail, Lock, Key, Zap, Globe, ChevronDown, ChevronUp, Copy, Rocket
 } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { Link } from "wouter";
@@ -28,7 +28,7 @@ type Result = {
 
 export default function ZenRowsRegister() {
   const { checking } = useServiceGuard("zenrows");
-  const [showAuto, setShowAuto] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRunning, setIsRunning] = useState(false);
@@ -145,110 +145,130 @@ export default function ZenRowsRegister() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="space-y-4">
-          <div className="rounded-xl p-5 space-y-4" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.8) 0%, rgba(13,17,23,0.9) 100%)', border: '1px solid rgba(0,240,255,0.08)' }}>
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.8) 0%, rgba(13,17,23,0.9) 100%)', border: '1px solid rgba(34,197,94,0.15)' }}>
             <div className="flex items-center gap-2 mb-1">
-              <Key className="w-3.5 h-3.5 text-cyan-400/60" />
-              <span className="text-[10px] font-mono text-cyan-400/50 uppercase tracking-wider">Outlook Account</span>
+              <Rocket className="w-3.5 h-3.5 text-emerald-400/70" />
+              <span className="text-[10px] font-mono text-emerald-400/60 uppercase tracking-wider">One-Click Auto Registration</span>
             </div>
 
             <p className="text-xs text-zinc-400 font-mono leading-relaxed">
-              Provide your Outlook email and password. The tool will register it on ZenRows, verify via email, and extract the API key automatically.
+              Automatically creates a fresh Outlook account, registers it on ZenRows, verifies via email, and extracts the API key. No manual input needed.
             </p>
 
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
-                  <Mail className="w-3 h-3" />
-                  Outlook Email
-                </Label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="user@outlook.com"
-                  disabled={isRunning}
-                  className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
-                  data-testid="input-outlook-email"
-                />
+            {error && !showManual && (
+              <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="text-error">
+                <p className="text-xs text-red-400 font-mono">{error}</p>
               </div>
+            )}
 
-              <div className="space-y-1.5">
-                <Label className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
-                  <Lock className="w-3 h-3" />
-                  Outlook Password
-                </Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Outlook account password"
-                  disabled={isRunning}
-                  className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
-                  onKeyDown={(e) => { if (e.key === "Enter" && !isRunning && email.trim() && password.trim()) handleManualRegister(); }}
-                  data-testid="input-outlook-password"
-                />
-              </div>
-
-              {error && !showAuto && (
-                <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="text-error">
-                  <p className="text-xs text-red-400 font-mono">{error}</p>
-                </div>
+            <Button
+              onClick={handleAutoRegister}
+              disabled={isRunning}
+              className="w-full h-12 font-mono text-sm rounded-lg text-white"
+              style={{ background: isRunning ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg, rgba(34,197,94,0.4) 0%, rgba(16,185,129,0.3) 100%)', border: '1px solid rgba(34,197,94,0.4)' }}
+              data-testid="button-auto-register"
+            >
+              {isRunning ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Creating Account & Extracting API Key...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 mr-2" />
+                  Create Account & Get API Key
+                </>
               )}
+            </Button>
 
-              <Button
-                onClick={handleManualRegister}
-                disabled={isRunning || !email.trim() || !password.trim()}
-                className="w-full h-11 font-mono text-sm rounded-lg"
-                style={{ background: isRunning ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg, rgba(34,197,94,0.3) 0%, rgba(16,185,129,0.2) 100%)', border: '1px solid rgba(34,197,94,0.3)' }}
-                data-testid="button-manual-register"
-              >
-                {isRunning ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Running...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 mr-2" />
-                    Register & Get API Key
-                  </>
-                )}
-              </Button>
+            <div className="pt-2 space-y-1.5">
+              <span className="text-[10px] font-mono text-cyan-400/30 uppercase tracking-wider">What happens</span>
+              <ul className="space-y-1 text-[11px] text-zinc-500 font-mono">
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400/40 mt-0.5">1</span>
+                  Creates a fresh Outlook email account automatically
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400/40 mt-0.5">2</span>
+                  Registers a new ZenRows account with that email
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400/40 mt-0.5">3</span>
+                  Logs into Outlook to find & click the verification link
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400/40 mt-0.5">4</span>
+                  Extracts the ZenRows API key and saves it
+                </li>
+              </ul>
             </div>
           </div>
 
           <div className="rounded-xl overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.6) 0%, rgba(13,17,23,0.7) 100%)', border: '1px solid rgba(0,240,255,0.06)' }}>
             <button
-              onClick={() => setShowAuto(!showAuto)}
+              onClick={() => setShowManual(!showManual)}
               disabled={isRunning}
               className="w-full px-5 py-3 flex items-center justify-between text-left"
-              data-testid="button-toggle-auto"
+              data-testid="button-toggle-manual"
             >
               <div className="flex items-center gap-2">
-                <Zap className="w-3.5 h-3.5 text-amber-400/40" />
-                <span className="text-[10px] font-mono text-amber-400/35 uppercase tracking-wider">Auto-Create Outlook (Experimental)</span>
+                <Key className="w-3.5 h-3.5 text-zinc-500/40" />
+                <span className="text-[10px] font-mono text-zinc-500/50 uppercase tracking-wider">Use Existing Outlook Account</span>
               </div>
-              {showAuto ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />}
+              {showManual ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />}
             </button>
 
-            {showAuto && (
+            {showManual && (
               <div className="px-5 pb-5 space-y-3">
                 <p className="text-[11px] text-zinc-500 font-mono leading-relaxed">
-                  Attempts to auto-create an Outlook account. May be blocked by Microsoft's bot detection (PerimeterX challenge).
+                  Already have an Outlook account? Enter it here to register on ZenRows directly.
                 </p>
 
-                {error && showAuto && (
-                  <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="text-error-auto">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
+                    <Mail className="w-3 h-3" />
+                    Outlook Email
+                  </Label>
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="user@outlook.com"
+                    disabled={isRunning}
+                    className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
+                    data-testid="input-outlook-email"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
+                    <Lock className="w-3 h-3" />
+                    Outlook Password
+                  </Label>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Outlook account password"
+                    disabled={isRunning}
+                    className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
+                    onKeyDown={(e) => { if (e.key === "Enter" && !isRunning && email.trim() && password.trim()) handleManualRegister(); }}
+                    data-testid="input-outlook-password"
+                  />
+                </div>
+
+                {error && showManual && (
+                  <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="text-error-manual">
                     <p className="text-xs text-red-400 font-mono">{error}</p>
                   </div>
                 )}
 
                 <Button
-                  onClick={handleAutoRegister}
-                  disabled={isRunning}
+                  onClick={handleManualRegister}
+                  disabled={isRunning || !email.trim() || !password.trim()}
                   className="w-full h-9 font-mono text-xs rounded-lg"
-                  style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.2)' }}
-                  data-testid="button-auto-register"
+                  style={{ background: 'rgba(0,240,255,0.1)', border: '1px solid rgba(0,240,255,0.15)' }}
+                  data-testid="button-manual-register"
                 >
                   {isRunning ? (
                     <>
@@ -258,7 +278,7 @@ export default function ZenRowsRegister() {
                   ) : (
                     <>
                       <Zap className="w-3.5 h-3.5 mr-1.5" />
-                      One-Click Register (Experimental)
+                      Register with Existing Outlook
                     </>
                   )}
                 </Button>
@@ -284,7 +304,7 @@ export default function ZenRowsRegister() {
 
               {result.success && result.outlookEmail && (
                 <div className="mt-3 space-y-2 p-3 rounded-lg bg-black/20">
-                  <span className="text-[10px] font-mono text-blue-400/50 uppercase tracking-wider">Outlook Account</span>
+                  <span className="text-[10px] font-mono text-blue-400/50 uppercase tracking-wider">Outlook Account Created</span>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-zinc-500 w-12">Email</span>
                     <code className="flex-1 text-xs font-mono text-blue-300 truncate" data-testid="text-outlook-email">{result.outlookEmail}</code>
@@ -321,32 +341,6 @@ export default function ZenRowsRegister() {
               )}
             </div>
           )}
-
-          <div className="rounded-xl p-4 space-y-2" style={{ background: 'rgba(15,21,32,0.5)', border: '1px solid rgba(0,240,255,0.05)' }}>
-            <span className="text-[10px] font-mono text-cyan-400/30 uppercase tracking-wider">How it Works</span>
-            <ul className="space-y-1.5 text-[11px] text-zinc-500 font-mono">
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-400/40 mt-0.5">1</span>
-                Registers a new ZenRows account with your Outlook email
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-400/40 mt-0.5">2</span>
-                Logs into Outlook to find the verification email
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-400/40 mt-0.5">3</span>
-                Clicks the verification link to activate the account
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-400/40 mt-0.5">4</span>
-                Logs into ZenRows and extracts the API key
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-cyan-400/30 mt-0.5">*</span>
-                Cloudflare bypass + captcha solving included
-              </li>
-            </ul>
-          </div>
         </div>
 
         <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,240,255,0.08)' }}>
