@@ -7769,27 +7769,12 @@ export async function registerZenrowsAccount(
     } // end if (!restSignupDone)
 
     if (existingZenrowsPassword && !page) {
-      log("Login-only mode: launching browser to login to ZenRows...");
-      let browserProxyUrl = "";
-      try {
-        const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-        if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
-          browserProxyUrl = proxyRow.rows[0].value as string;
-        }
-      } catch {}
+      log("Login-only mode: launching browser to login to ZenRows (NO PROXY — direct connection)...");
 
       await ensureBrowserInstalled();
       const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"];
       const launchOpts: any = { headless: true, args: launchArgs };
-      if (browserProxyUrl) {
-        const proxyUrl = new URL(browserProxyUrl);
-        launchOpts.proxy = {
-          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-          username: decodeURIComponent(proxyUrl.username),
-          password: decodeURIComponent(proxyUrl.password),
-        };
-        log("Using Webshare proxy for ZenRows login");
-      }
+      log("Launching browser WITHOUT proxy to bypass Cloudflare detection");
       localBrowser = await chromium.launch(launchOpts);
       context = await localBrowser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -7833,23 +7818,58 @@ export async function registerZenrowsAccount(
           log("No password field — ZenRows uses passwordless/magic-link login");
         }
 
-        const loginBtn = await page.$('button[type="submit"], button:has-text("Sign In"), button:has-text("Log In"), button:has-text("Continue")');
+        const allButtons = await page.$$eval("button, a[role='button'], input[type='submit']", (els: any[]) =>
+          els.map((e: any) => ({ tag: e.tagName, type: e.type, text: (e.textContent || "").trim().substring(0, 60), className: (e.className || "").substring(0, 80) }))
+        ).catch(() => []);
+        log("All buttons on login page: " + JSON.stringify(allButtons));
+
+        const allLinks = await page.$$eval("a[href]", (els: any[]) =>
+          els.map((e: any) => ({ text: (e.textContent || "").trim().substring(0, 40), href: (e.href || "").substring(0, 80) }))
+        ).catch(() => []);
+        log("All links on login page: " + JSON.stringify(allLinks));
+
+        let loginBtn = await page.$('button:has-text("Send magic link")');
+        if (!loginBtn) loginBtn = await page.$('button:has-text("magic link")');
+        if (!loginBtn) loginBtn = await page.$('button:has-text("Send link")');
+        if (!loginBtn) loginBtn = await page.$('button:has-text("Email me")');
+        if (!loginBtn) loginBtn = await page.$('button:has-text("Continue with email")');
+        if (!loginBtn) {
+          const btns = await page.$$("button");
+          for (const btn of btns) {
+            const text = await btn.textContent().catch(() => "");
+            const isGoogle = (text || "").toLowerCase().includes("google");
+            const isGithub = (text || "").toLowerCase().includes("github");
+            if (!isGoogle && !isGithub && (text || "").trim().length > 0) {
+              const btnType = await btn.getAttribute("type").catch(() => "");
+              if (btnType === "submit" || (text || "").toLowerCase().includes("sign") || (text || "").toLowerCase().includes("log") || (text || "").toLowerCase().includes("continue")) {
+                loginBtn = btn;
+                log("Selected non-OAuth button: " + (text || "").trim().substring(0, 50));
+                break;
+              }
+            }
+          }
+        }
+
         if (loginBtn) {
+          const btnText = await loginBtn.textContent().catch(() => "unknown");
+          log("Clicking login button: " + (btnText || "").trim().substring(0, 50));
           try {
             await loginBtn.click({ timeout: 10000 });
           } catch {
             log("Normal click timed out, trying force click...");
             await loginBtn.click({ force: true, timeout: 5000 }).catch(() => {});
-            await page.evaluate(() => {
-              const btn = document.querySelector('button[type="submit"]') as HTMLElement;
-              if (btn) btn.click();
-            }).catch(() => {});
           }
-          log("Clicked Sign In button (magic link will be sent to email)");
+          log("Clicked login button");
           await page.waitForTimeout(5000 + Math.random() * 3000);
           const afterUrl = page.url();
           const afterBody = (await page.textContent("body").catch(() => "") || "").substring(0, 300);
           log("After login click: URL=" + afterUrl.substring(0, 100) + " body=" + afterBody.replace(/\s+/g, " "));
+
+          if (afterUrl.includes("google.com") || afterUrl.includes("github.com")) {
+            log("Accidentally hit OAuth button — going back to login page to retry...");
+            await page.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+            await page.waitForTimeout(3000);
+          }
           if (afterUrl.includes("/phone/input") || afterUrl.includes("/phone/verify")) {
             log("Redirected to phone verification page — proceeding to SMSPool flow");
           } else if (afterUrl.includes("dashboard") || afterUrl.includes("onboarding")) {
