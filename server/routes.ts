@@ -2005,10 +2005,10 @@ export async function registerRoutes(
 
       batchOwners.set(batchId, userId);
       const mode = zenrowsPassword ? "login + phone verify" : outlookEmail && outlookPassword ? "existing Outlook account" : "auto-create Outlook account";
-      res.json({ success: true, regId, batchId, message: `ZenRows registration started (${mode})` });
+      res.json({ success: true, regId, batchId, message: `Proxy registration started (${mode})` });
 
       (async () => {
-        broadcastLog(batchId, regId, `Starting ZenRows account registration flow (${mode})...`, userId);
+        broadcastLog(batchId, regId, `Starting proxy account registration flow (${mode})...`, userId);
         try {
           const result = await registerZenrowsAccount(
             outlookEmail || null,
@@ -2018,7 +2018,7 @@ export async function registerRoutes(
           );
 
           if (result.success && result.apiKey) {
-            broadcastLog(batchId, regId, `ZenRows API Key extracted successfully`, userId);
+            broadcastLog(batchId, regId, `Proxy API Key extracted successfully`, userId);
             try {
               const caller = await storage.getUser(userId);
               if (caller && caller.role === "superadmin" && /^[a-f0-9]{40}$/.test(result.apiKey)) {
