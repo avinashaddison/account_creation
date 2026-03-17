@@ -7218,9 +7218,9 @@ export async function registerZenrowsAccount(
               if (resp.status === 200 && resp.body) {
                 try {
                   const data = JSON.parse(resp.body);
-                  const possibleKeys = [data.apiKey, data.api_key, data.apikey, data.token, data.access_token];
+                  const possibleKeys = [data.apiKey, data.api_key, data.apikey, data.token, data.access_token, data.key, data.secret, data.credentials?.apiKey, data.credentials?.api_key, data.user?.apiKey, data.user?.api_key];
                   for (const k of possibleKeys) {
-                    if (k && /^[a-f0-9]{40,}$/.test(k)) {
+                    if (k && typeof k === "string" && k.length >= 20 && k.length <= 80 && /^[a-f0-9]+$/.test(k)) {
                       log("API key found via internal API: " + k.substring(0, 8) + "...");
                       try { await page.close(); } catch {}
                       try { await context.close(); } catch {}
