@@ -6148,16 +6148,9 @@ export async function createOutlookAccount(
       if (isPerimeterX) {
         log("PerimeterX press-and-hold challenge detected (attempt " + (captchaAttempt + 1) + "/8)...");
 
-        if (captchaAttempt > 0 && captchaAttempt % 2 === 0) {
-          log("Refreshing page for fresh captcha session...");
-          await page.reload({ waitUntil: 'networkidle' }).catch(() => {});
-          await page.waitForTimeout(3000 + Math.random() * 2000);
-          const refreshedText = await page.textContent("body").catch(() => "");
-          if (!(refreshedText || "").toLowerCase().includes("prove you're human") && !(refreshedText || "").toLowerCase().includes("press and hold")) {
-            log("Captcha gone after refresh!");
-            captchaSolved = true;
-            break;
-          }
+        if (captchaAttempt > 0 && captchaAttempt % 3 === 0) {
+          log("Waiting extra time before retry " + (captchaAttempt + 1) + "...");
+          await page.waitForTimeout(5000 + Math.random() * 5000);
         }
 
         const hsFrame = page.frames().find((f: any) => f.url().includes('hsprotect.net') || f.url().includes('human'));
@@ -6398,6 +6391,15 @@ export async function createOutlookAccount(
     if (bodyLower.includes("prove you're human") || bodyLower.includes("press and hold") || bodyLower.includes("can't create")) {
       return { success: false, error: "Outlook signup stuck on challenge page. Account not created." };
     }
+
+    if (bodyLower.includes("create your microsoft account") || bodyLower.includes("enter your new email") || bodyLower.includes("new email@outlook.com")) {
+      return { success: false, error: "Signup went back to start page. Account was not created." };
+    }
+
+    if (bodyLower.includes("unusual activity") || bodyLower.includes("we're having trouble") || bodyLower.includes("something went wrong")) {
+      return { success: false, error: "Microsoft blocked signup: " + (bodyText || "").substring(0, 150).replace(/\s+/g, " ") };
+    }
+
     return { success: true, email, password };
   } catch (err: any) {
     log("Error creating Outlook account: " + (err.message || "").substring(0, 200));
