@@ -7101,15 +7101,25 @@ export async function registerZenrowsAccount(
 
     if (!useZenRowsForOutlook) {
       await ensureBrowserInstalled();
-      outlookBrowser = await chromium.launch({
-        headless: true,
-        args: [
-          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-          "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
-        ],
-      });
+      const olSoaxProxy = await getSoaxProxyForAccount();
+      const olLaunchArgs = [
+        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
+      ];
+      const olLaunchOpts: any = { headless: true, args: olLaunchArgs };
+      if (olSoaxProxy) {
+        const proxyUrl = new URL(olSoaxProxy);
+        olLaunchOpts.proxy = {
+          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+          username: decodeURIComponent(proxyUrl.username),
+          password: decodeURIComponent(proxyUrl.password),
+        };
+        log("Using SOAX proxy for Outlook login (ZenRows unavailable)");
+      } else {
+        log("No proxy available for Outlook login — using direct connection");
+      }
+      outlookBrowser = await chromium.launch(olLaunchOpts);
       localBrowser = outlookBrowser;
-      log("Fresh local browser launched for Outlook");
     }
 
     let outlookCtx: any;
