@@ -1027,6 +1027,53 @@ export async function registerRoutes(
             });
           }));
         }
+
+        if (!cancelledBatches.has(batchId)) {
+          const MAX_BATCH_RETRIES = 3;
+          for (let retryRound = 1; retryRound <= MAX_BATCH_RETRIES; retryRound++) {
+            const failedAccounts: typeof created = [];
+            for (const acc of created) {
+              const current = await storage.getAccount(acc.id);
+              if (current && current.status === "failed") {
+                failedAccounts.push(acc);
+              }
+            }
+            if (failedAccounts.length === 0) break;
+            if (cancelledBatches.has(batchId)) break;
+
+            broadcastLog(batchId, "system", `🔄 Auto-retry round ${retryRound}/${MAX_BATCH_RETRIES}: ${failedAccounts.length} failed account(s)...`, userId);
+            await new Promise(r => setTimeout(r, 5000));
+
+            for (const acc of failedAccounts) {
+              if (cancelledBatches.has(batchId)) break;
+              await storage.updateAccount(acc.id, { status: "pending" as any, errorMessage: null });
+              broadcastLog(batchId, acc.id, `🔄 Retry ${retryRound}: Re-creating email & retrying registration...`, userId);
+
+              let retryToken: string | undefined;
+              try {
+                await createTempEmail(acc.email, acc.emailPassword);
+                retryToken = await getAuthToken(acc.email, acc.emailPassword);
+              } catch (emailErr: any) {
+                try {
+                  retryToken = await getAuthToken(acc.email, acc.emailPassword);
+                } catch {
+                  broadcastLog(batchId, acc.id, `Email re-setup failed: ${emailErr.message.substring(0, 60)}`, userId);
+                }
+              }
+
+              const baseProxy = proxies[failedAccounts.indexOf(acc) % proxies.length];
+              const proxy = uniqueProxySession(baseProxy);
+              await processAccountWithToken(
+                acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
+                acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy,
+                retryToken
+              );
+
+              await new Promise(r => setTimeout(r, 3000));
+            }
+          }
+        }
+
         broadcastBatchComplete(batchId, userId);
         cancelledBatches.delete(batchId);
       })();
