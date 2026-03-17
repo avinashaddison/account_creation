@@ -6692,10 +6692,55 @@ export async function registerZenrowsAccount(
     });
 
     log("Navigating to ZenRows register page...");
+    let navSuccess = false;
     try {
-      await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 120000 });
+      await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 60000 });
+      const checkUrl = page.url();
+      if (checkUrl.includes("chrome-error") || checkUrl.includes("chromewebdata")) {
+        log("Proxy tunnel failed (chrome-error page). Will retry without proxy...");
+      } else {
+        navSuccess = true;
+      }
     } catch (navErr: any) {
-      log("Navigation note: " + (navErr.message || "").substring(0, 150));
+      log("Navigation failed with proxy: " + (navErr.message || "").substring(0, 150));
+    }
+
+    if (!navSuccess && browserProxyUrl) {
+      log("Proxy connection failed. Retrying with direct connection (no proxy)...");
+      try {
+        await page.close().catch(() => {});
+        await context.close().catch(() => {});
+        await dedicatedBrowser.close().catch(() => {});
+      } catch {}
+
+      const directBrowser = await chromium.launch({
+        headless: true,
+        args: launchArgs,
+      });
+      localBrowser = directBrowser;
+      context = await directBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1920, height: 1080 },
+        locale: "en-US",
+        timezoneId: "America/Los_Angeles",
+        ignoreHTTPSErrors: true,
+      });
+      page = await context.newPage();
+      await page.setDefaultNavigationTimeout(120000);
+      await page.setDefaultTimeout(30000);
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        (window as any).chrome = { runtime: {} };
+      });
+      log("Direct browser launched (no proxy). Navigating to ZenRows...");
+      try {
+        await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 120000 });
+        navSuccess = true;
+      } catch (navErr2: any) {
+        log("Direct navigation also failed: " + (navErr2.message || "").substring(0, 150));
+      }
     }
 
     await page.waitForTimeout(5000);
@@ -6705,6 +6750,12 @@ export async function registerZenrowsAccount(
     const bodyText1 = await page.textContent("body").catch(() => "");
     const pageTitle = await page.title().catch(() => "");
     log("Page title: " + pageTitle + ", body preview: " + (bodyText1 || "").substring(0, 100).replace(/\s+/g, " "));
+
+    if (currentPageUrl.includes("chrome-error") || currentPageUrl.includes("chromewebdata")) {
+      log("Page is on error page — connection completely failed");
+      try { await dedicatedBrowser?.close().catch(() => {}); } catch {}
+      return sendUpdate("Registration failed: Could not connect to ZenRows.com (proxy and direct connection both failed)", "error", true);
+    }
 
     if ((bodyText1 || "").includes("Just a moment") || pageTitle.includes("Just a moment") || (bodyText1 || "").includes("challenge")) {
       log("Cloudflare challenge detected, waiting up to 45s for auto-solve...");
