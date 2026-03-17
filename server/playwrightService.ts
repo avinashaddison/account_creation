@@ -6589,20 +6589,39 @@ export async function registerZenrowsAccount(
 
     if (!restSignupDone) {
 
-    log("Launching local browser for ZenRows registration...");
+    log("Launching browser for ZenRows registration...");
 
     let context: any;
     let page: any;
+    let useZenRowsForReg = false;
 
-    let browserProxyUrl = "";
-    try {
-      const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-      if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
-        browserProxyUrl = proxyRow.rows[0].value as string;
+    if (zenrowsUrl) {
+      log("Using ZenRows browser for ZenRows registration (anti-bot bypass)...");
+      let zrRegUrl = zenrowsUrl;
+      if (!zrRegUrl.includes('proxy_country=')) {
+        zrRegUrl += (zrRegUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
       }
-    } catch {}
+      try {
+        const regBrowser = await chromium.connectOverCDP(zrRegUrl, { timeout: 60000 });
+        localBrowser = regBrowser;
+        useZenRowsForReg = true;
+        context = regBrowser.contexts()[0] || await regBrowser.newContext();
+        page = await context.newPage();
+        log("ZenRows browser connected for ZenRows registration");
+      } catch (zrErr: any) {
+        log("ZenRows connection failed: " + (zrErr.message || "").substring(0, 100) + ", falling back to local browser");
+      }
+    }
 
-    {
+    if (!useZenRowsForReg) {
+      let browserProxyUrl = "";
+      try {
+        const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+        if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+          browserProxyUrl = proxyRow.rows[0].value as string;
+        }
+      } catch {}
+
       await ensureBrowserInstalled();
       const launchArgs = [
         "--no-sandbox",
@@ -6621,7 +6640,7 @@ export async function registerZenrowsAccount(
         };
         log("Using Addison Residential proxy for browser automation");
       } else {
-        log("No browser proxy configured — using direct connection (may be IP-blocked)");
+        log("No browser proxy configured — using direct connection");
       }
       const dedicatedBrowser = await chromium.launch(launchOpts);
       localBrowser = dedicatedBrowser;
@@ -6633,8 +6652,8 @@ export async function registerZenrowsAccount(
         ignoreHTTPSErrors: true,
       });
       page = await context.newPage();
+      log("Local browser launched" + (browserProxyUrl ? " (with proxy)" : " (no proxy)"));
     }
-    log("Browser launched" + (browserProxyUrl ? " (with proxy)" : " (local, no proxy)"));
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
@@ -7076,28 +7095,55 @@ export async function registerZenrowsAccount(
 
     log("Step 2/6: Logging into Outlook to get verification email...");
 
-    // Always launch a fresh browser WITHOUT proxy for Outlook login
-    // (proxies often block or slow Microsoft login pages)
     try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
     localBrowser = null as any;
 
-    await ensureBrowserInstalled();
-    const outlookBrowser = await chromium.launch({
-      headless: true,
-      args: [
-        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
-      ],
-    });
-    localBrowser = outlookBrowser;
-    log("Fresh browser launched for Outlook (no proxy)");
+    let outlookBrowser: any = null;
+    let useZenRowsForOutlook = false;
 
-    const outlookCtx = await outlookBrowser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      viewport: { width: 1920, height: 1080 },
-      ignoreHTTPSErrors: true,
-    });
-    const outlookPage = await outlookCtx.newPage();
+    if (zenrowsUrl) {
+      log("Using ZenRows browser for Outlook login (anti-bot bypass)...");
+      let zrOutlookUrl = zenrowsUrl;
+      if (!zrOutlookUrl.includes('proxy_country=')) {
+        zrOutlookUrl += (zrOutlookUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+      }
+      try {
+        outlookBrowser = await chromium.connectOverCDP(zrOutlookUrl, { timeout: 60000 });
+        zenrowsBrowser = outlookBrowser;
+        useZenRowsForOutlook = true;
+        log("ZenRows browser connected for Outlook login");
+      } catch (zrErr: any) {
+        log("ZenRows connection failed for Outlook: " + (zrErr.message || "").substring(0, 100) + ", falling back to local browser");
+      }
+    }
+
+    if (!useZenRowsForOutlook) {
+      await ensureBrowserInstalled();
+      outlookBrowser = await chromium.launch({
+        headless: true,
+        args: [
+          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+          "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
+        ],
+      });
+      localBrowser = outlookBrowser;
+      log("Fresh local browser launched for Outlook");
+    }
+
+    let outlookCtx: any;
+    let outlookPage: any;
+
+    if (useZenRowsForOutlook) {
+      outlookCtx = outlookBrowser.contexts()[0] || await outlookBrowser.newContext();
+      outlookPage = await outlookCtx.newPage();
+    } else {
+      outlookCtx = await outlookBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1920, height: 1080 },
+        ignoreHTTPSErrors: true,
+      });
+      outlookPage = await outlookCtx.newPage();
+    }
     await outlookPage.setDefaultNavigationTimeout(120000);
     await outlookPage.setDefaultTimeout(30000);
 
