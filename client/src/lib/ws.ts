@@ -5,6 +5,9 @@ const proxyReplacements: [RegExp, string][] = [
   [/ZenRows/g, "Addison Proxy"],
   [/zenrow/gi, "Addison Proxy"],
   [/browser\.zenrows\.com/gi, "proxy.addison.internal"],
+  [/soax\.com/gi, "addison-residential.internal"],
+  [/SOAX/g, "Addison Residential"],
+  [/soax/gi, "Addison Residential"],
 ];
 
 function sanitizeProxyRefs(obj: any): void {

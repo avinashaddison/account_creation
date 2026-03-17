@@ -31,8 +31,11 @@ The application features a modern full-stack architecture.
     -   **Primary Draw Registration:** Gigya REST API for setting profile information (birthYear, zip, country), favorites (disciplines, countries), and draw flags (`l2028_ticketing`, `l2028_fan28`). This method avoids direct interaction with `tickets.la28.org`.
     -   **Fallback:** Browser-based OIDC/ZenRows flow via `connectOverCDP` for `tickets.la28.org` form fill, used if the REST API fails.
 -   **Bot Detection Bypass:** Utilizes `curl-impersonate` binaries (mimicking Chrome 116 TLS fingerprint) to bypass Akamai bot detection for direct HTTP requests.
--   **Proxy Management:** ZenRows is the sole proxy provider for all browser automation. Connected via CDP (`wss://browser.zenrows.com?apikey=...&proxy_country=us`). Exception: ZenRows' own site (`app.zenrows.com`) uses direct local Chromium.
-    -   **Bandwidth Optimization:** All browser sessions (ZenRows and local) use `optimizePageBandwidth()` to block images, fonts, media, tracking scripts (Google Analytics, Facebook, Hotjar, ContentSquare, etc.), and unnecessary resource types. This reduces bandwidth per session by ~60-80%, maximizing proxy usage on limited balance. Applied across LA28, Ticketmaster, Bruno Mars, UEFA, Outlook, and ZenRows registration flows.
+-   **Proxy Management:** Dual-provider setup:
+    -   **Browser Engine:** ZenRows CDP (`wss://browser.zenrows.com?apikey=...`) for anti-bot bypass only — no ZenRows residential proxy.
+    -   **Residential Proxy:** SOAX (`user:pass@proxy.soax.com:5000`) for IP rotation. Session IDs rotate per account via `uniqueProxySession()`. Passed to ZenRows CDP via `&proxy=` parameter.
+    -   Exception: ZenRows' own site (`app.zenrows.com`) uses direct local Chromium.
+    -   **Bandwidth Optimization:** All browser sessions use `optimizePageBandwidth()` to block images, fonts, media, tracking scripts. Reduces bandwidth ~60-80%. Applied across all flows.
 
 **Wallet System:**
 -   **Functionality:** Tracks account creation costs, configurable by superadmin.
@@ -55,8 +58,9 @@ The application features a modern full-stack architecture.
 
 ## External Dependencies
 -   **Email Service:** mail.tm API (branded as "Addison Mail") for temporary email address generation and inbox access.
--   **Browser Automation Proxies:**
-    -   ZenRows Browser API (sole proxy — handles all browser automation via CDP with built-in US residential proxy)
+-   **Browser Automation:**
+    -   ZenRows Browser API (anti-bot browser engine only via CDP, no ZenRows proxy)
+    -   SOAX Residential Proxy (IP rotation for all browser traffic, passed through CDP URL)
 -   **CAPTCHA Solving:** CapSolver API (`https://api.capsolver.com`) for reCAPTCHA (v2, v3, Enterprise), hCaptcha, FunCaptcha, and Anti-Turnstile challenges.
 -   **SMS Verification:** SMSPool API (`https://api.smspool.net`) for phone number provisioning and SMS code retrieval, primarily for Ticketmaster phone verification.
 -   **Payment Processing:** Binance (implied for TRC20 USDT transactions).

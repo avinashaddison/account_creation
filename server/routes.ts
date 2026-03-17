@@ -37,6 +37,9 @@ function uniqueProxySession(proxyUrl: string): string {
   }
 
   if (proxyUrl.includes("soax.com") || proxyUrl.includes("rotating")) {
+    if (proxyUrl.includes("sessionid-")) {
+      return proxyUrl.replace(/sessionid-[^-]+/, `sessionid-${sessionId}`);
+    }
     if (proxyUrl.includes("sessid=")) {
       return proxyUrl.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
     }
@@ -56,6 +59,8 @@ function uniqueProxySession(proxyUrl: string): string {
 
 async function getDefaultProxies(proxyList?: string[]): Promise<string[]> {
   if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;
+  const residential = await storage.getSetting("residential_proxy_url");
+  if (residential) return [residential];
   const saved = await getDefaultBrowserApiUrl();
   if (saved) return [saved];
   return ["local"];

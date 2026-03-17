@@ -21,7 +21,7 @@ function getActiveProxyUrl(): string {
 }
 
 function getActiveProxyLabel(): string {
-  return "no-proxy (Addison Proxy handles proxying)";
+  return "Addison Proxy (browser engine + residential proxy)";
 }
 
 async function getZenRowsCDPUrl(): Promise<string> {
@@ -29,9 +29,8 @@ async function getZenRowsCDPUrl(): Promise<string> {
     const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
     if (result.rows.length > 0 && result.rows[0].value) {
       let url = result.rows[0].value as string;
-      if (!url.includes('proxy_country=')) {
-        url += (url.includes('?') ? '&' : '?') + 'proxy_country=us';
-      }
+      url = url.replace(/[&?]proxy_country=[^&]*/g, '');
+      url = url.replace(/\?$/, '');
       return url;
     }
   } catch (err: any) {
@@ -40,11 +39,30 @@ async function getZenRowsCDPUrl(): Promise<string> {
   throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
 }
 
-async function connectViaZenRows(log?: (msg: string) => void): Promise<Browser> {
-  const zenrowsUrl = await getZenRowsCDPUrl();
+async function getResidentialProxyUrl(): Promise<string | null> {
+  try {
+    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`);
+    if (result.rows.length > 0 && result.rows[0].value) {
+      return result.rows[0].value as string;
+    }
+  } catch {}
+  return null;
+}
+
+function buildCDPUrlWithProxy(cdpUrl: string, proxyUrl: string | null): string {
+  if (!proxyUrl) return cdpUrl;
+  const httpProxy = proxyUrl.startsWith('http') ? proxyUrl : `http://${proxyUrl}`;
+  const separator = cdpUrl.includes('?') ? '&' : '?';
+  return `${cdpUrl}${separator}proxy=${encodeURIComponent(httpProxy)}`;
+}
+
+async function connectViaZenRows(log?: (msg: string) => void, customProxy?: string): Promise<Browser> {
+  let cdpUrl = await getZenRowsCDPUrl();
+  const residentialProxy = customProxy || await getResidentialProxyUrl();
+  cdpUrl = buildCDPUrlWithProxy(cdpUrl, residentialProxy);
   if (log) log("Connecting via Addison Proxy...");
   console.log("[Proxy] Connecting to CDP...");
-  const browser = await vanillaChromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+  const browser = await vanillaChromium.connectOverCDP(cdpUrl, { timeout: 60000 });
   console.log("[Proxy] Connected!");
   if (log) log("Addison Proxy connected.");
   return browser;
@@ -2564,7 +2582,7 @@ export async function completeDrawViaGigyaBrowser(
       page = await context.newPage();
       await optimizePageBandwidth(page, { allowStylesheets: true });
       page.setDefaultTimeout(60000);
-      console.log("[Draw] Addison Proxy connected (built-in US proxy, stealth mode, bandwidth optimized)");
+      console.log("[Draw] Addison Proxy connected (residential proxy, stealth mode, bandwidth optimized)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -3485,9 +3503,9 @@ export async function completeDrawViaGigyaBrowser(
           if (!zenrowsUrl) {
             throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
           }
-          if (!zenrowsUrl.includes('proxy_country=')) {
-            zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-          }
+          zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
+          const resProxy1 = await getResidentialProxyUrl();
+          zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxy1);
           console.log("[Proxy] Connecting...");
           bdBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
           console.log("[Proxy] Connected!");
@@ -4052,9 +4070,9 @@ export async function completeDrawViaGigyaBrowser(
           if (!zenrowsUrl2) {
             throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
           }
-          if (!zenrowsUrl2.includes('proxy_country=')) {
-            zenrowsUrl2 += (zenrowsUrl2.includes('?') ? '&' : '?') + 'proxy_country=us';
-          }
+          zenrowsUrl2 = zenrowsUrl2.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
+          const resProxy2 = await getResidentialProxyUrl();
+          zenrowsUrl2 = buildCDPUrlWithProxy(zenrowsUrl2, resProxy2);
           console.log("[Proxy-Full] Connecting...");
           bdBrowser2 = await chromium.connectOverCDP(zenrowsUrl2, { timeout: 60000 });
           console.log("[Proxy-Full] Connected!");
@@ -4661,7 +4679,7 @@ async function ensureBrowserInstalled(): Promise<void> {
 
 async function getBrowser(proxyUrl?: string): Promise<Browser> {
   try {
-    console.log("[Browser] Connecting via Addison Proxy CDP (built-in proxy)...");
+    console.log("[Browser] Connecting via Addison Proxy CDP (residential proxy)...");
     return await connectViaZenRows();
   } catch (zenErr: any) {
     console.log("[Browser] Addison Proxy connection failed: " + zenErr.message + ", falling back to local browser");
@@ -4946,9 +4964,9 @@ async function doRegistration(
   let browser: Browser;
   let usingProxy = false;
   try {
-    browser = await connectViaZenRows(log);
+    browser = await connectViaZenRows(log, proxyUrl);
     usingProxy = true;
-    log("Using Addison Proxy for registration (built-in US proxy)");
+    log("Using Addison Proxy for registration (residential proxy)");
   } catch (zenErr: any) {
     console.log("[Registration] Addison Proxy failed: " + zenErr.message + ", falling back to local browser");
     try {
@@ -4971,7 +4989,7 @@ async function doRegistration(
   const usedZipCode = generateUSZip();
   log(`Using LA zip code ${usedZipCode} for all steps.`);
   if (usingProxy) {
-    log("Addison Proxy active — built-in US residential IP.");
+    log("Addison Proxy active — residential proxy connected.");
   } else {
     log("No proxy configured — using server IP.");
   }
@@ -5399,8 +5417,10 @@ export async function retryDrawRegistration(
     }
   } catch {}
   var connectUrl = zenrowsUrl || proxyUrl;
-  if (connectUrl.includes('zenrows.com') && !connectUrl.includes('proxy_country=')) {
-    connectUrl += (connectUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+  if (connectUrl.includes('zenrows.com')) {
+    connectUrl = connectUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
+    const resProxyDraw = await getResidentialProxyUrl();
+    connectUrl = buildCDPUrlWithProxy(connectUrl, resProxyDraw);
   }
   log("Connecting to " + (zenrowsUrl ? "Addison Proxy" : "proxy") + " browser...");
   const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
@@ -5444,9 +5464,9 @@ export async function loginOutlookAccount(
     if (!zenrowsUrl) {
       return { success: false, error: "Addison Proxy Browser URL not configured. Set it in Settings." };
     }
-    if (!zenrowsUrl.includes('proxy_country=')) {
-      zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-    }
+    zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
+    const resProxyOutlook = await getResidentialProxyUrl();
+    zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxyOutlook);
 
     browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
     log("Addison Proxy browser connected");
@@ -5740,9 +5760,9 @@ export async function createOutlookAccount(
 
     if (zenrowsUrl) {
       log("Using Addison Proxy browser for Outlook creation (anti-bot bypass)...");
-      if (!zenrowsUrl.includes('proxy_country=')) {
-        zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-      }
+      zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
+      const resProxyOC = await getResidentialProxyUrl();
+      zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxyOC);
       try {
         browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
         useZenRowsBrowser = true;
@@ -8177,10 +8197,9 @@ export async function registerZenrowsAccount(
 
     if (zenrowsUrl) {
       log("Using Addison Proxy browser for Outlook login (anti-bot bypass)...");
-      let zrOutlookUrl = zenrowsUrl;
-      if (!zrOutlookUrl.includes('proxy_country=')) {
-        zrOutlookUrl += (zrOutlookUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-      }
+      let zrOutlookUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
+      const resProxyOL = await getResidentialProxyUrl();
+      zrOutlookUrl = buildCDPUrlWithProxy(zrOutlookUrl, resProxyOL);
       try {
         outlookBrowser = await chromium.connectOverCDP(zrOutlookUrl, { timeout: 60000 });
         zenrowsBrowser = outlookBrowser;
