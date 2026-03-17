@@ -14,18 +14,41 @@ const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
 const CURL_COOKIE_DIR = "/tmp/la28_curl_sessions";
 
-const DECODO_HOST = process.env.DECODO_PROXY_HOST || "us.decodo.com";
-const DECODO_USER = process.env.DECODO_PROXY_USERNAME || "";
-const DECODO_PASS = process.env.DECODO_PROXY_PASSWORD || "";
-
-const IPROYAL_UNBLOCKER_HOST = "unblocker.iproyal.com";
-const IPROYAL_UNBLOCKER_PORT = 12323;
-const IPROYAL_UNBLOCKER_USER = "Gy1cwo1086864";
-const IPROYAL_UNBLOCKER_PASS = "KklSwl63u3TgeL8F";
-
 chromium.use(StealthPlugin());
 
-let activeProxyProvider: "iproyal" | "decodo" = "iproyal";
+function getActiveProxyUrl(): string {
+  return "";
+}
+
+function getActiveProxyLabel(): string {
+  return "no-proxy (ZenRows handles proxying)";
+}
+
+async function getZenRowsCDPUrl(): Promise<string> {
+  try {
+    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+    if (result.rows.length > 0 && result.rows[0].value) {
+      let url = result.rows[0].value as string;
+      if (!url.includes('proxy_country=')) {
+        url += (url.includes('?') ? '&' : '?') + 'proxy_country=us';
+      }
+      return url;
+    }
+  } catch (err: any) {
+    console.log("[ZenRows] Failed to get CDP URL from settings: " + err.message);
+  }
+  throw new Error("ZenRows Browser URL not configured. Set it in Settings.");
+}
+
+async function connectViaZenRows(log?: (msg: string) => void): Promise<Browser> {
+  const zenrowsUrl = await getZenRowsCDPUrl();
+  if (log) log("Connecting via ZenRows proxy...");
+  console.log("[ZenRows] Connecting to CDP...");
+  const browser = await vanillaChromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+  console.log("[ZenRows] Connected!");
+  if (log) log("ZenRows proxy connected.");
+  return browser;
+}
 
 function generateSoaxProxyUrl(templateUrl: string): string {
   const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -33,73 +56,7 @@ function generateSoaxProxyUrl(templateUrl: string): string {
 }
 
 async function getSoaxProxyForAccount(): Promise<string | null> {
-  try {
-    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
-    if (result.rows.length > 0 && result.rows[0].value) {
-      const template = result.rows[0].value as string;
-      if (template.includes('proxy.soax.com')) {
-        const proxyUrl = generateSoaxProxyUrl(template);
-        console.log("[Proxy] Generated SOAX proxy with unique session: " + proxyUrl.substring(0, 60) + "...");
-        return proxyUrl;
-      }
-    }
-  } catch (err: any) {
-    console.log("[Proxy] Failed to get SOAX proxy: " + err.message);
-  }
   return null;
-}
-
-function getDecodoProxyUrl(port: number = 10001): string {
-  if (DECODO_USER && DECODO_PASS) {
-    return `http://${DECODO_USER}:${DECODO_PASS}@${DECODO_HOST}:${port}`;
-  }
-  return `http://${DECODO_HOST}:${port}`;
-}
-
-function getDecodoProxyConfig(port: number = 10001): { server: string; username?: string; password?: string } {
-  const config: { server: string; username?: string; password?: string } = { server: `http://${DECODO_HOST}:${port}` };
-  if (DECODO_USER && DECODO_PASS) {
-    config.username = DECODO_USER;
-    config.password = DECODO_PASS;
-  }
-  return config;
-}
-
-function getIPRoyalProxyUrl(): string {
-  return `http://${IPROYAL_UNBLOCKER_USER}:${IPROYAL_UNBLOCKER_PASS}@${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`;
-}
-
-function getIPRoyalProxyConfig(): { server: string; username: string; password: string } {
-  return {
-    server: `http://${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`,
-    username: IPROYAL_UNBLOCKER_USER,
-    password: IPROYAL_UNBLOCKER_PASS,
-  };
-}
-
-function getIPRoyalBrowserlessLaunchProxy(): string {
-  return `--proxy-server=http://${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT}`;
-}
-
-function getActiveProxyConfig(port: number = 10001): { server: string; username?: string; password?: string } {
-  if (activeProxyProvider === "iproyal") {
-    return getIPRoyalProxyConfig();
-  }
-  return getDecodoProxyConfig(port);
-}
-
-function getActiveProxyUrl(port: number = 10001): string {
-  if (activeProxyProvider === "iproyal") {
-    return getIPRoyalProxyUrl();
-  }
-  return getDecodoProxyUrl(port);
-}
-
-function getActiveProxyLabel(port: number = 10001): string {
-  if (activeProxyProvider === "iproyal") {
-    return `IPRoyal unblocker (${IPROYAL_UNBLOCKER_HOST}:${IPROYAL_UNBLOCKER_PORT})`;
-  }
-  return `Decodo residential (${DECODO_HOST}:${port})`;
 }
 
 async function simulateHumanBehavior(page: Page, email: string, password: string): Promise<void> {
@@ -1543,13 +1500,9 @@ async function loginAndSubmitTicketRegistration(
 
   try {
     {
-      console.log("[Draw] Launching Chromium with " + getActiveProxyLabel() + "...");
-      proxyBrowser = await chromium.launch({
-        headless: true,
-        proxy: getActiveProxyConfig(),
-        args: ['--ignore-certificate-errors', '--disable-blink-features=AutomationControlled'],
-      });
-      proxyContext = await proxyBrowser.newContext({
+      console.log("[Draw] Connecting via ZenRows CDP...");
+      proxyBrowser = await connectViaZenRows(log);
+      proxyContext = proxyBrowser.contexts()[0] || await proxyBrowser.newContext({
         ignoreHTTPSErrors: true,
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         viewport: { width: 1366, height: 768 },
@@ -1575,7 +1528,7 @@ async function loginAndSubmitTicketRegistration(
     } catch (navErr: any) {
       console.log("[Draw] Navigation error: " + navErr.message.substring(0, 150));
       if (navErr.message.includes("robots.txt") || navErr.message.includes("restricted")) {
-        log("Browser blocked. Already using Decodo residential proxy.");
+        log("Browser blocked by robots/restriction check.");
       }
     }
 
@@ -2553,48 +2506,19 @@ export async function completeDrawViaGigyaBrowser(
     }
 
     try {
-      const drawProxy = await getSoaxProxyForAccount();
-      const launchOpts: any = {
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-        ],
-      };
-      if (drawProxy) {
-        const parsed = parseProxyUrl(drawProxy);
-        if (parsed) {
-          launchOpts.proxy = {
-            server: `http://${parsed.host}:${parsed.port}`,
-            username: parsed.username,
-            password: parsed.password,
-          };
-          console.log("[Draw] Launching Chromium with SOAX proxy: " + parsed.host + ":" + parsed.port);
-          log("Using Addison Residential proxy for draw (unique IP)");
-        }
-      } else {
-        console.log("[Draw] Launching local Chromium (no proxy)...");
-      }
-      browser = await chromium.launch(launchOpts);
-      const context = await browser.newContext({
+      console.log("[Draw] Connecting via ZenRows CDP...");
+      log("Connecting via ZenRows proxy for draw...");
+      browser = await connectViaZenRows(log);
+      const context = browser.contexts()[0] || await browser.newContext({
         ignoreHTTPSErrors: true,
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         viewport: { width: 1366, height: 768 },
         locale: 'en-US',
         timezoneId: 'America/Los_Angeles',
       });
-      await context.addInitScript(`
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-      `);
       page = await context.newPage();
       page.setDefaultTimeout(60000);
-      console.log("[Draw] Chromium launched (" + (drawProxy ? "SOAX proxy" : "no proxy") + ", stealth mode)");
+      console.log("[Draw] ZenRows connected (built-in US proxy, stealth mode)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -4688,6 +4612,13 @@ async function ensureBrowserInstalled(): Promise<void> {
 }
 
 async function getBrowser(proxyUrl?: string): Promise<Browser> {
+  try {
+    console.log("[Browser] Connecting via ZenRows CDP (built-in proxy)...");
+    return await connectViaZenRows();
+  } catch (zenErr: any) {
+    console.log("[Browser] ZenRows connection failed: " + zenErr.message + ", falling back to local browser");
+  }
+
   if (!proxyUrl && browserInstance && browserInstance.isConnected()) {
     return browserInstance;
   }
@@ -4697,39 +4628,6 @@ async function getBrowser(proxyUrl?: string): Promise<Browser> {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       if (browserInstance && browserInstance.isConnected()) return browserInstance;
     }
-  }
-
-  if (proxyUrl) {
-    await ensureBrowserInstalled();
-    const parsed = parseProxyUrl(proxyUrl);
-    const launchOpts: any = {
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-sync",
-        "--disable-translate",
-        "--no-first-run",
-        "--no-zygote",
-        "--js-flags=--max-old-space-size=256",
-        "--disable-http2",
-      ],
-    };
-    if (parsed) {
-      launchOpts.proxy = {
-        server: `http://${parsed.host}:${parsed.port}`,
-        username: parsed.username,
-        password: parsed.password,
-      };
-      console.log("[Browser] Launching with SOAX proxy: " + parsed.host + ":" + parsed.port);
-    }
-    const b = await chromium.launch(launchOpts);
-    return b;
   }
 
   launching = true;
@@ -4998,19 +4896,18 @@ async function doRegistration(
   proxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string; zipCode?: string }> {
   let browser: Browser;
-  let soaxProxy: string | null = null;
   let usingProxy = false;
   try {
-    soaxProxy = await getSoaxProxyForAccount();
-    if (soaxProxy) {
-      log("Using Addison Residential proxy for registration (unique IP per account)");
-      browser = await getBrowser(soaxProxy);
-      usingProxy = true;
-    } else {
+    browser = await connectViaZenRows(log);
+    usingProxy = true;
+    log("Using ZenRows proxy for registration (built-in US proxy)");
+  } catch (zenErr: any) {
+    console.log("[Registration] ZenRows failed: " + zenErr.message + ", falling back to local browser");
+    try {
       browser = await getBrowser();
+    } catch (err: any) {
+      return { success: false, error: `Failed to launch browser: ${err.message}` };
     }
-  } catch (err: any) {
-    return { success: false, error: `Failed to launch browser: ${err.message}` };
   }
 
   const contextOptions: any = {
@@ -5026,7 +4923,7 @@ async function doRegistration(
   const usedZipCode = generateUSZip();
   log(`Using LA zip code ${usedZipCode} for all steps.`);
   if (usingProxy) {
-    log("Addison Residential proxy active — unique IP for this account.");
+    log("ZenRows proxy active — built-in US residential IP.");
   } else {
     log("No proxy configured — using server IP.");
   }
@@ -5753,35 +5650,22 @@ export async function createOutlookAccount(
     }
 
     if (!useZenRowsBrowser) {
-      const browserProxyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-      const browserProxyUrl = browserProxyResult.rows.length > 0 ? (browserProxyResult.rows[0].value as string) : null;
-      if (browserProxyUrl) {
-        log("Using Webshare proxy for account creation");
-        browser = await getBrowser(browserProxyUrl);
+      try {
+        log("Connecting via ZenRows proxy for account creation...");
+        browser = await connectViaZenRows(log);
         usingProxy = true;
-      } else {
-        const soaxProxy = await getSoaxProxyForAccount();
-        if (soaxProxy) {
-          log("Using SOAX proxy for account creation");
-          browser = await getBrowser(soaxProxy);
-          usingProxy = true;
-        } else if (DECODO_USER && DECODO_PASS && DECODO_HOST) {
-          const decodoUrl = getDecodoProxyUrl(10001);
-          log("Using Decodo residential proxy for account creation");
-          browser = await getBrowser(decodoUrl);
-          usingProxy = true;
-        } else {
-          log("No proxy available, launching direct browser");
-          await ensureBrowserInstalled();
-          browser = await chromium.launch({
-            headless: true,
-            args: [
-              "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-              "--disable-blink-features=AutomationControlled",
-              "--disable-features=IsolateOrigins,site-per-process",
-            ],
-          });
-        }
+      } catch (zenErr: any) {
+        console.log("[OutlookCreate] ZenRows failed: " + zenErr.message + ", falling back to local browser");
+        log("ZenRows unavailable, launching direct browser");
+        await ensureBrowserInstalled();
+        browser = await chromium.launch({
+          headless: true,
+          args: [
+            "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+          ],
+        });
       }
     }
 
@@ -6702,23 +6586,6 @@ export async function registerZenrowsAccount(
 
     log("Launching browser for ZenRows registration (cannot use ZenRows browser for its own site)...");
 
-    let browserProxyUrl = "";
-    let proxyLabel = "configured";
-    try {
-      const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-      if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
-        browserProxyUrl = proxyRow.rows[0].value as string;
-        proxyLabel = "Webshare";
-      }
-    } catch {}
-    if (!browserProxyUrl) {
-      const soaxProxy = await getSoaxProxyForAccount();
-      if (soaxProxy) {
-        browserProxyUrl = soaxProxy;
-        proxyLabel = "SOAX residential";
-      }
-    }
-
     await ensureBrowserInstalled();
     const launchArgs = [
       "--no-sandbox",
@@ -6727,19 +6594,8 @@ export async function registerZenrowsAccount(
       "--disable-blink-features=AutomationControlled",
       "--ignore-certificate-errors",
     ];
-    const launchOpts: any = { headless: true, args: launchArgs };
-    if (browserProxyUrl) {
-      const proxyUrl = new URL(browserProxyUrl);
-      launchOpts.proxy = {
-        server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-        username: decodeURIComponent(proxyUrl.username),
-        password: decodeURIComponent(proxyUrl.password),
-      };
-      log("Using " + proxyLabel + " proxy for ZenRows registration");
-    } else {
-      log("No proxy configured — using direct connection for ZenRows registration");
-    }
-    const dedicatedBrowser = await chromium.launch(launchOpts);
+    log("Launching direct browser for ZenRows registration (cannot use ZenRows for its own site)");
+    const dedicatedBrowser = await chromium.launch({ headless: true, args: launchArgs });
     localBrowser = dedicatedBrowser;
     context = await dedicatedBrowser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -6749,7 +6605,7 @@ export async function registerZenrowsAccount(
       ignoreHTTPSErrors: true,
     });
     page = await context.newPage();
-    log("Local browser launched" + (browserProxyUrl ? " (with proxy)" : " (no proxy)"));
+    log("Local browser launched (direct, no proxy)");
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
@@ -6775,8 +6631,8 @@ export async function registerZenrowsAccount(
       log("Navigation failed with proxy: " + (navErr.message || "").substring(0, 150));
     }
 
-    if (!navSuccess && browserProxyUrl) {
-      log("Proxy connection failed. Retrying with direct connection (no proxy)...");
+    if (!navSuccess) {
+      log("Navigation failed. Retrying with fresh direct browser...");
       try {
         await page.close().catch(() => {});
         await context.close().catch(() => {});
@@ -7773,25 +7629,8 @@ export async function registerZenrowsAccount(
 
       await ensureBrowserInstalled();
       const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"];
-      const launchOpts: any = { headless: true, args: launchArgs };
-
-      const soaxProxy = await getSoaxProxyForAccount();
-      if (soaxProxy) {
-        try {
-          const proxyUrl = new URL(soaxProxy);
-          launchOpts.proxy = {
-            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-            username: decodeURIComponent(proxyUrl.username),
-            password: decodeURIComponent(proxyUrl.password),
-          };
-          log("Using SOAX residential proxy for ZenRows login");
-        } catch (e: any) {
-          log("Failed to parse SOAX proxy, going direct: " + e.message);
-        }
-      } else {
-        log("No SOAX proxy available, launching direct (no proxy)");
-      }
-      localBrowser = await chromium.launch(launchOpts);
+      log("Launching direct browser for ZenRows login (cannot use ZenRows for its own site)");
+      localBrowser = await chromium.launch({ headless: true, args: launchArgs });
       context = await localBrowser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         viewport: { width: 1920, height: 1080 },
@@ -8247,39 +8086,22 @@ export async function registerZenrowsAccount(
     }
 
     if (!useZenRowsForOutlook) {
-      await ensureBrowserInstalled();
-      const olLaunchArgs = [
-        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
-      ];
-      const olLaunchOpts: any = { headless: true, args: olLaunchArgs };
-
-      const olSoaxProxy = await getSoaxProxyForAccount();
-      if (olSoaxProxy) {
-        const proxyUrl = new URL(olSoaxProxy);
-        olLaunchOpts.proxy = {
-          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-          username: decodeURIComponent(proxyUrl.username),
-          password: decodeURIComponent(proxyUrl.password),
-        };
-        log("Using SOAX residential proxy for Outlook login");
-      } else {
-        const olWebshareResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-        const olWebshareProxy = (olWebshareResult.rows?.[0] as any)?.value || "";
-        if (olWebshareProxy) {
-          const proxyUrl = new URL(olWebshareProxy);
-          olLaunchOpts.proxy = {
-            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-            username: decodeURIComponent(proxyUrl.username),
-            password: decodeURIComponent(proxyUrl.password),
-          };
-          log("Using Webshare proxy for Outlook login (SOAX unavailable)");
-        } else {
-          log("No proxy available for Outlook login — using direct connection");
-        }
+      try {
+        log("Connecting via ZenRows for Outlook login...");
+        outlookBrowser = await connectViaZenRows(log);
+        useZenRowsForOutlook = true;
+        log("ZenRows connected for Outlook login");
+      } catch (zenErr: any) {
+        console.log("[OutlookLogin] ZenRows fallback failed: " + zenErr.message);
+        await ensureBrowserInstalled();
+        const olLaunchArgs = [
+          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+          "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
+        ];
+        log("Launching direct browser for Outlook login (no proxy)");
+        outlookBrowser = await chromium.launch({ headless: true, args: olLaunchArgs });
+        localBrowser = outlookBrowser;
       }
-      outlookBrowser = await chromium.launch(olLaunchOpts);
-      localBrowser = outlookBrowser;
     }
 
     let outlookCtx: any;
@@ -8844,13 +8666,11 @@ export async function registerZenrowsAccount(
             } else {
               log("ZenRows registration browser no longer available for resend, launching new one...");
               try {
-                const soaxResend = await getSoaxProxyForAccount();
-                if (soaxResend) {
+                {
                   await ensureBrowserInstalled();
                   const resendBrowser = await chromium.launch({
                     headless: true,
                     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"],
-                    proxy: (() => { const u = new URL(soaxResend); return { server: `${u.protocol}//${u.hostname}:${u.port}`, username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) }; })(),
                   });
                   zenrowsRegBrowserRef = resendBrowser;
                   const resendCtx = await resendBrowser.newContext({
