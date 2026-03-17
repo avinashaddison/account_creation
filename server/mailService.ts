@@ -10,39 +10,71 @@ export async function getAvailableDomain(): Promise<string> {
 }
 
 export async function createTempEmail(address: string, password: string): Promise<{ id: string; address: string }> {
-  const res = await fetch(`${BASE_URL}/accounts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address, password }),
-  });
-  if (!res.ok) {
+  const maxRetries = 5;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const res = await fetch(`${BASE_URL}/accounts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address, password }),
+    });
+    if (res.ok) return res.json();
     const text = await res.text();
+    if (res.status === 429 && attempt < maxRetries) {
+      const delay = Math.min(attempt * 3000, 15000);
+      console.log(`[Mail] Rate limited (429) creating ${address}, retry ${attempt}/${maxRetries} in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+      continue;
+    }
+    if (res.status >= 500 && attempt < maxRetries) {
+      console.log(`[Mail] Server error (${res.status}) creating ${address}, retry ${attempt}/${maxRetries}...`);
+      await new Promise(r => setTimeout(r, 2000));
+      continue;
+    }
     throw new Error(`Failed to create email account: ${res.status} - ${text}`);
   }
-  return res.json();
+  throw new Error(`Failed to create email account after ${maxRetries} retries`);
 }
 
 export async function getAuthToken(address: string, password: string): Promise<string> {
-  const res = await fetch(`${BASE_URL}/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address, password }),
-  });
-  if (!res.ok) {
+  const maxRetries = 4;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const res = await fetch(`${BASE_URL}/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address, password }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.token;
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+      const delay = Math.min(attempt * 2000, 10000);
+      console.log(`[Mail] Token request ${res.status} for ${address}, retry ${attempt}/${maxRetries} in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+      continue;
+    }
     const text = await res.text();
     throw new Error(`Failed to get token: ${res.status} - ${text}`);
   }
-  const data = await res.json();
-  return data.token;
+  throw new Error(`Failed to get token after ${maxRetries} retries`);
 }
 
 export async function fetchMessages(token: string): Promise<any[]> {
-  const res = await fetch(`${BASE_URL}/messages`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`Failed to fetch messages: ${res.status}`);
-  const data = await res.json();
-  return data["hydra:member"] || [];
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const res = await fetch(`${BASE_URL}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data["hydra:member"] || [];
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+      await new Promise(r => setTimeout(r, attempt * 2000));
+      continue;
+    }
+    throw new Error(`Failed to fetch messages: ${res.status}`);
+  }
+  return [];
 }
 
 export async function fetchMessageContent(token: string, messageId: string): Promise<string> {

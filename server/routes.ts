@@ -986,7 +986,7 @@ export async function registerRoutes(
       const CONCURRENCY = Math.min(Math.max(parseInt(reqConcurrency) || 5, 1), 10);
       (async () => {
         broadcastLog(batchId, "system", `⚡ Pre-creating ${created.length} emails (concurrency: ${CONCURRENCY})...`, userId);
-        const EMAIL_BATCH = 20;
+        const EMAIL_BATCH = 5;
         const emailTokens: Map<string, string> = new Map();
         for (let i = 0; i < created.length; i += EMAIL_BATCH) {
           if (cancelledBatches.has(batchId)) break;
