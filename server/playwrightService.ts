@@ -7110,16 +7110,185 @@ export async function registerZenrowsAccount(
       log("ZenRows shows 'Invalid email address' — will try ZenRows login as fallback (account may already exist).");
     } else if (afterSignupUrl.includes("/phone/input") || afterSignupUrl.includes("/verify") || afterSignupUrl.includes("/confirm")) {
       log("ZenRows redirected to verification/phone page: " + afterSignupUrl.substring(0, 100));
-      const sendCodeBtn = await page.$('button:has-text("Send code"), button:has-text("send code"), button:has-text("Send Code")');
-      if (sendCodeBtn) {
-        const scText = await sendCodeBtn.textContent().catch(() => "");
-        await sendCodeBtn.click();
-        log("Clicked '" + (scText || "").trim() + "' button immediately after signup to trigger verification email");
-        await page.waitForTimeout(3000);
-        const afterSendCodeText = await page.textContent("body").catch(() => "");
-        log("After Send code: " + (afterSendCodeText || "").replace(/\s+/g, " ").substring(0, 200));
-      } else {
-        log("No 'Send code' button found on verification page. Page text: " + (pageContent || "").replace(/\s+/g, " ").substring(0, 200));
+
+      const phonePageText = await page.textContent("body").catch(() => "");
+      log("Phone page content: " + (phonePageText || "").replace(/\s+/g, " ").substring(0, 300));
+      const phonePageInputs = await page.$$eval('input, select, textarea', (els: any[]) =>
+        els.map((e: any) => ({ tag: e.tagName, type: e.type, name: e.name, placeholder: e.placeholder, id: e.id }))
+      ).catch(() => []);
+      log("Phone page inputs: " + JSON.stringify(phonePageInputs));
+      const phonePageBtns = await page.$$eval('button, a[role="button"]', (els: any[]) =>
+        els.map((e: any) => ({ tag: e.tagName, text: (e.textContent || "").trim().substring(0, 60), type: e.type }))
+      ).catch(() => []);
+      log("Phone page buttons: " + JSON.stringify(phonePageBtns));
+
+      if (afterSignupUrl.includes("/phone/input")) {
+        log("Phone verification detected — attempting bypass strategies...");
+
+        log("Bypass strategy 1: Navigate directly to /builder...");
+        try {
+          await page.goto("https://app.zenrows.com/builder", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(3000);
+          const builderUrl = page.url();
+          const builderText = await page.textContent("body").catch(() => "");
+          log("After /builder nav: URL=" + builderUrl.substring(0, 100));
+          if (!builderUrl.includes("/phone") && !builderUrl.includes("/login") && !builderUrl.includes("/register")) {
+            log("Bypass SUCCESS — reached builder page!");
+            const bypassKey = await page.evaluate(() => {
+              const keyRe = /^[a-f0-9]{40,}$/;
+              const inputs = document.querySelectorAll('input[readonly], input[type="text"]');
+              for (const input of inputs) {
+                const val = (input as HTMLInputElement).value;
+                if (val && keyRe.test(val)) return val;
+              }
+              const bodyText = document.body.innerText || "";
+              const match = bodyText.match(/\b[a-f0-9]{40,}\b/);
+              if (match) return match[0];
+              return "";
+            }).catch(() => "");
+            if (bypassKey) {
+              log("API key extracted via bypass: " + bypassKey.substring(0, 8) + "...");
+              try { await page.close(); } catch {}
+              try { await context.close(); } catch {}
+              try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+              return { success: true, apiKey: bypassKey, zenrowsPassword, message: "ZenRows account created — phone verification bypassed, API key extracted" };
+            }
+            log("Builder page reached but no API key found. Body: " + (builderText || "").replace(/\s+/g, " ").substring(0, 200));
+          } else {
+            log("Builder redirect went to: " + builderUrl.substring(0, 100));
+          }
+        } catch (bypassErr: any) {
+          log("Bypass /builder error: " + (bypassErr.message || "").substring(0, 100));
+        }
+
+        log("Bypass strategy 2: Navigate directly to /dashboard...");
+        try {
+          await page.goto("https://app.zenrows.com/dashboard", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(3000);
+          const dashUrl = page.url();
+          log("After /dashboard nav: URL=" + dashUrl.substring(0, 100));
+          if (!dashUrl.includes("/phone") && !dashUrl.includes("/login") && !dashUrl.includes("/register")) {
+            log("Bypass SUCCESS — reached dashboard!");
+            const dashKey = await page.evaluate(() => {
+              const bodyText = document.body.innerText || "";
+              const match = bodyText.match(/\b[a-f0-9]{40,}\b/);
+              if (match) return match[0];
+              return "";
+            }).catch(() => "");
+            if (dashKey) {
+              log("API key extracted from dashboard: " + dashKey.substring(0, 8) + "...");
+              try { await page.close(); } catch {}
+              try { await context.close(); } catch {}
+              try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+              return { success: true, apiKey: dashKey, zenrowsPassword, message: "ZenRows account created — phone verification bypassed via dashboard" };
+            }
+          }
+        } catch (dashErr: any) {
+          log("Bypass /dashboard error: " + (dashErr.message || "").substring(0, 100));
+        }
+
+        log("Bypass strategy 3: Try internal API endpoints with session cookies...");
+        try {
+          const apiEndpoints = [
+            "https://app.zenrows.com/api/v1/me",
+            "https://app.zenrows.com/api/v1/scrapers",
+            "https://app.zenrows.com/api/v1/user",
+            "https://app.zenrows.com/api/v1/account",
+          ];
+          for (const endpoint of apiEndpoints) {
+            try {
+              const resp = await page.evaluate(async (url: string) => {
+                const r = await fetch(url, { credentials: "include" });
+                const text = await r.text();
+                return { status: r.status, body: text.substring(0, 500) };
+              }, endpoint);
+              log("API " + endpoint.split("/").pop() + ": " + resp.status + " → " + resp.body.substring(0, 200));
+              if (resp.status === 200 && resp.body) {
+                try {
+                  const data = JSON.parse(resp.body);
+                  const possibleKeys = [data.apiKey, data.api_key, data.apikey, data.token, data.access_token];
+                  for (const k of possibleKeys) {
+                    if (k && /^[a-f0-9]{40,}$/.test(k)) {
+                      log("API key found via internal API: " + k.substring(0, 8) + "...");
+                      try { await page.close(); } catch {}
+                      try { await context.close(); } catch {}
+                      try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+                      return { success: true, apiKey: k, zenrowsPassword, message: "ZenRows account created — API key extracted via internal API" };
+                    }
+                  }
+                  const jsonStr = JSON.stringify(data);
+                  const keyMatch = jsonStr.match(/[a-f0-9]{40,}/);
+                  if (keyMatch) {
+                    log("API key found in JSON response: " + keyMatch[0].substring(0, 8) + "...");
+                    try { await page.close(); } catch {}
+                    try { await context.close(); } catch {}
+                    try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+                    return { success: true, apiKey: keyMatch[0], zenrowsPassword, message: "ZenRows account created — API key extracted via internal API" };
+                  }
+                } catch {}
+              }
+            } catch {}
+          }
+        } catch (apiErr: any) {
+          log("Internal API bypass error: " + (apiErr.message || "").substring(0, 100));
+        }
+
+        log("Bypass strategy 4: Try fresh login in same browser...");
+        try {
+          await page.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(3000 + Math.random() * 2000);
+          const cfCheck = await page.textContent("body").catch(() => "");
+          if ((cfCheck || "").length < 50 || (cfCheck || "").includes("challenge")) {
+            log("Cloudflare on login, waiting...");
+            await page.waitForTimeout(10000);
+          }
+          const loginEmail = await page.$('input[type="email"], input[name="email"]');
+          const loginPass = await page.$('input[type="password"]');
+          if (loginEmail) {
+            await loginEmail.fill(outlookEmail.toLowerCase());
+            await page.waitForTimeout(500);
+            if (loginPass) {
+              await loginPass.fill(zenrowsPassword);
+              await page.waitForTimeout(500);
+            }
+            const loginBtn = await page.$('button[type="submit"]');
+            if (loginBtn) await loginBtn.click();
+            else await page.keyboard.press("Enter");
+            await page.waitForTimeout(5000 + Math.random() * 3000);
+            const afterLoginUrl = page.url();
+            log("After login attempt: " + afterLoginUrl.substring(0, 100));
+            if (afterLoginUrl.includes("dashboard") || afterLoginUrl.includes("builder") || afterLoginUrl.includes("onboarding")) {
+              log("Login bypass SUCCESS!");
+              await page.goto("https://app.zenrows.com/builder", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await page.waitForTimeout(3000);
+              const loginKey = await page.evaluate(() => {
+                const bodyText = document.body.innerText || "";
+                const match = bodyText.match(/\b[a-f0-9]{40,}\b/);
+                if (match) return match[0];
+                return "";
+              }).catch(() => "");
+              if (loginKey) {
+                log("API key via login bypass: " + loginKey.substring(0, 8) + "...");
+                try { await page.close(); } catch {}
+                try { await context.close(); } catch {}
+                try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+                return { success: true, apiKey: loginKey, zenrowsPassword, message: "ZenRows account created — API key extracted via login bypass" };
+              }
+            } else if (!afterLoginUrl.includes("/phone")) {
+              log("Login went to unexpected page: " + afterLoginUrl.substring(0, 100));
+              const loginBodyText = await page.textContent("body").catch(() => "");
+              log("Login page body: " + (loginBodyText || "").replace(/\s+/g, " ").substring(0, 200));
+            }
+          }
+        } catch (loginErr: any) {
+          log("Login bypass error: " + (loginErr.message || "").substring(0, 100));
+        }
+
+        log("All phone bypass strategies exhausted. Account created but phone-gated.");
+        try { await page.close(); } catch {}
+        try { await context.close(); } catch {}
+        try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+        return { success: false, zenrowsPassword, error: "ZenRows account created but requires phone verification which cannot be bypassed. The account exists with email: " + outlookEmail };
       }
     } else if (needsVerification) {
       log("ZenRows requires email verification");
