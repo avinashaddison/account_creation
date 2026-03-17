@@ -22,16 +22,36 @@ async function getDefaultBrowserApiUrl(): Promise<string | null> {
 
 function uniqueProxySession(proxyUrl: string): string {
   if (!proxyUrl || proxyUrl === "local") return proxyUrl;
-  if (!proxyUrl.includes("superproxy.zenrows.com")) return proxyUrl;
-  let url = proxyUrl.replace(/ttl-\w+/, "ttl-30m");
-  url = url.replace(/session-\w+/, `session-${randomUUID().replace(/-/g, "").substring(0, 12)}`);
-  if (!url.includes("session-")) {
-    const atIndex = url.indexOf("@");
-    if (atIndex !== -1) {
-      url = url.substring(0, atIndex).replace(/:(\d+)$/, "") + `_session-${randomUUID().replace(/-/g, "").substring(0, 12)}` + url.substring(url.lastIndexOf("@") - 1).replace(/.*@/, "@");
+  const sessionId = randomUUID().replace(/-/g, "").substring(0, 12);
+
+  if (proxyUrl.includes("superproxy.zenrows.com")) {
+    let url = proxyUrl.replace(/ttl-\w+/, "ttl-30m");
+    url = url.replace(/session-\w+/, `session-${sessionId}`);
+    if (!url.includes("session-")) {
+      const atIndex = url.indexOf("@");
+      if (atIndex !== -1) {
+        url = url.substring(0, atIndex).replace(/:(\d+)$/, "") + `_session-${sessionId}` + url.substring(url.lastIndexOf("@") - 1).replace(/.*@/, "@");
+      }
+    }
+    return url;
+  }
+
+  if (proxyUrl.includes("soax.com") || proxyUrl.includes("rotating")) {
+    if (proxyUrl.includes("sessid=")) {
+      return proxyUrl.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+    }
+    if (proxyUrl.includes("session-")) {
+      return proxyUrl.replace(/session-[^:@]+/, `session-${sessionId}`);
+    }
+    const atIdx = proxyUrl.lastIndexOf("@");
+    if (atIdx !== -1) {
+      const userPart = proxyUrl.substring(0, atIdx);
+      const hostPart = proxyUrl.substring(atIdx);
+      return `${userPart}_sessid-${sessionId}${hostPart}`;
     }
   }
-  return url;
+
+  return proxyUrl;
 }
 
 async function getDefaultProxies(proxyList?: string[]): Promise<string[]> {

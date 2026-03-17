@@ -5203,11 +5203,13 @@ async function doRegistration(
         if (retryForm) {
           await forceRemoveOverlays(page);
           await fillViaJS(page, "email", email);
+          await fillViaJS(page, "profile.email", email);
           await fillViaJS(page, "profile.firstName", firstName);
           await fillViaJS(page, "profile.lastName", lastName);
-          await fillPasswordViaJS(page, password);
-          await selectCountryViaJS(page, country);
-          await selectLanguageViaJS(page, language);
+          await fillViaJS(page, "password", password);
+          await selectViaJS(page, "profile.country", country);
+          await page.waitForTimeout(1000);
+          await selectViaJS(page, "data.personalization.siteLanguage", language);
           await page.waitForTimeout(500);
           await fillViaJS(page, "profile.zip", usedZipCode);
           await checkAllCheckboxesViaJS(page);
