@@ -7505,19 +7505,35 @@ export async function registerZenrowsAccount(
           await page.goto("https://app.zenrows.com/phone/input", { waitUntil: "domcontentloaded", timeout: 30000 });
           await page.waitForTimeout(2000);
 
-          const smsOrder = await orderSMSNumber(1, "817");
-          if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
-            log("SMSPool order failed: " + (smsOrder.error || "no number returned"));
+          const smsCountries = [
+            { id: 8, name: "Portugal", prefix: "+351", price: "$0.09" },
+            { id: 2, name: "UK", prefix: "+44", price: "$0.14" },
+            { id: 1, name: "US", prefix: "+1", price: "$0.72" },
+          ];
+          let smsOrder: any = null;
+          let usedCountry: typeof smsCountries[0] | null = null;
+          for (const country of smsCountries) {
+            log("SMSPool: trying " + country.name + " (country=" + country.id + ", " + country.price + ")...");
+            const order = await orderSMSNumber(country.id, "817");
+            if (order.success && order.number && order.orderId) {
+              smsOrder = order;
+              usedCountry = country;
+              break;
+            }
+            log("SMSPool: " + country.name + " failed — " + (order.error || "no number") + ", trying next...");
+          }
+          if (!smsOrder || !usedCountry) {
+            log("SMSPool: all countries failed, no number available");
             try { await page.close(); } catch {}
             try { await context.close(); } catch {}
             try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
-            return { success: false, zenrowsPassword, error: "ZenRows account created but phone verification failed — SMSPool could not provide a number: " + (smsOrder.error || "unknown") };
+            return { success: false, zenrowsPassword, error: "ZenRows account created but phone verification failed — SMSPool could not provide a number from any country" };
           }
 
           smsOrderId = smsOrder.orderId;
           let phoneNumber = smsOrder.number!;
-          if (!phoneNumber.startsWith("+")) phoneNumber = "+1" + phoneNumber.replace(/\D/g, "");
-          log("SMSPool number ordered: " + phoneNumber + " (order: " + smsOrderId + ")");
+          if (!phoneNumber.startsWith("+")) phoneNumber = usedCountry.prefix + phoneNumber.replace(/\D/g, "");
+          log("SMSPool number ordered: " + phoneNumber + " from " + usedCountry.name + " (" + usedCountry.price + ") (order: " + smsOrderId + ")");
 
           const phoneInput = await page.waitForSelector('input[name="phone_number"], input#phone_number, input[type="tel"]', { timeout: 10000 });
           if (phoneInput) {
