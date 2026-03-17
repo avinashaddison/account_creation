@@ -128,6 +128,7 @@ let wsClients: Map<WebSocket, string> = new Map();
 
 const batchLogs: Map<string, Array<{ accountId: string; message: string; timestamp: string }>> = new Map();
 const batchOwners: Map<string, string> = new Map();
+const cancelledBatches: Set<string> = new Set();
 const BATCH_LOG_TTL = 30 * 60 * 1000;
 
 function addBatchLog(batchId: string, accountId: string, message: string) {
@@ -961,8 +962,13 @@ export async function registerRoutes(
       const CONCURRENCY = 3;
       (async () => {
         for (let i = 0; i < created.length; i += CONCURRENCY) {
+          if (cancelledBatches.has(batchId)) {
+            broadcastLog(batchId, "system", `Batch stopped. Skipped ${created.length - i} remaining accounts.`, userId);
+            break;
+          }
           const chunk = created.slice(i, i + CONCURRENCY);
           await Promise.all(chunk.map((acc, j) => {
+            if (cancelledBatches.has(batchId)) return Promise.resolve();
             const baseProxy = proxies[(i + j) % proxies.length];
             const proxy = uniqueProxySession(baseProxy);
             broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
@@ -973,6 +979,7 @@ export async function registerRoutes(
           }));
         }
         broadcastBatchComplete(batchId, userId);
+        cancelledBatches.delete(batchId);
       })();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1387,6 +1394,31 @@ export async function registerRoutes(
       accounts: accounts.map(a => ({ id: a.id, email: a.email, firstName: a.firstName, lastName: a.lastName, status: a.status, errorMessage: a.errorMessage })),
       isComplete,
     });
+  });
+
+  app.post("/api/cancel-batch/:batchId", requireAuth, async (req, res) => {
+    const batchId = req.params.batchId;
+    const userId = req.session.userId!;
+    const owner = batchOwners.get(batchId);
+    if (owner && owner !== userId && req.session.role !== "superadmin") {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    cancelledBatches.add(batchId);
+    broadcastLog(batchId, "system", `🛑 Batch cancelled by user`, userId);
+
+    const accounts = await storage.getAccountsByBatch(batchId);
+    let cancelled = 0;
+    for (const acc of accounts) {
+      if (acc.status === "pending") {
+        await storage.updateAccount(acc.id, { status: "failed", errorMessage: "Cancelled by user" });
+        const updated = await storage.getAccount(acc.id);
+        if (updated) broadcastAccountUpdate(updated, userId);
+        cancelled++;
+      }
+    }
+    broadcastLog(batchId, "system", `Cancelled ${cancelled} pending accounts`, userId);
+    broadcast({ type: "batch_complete", batchId }, userId);
+    res.json({ success: true, cancelled });
   });
 
   app.get("/api/emails/:id/inbox", requireAuth, async (req, res) => {

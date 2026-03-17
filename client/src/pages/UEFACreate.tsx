@@ -11,7 +11,7 @@ import { handleUnauthorized } from "@/lib/auth";
 import { useAccountPrice } from "@/lib/useAccountPrice";
 import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
-  Terminal, Trophy
+  Terminal, Trophy, StopCircle
 } from "lucide-react";
 import { sounds } from "@/lib/sounds";
 
@@ -34,6 +34,13 @@ export default function UEFACreate() {
 
   const accountPrice = useAccountPrice();
   const estimatedCost = (count * accountPrice).toFixed(2);
+
+  async function cancelBatch() {
+    if (!batchId) return;
+    try {
+      await fetch(`/api/cancel-batch/${batchId}`, { method: "POST", credentials: "include" });
+    } catch (err) { console.error("Failed to cancel batch", err); }
+  }
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -201,6 +208,17 @@ export default function UEFACreate() {
                   </>
                 )}
               </Button>
+
+              {isRunning && (
+                <Button
+                  className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-red-700 to-red-700 hover:from-red-600 hover:to-red-600 shadow-lg shadow-red-900/25 border-0"
+                  onClick={cancelBatch}
+                  data-testid="button-uefa-stop-batch"
+                >
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Stop Batch
+                </Button>
+              )}
             </div>
           </div>
         </div>

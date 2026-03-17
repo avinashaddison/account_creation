@@ -14,7 +14,7 @@ import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
   Terminal, Ticket, AlertTriangle, Globe, Filter, User, Mail, Phone,
   Shield, Clock, ChevronDown, Copy, Wallet, Download, Eye, EyeOff,
-  Key, ExternalLink
+  Key, ExternalLink, StopCircle
 } from "lucide-react";
 
 const QUICK_AMOUNTS = [1, 3, 5, 10];
@@ -220,6 +220,13 @@ export default function TMCreate() {
     ? logs.filter(l => l.accountId === filterAccountId)
     : logs;
 
+  async function cancelBatch() {
+    if (!batchIdRef.current) return;
+    try {
+      await fetch(`/api/cancel-batch/${batchIdRef.current}`, { method: "POST", credentials: "include" });
+    } catch (err) { console.error("Failed to cancel batch", err); }
+  }
+
   const verified = accounts.filter(a => a.status === "verified").length;
   const failed = accounts.filter(a => a.status === "failed").length;
   const processing = accounts.filter(a => a.status !== "verified" && a.status !== "failed" && a.status !== "pending").length;
@@ -342,6 +349,17 @@ export default function TMCreate() {
                   <><Ticket className="w-4 h-4 mr-2" />Create {count} TM Account{count > 1 ? "s" : ""}</>
                 )}
               </Button>
+
+              {isRunning && (
+                <Button
+                  className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-red-700 to-red-700 hover:from-red-600 hover:to-red-600 shadow-lg shadow-red-900/25 border-0"
+                  onClick={cancelBatch}
+                  data-testid="button-tm-stop-batch"
+                >
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Stop Batch
+                </Button>
+              )}
             </div>
           </div>
 

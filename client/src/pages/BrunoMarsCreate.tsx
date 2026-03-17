@@ -12,7 +12,7 @@ import { useAccountPrice } from "@/lib/useAccountPrice";
 import { subscribe } from "@/lib/ws";
 import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
-  Terminal, Music, Globe, Filter, Clock, Shield, Wallet
+  Terminal, Music, Globe, Filter, Clock, Shield, Wallet, StopCircle
 } from "lucide-react";
 
 const QUICK_AMOUNTS = [1, 3, 5, 10, 25];
@@ -84,6 +84,13 @@ export default function BrunoMarsCreate() {
 
   const accountPrice = useAccountPrice();
   const estimatedCost = (count * accountPrice).toFixed(2);
+
+  async function cancelBatch() {
+    if (!batchIdRef.current) return;
+    try {
+      await fetch(`/api/cancel-batch/${batchIdRef.current}`, { method: "POST", credentials: "include" });
+    } catch (err) { console.error("Failed to cancel batch", err); }
+  }
 
   useEffect(() => {
     const unsub = subscribe((data) => {
@@ -289,6 +296,17 @@ export default function BrunoMarsCreate() {
                   <><Music className="w-4 h-4 mr-2" /> Start Signup ({count})</>
                 )}
               </Button>
+
+              {isRunning && (
+                <Button
+                  className="w-full h-10 text-sm font-semibold bg-gradient-to-r from-red-700 to-red-700 hover:from-red-600 hover:to-red-600 shadow-lg shadow-red-900/25 border-0"
+                  onClick={cancelBatch}
+                  data-testid="button-brunomars-stop-batch"
+                >
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Stop Batch
+                </Button>
+              )}
             </div>
           </div>
 

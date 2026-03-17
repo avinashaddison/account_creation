@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2, CheckCircle2, XCircle, Zap, Terminal, ArrowLeft,
-  DollarSign, Globe, Languages, Hash, Rocket, Trophy
+  DollarSign, Globe, Languages, Hash, Rocket, Trophy, StopCircle
 } from "lucide-react";
 import { subscribe } from "@/lib/ws";
 import { Link } from "wouter";
@@ -183,6 +183,15 @@ export default function AutoCreate() {
     }
   }
 
+  async function cancelBatch() {
+    if (!batchId) return;
+    try {
+      await fetch(`/api/cancel-batch/${batchId}`, { method: "POST", credentials: "include" });
+    } catch (err) {
+      console.error("Failed to cancel batch", err);
+    }
+  }
+
   const completedCount = batchAccounts.filter((a) => a.status === "completed" || a.status === "verified").length;
   const failedCount = batchAccounts.filter((a) => a.status === "failed").length;
   const totalCount = batchAccounts.length;
@@ -309,6 +318,17 @@ export default function AutoCreate() {
                   </>
                 )}
               </Button>
+
+              {isRunning && (
+                <Button
+                  className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-red-700 to-red-700 hover:from-red-600 hover:to-red-600 shadow-lg shadow-red-900/25 border-0"
+                  onClick={cancelBatch}
+                  data-testid="button-stop-batch"
+                >
+                  <StopCircle className="w-4 h-4 mr-2" />
+                  Stop Batch
+                </Button>
+              )}
             </div>
           </div>
         </div>
