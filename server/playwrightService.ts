@@ -7121,6 +7121,15 @@ export async function registerZenrowsAccount(
         els.map((e: any) => ({ tag: e.tagName, text: (e.textContent || "").trim().substring(0, 60), type: e.type }))
       ).catch(() => []);
       log("Phone page buttons: " + JSON.stringify(phonePageBtns));
+      const phonePageForms = await page.$$eval('form', (forms: any[]) =>
+        forms.map((f: any) => ({ action: f.action, method: f.method, id: f.id, html: f.outerHTML.substring(0, 500) }))
+      ).catch(() => []);
+      log("Phone page forms: " + JSON.stringify(phonePageForms));
+      const phonePageHtml = await page.evaluate(() => {
+        const main = document.querySelector('main') || document.querySelector('[role="main"]') || document.querySelector('.container') || document.body;
+        return (main.innerHTML || "").substring(0, 1000);
+      }).catch(() => "");
+      log("Phone page DOM snapshot: " + (phonePageHtml || "").replace(/\s+/g, " ").substring(0, 500));
 
       if (afterSignupUrl.includes("/phone/input")) {
         log("Phone verification detected — attempting bypass strategies...");
@@ -7202,7 +7211,8 @@ export async function registerZenrowsAccount(
                 const text = await r.text();
                 return { status: r.status, body: text.substring(0, 500) };
               }, endpoint);
-              log("API " + endpoint.split("/").pop() + ": " + resp.status + " → " + resp.body.substring(0, 200));
+              const sanitizedBody = (resp.body || "").replace(/[a-f0-9]{40,}/g, (m: string) => m.substring(0, 8) + "***").substring(0, 200);
+              log("API " + endpoint.split("/").pop() + ": " + resp.status + " → " + sanitizedBody);
               if (resp.status === 200 && resp.body) {
                 try {
                   const data = JSON.parse(resp.body);
@@ -7233,55 +7243,75 @@ export async function registerZenrowsAccount(
           log("Internal API bypass error: " + (apiErr.message || "").substring(0, 100));
         }
 
-        log("Bypass strategy 4: Try fresh login in same browser...");
+        log("Bypass strategy 4: Try fresh login in new browser context...");
+        let freshCtx: any = null;
+        let freshPage: any = null;
         try {
-          await page.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
-          await page.waitForTimeout(3000 + Math.random() * 2000);
-          const cfCheck = await page.textContent("body").catch(() => "");
+          if (!localBrowser || !localBrowser.isConnected()) {
+            await ensureBrowserInstalled();
+            localBrowser = await chromium.launch({
+              headless: true,
+              args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+            });
+          }
+          freshCtx = await localBrowser.newContext({
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            viewport: { width: 1920, height: 1080 },
+          });
+          freshPage = await freshCtx.newPage();
+          await freshPage.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await freshPage.waitForTimeout(3000 + Math.random() * 2000);
+          const cfCheck = await freshPage.textContent("body").catch(() => "");
           if ((cfCheck || "").length < 50 || (cfCheck || "").includes("challenge")) {
             log("Cloudflare on login, waiting...");
-            await page.waitForTimeout(10000);
+            await freshPage.waitForTimeout(10000);
           }
-          const loginEmail = await page.$('input[type="email"], input[name="email"]');
-          const loginPass = await page.$('input[type="password"]');
+          const loginEmail = await freshPage.$('input[type="email"], input[name="email"]');
+          const loginPass = await freshPage.$('input[type="password"]');
           if (loginEmail) {
             await loginEmail.fill(outlookEmail.toLowerCase());
-            await page.waitForTimeout(500);
+            await freshPage.waitForTimeout(500);
             if (loginPass) {
               await loginPass.fill(zenrowsPassword);
-              await page.waitForTimeout(500);
+              await freshPage.waitForTimeout(500);
             }
-            const loginBtn = await page.$('button[type="submit"]');
+            const loginBtn = await freshPage.$('button[type="submit"]');
             if (loginBtn) await loginBtn.click();
-            else await page.keyboard.press("Enter");
-            await page.waitForTimeout(5000 + Math.random() * 3000);
-            const afterLoginUrl = page.url();
-            log("After login attempt: " + afterLoginUrl.substring(0, 100));
+            else await freshPage.keyboard.press("Enter");
+            await freshPage.waitForTimeout(5000 + Math.random() * 3000);
+            const afterLoginUrl = freshPage.url();
+            log("After fresh login attempt: " + afterLoginUrl.substring(0, 100));
             if (afterLoginUrl.includes("dashboard") || afterLoginUrl.includes("builder") || afterLoginUrl.includes("onboarding")) {
-              log("Login bypass SUCCESS!");
-              await page.goto("https://app.zenrows.com/builder", { waitUntil: "domcontentloaded", timeout: 30000 });
-              await page.waitForTimeout(3000);
-              const loginKey = await page.evaluate(() => {
+              log("Fresh login bypass SUCCESS!");
+              await freshPage.goto("https://app.zenrows.com/builder", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await freshPage.waitForTimeout(3000);
+              const loginKey = await freshPage.evaluate(() => {
                 const bodyText = document.body.innerText || "";
                 const match = bodyText.match(/\b[a-f0-9]{40,}\b/);
                 if (match) return match[0];
                 return "";
               }).catch(() => "");
               if (loginKey) {
-                log("API key via login bypass: " + loginKey.substring(0, 8) + "...");
+                log("API key via fresh login bypass: " + loginKey.substring(0, 8) + "...");
+                try { await freshPage.close(); } catch {}
+                try { await freshCtx.close(); } catch {}
                 try { await page.close(); } catch {}
                 try { await context.close(); } catch {}
                 try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
                 return { success: true, apiKey: loginKey, zenrowsPassword, message: "ZenRows account created — API key extracted via login bypass" };
               }
             } else if (!afterLoginUrl.includes("/phone")) {
-              log("Login went to unexpected page: " + afterLoginUrl.substring(0, 100));
-              const loginBodyText = await page.textContent("body").catch(() => "");
+              log("Fresh login went to unexpected page: " + afterLoginUrl.substring(0, 100));
+              const loginBodyText = await freshPage.textContent("body").catch(() => "");
               log("Login page body: " + (loginBodyText || "").replace(/\s+/g, " ").substring(0, 200));
             }
           }
+          try { await freshPage.close(); } catch {}
+          try { await freshCtx.close(); } catch {}
         } catch (loginErr: any) {
-          log("Login bypass error: " + (loginErr.message || "").substring(0, 100));
+          log("Fresh login bypass error: " + (loginErr.message || "").substring(0, 100));
+          try { if (freshPage) await freshPage.close(); } catch {}
+          try { if (freshCtx) await freshCtx.close(); } catch {}
         }
 
         log("All phone bypass strategies exhausted. Account created but phone-gated.");
