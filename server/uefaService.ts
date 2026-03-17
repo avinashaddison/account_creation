@@ -139,6 +139,25 @@ async function doUefaRegistration(
   const page = await context.newPage();
   page.setDefaultTimeout(30000);
 
+  try {
+    const blockedTypes = new Set(["image", "media", "font", "texttrack", "manifest"]);
+    const blockedPatterns = [
+      "google-analytics", "googletagmanager", "facebook.net", "fbevents", "doubleclick",
+      "hotjar", "segment.io", "newrelic", "nr-data", "sentry.io", "clarity.ms",
+      ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+      ".woff", ".woff2", ".ttf", ".eot", ".otf",
+      ".mp4", ".webm", ".ogg", ".mp3",
+    ];
+    await page.route("**/*", (route) => {
+      const resourceType = route.request().resourceType();
+      const url = route.request().url().toLowerCase();
+      if (blockedTypes.has(resourceType)) return route.abort();
+      for (const p of blockedPatterns) { if (url.includes(p)) return route.abort(); }
+      return route.continue();
+    });
+    console.log("[UEFA] Bandwidth optimization enabled");
+  } catch {}
+
   const dob = generateDOB();
   let registrationStepId = "";
   let interceptedSubmit = false;

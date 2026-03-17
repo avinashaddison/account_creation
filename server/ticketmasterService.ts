@@ -900,14 +900,25 @@ async function doTMRegistration(
     console.log("[TM-Playwright] Navigating to Ticketmaster...");
 
     try {
-      await page.route('**/*contentsquare*', (route: any) => route.abort());
-      await page.route('**/*cs-sdk*', (route: any) => route.abort());
-      await page.route('**/t.contentsquare.net/**', (route: any) => route.abort());
-      await page.route('**/*.contentsquare.net/**', (route: any) => route.abort());
-      await page.route('**/*uxa.js*', (route: any) => route.abort());
-      console.log("[TM-Playwright] Blocked ContentSquare scripts");
+      const blockedTypes = new Set(["image", "media", "font", "texttrack", "manifest"]);
+      const blockedPatterns = [
+        "contentsquare", "cs-sdk", "uxa.js", "google-analytics", "googletagmanager",
+        "facebook.net", "fbevents", "doubleclick", "hotjar", "segment.io", "segment.com",
+        "newrelic", "nr-data", "sentry.io", "clarity.ms", "adsbygoogle",
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+        ".woff", ".woff2", ".ttf", ".eot", ".otf",
+        ".mp4", ".webm", ".ogg", ".mp3",
+      ];
+      await page.route("**/*", (route: any) => {
+        const resourceType = route.request().resourceType();
+        const url = route.request().url().toLowerCase();
+        if (blockedTypes.has(resourceType)) return route.abort();
+        for (const p of blockedPatterns) { if (url.includes(p)) return route.abort(); }
+        return route.continue();
+      });
+      console.log("[TM-Playwright] Bandwidth optimization enabled (blocked images/fonts/media/trackers)");
     } catch (e: any) {
-      console.log("[TM-Playwright] Could not block ContentSquare:", e.message);
+      console.log("[TM-Playwright] Could not set bandwidth optimization:", e.message);
     }
 
     log(`🔗 Navigating to Ticketmaster sign-up page...`);

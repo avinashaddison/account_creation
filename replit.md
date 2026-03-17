@@ -31,7 +31,8 @@ The application features a modern full-stack architecture.
     -   **Primary Draw Registration:** Gigya REST API for setting profile information (birthYear, zip, country), favorites (disciplines, countries), and draw flags (`l2028_ticketing`, `l2028_fan28`). This method avoids direct interaction with `tickets.la28.org`.
     -   **Fallback:** Browser-based OIDC/ZenRows flow via `connectOverCDP` for `tickets.la28.org` form fill, used if the REST API fails.
 -   **Bot Detection Bypass:** Utilizes `curl-impersonate` binaries (mimicking Chrome 116 TLS fingerprint) to bypass Akamai bot detection for direct HTTP requests.
--   **Proxy Management:** Integrates with ZenRows Browser API, Bright Data, and SOAX residential proxies for robust browser automation and proxy rotation. SOAX proxy (configured via `soax_proxy_template` DB setting) provides unique rotating IPs per account — each browser launch generates a unique session ID to get a fresh US residential IP. Proxy is wired into `getBrowser()`, `doRegistration()`, and `completeDrawViaGigyaBrowser()` via Playwright's native proxy option.
+-   **Proxy Management:** ZenRows is the sole proxy provider for all browser automation. Connected via CDP (`wss://browser.zenrows.com?apikey=...&proxy_country=us`). Exception: ZenRows' own site (`app.zenrows.com`) uses direct local Chromium.
+    -   **Bandwidth Optimization:** All browser sessions (ZenRows and local) use `optimizePageBandwidth()` to block images, fonts, media, tracking scripts (Google Analytics, Facebook, Hotjar, ContentSquare, etc.), and unnecessary resource types. This reduces bandwidth per session by ~60-80%, maximizing proxy usage on limited balance. Applied across LA28, Ticketmaster, Bruno Mars, UEFA, Outlook, and ZenRows registration flows.
 
 **Wallet System:**
 -   **Functionality:** Tracks account creation costs, configurable by superadmin.
@@ -55,9 +56,7 @@ The application features a modern full-stack architecture.
 ## External Dependencies
 -   **Email Service:** mail.tm API (branded as "Addison Mail") for temporary email address generation and inbox access.
 -   **Browser Automation Proxies:**
-    -   ZenRows Browser API
-    -   Bright Data (for general automation and residential proxies)
-    -   Oxylabs Web Unblocker (for specific Akamai bypass on `tickets.la28.org` for HTTP requests)
+    -   ZenRows Browser API (sole proxy — handles all browser automation via CDP with built-in US residential proxy)
 -   **CAPTCHA Solving:** CapSolver API (`https://api.capsolver.com`) for reCAPTCHA (v2, v3, Enterprise), hCaptcha, FunCaptcha, and Anti-Turnstile challenges.
 -   **SMS Verification:** SMSPool API (`https://api.smspool.net`) for phone number provisioning and SMS code retrieval, primarily for Ticketmaster phone verification.
 -   **Payment Processing:** Binance (implied for TRC20 USDT transactions).

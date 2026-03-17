@@ -50,6 +50,50 @@ async function connectViaZenRows(log?: (msg: string) => void): Promise<Browser> 
   return browser;
 }
 
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "texttrack", "eventsource", "websocket", "manifest", "other"]);
+const BLOCKED_URL_PATTERNS = [
+  "google-analytics", "googletagmanager", "facebook.net", "fbevents", "doubleclick",
+  "hotjar", "segment.io", "segment.com", "mixpanel", "amplitude", "contentsquare",
+  "cs-sdk", "uxa.js", "newrelic", "nr-data", "sentry.io", "clarity.ms",
+  "adsbygoogle", "googlesyndication", "ads-twitter", "snap.licdn",
+  "intercom", "crisp.chat", "drift.com", "tawk.to", "livechat",
+  ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp",
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  ".mp4", ".webm", ".ogg", ".mp3", ".wav",
+];
+
+export async function optimizePageBandwidth(page: Page, opts?: { allowImages?: boolean; allowStylesheets?: boolean }): Promise<void> {
+  try {
+    await page.route("**/*", (route) => {
+      const request = route.request();
+      const resourceType = request.resourceType();
+      const url = request.url().toLowerCase();
+
+      if (resourceType === "image" && opts?.allowImages) {
+        return route.continue();
+      }
+
+      if (BLOCKED_RESOURCE_TYPES.has(resourceType)) {
+        return route.abort();
+      }
+
+      if (resourceType === "stylesheet" && !opts?.allowStylesheets) {
+        return route.abort();
+      }
+
+      for (const pattern of BLOCKED_URL_PATTERNS) {
+        if (url.includes(pattern)) {
+          return route.abort();
+        }
+      }
+
+      return route.continue();
+    });
+  } catch (err: any) {
+    console.log("[BandwidthOpt] Failed to set up route interception: " + (err.message || "").substring(0, 100));
+  }
+}
+
 function generateSoaxProxyUrl(templateUrl: string): string {
   const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
   return templateUrl.replace('SESSION_PLACEHOLDER', sessionId);
@@ -1512,6 +1556,7 @@ async function loginAndSubmitTicketRegistration(
         permissions: ['geolocation'],
       });
       ticketsPage = await proxyContext.newPage();
+      await optimizePageBandwidth(ticketsPage, { allowStylesheets: true });
 
       await ticketsPage.route('**/public-api.eventim.com/**', async (route) => {
         const url = route.request().url();
@@ -2517,8 +2562,9 @@ export async function completeDrawViaGigyaBrowser(
         timezoneId: 'America/Los_Angeles',
       });
       page = await context.newPage();
+      await optimizePageBandwidth(page, { allowStylesheets: true });
       page.setDefaultTimeout(60000);
-      console.log("[Draw] ZenRows connected (built-in US proxy, stealth mode)");
+      console.log("[Draw] ZenRows connected (built-in US proxy, stealth mode, bandwidth optimized)");
 
       setupRecaptchaLogging(page);
       page.on('requestfailed', (request) => {
@@ -3448,6 +3494,7 @@ export async function completeDrawViaGigyaBrowser(
 
           const bdContext = bdBrowser.contexts()[0] || await bdBrowser.newContext();
           const bdPage = await bdContext.newPage();
+          await optimizePageBandwidth(bdPage, { allowStylesheets: true });
           await bdPage.setDefaultNavigationTimeout(120000);
           await bdPage.setDefaultTimeout(60000);
 
@@ -4014,6 +4061,7 @@ export async function completeDrawViaGigyaBrowser(
 
           const bdCtx2 = bdBrowser2.contexts()[0] || await bdBrowser2.newContext();
           const bdPg2 = await bdCtx2.newPage();
+          await optimizePageBandwidth(bdPg2, { allowStylesheets: true });
           await bdPg2.setDefaultNavigationTimeout(120000);
           await bdPg2.setDefaultTimeout(60000);
 
@@ -4931,15 +4979,8 @@ async function doRegistration(
   const context = await browser.newContext(contextOptions);
 
   const page = await context.newPage();
+  await optimizePageBandwidth(page, { allowStylesheets: true });
   page.setDefaultTimeout(30000);
-
-  await page.route("**/*", (route) => {
-    const resourceType = route.request().resourceType();
-    if (["image", "media", "font"].includes(resourceType)) {
-      return route.abort();
-    }
-    return route.continue();
-  });
 
   try {
     await onStatusUpdate("registering");
@@ -5303,6 +5344,7 @@ export async function retryDrawRegistration(
   const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
   try {
     const page = await browser.newPage();
+    await optimizePageBandwidth(page, { allowStylesheets: true });
     page.setDefaultTimeout(120000);
     log("Connected to " + (zenrowsUrl ? "ZenRows" : "proxy") + " browser.");
 
@@ -5349,6 +5391,7 @@ export async function loginOutlookAccount(
 
     const context = browser.contexts()[0] || await browser.newContext();
     const page = await context.newPage();
+    await optimizePageBandwidth(page, { allowStylesheets: true });
     await page.setDefaultNavigationTimeout(90000);
     await page.setDefaultTimeout(30000);
 
@@ -5691,6 +5734,7 @@ export async function createOutlookAccount(
 
       page = await context.newPage();
     }
+    await optimizePageBandwidth(page, { allowStylesheets: true });
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
 
@@ -8118,6 +8162,7 @@ export async function registerZenrowsAccount(
       });
       outlookPage = await outlookCtx.newPage();
     }
+    await optimizePageBandwidth(outlookPage, { allowStylesheets: true });
     await outlookPage.setDefaultNavigationTimeout(120000);
     await outlookPage.setDefaultTimeout(30000);
 
