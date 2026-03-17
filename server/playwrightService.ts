@@ -5753,22 +5753,22 @@ export async function createOutlookAccount(
     }
 
     if (!useZenRowsBrowser) {
-      const soaxProxy = await getSoaxProxyForAccount();
-      if (soaxProxy) {
-        log("Using Addison Residential proxy for account creation");
-        browser = await getBrowser(soaxProxy);
-        usingProxy = true;
-      } else if (DECODO_USER && DECODO_PASS && DECODO_HOST) {
-        const decodoUrl = getDecodoProxyUrl(10001);
-        log("Using Decodo residential proxy for account creation");
-        browser = await getBrowser(decodoUrl);
+      const browserProxyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+      const browserProxyUrl = browserProxyResult.rows.length > 0 ? (browserProxyResult.rows[0].value as string) : null;
+      if (browserProxyUrl) {
+        log("Using Webshare proxy for account creation");
+        browser = await getBrowser(browserProxyUrl);
         usingProxy = true;
       } else {
-        const browserProxyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-        const browserProxyUrl = browserProxyResult.rows.length > 0 ? (browserProxyResult.rows[0].value as string) : null;
-        if (browserProxyUrl) {
-          log("Using browser proxy for account creation");
-          browser = await getBrowser(browserProxyUrl);
+        const soaxProxy = await getSoaxProxyForAccount();
+        if (soaxProxy) {
+          log("Using SOAX proxy for account creation");
+          browser = await getBrowser(soaxProxy);
+          usingProxy = true;
+        } else if (DECODO_USER && DECODO_PASS && DECODO_HOST) {
+          const decodoUrl = getDecodoProxyUrl(10001);
+          log("Using Decodo residential proxy for account creation");
+          browser = await getBrowser(decodoUrl);
           usingProxy = true;
         } else {
           log("No proxy available, launching direct browser");
@@ -6628,12 +6628,13 @@ async function tryZenRowsRestSignup(
 export async function registerZenrowsAccount(
   outlookEmail: string | null,
   outlookPassword: string | null,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  existingZenrowsPassword: string | null = null
 ): Promise<ZenrowsRegistrationResult> {
   let localBrowser: any = null;
   let zenrowsBrowser: any = null;
 
-  const zenrowsPassword = "Zr" + Math.random().toString(36).substring(2, 10) + "!" + Math.floor(Math.random() * 900 + 100);
+  const zenrowsPassword = existingZenrowsPassword || ("Zr" + Math.random().toString(36).substring(2, 10) + "!" + Math.floor(Math.random() * 900 + 100));
 
   try {
     if (!outlookEmail || !outlookPassword) {
@@ -6666,15 +6667,24 @@ export async function registerZenrowsAccount(
 
     log("Step 1/6: Registering on ZenRows...");
     log("Using email: " + outlookEmail);
-    log("Generated ZenRows password: " + zenrowsPassword);
+    if (existingZenrowsPassword) {
+      log("Using existing ZenRows password (login-only mode)");
+    } else {
+      log("Generated ZenRows password: " + zenrowsPassword);
+    }
 
     let restSignupDone = false;
-    const restResult = await tryZenRowsRestSignup(outlookEmail, zenrowsPassword, log);
-    if (restResult.success) {
-      log("REST API signup succeeded — skipping browser-based signup");
+    if (existingZenrowsPassword) {
       restSignupDone = true;
+      log("Skipping signup — will login with provided ZenRows password");
     } else {
-      log("REST API signup failed: " + (restResult.error || "unknown") + " — falling back to browser signup");
+      const restResult = await tryZenRowsRestSignup(outlookEmail, zenrowsPassword, log);
+      if (restResult.success) {
+        log("REST API signup succeeded — skipping browser-based signup");
+        restSignupDone = true;
+      } else {
+        log("REST API signup failed: " + (restResult.error || "unknown") + " — falling back to browser signup");
+      }
     }
 
     let zenrowsUrl = "";
@@ -7729,7 +7739,11 @@ export async function registerZenrowsAccount(
             const afterLoginUrl = page.url();
             const afterLoginBody = await page.textContent("body").catch(() => "");
             log("After ZenRows login: URL=" + afterLoginUrl.substring(0, 100) + " body=" + (afterLoginBody || "").substring(0, 200));
-            if (afterLoginUrl.includes("dashboard") || afterLoginUrl.includes("onboarding") || afterLoginUrl.includes("builder")) {
+            if (afterLoginUrl.includes("/phone/input") || afterLoginUrl.includes("/phone/verify") || afterLoginUrl.includes("/verify")) {
+              log("ZenRows login successful — redirected to phone verification page!");
+              log("Jumping directly to phone verification via SMSPool...");
+              restSignupDone = true;
+            } else if (afterLoginUrl.includes("dashboard") || afterLoginUrl.includes("onboarding") || afterLoginUrl.includes("builder")) {
               log("ZenRows login successful! Account already exists.");
               const apiKey = await page.$$eval('[class*="api"], [data-testid*="api"], code, pre, input[readonly], input[disabled]', (els: any[]) =>
                 els.map((e: any) => (e.textContent || e.value || "").trim()).filter((t: string) => t.length > 20 && t.length < 80)
@@ -7753,6 +7767,284 @@ export async function registerZenrowsAccount(
     }
 
     } // end if (!restSignupDone)
+
+    if (existingZenrowsPassword && !page) {
+      log("Login-only mode: launching browser to login to ZenRows...");
+      let browserProxyUrl = "";
+      try {
+        const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+        if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+          browserProxyUrl = proxyRow.rows[0].value as string;
+        }
+      } catch {}
+
+      await ensureBrowserInstalled();
+      const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"];
+      const launchOpts: any = { headless: true, args: launchArgs };
+      if (browserProxyUrl) {
+        const proxyUrl = new URL(browserProxyUrl);
+        launchOpts.proxy = {
+          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+          username: decodeURIComponent(proxyUrl.username),
+          password: decodeURIComponent(proxyUrl.password),
+        };
+        log("Using Webshare proxy for ZenRows login");
+      }
+      localBrowser = await chromium.launch(launchOpts);
+      context = await localBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1920, height: 1080 },
+        ignoreHTTPSErrors: true,
+      });
+      page = await context.newPage();
+      page.setDefaultNavigationTimeout(120000);
+
+      log("Navigating to ZenRows login page...");
+      await page.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.waitForTimeout(3000 + Math.random() * 2000);
+
+      const cfCheck = await page.textContent("body").catch(() => "");
+      if ((cfCheck || "").toLowerCase().includes("just a moment") || (cfCheck || "").toLowerCase().includes("checking your browser") || (cfCheck || "").toLowerCase().includes("verify you are human")) {
+        log("Cloudflare challenge on login page, waiting up to 45s...");
+        for (let cfWait = 0; cfWait < 9; cfWait++) {
+          await page.waitForTimeout(5000);
+          const cfBody = await page.textContent("body").catch(() => "");
+          const cfLower = (cfBody || "").toLowerCase();
+          if (!cfLower.includes("just a moment") && !cfLower.includes("checking your browser") && !cfLower.includes("verify you are human")) {
+            log("Cloudflare challenge resolved after " + ((cfWait + 1) * 5) + "s");
+            break;
+          }
+        }
+      }
+
+      log("Login page URL after CF: " + page.url().substring(0, 100));
+      const loginPageBody = (await page.textContent("body").catch(() => "") || "").substring(0, 300);
+      log("Login page content: " + loginPageBody.replace(/\s+/g, " "));
+
+      const emailInput = await page.$('input[type="email"], input[name="email"]');
+      if (emailInput) {
+        await emailInput.fill(outlookEmail!);
+        log("Login email filled: " + outlookEmail);
+        const passInput = await page.$('input[type="password"]');
+        if (passInput) {
+          await passInput.fill(zenrowsPassword);
+          log("Login password filled");
+        } else {
+          log("No password field — ZenRows uses passwordless/magic-link login");
+        }
+
+        const loginBtn = await page.$('button[type="submit"], button:has-text("Sign In"), button:has-text("Log In"), button:has-text("Continue")');
+        if (loginBtn) {
+          try {
+            await loginBtn.click({ timeout: 10000 });
+          } catch {
+            log("Normal click timed out, trying force click...");
+            await loginBtn.click({ force: true, timeout: 5000 }).catch(() => {});
+            await page.evaluate(() => {
+              const btn = document.querySelector('button[type="submit"]') as HTMLElement;
+              if (btn) btn.click();
+            }).catch(() => {});
+          }
+          log("Clicked Sign In button (magic link will be sent to email)");
+          await page.waitForTimeout(5000 + Math.random() * 3000);
+          const afterUrl = page.url();
+          const afterBody = (await page.textContent("body").catch(() => "") || "").substring(0, 300);
+          log("After login click: URL=" + afterUrl.substring(0, 100) + " body=" + afterBody.replace(/\s+/g, " "));
+          if (afterUrl.includes("/phone/input") || afterUrl.includes("/phone/verify")) {
+            log("Redirected to phone verification page — proceeding to SMSPool flow");
+          } else if (afterUrl.includes("dashboard") || afterUrl.includes("onboarding")) {
+            log("Login successful — on dashboard");
+            const apiKey = await page.$$eval('[class*="api"], [data-testid*="api"], code, pre, input[readonly], input[disabled]', (els: any[]) =>
+              els.map((e: any) => (e.textContent || e.value || "").trim()).filter((t: string) => /^[a-f0-9]{40}$/.test(t))
+            ).catch(() => []);
+            if (apiKey.length > 0) {
+              return { success: true, apiKey: apiKey[0], zenrowsPassword, outlookEmail, outlookPassword, message: "Logged in and extracted API key" };
+            }
+          } else {
+            log("Magic link sent — will check Outlook inbox for login link");
+          }
+        } else {
+          log("No login button found on page");
+        }
+      } else {
+        log("No email input on login page");
+      }
+    }
+
+    if (existingZenrowsPassword && page) {
+      const currentUrl = page.url();
+      if (currentUrl.includes("/phone") || currentUrl.includes("/verify")) {
+        log("Already on phone page — skipping to phone verification");
+      } else if (currentUrl.includes("dashboard") || currentUrl.includes("onboarding")) {
+        log("Already on dashboard — skipping to API key extraction");
+      } else {
+        log("Not on phone page yet (on " + currentUrl.substring(0, 80) + ") — magic link login needed, will check Outlook");
+      }
+    }
+
+    if (existingZenrowsPassword && page) {
+      const phoneUrl = page.url();
+      if (phoneUrl.includes("/phone") || phoneUrl.includes("/verify")) {
+        log("Login-only mode: already on phone page, skipping email verification — going straight to SMSPool phone verification...");
+
+        let smsOrderId: string | undefined;
+        try {
+          if (!phoneUrl.includes("/phone/input")) {
+            await page.goto("https://app.zenrows.com/phone/input", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await page.waitForTimeout(2000);
+          }
+          const phonePageText = await page.textContent("body").catch(() => "");
+          log("Phone page content: " + (phonePageText || "").substring(0, 200).replace(/\s+/g, " "));
+
+          const smspoolResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'smspool_api_key'`);
+          const smspoolApiKey = smspoolResult.rows.length > 0 ? (smspoolResult.rows[0].value as string) : "";
+          if (!smspoolApiKey) {
+            return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "SMSPool API key not configured" };
+          }
+
+          const countries = [
+            { id: "8", name: "Portugal", price: 0.09 },
+            { id: "2", name: "United Kingdom", price: 0.14 },
+            { id: "1", name: "United States", price: 0.72 },
+          ];
+
+          let phoneNumber = "";
+          let orderCountry = "";
+          for (const country of countries) {
+            log("Trying SMSPool country: " + country.name + " (ID=" + country.id + ", ~$" + country.price + ")...");
+            try {
+              const orderResp = await fetch("https://api.smspool.net/purchase/sms", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({ key: smspoolApiKey, country: country.id, service: "817", pool: "1" }),
+              });
+              const orderData = await orderResp.json() as any;
+              log("SMSPool order response: " + JSON.stringify(orderData).substring(0, 200));
+              if (orderData.success === 1 && orderData.phonenumber && orderData.order_id) {
+                phoneNumber = orderData.phonenumber;
+                smsOrderId = orderData.order_id;
+                orderCountry = country.name;
+                log("Got phone number from " + country.name + ": " + phoneNumber + " (order " + smsOrderId + ")");
+                break;
+              }
+            } catch (smsErr: any) {
+              log("SMSPool error for " + country.name + ": " + (smsErr.message || "").substring(0, 100));
+            }
+          }
+
+          if (!phoneNumber || !smsOrderId) {
+            return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "SMSPool could not provide a number from any country" };
+          }
+
+          const phoneInput = await page.waitForSelector('input[name="phone_number"], input#phone_number, input[type="tel"]', { timeout: 10000 }).catch(() => null);
+          if (!phoneInput) {
+            log("No phone input field found on page");
+            return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "Phone input field not found on ZenRows phone page" };
+          }
+
+          let formattedPhone = phoneNumber;
+          if (!formattedPhone.startsWith("+")) formattedPhone = "+" + formattedPhone;
+          await phoneInput.fill(formattedPhone);
+          log("Phone number entered: " + formattedPhone);
+
+          const sendBtn = await page.$('button[type="submit"], button:has-text("Send"), button:has-text("Verify"), button:has-text("Continue")');
+          if (sendBtn) {
+            await sendBtn.click();
+            log("Clicked send/verify button");
+          } else {
+            await phoneInput.press("Enter");
+            log("Pressed Enter to submit phone");
+          }
+          await page.waitForTimeout(5000 + Math.random() * 3000);
+
+          const currentUrl = page.url();
+          const pageText = (await page.textContent("body").catch(() => "") || "").toLowerCase();
+          log("After phone submit: URL=" + currentUrl.substring(0, 100));
+
+          if (currentUrl.includes("/phone/verify") || currentUrl.includes("/phone/code") || pageText.includes("enter") || pageText.includes("code")) {
+            log("Phone code input page detected — polling SMSPool for SMS code...");
+            let smsCode = "";
+            for (let poll = 0; poll < 30; poll++) {
+              await page.waitForTimeout(5000);
+              try {
+                const checkResp = await fetch("https://api.smspool.net/sms/check", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  body: new URLSearchParams({ key: smspoolApiKey, orderid: smsOrderId! }),
+                });
+                const checkData = await checkResp.json() as any;
+                if (checkData.status === 3 && checkData.sms) {
+                  const codeMatch = (checkData.sms as string).match(/\b(\d{4,8})\b/);
+                  if (codeMatch) {
+                    smsCode = codeMatch[1];
+                    log("SMS code received: " + smsCode + " (from " + orderCountry + ")");
+                    break;
+                  }
+                }
+                if (poll % 5 === 4) log("Still waiting for SMS... (poll " + (poll + 1) + "/30)");
+              } catch {}
+            }
+
+            if (!smsCode) {
+              return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "Timed out waiting for SMS code from SMSPool" };
+            }
+
+            const codeInput = await page.$('input[name="code"], input[name="verification_code"], input[type="text"], input[type="number"], input[inputmode="numeric"]');
+            if (codeInput) {
+              await codeInput.fill(smsCode);
+              log("Code entered: " + smsCode);
+              const verifyBtn = await page.$('button[type="submit"], button:has-text("Verify"), button:has-text("Confirm"), button:has-text("Submit")');
+              if (verifyBtn) {
+                await verifyBtn.click();
+                log("Clicked verify button");
+              } else {
+                await codeInput.press("Enter");
+              }
+              await page.waitForTimeout(5000 + Math.random() * 3000);
+
+              const afterVerifyUrl = page.url();
+              log("After code submit: " + afterVerifyUrl.substring(0, 100));
+
+              if (afterVerifyUrl.includes("dashboard") || afterVerifyUrl.includes("onboarding") || afterVerifyUrl.includes("builder")) {
+                log("Phone verification successful! On dashboard now.");
+                await page.waitForTimeout(3000);
+                const extractedKey = await page.$$eval('[class*="api"], [data-testid*="api"], code, pre, input[readonly], input[disabled], span', (els: any[]) =>
+                  els.map((e: any) => (e.textContent || e.value || "").trim()).filter((t: string) => /^[a-f0-9]{40}$/.test(t))
+                ).catch(() => []);
+                if (extractedKey.length > 0) {
+                  log("API key extracted after phone verification: " + extractedKey[0].substring(0, 8) + "...");
+                  return { success: true, apiKey: extractedKey[0], zenrowsPassword, outlookEmail, outlookPassword, message: "ZenRows phone verified via SMSPool, API key extracted" };
+                }
+
+                try {
+                  const cookies = await context.cookies();
+                  const cookieHeader = cookies.map((c: any) => c.name + "=" + c.value).join("; ");
+                  for (const apiUrl of ["https://app.zenrows.com/api/v1/me", "https://app.zenrows.com/api/me", "https://app.zenrows.com/api/v1/user"]) {
+                    const resp = await fetch(apiUrl, { headers: { "Cookie": cookieHeader } });
+                    if (resp.ok) {
+                      const data = await resp.text();
+                      const keyMatch = data.match(/[a-f0-9]{40}/);
+                      if (keyMatch) {
+                        log("API key from internal API: " + keyMatch[0].substring(0, 8) + "...");
+                        return { success: true, apiKey: keyMatch[0], zenrowsPassword, outlookEmail, outlookPassword, message: "ZenRows phone verified — API key from internal API" };
+                      }
+                    }
+                  }
+                } catch {}
+
+                return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "Phone verified but could not extract API key. Login manually." };
+              }
+            }
+          }
+        } catch (phoneErr: any) {
+          log("Phone verification error: " + (phoneErr.message || "").substring(0, 200));
+          if (smsOrderId) {
+            try { await fetch("https://api.smspool.net/sms/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ key: (await db.execute(sql`SELECT value FROM settings WHERE key = 'smspool_api_key'`)).rows[0]?.value as string || "", orderid: smsOrderId }) }); } catch {}
+          }
+          return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "Phone verification failed: " + (phoneErr.message || "").substring(0, 150) };
+        }
+      }
+    }
 
     log("Step 2/6: Logging into Outlook to get verification email...");
 

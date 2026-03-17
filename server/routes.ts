@@ -1997,14 +1997,14 @@ export async function registerRoutes(
 
   app.post("/api/zenrows-register", requireAuth, requireServiceAccess("zenrows"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword } = req.body;
+      const { outlookEmail, outlookPassword, zenrowsPassword } = req.body;
 
       const userId = req.session.userId;
       const regId = randomUUID().substring(0, 8);
       const batchId = `zenrows-reg-${regId}`;
 
       batchOwners.set(batchId, userId);
-      const mode = outlookEmail && outlookPassword ? "existing Outlook account" : "auto-create Outlook account";
+      const mode = zenrowsPassword ? "login + phone verify" : outlookEmail && outlookPassword ? "existing Outlook account" : "auto-create Outlook account";
       res.json({ success: true, regId, batchId, message: `ZenRows registration started (${mode})` });
 
       (async () => {
@@ -2013,7 +2013,8 @@ export async function registerRoutes(
           const result = await registerZenrowsAccount(
             outlookEmail || null,
             outlookPassword || null,
-            (msg) => broadcastLog(batchId, regId, msg, userId)
+            (msg) => broadcastLog(batchId, regId, msg, userId),
+            zenrowsPassword || null
           );
 
           if (result.success && result.apiKey) {
