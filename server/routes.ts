@@ -2020,7 +2020,7 @@ export async function registerRoutes(
             broadcastLog(batchId, regId, `ZenRows API Key extracted successfully`, userId);
             try {
               const caller = await storage.getUser(userId);
-              if (caller && caller.role === "superadmin" && /^[a-f0-9]{40,}$/.test(result.apiKey)) {
+              if (caller && caller.role === "superadmin" && /^[a-f0-9]{40}$/.test(result.apiKey)) {
                 await storage.setSetting("zenrows_rest_api_key", result.apiKey);
                 clearZenrowsApiKeyCache();
                 broadcastLog(batchId, regId, `API key auto-saved to settings (length=${result.apiKey.length})`, userId);

@@ -7202,7 +7202,7 @@ export async function registerZenrowsAccount(
 
         if (capturedApiKeys.length > 0) {
           log("Network intercept found " + capturedApiKeys.length + " potential API key(s) during signup!");
-          const validKey = capturedApiKeys.find(k => /^[a-f0-9]{40,80}$/.test(k));
+          const validKey = capturedApiKeys.find(k => /^[a-f0-9]{40}$/.test(k));
           if (validKey) {
             log("Valid API key captured from network: " + validKey.substring(0, 8) + "...");
             try { await page.close(); } catch {}
@@ -7215,29 +7215,31 @@ export async function registerZenrowsAccount(
         log("Bypass strategy 0: Check localStorage/sessionStorage/cookies for API key...");
         try {
           const storageKey = await page.evaluate(() => {
-            const keyRe = /^[a-f0-9]{40,80}$/;
+            const keyRe = /^[a-f0-9]{40}$/;
+            const skipKeys = ["radar", "intercom", "segment", "hotjar", "sentry", "hubspot", "analytics", "hs_", "crisp", "drift"];
+            const shouldSkip = (name: string) => skipKeys.some(s => name.toLowerCase().includes(s));
             for (let i = 0; i < localStorage.length; i++) {
               const k = localStorage.key(i);
-              if (k) {
+              if (k && !shouldSkip(k)) {
                 const v = localStorage.getItem(k) || "";
                 if (keyRe.test(v)) return { source: "localStorage:" + k, key: v };
                 try {
                   const parsed = JSON.parse(v);
                   const jsonStr = JSON.stringify(parsed);
-                  const m = jsonStr.match(/[a-f0-9]{40,80}/);
+                  const m = jsonStr.match(/\b[a-f0-9]{40}\b/);
                   if (m && keyRe.test(m[0])) return { source: "localStorage:" + k + "(json)", key: m[0] };
                 } catch {}
               }
             }
             for (let i = 0; i < sessionStorage.length; i++) {
               const k = sessionStorage.key(i);
-              if (k) {
+              if (k && !shouldSkip(k)) {
                 const v = sessionStorage.getItem(k) || "";
                 if (keyRe.test(v)) return { source: "sessionStorage:" + k, key: v };
                 try {
                   const parsed = JSON.parse(v);
                   const jsonStr = JSON.stringify(parsed);
-                  const m = jsonStr.match(/[a-f0-9]{40,80}/);
+                  const m = jsonStr.match(/\b[a-f0-9]{40}\b/);
                   if (m && keyRe.test(m[0])) return { source: "sessionStorage:" + k + "(json)", key: m[0] };
                 } catch {}
               }
@@ -7779,22 +7781,35 @@ export async function registerZenrowsAccount(
 
     if (!useZenRowsForOutlook) {
       await ensureBrowserInstalled();
-      const olSoaxProxy = await getSoaxProxyForAccount();
       const olLaunchArgs = [
         "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
       ];
       const olLaunchOpts: any = { headless: true, args: olLaunchArgs };
-      if (olSoaxProxy) {
-        const proxyUrl = new URL(olSoaxProxy);
+
+      const olWebshareResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+      const olWebshareProxy = (olWebshareResult.rows?.[0] as any)?.value || "";
+      if (olWebshareProxy) {
+        const proxyUrl = new URL(olWebshareProxy);
         olLaunchOpts.proxy = {
           server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
           username: decodeURIComponent(proxyUrl.username),
           password: decodeURIComponent(proxyUrl.password),
         };
-        log("Using SOAX proxy for Outlook login (ZenRows unavailable)");
+        log("Using Webshare proxy for Outlook login");
       } else {
-        log("No proxy available for Outlook login — using direct connection");
+        const olSoaxProxy = await getSoaxProxyForAccount();
+        if (olSoaxProxy) {
+          const proxyUrl = new URL(olSoaxProxy);
+          olLaunchOpts.proxy = {
+            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+            username: decodeURIComponent(proxyUrl.username),
+            password: decodeURIComponent(proxyUrl.password),
+          };
+          log("Using SOAX proxy for Outlook login (Webshare unavailable)");
+        } else {
+          log("No proxy available for Outlook login — using direct connection");
+        }
       }
       outlookBrowser = await chromium.launch(olLaunchOpts);
       localBrowser = outlookBrowser;
