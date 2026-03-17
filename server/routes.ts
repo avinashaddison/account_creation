@@ -20,6 +20,20 @@ async function getDefaultBrowserApiUrl(): Promise<string | null> {
   return saved || null;
 }
 
+function uniqueProxySession(proxyUrl: string): string {
+  if (!proxyUrl || proxyUrl === "local") return proxyUrl;
+  if (!proxyUrl.includes("superproxy.zenrows.com")) return proxyUrl;
+  let url = proxyUrl.replace(/ttl-\w+/, "ttl-30m");
+  url = url.replace(/session-\w+/, `session-${randomUUID().replace(/-/g, "").substring(0, 12)}`);
+  if (!url.includes("session-")) {
+    const atIndex = url.indexOf("@");
+    if (atIndex !== -1) {
+      url = url.substring(0, atIndex).replace(/:(\d+)$/, "") + `_session-${randomUUID().replace(/-/g, "").substring(0, 12)}` + url.substring(url.lastIndexOf("@") - 1).replace(/.*@/, "@");
+    }
+  }
+  return url;
+}
+
 async function getDefaultProxies(proxyList?: string[]): Promise<string[]> {
   if (Array.isArray(proxyList) && proxyList.length > 0) return proxyList;
   const saved = await getDefaultBrowserApiUrl();
@@ -949,7 +963,8 @@ export async function registerRoutes(
         for (let i = 0; i < created.length; i += CONCURRENCY) {
           const chunk = created.slice(i, i + CONCURRENCY);
           await Promise.all(chunk.map((acc, j) => {
-            const proxy = proxies[(i + j) % proxies.length];
+            const baseProxy = proxies[(i + j) % proxies.length];
+            const proxy = uniqueProxySession(baseProxy);
             broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
             return processAccount(
               acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
@@ -988,7 +1003,8 @@ export async function registerRoutes(
       }
 
       const proxies = await getDefaultProxies(proxyList);
-      const resolvedProxy = proxies[Math.floor(Math.random() * proxies.length)];
+      const baseProxy = proxies[Math.floor(Math.random() * proxies.length)];
+      const resolvedProxy = uniqueProxySession(baseProxy);
 
       const domain = await getAvailableDomain();
       const username = generateRandomUsername();
@@ -1567,7 +1583,7 @@ export async function registerRoutes(
 
       const { count = 1 } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
-      const proxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
+      const baseProxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -1620,6 +1636,7 @@ export async function registerRoutes(
 
       (async () => {
         for (const acc of created) {
+          const proxyUrl = uniqueProxySession(baseProxyUrl);
           broadcastLog(batchId, acc.id, `Starting TM registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processTMAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
@@ -1628,6 +1645,7 @@ export async function registerRoutes(
 
           const afterAccount = await storage.getAccount(acc.id);
           if (afterAccount && afterAccount.status === "failed") {
+            const retryProxy = uniqueProxySession(baseProxyUrl);
             broadcastLog(batchId, acc.id, `Retrying with new email address...`, userId);
             const retryDomain = await getAvailableDomain();
             const retryUsername = generateRandomUsername();
@@ -1642,7 +1660,7 @@ export async function registerRoutes(
             }
             await processTMAccount(
               acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-              retryEmail, "TempPass123!", userId, proxyUrl
+              retryEmail, "TempPass123!", userId, retryProxy
             );
           }
         }
@@ -1806,7 +1824,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Count must be between 1 and 100" });
       }
       const numAccounts = parsed;
-      const proxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
+      const baseProxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -1859,6 +1877,7 @@ export async function registerRoutes(
 
       (async () => {
         for (const acc of created) {
+          const proxyUrl = uniqueProxySession(baseProxyUrl);
           broadcastLog(batchId, acc.id, `Starting TM + Bruno Mars flow for ${acc.firstName} ${acc.lastName}...`, userId);
 
           let tmSuccess = false;
