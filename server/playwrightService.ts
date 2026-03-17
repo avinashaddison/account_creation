@@ -6093,7 +6093,7 @@ export async function createOutlookAccount(
     log("Checking for captcha...");
     let captchaSolved = false;
 
-    for (let captchaAttempt = 0; captchaAttempt < 5; captchaAttempt++) {
+    for (let captchaAttempt = 0; captchaAttempt < 8; captchaAttempt++) {
       const bodyText = await page.textContent("body").catch(() => "");
       const bodyLowerCheck = (bodyText || "").toLowerCase();
 
@@ -6110,80 +6110,122 @@ export async function createOutlookAccount(
       }
 
       if (isPerimeterX) {
-        log("PerimeterX press-and-hold challenge detected (attempt " + (captchaAttempt + 1) + "/5)...");
+        log("PerimeterX press-and-hold challenge detected (attempt " + (captchaAttempt + 1) + "/8)...");
+
+        if (captchaAttempt > 0 && captchaAttempt % 2 === 0) {
+          log("Refreshing page for fresh captcha session...");
+          await page.reload({ waitUntil: 'networkidle' }).catch(() => {});
+          await page.waitForTimeout(3000 + Math.random() * 2000);
+          const refreshedText = await page.textContent("body").catch(() => "");
+          if (!(refreshedText || "").toLowerCase().includes("prove you're human") && !(refreshedText || "").toLowerCase().includes("press and hold")) {
+            log("Captcha gone after refresh!");
+            captchaSolved = true;
+            break;
+          }
+        }
 
         const hsFrame = page.frames().find((f: any) => f.url().includes('hsprotect.net') || f.url().includes('human'));
         if (hsFrame) {
           log("Found PerimeterX iframe: " + hsFrame.url().substring(0, 80));
 
-          await page.evaluate(() => {
-            const iframes = document.querySelectorAll('iframe[src*="hsprotect"]');
-            iframes.forEach((iframe: any) => {
-              iframe.style.position = 'fixed';
-              iframe.style.left = '100px';
-              iframe.style.top = '200px';
-              iframe.style.width = '400px';
-              iframe.style.height = '200px';
-              iframe.style.zIndex = '99999';
-            });
-          }).catch(() => {});
-          await page.waitForTimeout(500);
+          const iframeEl = await page.$('iframe[src*="hsprotect"]').catch(() => null);
+          let iframeBox: any = null;
+          if (iframeEl) {
+            iframeBox = await iframeEl.boundingBox().catch(() => null);
+            log("Actual iframe bounding box: " + JSON.stringify(iframeBox));
+
+            if (!iframeBox || iframeBox.width < 50) {
+              await page.evaluate(() => {
+                const iframes = document.querySelectorAll('iframe[src*="hsprotect"]');
+                iframes.forEach((iframe: any) => {
+                  iframe.style.position = 'fixed';
+                  iframe.style.left = '100px';
+                  iframe.style.top = '150px';
+                  iframe.style.width = '500px';
+                  iframe.style.height = '300px';
+                  iframe.style.zIndex = '99999';
+                  iframe.style.opacity = '1';
+                  iframe.style.visibility = 'visible';
+                });
+              }).catch(() => {});
+              await page.waitForTimeout(500);
+              iframeBox = await iframeEl.boundingBox().catch(() => null);
+              log("Repositioned iframe box: " + JSON.stringify(iframeBox));
+            }
+          }
 
           await hsFrame.evaluate(() => {
             const el = document.getElementById('px-captcha');
             if (el) {
-              el.style.width = '300px';
-              el.style.height = '60px';
-              el.style.position = 'relative';
-              el.style.left = '0';
-              el.style.top = '0';
               el.style.display = 'block';
               el.style.visibility = 'visible';
               el.style.opacity = '1';
+              el.style.pointerEvents = 'auto';
             }
           }).catch(() => {});
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(1000 + Math.random() * 500);
 
           const pxCaptcha = await hsFrame.$('#px-captcha').catch(() => null);
           if (pxCaptcha) {
             let box = await pxCaptcha.boundingBox().catch(() => null);
-            log("px-captcha box: " + JSON.stringify(box));
+            log("px-captcha raw box: " + JSON.stringify(box));
 
-            if (!box || box.x < 0 || box.width < 10) {
-              const iframeEl = await page.$('iframe[src*="hsprotect"]').catch(() => null);
-              if (iframeEl) {
-                const iframeBox = await iframeEl.boundingBox().catch(() => null);
-                log("iframe box: " + JSON.stringify(iframeBox));
-                if (iframeBox && iframeBox.width > 10 && iframeBox.x >= 0) {
-                  box = { x: iframeBox.x + 20, y: iframeBox.y + 20, width: iframeBox.width - 40, height: iframeBox.height - 40 };
-                  log("Using iframe position as fallback: " + JSON.stringify(box));
-                }
+            if ((!box || box.x < 0 || box.width < 10) && iframeBox && iframeBox.width > 10 && iframeBox.x >= 0) {
+              const innerBox = await hsFrame.evaluate(() => {
+                const el = document.getElementById('px-captcha');
+                if (!el) return null;
+                const rect = el.getBoundingClientRect();
+                return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+              }).catch(() => null);
+              log("px-captcha inner rect: " + JSON.stringify(innerBox));
+
+              if (innerBox && innerBox.width > 10) {
+                box = { x: iframeBox.x + innerBox.x, y: iframeBox.y + innerBox.y, width: innerBox.width, height: innerBox.height };
+              } else {
+                box = { x: iframeBox.x + 30, y: iframeBox.y + iframeBox.height / 2 - 25, width: iframeBox.width - 60, height: 50 };
               }
+              log("Computed captcha box: " + JSON.stringify(box));
             }
 
             if (box && box.width >= 1 && box.x >= 0) {
-              const cx = box.x + box.width / 2;
-              const cy = box.y + box.height / 2;
+              const cx = box.x + box.width * (0.3 + Math.random() * 0.4);
+              const cy = box.y + box.height * (0.3 + Math.random() * 0.4);
 
-              await page.mouse.move(cx - 50, cy - 30, { steps: 3 });
-              await page.waitForTimeout(300 + Math.random() * 500);
-              await page.mouse.move(cx, cy, { steps: 5 });
-              await page.waitForTimeout(200 + Math.random() * 300);
+              const startX = cx - 100 - Math.random() * 200;
+              const startY = cy - 50 - Math.random() * 100;
+              await page.mouse.move(startX, startY, { steps: 5 + Math.floor(Math.random() * 5) });
+              await page.waitForTimeout(200 + Math.random() * 400);
+
+              const midPoints = 3 + Math.floor(Math.random() * 3);
+              for (let m = 0; m < midPoints; m++) {
+                const progress = (m + 1) / (midPoints + 1);
+                const mx = startX + (cx - startX) * progress + (Math.random() - 0.5) * 30;
+                const my = startY + (cy - startY) * progress + (Math.random() - 0.5) * 20;
+                await page.mouse.move(mx, my, { steps: 3 + Math.floor(Math.random() * 3) });
+                await page.waitForTimeout(50 + Math.random() * 150);
+              }
+
+              await page.mouse.move(cx, cy, { steps: 4 + Math.floor(Math.random() * 4) });
+              await page.waitForTimeout(100 + Math.random() * 300);
+
               await page.mouse.down();
-              log("Mouse down on px-captcha, holding for ~12s...");
+              log("Mouse down on px-captcha at (" + Math.round(cx) + "," + Math.round(cy) + "), holding...");
 
-              const holdTime = 10000 + Math.random() * 5000;
-              const steps = 30;
-              for (let s = 0; s < steps; s++) {
-                await page.waitForTimeout(holdTime / steps);
-                const jx = cx + (Math.random() - 0.5) * 4;
-                const jy = cy + (Math.random() - 0.5) * 4;
+              const holdTime = 12000 + Math.random() * 6000;
+              const holdSteps = 40 + Math.floor(Math.random() * 20);
+              log("Hold time: " + Math.round(holdTime) + "ms in " + holdSteps + " steps");
+              for (let s = 0; s < holdSteps; s++) {
+                const stepDelay = (holdTime / holdSteps) * (0.7 + Math.random() * 0.6);
+                await page.waitForTimeout(stepDelay);
+                const drift = Math.min(s * 0.15, 3);
+                const jx = cx + (Math.random() - 0.5) * drift;
+                const jy = cy + (Math.random() - 0.5) * drift;
                 await page.mouse.move(jx, jy);
               }
 
               await page.mouse.up();
               log("Mouse up after hold, waiting for result...");
-              await page.waitForTimeout(5000 + Math.random() * 3000);
+              await page.waitForTimeout(4000 + Math.random() * 4000);
 
               const afterHoldText = await page.textContent("body").catch(() => "");
               const afterLower = (afterHoldText || "").toLowerCase();
@@ -6194,22 +6236,28 @@ export async function createOutlookAccount(
               }
               log("Still on challenge page after hold attempt " + (captchaAttempt + 1));
             } else {
-              log("px-captcha still has no usable bounding box");
+              log("px-captcha has no usable bounding box, trying JS dispatch...");
 
               await hsFrame.evaluate(() => {
                 const el = document.getElementById('px-captcha');
                 if (el) {
-                  const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 150, clientY: 30 });
-                  el.dispatchEvent(mousedown);
+                  const rect = el.getBoundingClientRect();
+                  const cx = rect.x + rect.width / 2;
+                  const cy = rect.y + rect.height / 2;
+                  el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: 1, pointerType: 'mouse' }));
+                  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
                 }
               }).catch(() => {});
-              log("Dispatched mousedown via JS, holding 12s...");
-              await page.waitForTimeout(12000 + Math.random() * 3000);
+              log("Dispatched mousedown via JS, holding 14s...");
+              await page.waitForTimeout(14000 + Math.random() * 4000);
               await hsFrame.evaluate(() => {
                 const el = document.getElementById('px-captcha');
                 if (el) {
-                  const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 150, clientY: 30 });
-                  el.dispatchEvent(mouseup);
+                  const rect = el.getBoundingClientRect();
+                  const cx = rect.x + rect.width / 2;
+                  const cy = rect.y + rect.height / 2;
+                  el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: 1, pointerType: 'mouse' }));
+                  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
                 }
               }).catch(() => {});
               log("Dispatched mouseup via JS");
@@ -6275,7 +6323,7 @@ export async function createOutlookAccount(
     }
 
     if (!captchaSolved) {
-      return { success: false, error: "Could not solve captcha challenge after 5 attempts" };
+      return { success: false, error: "Could not solve captcha challenge after 8 attempts" };
     }
 
     await page.waitForTimeout(3000 + Math.random() * 2000);
