@@ -6692,16 +6692,20 @@ export async function registerZenrowsAccount(
     log("Launching browser for ZenRows registration (cannot use ZenRows browser for its own site)...");
 
     let browserProxyUrl = "";
-    const soaxProxy = await getSoaxProxyForAccount();
-    if (soaxProxy) {
-      browserProxyUrl = soaxProxy;
-    } else {
-      try {
-        const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-        if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
-          browserProxyUrl = proxyRow.rows[0].value as string;
-        }
-      } catch {}
+    let proxyLabel = "configured";
+    try {
+      const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+      if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
+        browserProxyUrl = proxyRow.rows[0].value as string;
+        proxyLabel = "Webshare";
+      }
+    } catch {}
+    if (!browserProxyUrl) {
+      const soaxProxy = await getSoaxProxyForAccount();
+      if (soaxProxy) {
+        browserProxyUrl = soaxProxy;
+        proxyLabel = "SOAX residential";
+      }
     }
 
     await ensureBrowserInstalled();
@@ -6720,7 +6724,7 @@ export async function registerZenrowsAccount(
         username: decodeURIComponent(proxyUrl.username),
         password: decodeURIComponent(proxyUrl.password),
       };
-      log("Using " + (soaxProxy ? "SOAX residential" : "configured") + " proxy for ZenRows registration");
+      log("Using " + proxyLabel + " proxy for ZenRows registration");
     } else {
       log("No proxy configured — using direct connection for ZenRows registration");
     }
