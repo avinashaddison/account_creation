@@ -7769,12 +7769,28 @@ export async function registerZenrowsAccount(
     } // end if (!restSignupDone)
 
     if (existingZenrowsPassword && !page) {
-      log("Login-only mode: launching browser to login to ZenRows (NO PROXY — direct connection)...");
+      log("Login-only mode: launching browser to login to ZenRows...");
 
       await ensureBrowserInstalled();
       const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"];
       const launchOpts: any = { headless: true, args: launchArgs };
-      log("Launching browser WITHOUT proxy to bypass Cloudflare detection");
+
+      const soaxProxy = await getSoaxProxyForAccount();
+      if (soaxProxy) {
+        try {
+          const proxyUrl = new URL(soaxProxy);
+          launchOpts.proxy = {
+            server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+            username: decodeURIComponent(proxyUrl.username),
+            password: decodeURIComponent(proxyUrl.password),
+          };
+          log("Using SOAX residential proxy for ZenRows login");
+        } catch (e: any) {
+          log("Failed to parse SOAX proxy, going direct: " + e.message);
+        }
+      } else {
+        log("No SOAX proxy available, launching direct (no proxy)");
+      }
       localBrowser = await chromium.launch(launchOpts);
       context = await localBrowser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -7808,8 +7824,33 @@ export async function registerZenrowsAccount(
 
       const emailInput = await page.$('input[type="email"], input[name="email"]');
       if (emailInput) {
-        await emailInput.fill(outlookEmail!);
-        log("Login email filled: " + outlookEmail);
+        await emailInput.click();
+        await page.waitForTimeout(300);
+        await emailInput.focus();
+        await page.waitForTimeout(200);
+        
+        await page.evaluate((email: string) => {
+          const input = document.querySelector('input[type="email"], input[name="email"]') as HTMLInputElement;
+          if (input) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+            nativeInputValueSetter.call(input, '');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            for (let i = 0; i < email.length; i++) {
+              nativeInputValueSetter.call(input, email.substring(0, i + 1));
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }, outlookEmail!);
+        await page.waitForTimeout(500);
+        
+        const filledValue = await page.evaluate(() => {
+          const input = document.querySelector('input[type="email"], input[name="email"]') as HTMLInputElement;
+          return input ? input.value : '';
+        });
+        log("Login email filled: " + outlookEmail + " (DOM value: " + filledValue + ")");
         const passInput = await page.$('input[type="password"]');
         if (passInput) {
           await passInput.fill(zenrowsPassword);
@@ -7828,6 +7869,78 @@ export async function registerZenrowsAccount(
         ).catch(() => []);
         log("All links on login page: " + JSON.stringify(allLinks));
 
+        const hiddenElements = await page.evaluate(() => {
+          const iframes = Array.from(document.querySelectorAll("iframe")).map(f => ({
+            src: (f.src || "").substring(0, 120),
+            title: f.title || "",
+            width: f.width,
+            height: f.height,
+            hidden: f.hidden || f.style.display === "none" || f.offsetHeight === 0,
+          }));
+          const captchaEls = Array.from(document.querySelectorAll("[data-sitekey], .cf-turnstile, .g-recaptcha, .h-captcha, [id*='turnstile'], [id*='captcha']")).map(e => ({
+            tag: e.tagName,
+            id: e.id,
+            className: (e.className || "").toString().substring(0, 80),
+            sitekey: (e as any).dataset?.sitekey || "",
+          }));
+          const forms = Array.from(document.querySelectorAll("form")).map(f => ({
+            action: f.action?.substring(0, 100) || "",
+            method: f.method || "",
+            inputs: Array.from(f.querySelectorAll("input")).map(i => ({ type: i.type, name: i.name, value: i.type === "hidden" ? i.value.substring(0, 50) : "" })),
+          }));
+          return { iframes, captchaEls, forms };
+        }).catch(() => ({ iframes: [], captchaEls: [], forms: [] }));
+        log("Page structure: " + JSON.stringify(hiddenElements));
+
+        const emailFormInfo = hiddenElements.forms.find((f: any) => f.action.includes("/login/email"));
+        if (emailFormInfo) {
+          const csrfToken = emailFormInfo.inputs.find((i: any) => i.name === "_token")?.value || "";
+          const tz = emailFormInfo.inputs.find((i: any) => i.name === "tz")?.value || "UTC";
+          log("Found email login form: action=" + emailFormInfo.action + " csrf=" + csrfToken.substring(0, 10) + "... tz=" + tz);
+          
+          log("Submitting magic link request via direct form POST...");
+          const submitResult = await page.evaluate(async (params: { email: string; token: string; tz: string; action: string }) => {
+            try {
+              const formData = new FormData();
+              formData.append("_token", params.token);
+              formData.append("tz", params.tz);
+              formData.append("email", params.email);
+              
+              const resp = await fetch(params.action, {
+                method: "POST",
+                body: formData,
+                credentials: "same-origin",
+                redirect: "follow",
+              });
+              
+              const respText = await resp.text();
+              return {
+                status: resp.status,
+                url: resp.url.substring(0, 150),
+                bodyPreview: respText.substring(0, 800).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
+                ok: resp.ok,
+              };
+            } catch (e: any) {
+              return { status: 0, url: "", bodyPreview: "fetch error: " + e.message, ok: false };
+            }
+          }, { email: outlookEmail!, token: csrfToken, tz, action: emailFormInfo.action });
+          
+          log("Form POST result: status=" + submitResult.status + " url=" + submitResult.url);
+          log("Form POST body: " + submitResult.bodyPreview.substring(0, 400));
+          
+          await page.waitForTimeout(2000);
+          const afterUrl = page.url();
+          
+          if (afterUrl.includes("/phone/input") || afterUrl.includes("/phone/verify")) {
+            log("Redirected to phone verification page — proceeding to SMSPool flow");
+          } else if (afterUrl.includes("dashboard") || afterUrl.includes("onboarding")) {
+            log("Login successful — on dashboard");
+          } else {
+            log("Magic link should have been sent — will check Outlook inbox");
+          }
+        }
+        
+        if (!hiddenElements.forms?.find((f: any) => f.action?.includes("/login/email"))) {
         let loginBtn = await page.$('button:has-text("Send magic link")');
         if (!loginBtn) loginBtn = await page.$('button:has-text("magic link")');
         if (!loginBtn) loginBtn = await page.$('button:has-text("Send link")');
@@ -7860,7 +7973,48 @@ export async function registerZenrowsAccount(
             await loginBtn.click({ force: true, timeout: 5000 }).catch(() => {});
           }
           log("Clicked login button");
-          await page.waitForTimeout(5000 + Math.random() * 3000);
+          await page.waitForTimeout(3000);
+          log("Network requests after click: " + JSON.stringify(networkRequests));
+
+          if (page.url().includes("/login")) {
+            log("Still on login page after click, pressing Enter on email input...");
+            const emailAgain = await page.$('input[type="email"], input[name="email"]');
+            if (emailAgain) {
+              await emailAgain.press("Enter");
+              await page.waitForTimeout(5000);
+              log("Network requests after Enter: " + JSON.stringify(networkRequests));
+            }
+          }
+
+          await page.waitForTimeout(1000);
+
+          const afterBodyImmediate = (await page.textContent("body").catch(() => "") || "").substring(0, 500);
+          log("Immediately after click: " + afterBodyImmediate.replace(/\s+/g, " "));
+
+          if (afterBodyImmediate.toLowerCase().includes("check your email") || afterBodyImmediate.toLowerCase().includes("magic link") || afterBodyImmediate.toLowerCase().includes("sent")) {
+            log("Magic link confirmation detected!");
+          } else if (page.url().includes("/login")) {
+            log("Still on login page — trying React-compatible Sign In button click via JS...");
+            const jsClickResult = await page.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll("button"));
+              const signIn = buttons.find(b => {
+                const text = (b.textContent || "").trim();
+                return text === "Sign In" || text === "Sign in";
+              });
+              if (signIn) {
+                const isDisabled = signIn.disabled || signIn.getAttribute("aria-disabled") === "true";
+                signIn.click();
+                return { found: true, disabled: isDisabled, text: (signIn.textContent || "").trim() };
+              }
+              return { found: false, disabled: false, text: "" };
+            }).catch((e: any) => ({ found: false, disabled: false, text: "error: " + e.message }));
+            log("JS click result: " + JSON.stringify(jsClickResult));
+            await page.waitForTimeout(5000);
+            const afterJsClick = (await page.textContent("body").catch(() => "") || "").substring(0, 500);
+            log("After JS click: URL=" + page.url().substring(0, 100) + " body=" + afterJsClick.replace(/\s+/g, " "));
+          }
+
+          await page.waitForTimeout(2000 + Math.random() * 2000);
           const afterUrl = page.url();
           const afterBody = (await page.textContent("body").catch(() => "") || "").substring(0, 300);
           log("After login click: URL=" + afterUrl.substring(0, 100) + " body=" + afterBody.replace(/\s+/g, " "));
@@ -7885,6 +8039,7 @@ export async function registerZenrowsAccount(
           }
         } else {
           log("No login button found on page");
+        }
         }
       } else {
         log("No email input on login page");
@@ -8099,26 +8254,26 @@ export async function registerZenrowsAccount(
       ];
       const olLaunchOpts: any = { headless: true, args: olLaunchArgs };
 
-      const olWebshareResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-      const olWebshareProxy = (olWebshareResult.rows?.[0] as any)?.value || "";
-      if (olWebshareProxy) {
-        const proxyUrl = new URL(olWebshareProxy);
+      const olSoaxProxy = await getSoaxProxyForAccount();
+      if (olSoaxProxy) {
+        const proxyUrl = new URL(olSoaxProxy);
         olLaunchOpts.proxy = {
           server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
           username: decodeURIComponent(proxyUrl.username),
           password: decodeURIComponent(proxyUrl.password),
         };
-        log("Using Webshare proxy for Outlook login");
+        log("Using SOAX residential proxy for Outlook login");
       } else {
-        const olSoaxProxy = await getSoaxProxyForAccount();
-        if (olSoaxProxy) {
-          const proxyUrl = new URL(olSoaxProxy);
+        const olWebshareResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+        const olWebshareProxy = (olWebshareResult.rows?.[0] as any)?.value || "";
+        if (olWebshareProxy) {
+          const proxyUrl = new URL(olWebshareProxy);
           olLaunchOpts.proxy = {
             server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
             username: decodeURIComponent(proxyUrl.username),
             password: decodeURIComponent(proxyUrl.password),
           };
-          log("Using SOAX proxy for Outlook login (Webshare unavailable)");
+          log("Using Webshare proxy for Outlook login (SOAX unavailable)");
         } else {
           log("No proxy available for Outlook login — using direct connection");
         }
