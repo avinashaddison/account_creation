@@ -5180,7 +5180,7 @@ async function doRegistration(
     try {
       code = await Promise.race([
         getVerificationCode(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 150000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 240000)),
       ]);
     } catch (e: any) {
       console.log("[Playwright] Error getting verification code:", e.message);

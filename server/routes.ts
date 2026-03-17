@@ -222,7 +222,7 @@ async function processAccount(
       },
       async () => {
         broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-        const code = await pollForVerificationCode(token, 40, 3000);
+        const code = await pollForVerificationCode(token, 70, 3000);
         if (code) {
           await storage.updateAccount(accountId, { verificationCode: code });
           broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -1594,7 +1594,7 @@ export async function registerRoutes(
         },
         async () => {
           broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-          const code = await pollForVerificationCode(token, 40, 3000);
+          const code = await pollForVerificationCode(token, 70, 3000);
           if (code) {
             await storage.updateAccount(accountId, { verificationCode: code });
             broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -1774,7 +1774,7 @@ export async function registerRoutes(
         },
         async () => {
           broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-          const code = await pollForVerificationCode(token, 40, 3000);
+          const code = await pollForVerificationCode(token, 70, 3000);
           if (code) {
             await storage.updateAccount(accountId, { verificationCode: code });
             broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -1977,7 +1977,7 @@ export async function registerRoutes(
               },
               async () => {
                 broadcastLog(batchId, acc.id, `Polling for verification code...`, userId);
-                const code = await pollForVerificationCode(token, 40, 3000);
+                const code = await pollForVerificationCode(token, 70, 3000);
                 if (code) {
                   await storage.updateAccount(acc.id, { verificationCode: code });
                   broadcastLog(batchId, acc.id, `Got verification code: ${code}`, userId);
