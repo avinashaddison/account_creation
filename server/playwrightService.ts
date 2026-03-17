@@ -6589,71 +6589,55 @@ export async function registerZenrowsAccount(
 
     if (!restSignupDone) {
 
-    log("Launching browser for ZenRows registration...");
+    log("Launching browser for ZenRows registration (cannot use ZenRows browser for its own site)...");
 
     let context: any;
     let page: any;
-    let useZenRowsForReg = false;
 
-    if (zenrowsUrl) {
-      log("Using ZenRows browser for ZenRows registration (anti-bot bypass)...");
-      let zrRegUrl = zenrowsUrl;
-      if (!zrRegUrl.includes('proxy_country=')) {
-        zrRegUrl += (zrRegUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
-      }
-      try {
-        const regBrowser = await chromium.connectOverCDP(zrRegUrl, { timeout: 60000 });
-        localBrowser = regBrowser;
-        useZenRowsForReg = true;
-        context = regBrowser.contexts()[0] || await regBrowser.newContext();
-        page = await context.newPage();
-        log("ZenRows browser connected for ZenRows registration");
-      } catch (zrErr: any) {
-        log("ZenRows connection failed: " + (zrErr.message || "").substring(0, 100) + ", falling back to local browser");
-      }
-    }
-
-    if (!useZenRowsForReg) {
-      let browserProxyUrl = "";
+    let browserProxyUrl = "";
+    const soaxProxy = await getSoaxProxyForAccount();
+    if (soaxProxy) {
+      browserProxyUrl = soaxProxy;
+    } else {
       try {
         const proxyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
         if (proxyRow.rows.length > 0 && proxyRow.rows[0].value) {
           browserProxyUrl = proxyRow.rows[0].value as string;
         }
       } catch {}
-
-      await ensureBrowserInstalled();
-      const launchArgs = [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--ignore-certificate-errors",
-      ];
-      const launchOpts: any = { headless: true, args: launchArgs };
-      if (browserProxyUrl) {
-        const proxyUrl = new URL(browserProxyUrl);
-        launchOpts.proxy = {
-          server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
-          username: decodeURIComponent(proxyUrl.username),
-          password: decodeURIComponent(proxyUrl.password),
-        };
-        log("Using Addison Residential proxy for browser automation");
-      } else {
-        log("No browser proxy configured — using direct connection");
-      }
-      const dedicatedBrowser = await chromium.launch(launchOpts);
-      localBrowser = dedicatedBrowser;
-      context = await dedicatedBrowser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        viewport: { width: 1920, height: 1080 },
-        locale: "en-US",
-        timezoneId: "America/Los_Angeles",
-        ignoreHTTPSErrors: true,
-      });
-      page = await context.newPage();
-      log("Local browser launched" + (browserProxyUrl ? " (with proxy)" : " (no proxy)"));
     }
+
+    await ensureBrowserInstalled();
+    const launchArgs = [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled",
+      "--ignore-certificate-errors",
+    ];
+    const launchOpts: any = { headless: true, args: launchArgs };
+    if (browserProxyUrl) {
+      const proxyUrl = new URL(browserProxyUrl);
+      launchOpts.proxy = {
+        server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+        username: decodeURIComponent(proxyUrl.username),
+        password: decodeURIComponent(proxyUrl.password),
+      };
+      log("Using " + (soaxProxy ? "SOAX residential" : "configured") + " proxy for ZenRows registration");
+    } else {
+      log("No proxy configured — using direct connection for ZenRows registration");
+    }
+    const dedicatedBrowser = await chromium.launch(launchOpts);
+    localBrowser = dedicatedBrowser;
+    context = await dedicatedBrowser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1920, height: 1080 },
+      locale: "en-US",
+      timezoneId: "America/Los_Angeles",
+      ignoreHTTPSErrors: true,
+    });
+    page = await context.newPage();
+    log("Local browser launched" + (browserProxyUrl ? " (with proxy)" : " (no proxy)"));
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
