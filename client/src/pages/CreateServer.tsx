@@ -57,10 +57,10 @@ const platforms: Platform[] = [
     name: "UEFA Account",
     description: "Create verified UEFA accounts for European football ticket access",
     href: "/admin/uefa-create",
-    gradient: "from-emerald-600/80 via-teal-700/60 to-cyan-900/80",
+    gradient: "from-emerald-600/80 via-emerald-700/60 to-emerald-900/80",
     badge: "ACTIVE",
     badgeColor: "text-emerald-400",
-    borderColor: "rgba(0,255,136,0.2)",
+    borderColor: "rgba(0,255,65,0.2)",
     comingSoon: false,
     stats: [
       { label: "Auto Verify", icon: Shield },
@@ -76,7 +76,7 @@ const platforms: Platform[] = [
     gradient: "from-purple-600/80 via-fuchsia-700/60 to-pink-900/80",
     badge: "ACTIVE",
     badgeColor: "text-emerald-400",
-    borderColor: "rgba(168,85,247,0.2)",
+    borderColor: "rgba(255,176,0,0.2)",
     comingSoon: false,
     stats: [
       { label: "Auto Signup", icon: Shield },
@@ -175,12 +175,12 @@ export default function CreateServer() {
     <div className="space-y-6 animate-float-up">
       <div>
         <div className="flex items-center gap-2.5">
-          <Server className="w-5 h-5 text-cyan-400/50" />
+          <Server className="w-5 h-5 text-emerald-400/50" />
           <h1 className="text-xl font-bold tracking-tight text-white font-mono" data-testid="text-create-server-title">
-            Create<span className="text-cyan-400">_</span>Server
+            Create<span className="text-emerald-400">_</span>Server
           </h1>
         </div>
-        <p className="text-cyan-400/30 mt-1 text-[11px] font-mono pl-7.5">Select target module to initialize</p>
+        <p className="text-emerald-400/30 mt-1 text-[11px] font-mono pl-7.5">Select target module to initialize</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -208,7 +208,7 @@ export default function CreateServer() {
                         <img src={ticketmasterLogo} alt="Ticketmaster" className="w-full h-full object-cover" />
                       </div>
                     ) : platform.id === "brunomars" ? (
-                      <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(168,85,247,0.2)' }}>
+                      <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(255,176,0,0.2)' }}>
                         <span className="text-2xl font-black text-white font-mono">BM</span>
                       </div>
                     ) : platform.id === "outlook-create" ? (
@@ -220,11 +220,11 @@ export default function CreateServer() {
                         <Mail className="w-7 h-7 text-white" />
                       </div>
                     ) : (
-                      <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden p-2" style={{ boxShadow: '0 0 20px rgba(0,255,136,0.2)' }}>
+                      <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden p-2" style={{ boxShadow: '0 0 20px rgba(0,255,65,0.2)' }}>
                         <img src={uefaLogo} alt="UEFA" className="w-11 h-11 object-contain" />
                       </div>
                     )}
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm" style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(0,240,255,0.1)' }}>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm" style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(0,255,65,0.1)' }}>
                       <Radio className="w-2.5 h-2.5 text-emerald-400 animate-glow" />
                       <span className={`text-[9px] font-mono ${platform.badgeColor} uppercase tracking-wider`}>
                         {platform.badge}
@@ -245,11 +245,11 @@ export default function CreateServer() {
                       </div>
                     ))}
                   </div>
-                  <div className="w-8 h-8 rounded-md flex items-center justify-center transition-all duration-300" style={{ background: 'rgba(0,240,255,0.05)', border: '1px solid rgba(0,240,255,0.15)' }}>
+                  <div className="w-8 h-8 rounded-md flex items-center justify-center transition-all duration-300" style={{ background: 'rgba(0,255,65,0.05)', border: '1px solid rgba(0,255,65,0.15)' }}>
                     {platform.comingSoon ? (
                       <Lock className="w-3.5 h-3.5 text-zinc-500" />
                     ) : (
-                      <ArrowRight className="w-3.5 h-3.5 text-cyan-400 group-hover:translate-x-0.5 transition-transform duration-300" />
+                      <ArrowRight className="w-3.5 h-3.5 text-emerald-400 group-hover:translate-x-0.5 transition-transform duration-300" />
                     )}
                   </div>
                 </div>

@@ -40,7 +40,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   verifying: { label: "Verifying", color: "bg-purple-500/10 text-purple-400 border-purple-500/20" },
   verified: { label: "Verified", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
   profile_saving: { label: "Saving Profile", color: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" },
-  draw_registering: { label: "Draw Registering", color: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
+  draw_registering: { label: "Draw Registering", color: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
   completed: { label: "Completed", color: "bg-green-500/10 text-green-400 border-green-500/20" },
   failed: { label: "Failed", color: "bg-red-500/10 text-red-400 border-red-500/20" },
 };
@@ -414,7 +414,7 @@ export default function Home() {
                         : log.message.includes("code") || log.message.includes("Code")
                         ? "text-amber-400"
                         : log.message.includes("draw_registering") || log.message.includes("Draw") || log.message.includes("tickets.la28.org")
-                        ? "text-violet-400"
+                        ? "text-amber-400"
                         : log.message.includes("profile_saving") || log.message.includes("Profile") || log.message.includes("Gigya")
                         ? "text-indigo-400"
                         : log.message.includes("Status:")

@@ -111,10 +111,10 @@ function App() {
       <div className="min-h-screen flex items-center justify-center cyber-grid" style={{ background: '#0d1117' }}>
         <div className="flex flex-col items-center gap-3">
           <div className="relative">
-            <div className="absolute inset-0 rounded-full bg-cyan-400/10 blur-md animate-glow" />
-            <Loader2 className="w-6 h-6 animate-spin text-cyan-400/60 relative" />
+            <div className="absolute inset-0 rounded-full bg-emerald-400/10 blur-md animate-glow" />
+            <Loader2 className="w-6 h-6 animate-spin text-emerald-400/60 relative" />
           </div>
-          <p className="text-[9px] text-cyan-400/30 font-mono uppercase tracking-[0.2em]">Initializing...</p>
+          <p className="text-[9px] text-emerald-400/30 font-mono uppercase tracking-[0.2em]">Initializing...</p>
         </div>
       </div>
     );

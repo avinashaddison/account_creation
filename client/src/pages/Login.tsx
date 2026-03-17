@@ -66,26 +66,26 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden cyber-grid" style={{ background: '#0d1117' }}>
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden cyber-grid" style={{ background: '#0a0a0a' }}>
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-30%] left-[-15%] w-[60%] h-[60%] rounded-full opacity-[0.1]" style={{ background: 'radial-gradient(circle, #00e5ff 0%, transparent 70%)' }} />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full opacity-[0.07]" style={{ background: 'radial-gradient(circle, #a855f7 0%, transparent 70%)' }} />
-        <div className="absolute top-[15%] right-[20%] w-1 h-1 rounded-full bg-cyan-400/50 animate-glow" />
-        <div className="absolute top-[65%] left-[15%] w-1.5 h-1.5 rounded-full bg-violet-400/30 animate-glow" style={{ animationDelay: '1s' }} />
-        <div className="absolute top-[35%] left-[65%] w-0.5 h-0.5 rounded-full bg-cyan-400/40 animate-glow" style={{ animationDelay: '2s' }} />
+        <div className="absolute top-[-30%] left-[-15%] w-[60%] h-[60%] rounded-full opacity-[0.1]" style={{ background: 'radial-gradient(circle, #00ff41 0%, transparent 70%)' }} />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full opacity-[0.07]" style={{ background: 'radial-gradient(circle, #ffb000 0%, transparent 70%)' }} />
+        <div className="absolute top-[15%] right-[20%] w-1 h-1 rounded-full bg-emerald-400/50 animate-glow" />
+        <div className="absolute top-[65%] left-[15%] w-1.5 h-1.5 rounded-full bg-amber-400/30 animate-glow" style={{ animationDelay: '1s' }} />
+        <div className="absolute top-[35%] left-[65%] w-0.5 h-0.5 rounded-full bg-emerald-400/40 animate-glow" style={{ animationDelay: '2s' }} />
         <div className="absolute bottom-[25%] left-[40%] w-1 h-1 rounded-full bg-emerald-400/20 animate-glow" style={{ animationDelay: '1.5s' }} />
       </div>
 
       <div className="absolute inset-0 scan-line pointer-events-none" />
 
       <div className={`relative w-full max-w-[440px] mx-4 transition-all duration-700 ${bootReady ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-        <div className="absolute -inset-px rounded-xl bg-gradient-to-b from-cyan-500/25 via-transparent to-violet-500/15 opacity-60" />
+        <div className="absolute -inset-px rounded-xl bg-gradient-to-b from-emerald-500/20 via-transparent to-emerald-500/10 opacity-60" />
 
         <div className="relative cyber-card rounded-xl" data-testid="card-login">
-          <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-cyan-400/60 to-transparent" />
+          <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent" />
 
           <div className="px-8 pt-6 pb-1">
-            <div className="flex items-center gap-2 text-[10px] font-mono text-cyan-400/40 mb-6">
+            <div className="flex items-center gap-2 text-[10px] font-mono text-emerald-400/40 mb-6">
               <Wifi className="w-3 h-3" />
               <span>SECURE CHANNEL ACTIVE</span>
               <span className="flex-1" />
@@ -95,38 +95,38 @@ export default function Login({ onLogin }: LoginProps) {
 
             <div className="flex flex-col items-center mb-6">
               <div className="relative mb-4">
-                <div className="absolute inset-0 rounded-xl bg-cyan-500/20 blur-xl animate-glow" />
-                <div className="relative w-14 h-14 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(0,240,255,0.15) 0%, rgba(168,85,247,0.15) 100%)', border: '1px solid rgba(0,240,255,0.3)' }}>
-                  <Terminal className="w-7 h-7 text-cyan-400" />
+                <div className="absolute inset-0 rounded-xl bg-emerald-500/20 blur-xl animate-glow" />
+                <div className="relative w-14 h-14 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(0,255,65,0.15) 0%, rgba(255,176,0,0.15) 100%)', border: '1px solid rgba(0,255,65,0.3)' }}>
+                  <Terminal className="w-7 h-7 text-emerald-400" />
                 </div>
               </div>
               <h1 className="text-xl font-bold tracking-tight text-white font-mono" data-testid="text-login-title">
-                ADDISON<span className="text-cyan-400">_</span>PANEL
+                ADDISON<span className="text-emerald-400">_</span>PANEL
               </h1>
               <div className="flex items-center gap-2 mt-2">
-                <div className="h-px w-8 bg-gradient-to-r from-transparent to-cyan-400/30" />
-                <p className="text-[10px] text-cyan-400/50 font-mono uppercase tracking-[0.2em] flex items-center gap-1.5">
+                <div className="h-px w-8 bg-gradient-to-r from-transparent to-emerald-400/30" />
+                <p className="text-[10px] text-emerald-400/50 font-mono uppercase tracking-[0.2em] flex items-center gap-1.5">
                   <Lock className="w-3 h-3" />
-                  Command Interface v2.0
+                  Terminal Access v3.0
                 </p>
-                <div className="h-px w-8 bg-gradient-to-l from-transparent to-cyan-400/30" />
+                <div className="h-px w-8 bg-gradient-to-l from-transparent to-emerald-400/30" />
               </div>
             </div>
           </div>
 
-          <div className="mx-6 mb-4 rounded-lg p-3 font-mono text-[10px] leading-relaxed" style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(0,229,255,0.12)' }}>
+          <div className="mx-6 mb-4 rounded-lg p-3 font-mono text-[10px] leading-relaxed" style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(0,255,65,0.12)' }}>
             {(bootLines || []).map((line, i) => (
-              <div key={i} className={`${line?.includes('[OK]') ? 'text-emerald-400' : line?.includes('[SYS]') ? 'text-cyan-400/60' : line?.includes('[NET]') ? 'text-violet-400/60' : 'text-amber-400/60'}`}>
+              <div key={i} className={`${line?.includes('[OK]') ? 'text-emerald-400' : line?.includes('[SYS]') ? 'text-emerald-400/60' : line?.includes('[NET]') ? 'text-amber-400/60' : 'text-amber-400/60'}`}>
                 {line}
               </div>
             ))}
-            {bootReady && <div className="text-cyan-400 mt-1">{'>'} Awaiting credentials...<span className="inline-block w-1.5 h-3 bg-cyan-400 ml-1 animate-glow" /></div>}
+            {bootReady && <div className="text-emerald-400 mt-1">{'>'} Awaiting credentials...<span className="inline-block w-1.5 h-3 bg-emerald-400 ml-1 animate-glow" /></div>}
           </div>
 
           <div className="px-8 pb-8 pt-2">
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[10px] font-mono text-cyan-400/50 uppercase tracking-[0.15em] pl-1 flex items-center gap-1.5">
+                <label className="text-[10px] font-mono text-emerald-400/50 uppercase tracking-[0.15em] pl-1 flex items-center gap-1.5">
                   <Shield className="w-3 h-3" /> Identity
                 </label>
                 <Input
@@ -135,12 +135,12 @@ export default function Login({ onLogin }: LoginProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="operator@addison.io"
                   required
-                  className="h-11 bg-black/20 border-cyan-500/20 text-cyan-50 placeholder:text-zinc-500 rounded-lg font-mono text-sm focus:border-cyan-400/40 focus:ring-cyan-400/15 transition-all"
+                  className="h-11 bg-black/20 border-emerald-500/20 text-emerald-50 placeholder:text-zinc-500 rounded-lg font-mono text-sm focus:border-emerald-400/40 focus:ring-emerald-400/15 transition-all"
                   data-testid="input-login-email"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] font-mono text-cyan-400/50 uppercase tracking-[0.15em] pl-1 flex items-center gap-1.5">
+                <label className="text-[10px] font-mono text-emerald-400/50 uppercase tracking-[0.15em] pl-1 flex items-center gap-1.5">
                   <Cpu className="w-3 h-3" /> Passkey
                 </label>
                 <Input
@@ -149,7 +149,7 @@ export default function Login({ onLogin }: LoginProps) {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter passkey"
                   required
-                  className="h-11 bg-black/20 border-cyan-500/20 text-cyan-50 placeholder:text-zinc-500 rounded-lg font-mono text-sm focus:border-cyan-400/40 focus:ring-cyan-400/15 transition-all"
+                  className="h-11 bg-black/20 border-emerald-500/20 text-emerald-50 placeholder:text-zinc-500 rounded-lg font-mono text-sm focus:border-emerald-400/40 focus:ring-emerald-400/15 transition-all"
                   data-testid="input-login-password"
                 />
               </div>
@@ -164,10 +164,10 @@ export default function Login({ onLogin }: LoginProps) {
                 type="submit"
                 className="w-full h-11 text-sm font-bold rounded-lg font-mono uppercase tracking-wider transition-all duration-300 group"
                 style={{
-                  background: 'linear-gradient(135deg, rgba(0,240,255,0.15) 0%, rgba(168,85,247,0.1) 100%)',
-                  border: '1px solid rgba(0,240,255,0.3)',
-                  color: '#00f0ff',
-                  boxShadow: '0 0 15px rgba(0,240,255,0.08)',
+                  background: 'linear-gradient(135deg, rgba(0,255,65,0.15) 0%, rgba(255,176,0,0.1) 100%)',
+                  border: '1px solid rgba(0,255,65,0.3)',
+                  color: '#00ff41',
+                  boxShadow: '0 0 15px rgba(0,255,65,0.08)',
                 }}
                 disabled={loading}
                 data-testid="button-login"
@@ -186,8 +186,8 @@ export default function Login({ onLogin }: LoginProps) {
               </Button>
             </form>
 
-            <div className="mt-5 pt-4 border-t border-cyan-500/[0.06]">
-              <p className="text-center text-[9px] text-cyan-400/25 font-mono uppercase tracking-wider">
+            <div className="mt-5 pt-4 border-t border-emerald-500/[0.06]">
+              <p className="text-center text-[9px] text-emerald-400/25 font-mono uppercase tracking-wider">
                 AES-256 Encrypted Channel
               </p>
             </div>

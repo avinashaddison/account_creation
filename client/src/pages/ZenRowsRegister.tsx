@@ -113,14 +113,14 @@ export default function ZenRowsRegister() {
     startRegistration(email.trim(), password.trim());
   }, [email, password, startRegistration]);
 
-  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/admin/create-server">
-            <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 hover:bg-cyan-500/5 font-mono text-xs" data-testid="button-back-create-server">
+            <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/5 font-mono text-xs" data-testid="button-back-create-server">
               <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
               Back
             </Button>
@@ -132,7 +132,7 @@ export default function ZenRowsRegister() {
               </div>
               <h1 className="text-lg font-bold text-white font-mono tracking-tight" data-testid="text-page-title">ZenRows Register</h1>
             </div>
-            <p className="text-[10px] text-cyan-400/30 font-mono mt-0.5 tracking-wide">AUTO-CREATE ZENROWS ACCOUNT & EXTRACT API KEY</p>
+            <p className="text-[10px] text-emerald-400/30 font-mono mt-0.5 tracking-wide">AUTO-CREATE ZENROWS ACCOUNT & EXTRACT API KEY</p>
           </div>
         </div>
         {isRunning && (
@@ -182,7 +182,7 @@ export default function ZenRowsRegister() {
             </Button>
 
             <div className="pt-2 space-y-1.5">
-              <span className="text-[10px] font-mono text-cyan-400/30 uppercase tracking-wider">What happens</span>
+              <span className="text-[10px] font-mono text-emerald-400/30 uppercase tracking-wider">What happens</span>
               <ul className="space-y-1 text-[11px] text-zinc-500 font-mono">
                 <li className="flex items-start gap-2">
                   <span className="text-emerald-400/40 mt-0.5">1</span>
@@ -204,7 +204,7 @@ export default function ZenRowsRegister() {
             </div>
           </div>
 
-          <div className="rounded-xl overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.6) 0%, rgba(13,17,23,0.7) 100%)', border: '1px solid rgba(0,240,255,0.06)' }}>
+          <div className="rounded-xl overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.6) 0%, rgba(13,17,23,0.7) 100%)', border: '1px solid rgba(0,255,65,0.06)' }}>
             <button
               onClick={() => setShowManual(!showManual)}
               disabled={isRunning}
@@ -235,7 +235,7 @@ export default function ZenRowsRegister() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="user@outlook.com"
                     disabled={isRunning}
-                    className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
+                    className="h-9 bg-black/30 border-emerald-500/10 text-emerald-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
                     data-testid="input-outlook-email"
                   />
                 </div>
@@ -251,7 +251,7 @@ export default function ZenRowsRegister() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Outlook account password"
                     disabled={isRunning}
-                    className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
+                    className="h-9 bg-black/30 border-emerald-500/10 text-emerald-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
                     onKeyDown={(e) => { if (e.key === "Enter" && !isRunning && email.trim() && password.trim()) handleManualRegister(); }}
                     data-testid="input-outlook-password"
                   />
@@ -267,7 +267,7 @@ export default function ZenRowsRegister() {
                   onClick={handleManualRegister}
                   disabled={isRunning || !email.trim() || !password.trim()}
                   className="w-full h-9 font-mono text-xs rounded-lg"
-                  style={{ background: 'rgba(0,240,255,0.1)', border: '1px solid rgba(0,240,255,0.15)' }}
+                  style={{ background: 'rgba(0,255,65,0.1)', border: '1px solid rgba(0,255,65,0.15)' }}
                   data-testid="button-manual-register"
                 >
                   {isRunning ? (
@@ -343,12 +343,12 @@ export default function ZenRowsRegister() {
           )}
         </div>
 
-        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,240,255,0.08)' }}>
-          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: 'rgba(0,240,255,0.03)', borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
-            <Terminal className="w-3.5 h-3.5 text-cyan-400/50" />
-            <span className="text-[10px] font-mono text-cyan-400/40 uppercase tracking-wider">Live Logs</span>
+        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,255,65,0.08)' }}>
+          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: 'rgba(0,255,65,0.03)', borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
+            <Terminal className="w-3.5 h-3.5 text-emerald-400/50" />
+            <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Live Logs</span>
             {logs.length > 0 && (
-              <Badge variant="outline" className="ml-auto border-cyan-500/15 text-cyan-400/40 text-[9px] font-mono" data-testid="badge-log-count">
+              <Badge variant="outline" className="ml-auto border-emerald-500/15 text-emerald-400/40 text-[9px] font-mono" data-testid="badge-log-count">
                 {logs.length}
               </Badge>
             )}
@@ -370,7 +370,7 @@ export default function ZenRowsRegister() {
                       className={`py-1 px-2 rounded ${isError ? 'text-red-400/80 bg-red-500/5' : isSuccess ? 'text-emerald-400/80 bg-emerald-500/5' : isStep ? 'text-blue-400/80 bg-blue-500/5' : 'text-zinc-400'}`}
                       data-testid={`log-entry-${i}`}
                     >
-                      <span className="text-cyan-400/20 mr-2">
+                      <span className="text-emerald-400/20 mr-2">
                         {new Date(log.timestamp).toLocaleTimeString("en-US", { hour12: false })}
                       </span>
                       {log.message}

@@ -190,7 +190,7 @@ export default function AutoCreate() {
   const accountPrice = useAccountPrice();
   const estimatedCost = (count * accountPrice).toFixed(2);
 
-  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-6 animate-float-up">
@@ -203,7 +203,7 @@ export default function AutoCreate() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-auto-create-title">LA28 Account Creator</h1>
-            <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/15 hover:bg-violet-500/15 text-[10px]">Olympic ID</Badge>
+            <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/15 hover:bg-amber-500/15 text-[10px]">Olympic ID</Badge>
           </div>
           <p className="text-zinc-500 text-sm mt-0.5">Full flow: Register, Verify, Profile, Draw Registration</p>
         </div>
@@ -213,7 +213,7 @@ export default function AutoCreate() {
         <div className="lg:col-span-2 space-y-4">
           <div className="rounded-xl glass-panel p-5">
             <div className="flex items-center gap-2 mb-5">
-              <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-600 to-purple-700 text-white">
+              <div className="p-1.5 rounded-lg bg-gradient-to-br from-amber-600 to-amber-700 text-white">
                 <Rocket className="w-3.5 h-3.5" />
               </div>
               <span className="text-sm font-semibold text-zinc-200">Configuration</span>
@@ -232,7 +232,7 @@ export default function AutoCreate() {
                       disabled={isRunning}
                       className={`flex-1 h-9 text-sm font-semibold rounded-lg border transition-all ${
                         count === n
-                          ? "bg-gradient-to-r from-violet-600 to-purple-600 border-violet-500/30 text-white shadow-lg shadow-violet-900/20"
+                          ? "bg-gradient-to-r from-amber-600 to-amber-600 border-amber-500/30 text-white shadow-lg shadow-amber-900/20"
                           : "bg-white/[0.02] border-white/5 text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-300"
                       } disabled:opacity-50`}
                       data-testid={`button-count-${n}`}
@@ -292,7 +292,7 @@ export default function AutoCreate() {
               )}
 
               <Button
-                className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 shadow-lg shadow-violet-900/25 border-0"
+                className="w-full h-11 text-sm font-semibold bg-gradient-to-r from-amber-600 to-amber-600 hover:from-amber-500 hover:to-amber-500 shadow-lg shadow-amber-900/25 border-0"
                 onClick={() => { sounds.start(); startBatch(count); }}
                 disabled={isRunning}
                 data-testid="button-start-batch"
@@ -330,7 +330,7 @@ export default function AutoCreate() {
                   </Badge>
                 )}
                 {batchAccounts.filter(a => a.status === "verified").length > 0 && (
-                  <Badge className="bg-cyan-500/10 text-cyan-400 border-cyan-500/20 text-xs">
+                  <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">
                     {batchAccounts.filter(a => a.status === "verified").length} no_draw
                   </Badge>
                 )}
@@ -349,7 +349,7 @@ export default function AutoCreate() {
                   : acc.status === "failed"
                   ? "bg-red-500/10 border-red-500/20 text-red-400"
                   : acc.status === "draw_registering"
-                  ? "bg-violet-500/10 border-violet-500/20 text-violet-400"
+                  ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
                   : acc.status === "profile_saving"
                   ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
                   : "bg-amber-500/10 border-amber-500/20 text-amber-400";
@@ -390,7 +390,7 @@ export default function AutoCreate() {
               <div className="flex flex-col items-center justify-center h-full text-zinc-600 text-sm gap-2">
                 {isRunning ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
+                    <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
                     <span className="text-zinc-500">Waiting for logs...</span>
                   </>
                 ) : (
@@ -421,7 +421,7 @@ export default function AutoCreate() {
                     : isFail ? "text-red-400"
                     : isVerified ? "text-emerald-400"
                     : isCode ? "text-amber-400"
-                    : isDraw ? "text-violet-400"
+                    : isDraw ? "text-amber-400"
                     : isProfile ? "text-blue-400"
                     : isZenRows ? "text-rose-300"
                     : isStatus ? "text-sky-400"

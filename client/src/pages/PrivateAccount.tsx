@@ -292,8 +292,8 @@ export default function PrivateAccount() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold font-mono text-cyan-50 flex items-center gap-2" data-testid="text-page-title">
-            <Shield className="w-5 h-5 text-cyan-400" />
+          <h1 className="text-xl font-bold font-mono text-emerald-50 flex items-center gap-2" data-testid="text-page-title">
+            <Shield className="w-5 h-5 text-emerald-400" />
             Private Account
           </h1>
           <p className="text-xs text-zinc-500 font-mono mt-1">Superadmin private account stock management</p>
@@ -301,7 +301,7 @@ export default function PrivateAccount() {
         <Button
           variant="ghost"
           size="sm"
-          className="text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/5 font-mono text-xs"
+          className="text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/5 font-mono text-xs"
           onClick={() => { fetchOutlook(); fetchZenrows(); sounds.navigate(); }}
           data-testid="button-refresh-private"
         >
@@ -311,7 +311,7 @@ export default function PrivateAccount() {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Card className="border-cyan-500/10 bg-black/20 cursor-pointer transition-all hover:border-cyan-500/25" onClick={() => { setTab("outlook"); sounds.hover(); }} data-testid="card-outlook-summary">
+        <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("outlook"); sounds.hover(); }} data-testid="card-outlook-summary">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
@@ -319,7 +319,7 @@ export default function PrivateAccount() {
               </div>
               <div>
                 <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Outlook Accounts</p>
-                <p className="text-xl font-bold text-cyan-50 font-mono" data-testid="text-outlook-count">{outlookAccounts.length}</p>
+                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-outlook-count">{outlookAccounts.length}</p>
               </div>
               <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
                 {activeOutlook} active
@@ -328,15 +328,15 @@ export default function PrivateAccount() {
           </CardContent>
         </Card>
 
-        <Card className="border-cyan-500/10 bg-black/20 cursor-pointer transition-all hover:border-cyan-500/25" onClick={() => { setTab("zenrows"); sounds.hover(); }} data-testid="card-zenrows-summary">
+        <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("zenrows"); sounds.hover(); }} data-testid="card-zenrows-summary">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.15)" }}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,176,0,0.08)", border: "1px solid rgba(255,176,0,0.15)" }}>
                 <Key className="w-5 h-5 text-purple-400" />
               </div>
               <div>
                 <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">ZenRows API Stock</p>
-                <p className="text-xl font-bold text-cyan-50 font-mono" data-testid="text-zenrows-count">{zenrowsKeys.length}</p>
+                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-zenrows-count">{zenrowsKeys.length}</p>
               </div>
               <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
                 {activeZenrows} active
@@ -349,14 +349,14 @@ export default function PrivateAccount() {
       {activeJobs.length > 0 && (
         <div className="space-y-3">
           {Object.values(zenrowsRegJobs).map((job) => (
-            <Card key={job.batchId} className={`border-cyan-500/10 bg-black/20 ${job.status === "success" ? "border-emerald-500/20" : job.status === "failed" ? "border-red-500/20" : "border-purple-500/20"}`}>
+            <Card key={job.batchId} className={`border-emerald-500/10 bg-black/20 ${job.status === "success" ? "border-emerald-500/20" : job.status === "failed" ? "border-red-500/20" : "border-purple-500/20"}`}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     {job.status === "running" && <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />}
                     {job.status === "success" && <Check className="w-4 h-4 text-emerald-400" />}
                     {job.status === "failed" && <X className="w-4 h-4 text-red-400" />}
-                    <span className="text-xs font-mono text-cyan-50">
+                    <span className="text-xs font-mono text-emerald-50">
                       ZenRows Registration — {job.outlookEmail}
                     </span>
                     <Badge variant="outline" className={`text-[9px] font-mono ${
@@ -389,7 +389,7 @@ export default function PrivateAccount() {
                     <p className="text-[10px] text-red-400 font-mono">{job.error}</p>
                   </div>
                 )}
-                <div className="max-h-32 overflow-y-auto rounded border border-cyan-500/8 p-2" style={{ background: "rgba(0,0,0,0.3)" }}>
+                <div className="max-h-32 overflow-y-auto rounded border border-emerald-500/8 p-2" style={{ background: "rgba(0,0,0,0.3)" }}>
                   {job.logs.map((log, i) => (
                     <p key={i} className="text-[10px] text-zinc-500 font-mono leading-relaxed">{log}</p>
                   ))}
@@ -425,18 +425,18 @@ export default function PrivateAccount() {
       </div>
 
       {tab === "outlook" && (
-        <Card className="border-cyan-500/10 bg-black/20">
+        <Card className="border-emerald-500/10 bg-black/20">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-mono text-cyan-50 flex items-center gap-2">
+              <CardTitle className="text-sm font-mono text-emerald-50 flex items-center gap-2">
                 <Mail className="w-4 h-4 text-blue-400" />
                 Outlook Accounts
-                <Badge variant="outline" className="text-[9px] font-mono border-cyan-500/15 text-cyan-400/60 ml-2">{outlookAccounts.length} total</Badge>
+                <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/15 text-emerald-400/60 ml-2">{outlookAccounts.length} total</Badge>
               </CardTitle>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 font-mono text-xs"
+                className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-mono text-xs"
                 onClick={() => { setAddOutlookOpen(!addOutlookOpen); sounds.navigate(); }}
                 data-testid="button-add-outlook"
               >
@@ -447,21 +447,21 @@ export default function PrivateAccount() {
           </CardHeader>
 
           {addOutlookOpen && (
-            <div className="mx-6 mb-4 p-4 rounded-lg border border-cyan-500/10" style={{ background: "rgba(0,240,255,0.02)" }}>
+            <div className="mx-6 mb-4 p-4 rounded-lg border border-emerald-500/10" style={{ background: "rgba(0,255,65,0.02)" }}>
               <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-3">Add Outlook Account</p>
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <Input
                   placeholder="email@outlook.com"
                   value={newOutlookEmail}
                   onChange={(e) => setNewOutlookEmail(e.target.value)}
-                  className="h-8 text-xs bg-black/30 border-cyan-500/10 text-cyan-50 font-mono"
+                  className="h-8 text-xs bg-black/30 border-emerald-500/10 text-emerald-50 font-mono"
                   data-testid="input-outlook-email"
                 />
                 <Input
                   placeholder="Password"
                   value={newOutlookPassword}
                   onChange={(e) => setNewOutlookPassword(e.target.value)}
-                  className="h-8 text-xs bg-black/30 border-cyan-500/10 text-cyan-50 font-mono"
+                  className="h-8 text-xs bg-black/30 border-emerald-500/10 text-emerald-50 font-mono"
                   data-testid="input-outlook-password"
                 />
               </div>
@@ -479,10 +479,10 @@ export default function PrivateAccount() {
                 <p className="text-xs text-zinc-600 font-mono mt-1">Accounts are auto-saved when created via Outlook Create</p>
               </div>
             ) : (
-              <div className="rounded-lg border border-cyan-500/8 overflow-hidden">
+              <div className="rounded-lg border border-emerald-500/8 overflow-hidden">
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-cyan-500/8 hover:bg-transparent">
+                    <TableRow className="border-emerald-500/8 hover:bg-transparent">
                       <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Email</TableHead>
                       <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Password</TableHead>
                       <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Status</TableHead>
@@ -492,11 +492,11 @@ export default function PrivateAccount() {
                   </TableHeader>
                   <TableBody>
                     {outlookAccounts.map((acc) => (
-                      <TableRow key={acc.id} className="border-cyan-500/5 hover:bg-cyan-500/[0.02]" data-testid={`row-outlook-${acc.id}`}>
+                      <TableRow key={acc.id} className="border-emerald-500/5 hover:bg-emerald-500/[0.02]" data-testid={`row-outlook-${acc.id}`}>
                         <TableCell className="py-2.5">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-cyan-50" data-testid={`text-email-${acc.id}`}>{acc.email}</span>
-                            <button onClick={() => copyToClipboard(acc.email, `e-${acc.id}`)} className="text-zinc-600 hover:text-cyan-400 transition-colors" data-testid={`button-copy-email-${acc.id}`}>
+                            <span className="text-xs font-mono text-emerald-50" data-testid={`text-email-${acc.id}`}>{acc.email}</span>
+                            <button onClick={() => copyToClipboard(acc.email, `e-${acc.id}`)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-copy-email-${acc.id}`}>
                               {copied === `e-${acc.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                             </button>
                           </div>
@@ -506,10 +506,10 @@ export default function PrivateAccount() {
                             <span className="text-xs font-mono text-zinc-400" data-testid={`text-password-${acc.id}`}>
                               {showPasswords[acc.id] ? acc.password : "••••••••"}
                             </span>
-                            <button onClick={() => togglePassword(acc.id)} className="text-zinc-600 hover:text-cyan-400 transition-colors" data-testid={`button-toggle-password-${acc.id}`}>
+                            <button onClick={() => togglePassword(acc.id)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-toggle-password-${acc.id}`}>
                               {showPasswords[acc.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                             </button>
-                            <button onClick={() => copyToClipboard(acc.password, `p-${acc.id}`)} className="text-zinc-600 hover:text-cyan-400 transition-colors" data-testid={`button-copy-password-${acc.id}`}>
+                            <button onClick={() => copyToClipboard(acc.password, `p-${acc.id}`)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-copy-password-${acc.id}`}>
                               {copied === `p-${acc.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                             </button>
                           </div>
@@ -559,18 +559,18 @@ export default function PrivateAccount() {
       )}
 
       {tab === "zenrows" && (
-        <Card className="border-cyan-500/10 bg-black/20">
+        <Card className="border-emerald-500/10 bg-black/20">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-mono text-cyan-50 flex items-center gap-2">
+              <CardTitle className="text-sm font-mono text-emerald-50 flex items-center gap-2">
                 <Key className="w-4 h-4 text-purple-400" />
                 ZenRows API Key Stock
-                <Badge variant="outline" className="text-[9px] font-mono border-cyan-500/15 text-cyan-400/60 ml-2">{zenrowsKeys.length} total</Badge>
+                <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/15 text-emerald-400/60 ml-2">{zenrowsKeys.length} total</Badge>
               </CardTitle>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 font-mono text-xs"
+                className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-mono text-xs"
                 onClick={() => { setAddZenrowsOpen(!addZenrowsOpen); sounds.navigate(); }}
                 data-testid="button-add-zenrows"
               >
@@ -581,14 +581,14 @@ export default function PrivateAccount() {
           </CardHeader>
 
           {addZenrowsOpen && (
-            <div className="mx-6 mb-4 p-4 rounded-lg border border-purple-500/10" style={{ background: "rgba(168,85,247,0.02)" }}>
+            <div className="mx-6 mb-4 p-4 rounded-lg border border-purple-500/10" style={{ background: "rgba(255,176,0,0.02)" }}>
               <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-3">Add ZenRows API Key</p>
               <div className="space-y-3 mb-3">
                 <Input
                   placeholder="API Key (40+ char hex string)"
                   value={newZenrowsKey}
                   onChange={(e) => setNewZenrowsKey(e.target.value)}
-                  className="h-8 text-xs bg-black/30 border-purple-500/10 text-cyan-50 font-mono"
+                  className="h-8 text-xs bg-black/30 border-purple-500/10 text-emerald-50 font-mono"
                   data-testid="input-zenrows-key"
                 />
                 <div className="grid grid-cols-2 gap-3">
@@ -596,14 +596,14 @@ export default function PrivateAccount() {
                     placeholder="Outlook email (optional)"
                     value={newZenrowsEmail}
                     onChange={(e) => setNewZenrowsEmail(e.target.value)}
-                    className="h-8 text-xs bg-black/30 border-purple-500/10 text-cyan-50 font-mono"
+                    className="h-8 text-xs bg-black/30 border-purple-500/10 text-emerald-50 font-mono"
                     data-testid="input-zenrows-email"
                   />
                   <Input
                     placeholder="Outlook password (optional)"
                     value={newZenrowsPassword}
                     onChange={(e) => setNewZenrowsPassword(e.target.value)}
-                    className="h-8 text-xs bg-black/30 border-purple-500/10 text-cyan-50 font-mono"
+                    className="h-8 text-xs bg-black/30 border-purple-500/10 text-emerald-50 font-mono"
                     data-testid="input-zenrows-password"
                   />
                 </div>
@@ -622,10 +622,10 @@ export default function PrivateAccount() {
                 <p className="text-xs text-zinc-600 font-mono mt-1">Keys are auto-saved when created via ZenRows Register</p>
               </div>
             ) : (
-              <div className="rounded-lg border border-cyan-500/8 overflow-hidden">
+              <div className="rounded-lg border border-emerald-500/8 overflow-hidden">
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-cyan-500/8 hover:bg-transparent">
+                    <TableRow className="border-emerald-500/8 hover:bg-transparent">
                       <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">API Key</TableHead>
                       <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Outlook Email</TableHead>
                       <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Status</TableHead>
@@ -635,10 +635,10 @@ export default function PrivateAccount() {
                   </TableHeader>
                   <TableBody>
                     {zenrowsKeys.map((key) => (
-                      <TableRow key={key.id} className="border-cyan-500/5 hover:bg-cyan-500/[0.02]" data-testid={`row-zenrows-${key.id}`}>
+                      <TableRow key={key.id} className="border-emerald-500/5 hover:bg-emerald-500/[0.02]" data-testid={`row-zenrows-${key.id}`}>
                         <TableCell className="py-2.5">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-cyan-50" data-testid={`text-apikey-${key.id}`}>
+                            <span className="text-xs font-mono text-emerald-50" data-testid={`text-apikey-${key.id}`}>
                               {showPasswords[`zk-${key.id}`] ? key.apiKey : key.apiKey.substring(0, 8) + "••••••••"}
                             </span>
                             <button onClick={() => togglePassword(`zk-${key.id}`)} className="text-zinc-600 hover:text-purple-400 transition-colors" data-testid={`button-toggle-key-${key.id}`}>

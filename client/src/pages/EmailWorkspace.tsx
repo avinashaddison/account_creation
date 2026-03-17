@@ -220,7 +220,7 @@ export default function EmailWorkspace() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white font-mono flex items-center gap-2" data-testid="text-email-workspace-title">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.15) 0%, rgba(0,240,255,0.1) 100%)', border: '1px solid rgba(168,85,247,0.25)' }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(255,176,0,0.15) 0%, rgba(0,255,65,0.1) 100%)', border: '1px solid rgba(255,176,0,0.25)' }}>
               <Mail className="w-4 h-4 text-purple-400" />
             </div>
             Email Workspace
@@ -232,7 +232,7 @@ export default function EmailWorkspace() {
             variant="ghost"
             size="sm"
             onClick={fetchAll}
-            className="h-8 px-3 text-zinc-400 hover:text-cyan-300 hover:bg-cyan-500/10 font-mono text-xs"
+            className="h-8 px-3 text-zinc-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-mono text-xs"
             data-testid="button-refresh-workspace"
           >
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
@@ -242,7 +242,7 @@ export default function EmailWorkspace() {
             onClick={generateNewMail}
             disabled={generating}
             className="h-8 px-4 font-mono text-xs"
-            style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.8) 0%, rgba(124,58,237,0.9) 100%)', border: '1px solid rgba(168,85,247,0.4)' }}
+            style={{ background: 'linear-gradient(135deg, rgba(255,176,0,0.8) 0%, rgba(124,58,237,0.9) 100%)', border: '1px solid rgba(255,176,0,0.4)' }}
             data-testid="button-generate-email"
           >
             {generating ? (
@@ -256,8 +256,8 @@ export default function EmailWorkspace() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
-        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(15,21,32,0.6)', border: '1px solid rgba(0,240,255,0.08)' }}>
-          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
+        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(15,21,32,0.6)', border: '1px solid rgba(0,255,65,0.08)' }}>
+          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
             <div className="flex items-center gap-2">
               <Sparkles className="w-3.5 h-3.5 text-purple-400/60" />
               <span className="text-xs font-mono text-zinc-400">Mailboxes</span>
@@ -267,14 +267,14 @@ export default function EmailWorkspace() {
             </Badge>
           </div>
 
-          <div className="flex px-3 pt-2 gap-1" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
+          <div className="flex px-3 pt-2 gap-1" style={{ borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
             {tabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={`px-2.5 py-1.5 text-[10px] font-mono rounded-t-md transition-all ${
                   activeTab === tab.key
-                    ? "text-cyan-300 bg-cyan-500/10 border-b-2 border-cyan-400"
+                    ? "text-emerald-300 bg-emerald-500/10 border-b-2 border-emerald-400"
                     : "text-zinc-600 hover:text-zinc-400"
                 }`}
                 data-testid={`tab-${tab.key}`}
@@ -284,7 +284,7 @@ export default function EmailWorkspace() {
             ))}
           </div>
 
-          <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
+          <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-600" />
               <input
@@ -292,7 +292,7 @@ export default function EmailWorkspace() {
                 placeholder="Search emails..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full h-7 pl-7 pr-3 text-xs font-mono rounded-md bg-black/30 border border-cyan-500/10 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-cyan-500/20"
+                className="w-full h-7 pl-7 pr-3 text-xs font-mono rounded-md bg-black/30 border border-emerald-500/10 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/20"
                 data-testid="input-search-emails"
               />
             </div>
@@ -328,7 +328,7 @@ export default function EmailWorkspace() {
                       }`}
                       style={
                         selectedEmail?.id === em.id && selectedEmail?.source === em.source
-                          ? { background: 'linear-gradient(135deg, rgba(168,85,247,0.1) 0%, rgba(0,240,255,0.05) 100%)', border: '1px solid rgba(168,85,247,0.2)' }
+                          ? { background: 'linear-gradient(135deg, rgba(255,176,0,0.1) 0%, rgba(0,255,65,0.05) 100%)', border: '1px solid rgba(255,176,0,0.2)' }
                           : { border: '1px solid transparent' }
                       }
                       onClick={() => fetchInbox(em)}
@@ -337,14 +337,14 @@ export default function EmailWorkspace() {
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{
                           background: selectedEmail?.id === em.id && selectedEmail?.source === em.source
-                            ? (isAccount ? 'rgba(0,240,255,0.15)' : 'rgba(168,85,247,0.15)')
+                            ? (isAccount ? 'rgba(0,255,65,0.15)' : 'rgba(255,176,0,0.15)')
                             : 'rgba(255,255,255,0.03)',
                           border: `1px solid ${selectedEmail?.id === em.id && selectedEmail?.source === em.source
-                            ? (isAccount ? 'rgba(0,240,255,0.3)' : 'rgba(168,85,247,0.3)')
+                            ? (isAccount ? 'rgba(0,255,65,0.3)' : 'rgba(255,176,0,0.3)')
                             : 'rgba(255,255,255,0.05)'}`
                         }}>
                           {isAccount ? (
-                            <Users className={`w-3 h-3 ${selectedEmail?.id === em.id && selectedEmail?.source === em.source ? 'text-cyan-400' : 'text-zinc-600'}`} />
+                            <Users className={`w-3 h-3 ${selectedEmail?.id === em.id && selectedEmail?.source === em.source ? 'text-emerald-400' : 'text-zinc-600'}`} />
                           ) : (
                             <Mail className={`w-3 h-3 ${selectedEmail?.id === em.id && selectedEmail?.source === em.source ? 'text-purple-400' : 'text-zinc-600'}`} />
                           )}
@@ -380,7 +380,7 @@ export default function EmailWorkspace() {
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={(e) => { e.stopPropagation(); copyText(em.address, `${em.source}-${em.id}`); }}
-                            className="p-1 rounded hover:bg-cyan-500/10"
+                            className="p-1 rounded hover:bg-emerald-500/10"
                             data-testid={`button-copy-${em.source}-${em.id}`}
                           >
                             {copiedId === `${em.source}-${em.id}` ? (
@@ -413,23 +413,23 @@ export default function EmailWorkspace() {
           </ScrollArea>
         </div>
 
-        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(15,21,32,0.6)', border: '1px solid rgba(0,240,255,0.08)' }}>
-          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
+        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(15,21,32,0.6)', border: '1px solid rgba(0,255,65,0.08)' }}>
+          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
             <div className="flex items-center gap-2">
-              <Inbox className="w-3.5 h-3.5 text-cyan-400/60" />
+              <Inbox className="w-3.5 h-3.5 text-emerald-400/60" />
               <span className="text-xs font-mono text-zinc-400">
                 {selectedEmail ? selectedEmail.address : "Inbox"}
               </span>
               {selectedEmail && (
                 <button
                   onClick={() => copyText(selectedEmail.address, "header-" + selectedEmail.id)}
-                  className="p-0.5 rounded hover:bg-cyan-500/10"
+                  className="p-0.5 rounded hover:bg-emerald-500/10"
                   data-testid="button-copy-selected"
                 >
                   {copiedId === "header-" + selectedEmail?.id ? (
                     <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                   ) : (
-                    <Copy className="w-3 h-3 text-zinc-600 hover:text-cyan-400" />
+                    <Copy className="w-3 h-3 text-zinc-600 hover:text-emerald-400" />
                   )}
                 </button>
               )}
@@ -438,11 +438,11 @@ export default function EmailWorkspace() {
               <div className="flex items-center gap-2">
                 {scanning && (
                   <div className="flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                    <span className="text-[9px] font-mono text-cyan-400/60">Scanning...</span>
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[9px] font-mono text-emerald-400/60">Scanning...</span>
                   </div>
                 )}
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-mono bg-cyan-500/10 text-cyan-300 border-cyan-500/20">
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-mono bg-emerald-500/10 text-emerald-300 border-emerald-500/20">
                   {inbox.length} msg{inbox.length !== 1 ? "s" : ""}
                 </Badge>
               </div>
@@ -450,8 +450,8 @@ export default function EmailWorkspace() {
           </div>
 
           {selectedEmail && (
-            <div className="px-4 py-2 flex items-center gap-3 text-[10px] font-mono" style={{ borderBottom: '1px solid rgba(0,240,255,0.06)', background: 'rgba(0,0,0,0.2)' }}>
-              <Badge className={`text-[8px] px-1.5 py-0 font-mono ${selectedEmail.source === "temp" ? "bg-purple-500/15 text-purple-300 border-purple-500/20" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/20"}`}>
+            <div className="px-4 py-2 flex items-center gap-3 text-[10px] font-mono" style={{ borderBottom: '1px solid rgba(0,255,65,0.06)', background: 'rgba(0,0,0,0.2)' }}>
+              <Badge className={`text-[8px] px-1.5 py-0 font-mono ${selectedEmail.source === "temp" ? "bg-purple-500/15 text-purple-300 border-purple-500/20" : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"}`}>
                 {selectedEmail.source === "temp" ? "Generated" : "Account"}
               </Badge>
               {selectedEmail.source === "account" && (
@@ -469,7 +469,7 @@ export default function EmailWorkspace() {
           <ScrollArea className="h-[calc(100vh-320px)]">
             {!selectedEmail ? (
               <div className="flex flex-col items-center justify-center py-24 text-zinc-600">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(168,85,247,0.05)', border: '1px solid rgba(168,85,247,0.1)' }}>
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(255,176,0,0.05)', border: '1px solid rgba(255,176,0,0.1)' }}>
                   <Inbox className="w-7 h-7 text-purple-400/30" />
                 </div>
                 <p className="text-sm font-mono text-zinc-500">Select a mailbox to view inbox</p>
@@ -482,8 +482,8 @@ export default function EmailWorkspace() {
               </div>
             ) : inbox.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-zinc-600">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(0,240,255,0.03)', border: '1px solid rgba(0,240,255,0.08)' }}>
-                  <Mail className="w-7 h-7 text-cyan-400/20" />
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(0,255,65,0.03)', border: '1px solid rgba(0,255,65,0.08)' }}>
+                  <Mail className="w-7 h-7 text-emerald-400/20" />
                 </div>
                 <p className="text-sm font-mono text-zinc-500">No messages yet</p>
                 <p className="text-[10px] font-mono mt-1 text-zinc-700">Inbox auto-refreshes every 5 seconds</p>
@@ -494,7 +494,7 @@ export default function EmailWorkspace() {
                   <div
                     key={msg.id}
                     className="rounded-lg transition-all duration-150 cursor-pointer"
-                    style={{ background: expandedMsg === msg.id ? 'rgba(168,85,247,0.05)' : 'rgba(0,0,0,0.2)', border: `1px solid ${expandedMsg === msg.id ? 'rgba(168,85,247,0.15)' : 'rgba(0,240,255,0.05)'}` }}
+                    style={{ background: expandedMsg === msg.id ? 'rgba(255,176,0,0.05)' : 'rgba(0,0,0,0.2)', border: `1px solid ${expandedMsg === msg.id ? 'rgba(255,176,0,0.15)' : 'rgba(0,255,65,0.05)'}` }}
                     onClick={() => setExpandedMsg(expandedMsg === msg.id ? null : msg.id)}
                     data-testid={`inbox-msg-${msg.id}`}
                   >
@@ -517,7 +517,7 @@ export default function EmailWorkspace() {
                     </div>
                     {expandedMsg === msg.id && (
                       <div className="px-3 pb-3">
-                        <div className="rounded-md p-3 text-xs font-mono text-zinc-300 max-h-80 overflow-auto" style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,240,255,0.05)' }}>
+                        <div className="rounded-md p-3 text-xs font-mono text-zinc-300 max-h-80 overflow-auto" style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,255,65,0.05)' }}>
                           <pre className="whitespace-pre-wrap break-words">{msg.text?.replace(/<[^>]*>/g, "") || "(empty)"}</pre>
                         </div>
                       </div>

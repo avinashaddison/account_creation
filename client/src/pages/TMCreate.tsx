@@ -38,10 +38,10 @@ function getLogColor(msg: string) {
   if (m.includes("sms number ordered") || m.includes("sms cost") || m.includes("$0.36")) return "text-amber-300 font-medium";
   if (m.includes("code") || m.includes("otp") || m.includes("sms")) return "text-amber-400";
   if (m.includes("phone_retry") || m.includes("retrying") || m.includes("new number")) return "text-orange-400 font-medium";
-  if (m.includes("phone") || m.includes("smspool")) return "text-violet-400";
+  if (m.includes("phone") || m.includes("smspool")) return "text-amber-400";
   if (m.includes("email") || m.includes("mail")) return "text-sky-400";
   if (m.includes("password") || m.includes("form") || m.includes("filled") || m.includes("submit")) return "text-blue-400";
-  if (m.includes("navigat") || m.includes("connect") || m.includes("browser")) return "text-cyan-400";
+  if (m.includes("navigat") || m.includes("connect") || m.includes("browser")) return "text-emerald-400";
   if (m.includes("status:")) return "text-sky-400";
   if (m.includes("starting") || m.includes("creating")) return "text-zinc-300";
   return "text-zinc-500";
@@ -54,10 +54,10 @@ function getStepFromLogs(logs: LogEntry[], accountId: string): { step: string; c
   if (last.includes("verified") || last.includes("success") || last.includes("phone verification completed")) return { step: "Verified", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
   if (last.includes("failed") || last.includes("error")) return { step: "Failed", color: "text-red-400", icon: <XCircle className="w-3.5 h-3.5" /> };
   if (last.includes("phone_retry")) return { step: "Phone Retry", color: "text-orange-400", icon: <Phone className="w-3.5 h-3.5" /> };
-  if (last.includes("phone") || last.includes("sms")) return { step: "Phone Verify", color: "text-violet-400", icon: <Phone className="w-3.5 h-3.5" /> };
+  if (last.includes("phone") || last.includes("sms")) return { step: "Phone Verify", color: "text-amber-400", icon: <Phone className="w-3.5 h-3.5" /> };
   if (last.includes("code") || last.includes("otp")) return { step: "Email Verify", color: "text-amber-400", icon: <Mail className="w-3.5 h-3.5" /> };
   if (last.includes("password") || last.includes("submit") || last.includes("form")) return { step: "Registering", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };
-  if (last.includes("navigat") || last.includes("connect")) return { step: "Connecting", color: "text-cyan-400", icon: <Globe className="w-3.5 h-3.5" /> };
+  if (last.includes("navigat") || last.includes("connect")) return { step: "Connecting", color: "text-emerald-400", icon: <Globe className="w-3.5 h-3.5" /> };
   return { step: "Processing", color: "text-sky-400", icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> };
 }
 
@@ -224,7 +224,7 @@ export default function TMCreate() {
   const failed = accounts.filter(a => a.status === "failed").length;
   const processing = accounts.filter(a => a.status !== "verified" && a.status !== "failed" && a.status !== "pending").length;
 
-  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-5">
@@ -502,7 +502,7 @@ export default function TMCreate() {
                 )}
               </div>
               {activeTab === "logs" && filterAccountId && (
-                <Badge className="text-[10px] bg-violet-500/10 text-violet-400 border-violet-500/20">
+                <Badge className="text-[10px] bg-amber-500/10 text-amber-400 border-amber-500/20">
                   Filtered: {accounts.find(a => a.id === filterAccountId)?.firstName || "Account"}
                 </Badge>
               )}
@@ -690,7 +690,7 @@ export default function TMCreate() {
                             </div>
 
                             <div className="flex items-center gap-2 group">
-                              <Shield className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                              <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                               <span className="text-[10px] text-zinc-500 w-16 shrink-0">Mail Pass</span>
                               <span className="text-xs text-zinc-300 font-mono flex-1 truncate" data-testid={`text-email-pass-${acc.id}`}>
                                 {showPasswords ? acc.emailPassword : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}

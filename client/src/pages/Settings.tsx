@@ -31,8 +31,8 @@ const apiKeyFields: ApiKeyField[] = [
     putEndpoint: "/api/admin/zenrows-api-key",
     fieldName: "key",
     placeholder: "Enter ZenRows API key...",
-    borderColor: "rgba(0,240,255,0.15)",
-    iconColor: "text-cyan-400",
+    borderColor: "rgba(0,255,65,0.15)",
+    iconColor: "text-emerald-400",
   },
   {
     id: "zenrows-proxy",
@@ -43,8 +43,8 @@ const apiKeyFields: ApiKeyField[] = [
     putEndpoint: "/api/admin/zenrows-proxy",
     fieldName: "url",
     placeholder: "wss://browser.zenrows.com?apikey=...",
-    borderColor: "rgba(0,240,255,0.1)",
-    iconColor: "text-cyan-400/70",
+    borderColor: "rgba(0,255,65,0.1)",
+    iconColor: "text-emerald-400/70",
   },
   {
     id: "capsolver",
@@ -55,8 +55,8 @@ const apiKeyFields: ApiKeyField[] = [
     putEndpoint: "/api/admin/capsolver-api-key",
     fieldName: "key",
     placeholder: "Enter CapSolver API key...",
-    borderColor: "rgba(168,85,247,0.15)",
-    iconColor: "text-violet-400",
+    borderColor: "rgba(255,176,0,0.15)",
+    iconColor: "text-amber-400",
     balanceEndpoint: "/api/capsolver/balance",
     balanceLabel: "Balance",
   },
@@ -69,7 +69,7 @@ const apiKeyFields: ApiKeyField[] = [
     putEndpoint: "/api/admin/account-price",
     fieldName: "price",
     placeholder: "0.24",
-    borderColor: "rgba(0,255,136,0.15)",
+    borderColor: "rgba(0,255,65,0.15)",
     iconColor: "text-emerald-400",
   },
 ];
@@ -162,12 +162,12 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
           </div>
           <div className="flex items-center gap-2">
             {balance && (
-              <div className="flex items-center gap-1 px-2 py-1 rounded-sm" style={{ background: 'rgba(0,255,136,0.05)', border: '1px solid rgba(0,255,136,0.15)' }}>
+              <div className="flex items-center gap-1 px-2 py-1 rounded-sm" style={{ background: 'rgba(0,255,65,0.05)', border: '1px solid rgba(0,255,65,0.15)' }}>
                 <span className="text-[9px] text-emerald-400 font-mono">{balance}</span>
               </div>
             )}
             {!loading && originalValue && (
-              <div className="flex items-center gap-1 px-2 py-1 rounded-sm" style={{ background: 'rgba(0,240,255,0.05)', border: '1px solid rgba(0,240,255,0.1)' }}>
+              <div className="flex items-center gap-1 px-2 py-1 rounded-sm" style={{ background: 'rgba(0,255,65,0.05)', border: '1px solid rgba(0,255,65,0.1)' }}>
                 <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
                 <span className="text-[9px] text-emerald-400 font-mono">CONFIGURED</span>
               </div>
@@ -183,8 +183,8 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
 
         {loading ? (
           <div className="flex items-center gap-2 py-3">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400/40" />
-            <span className="text-[10px] text-cyan-400/30 font-mono">Loading...</span>
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400/40" />
+            <span className="text-[10px] text-emerald-400/30 font-mono">Loading...</span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -194,7 +194,7 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={field.placeholder}
-                className="h-9 text-[12px] bg-black/20 border-cyan-500/15 text-cyan-50 font-mono rounded-lg pr-10 focus:border-cyan-500/30 placeholder:text-zinc-500"
+                className="h-9 text-[12px] bg-black/20 border-emerald-500/15 text-emerald-50 font-mono rounded-lg pr-10 focus:border-emerald-500/30 placeholder:text-zinc-500"
                 data-testid={`input-${field.id}`}
               />
               {isSecret && (
@@ -213,7 +213,7 @@ function ApiKeyCard({ field }: { field: ApiKeyField }) {
               disabled={saving || !hasChanged || !strValue.trim()}
               className={`h-9 px-3 font-mono text-[11px] rounded-lg transition-all duration-200 ${
                 hasChanged && strValue.trim()
-                  ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25"
+                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/25"
                   : "bg-zinc-800/30 text-zinc-600 border border-zinc-700/20"
               }`}
               data-testid={`button-save-${field.id}`}
@@ -232,12 +232,12 @@ export default function Settings() {
     <div className="space-y-6 animate-float-up">
       <div>
         <div className="flex items-center gap-2.5">
-          <Key className="w-5 h-5 text-cyan-400/50" />
+          <Key className="w-5 h-5 text-emerald-400/50" />
           <h1 className="text-xl font-bold tracking-tight text-white font-mono" data-testid="text-settings-title">
-            API<span className="text-cyan-400">_</span>Settings
+            API<span className="text-emerald-400">_</span>Settings
           </h1>
         </div>
-        <p className="text-cyan-400/30 mt-1 text-[11px] font-mono pl-7.5">Configure external service API keys and pricing</p>
+        <p className="text-emerald-400/30 mt-1 text-[11px] font-mono pl-7.5">Configure external service API keys and pricing</p>
       </div>
 
       <div className="grid gap-4">
@@ -246,9 +246,9 @@ export default function Settings() {
         ))}
       </div>
 
-      <div className="rounded-lg px-4 py-3" style={{ background: 'rgba(0,240,255,0.02)', border: '1px solid rgba(0,240,255,0.06)' }}>
-        <p className="text-[10px] text-cyan-400/25 font-mono leading-relaxed">
-          <span className="text-cyan-400/40">[INFO]</span> API keys are stored encrypted in the database and take effect immediately.
+      <div className="rounded-lg px-4 py-3" style={{ background: 'rgba(0,255,65,0.02)', border: '1px solid rgba(0,255,65,0.06)' }}>
+        <p className="text-[10px] text-emerald-400/25 font-mono leading-relaxed">
+          <span className="text-emerald-400/40">[INFO]</span> API keys are stored encrypted in the database and take effect immediately.
           Changes to ZenRows and CapSolver keys will clear cached values on the server.
         </p>
       </div>

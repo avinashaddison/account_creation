@@ -165,9 +165,9 @@ export default function AccountStock() {
   function getStatusIcon(status: string) {
     switch (status) {
       case "completed": return <Trophy className="w-3.5 h-3.5 text-emerald-400" />;
-      case "verified": return <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />;
+      case "verified": return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />;
       case "profile_saving": return <UserCheck className="w-3.5 h-3.5 text-blue-400 animate-pulse" />;
-      case "draw_registering": return <Ticket className="w-3.5 h-3.5 text-violet-400 animate-pulse" />;
+      case "draw_registering": return <Ticket className="w-3.5 h-3.5 text-amber-400 animate-pulse" />;
       case "failed": return <XCircle className="w-3.5 h-3.5 text-red-400" />;
       case "pending": return <Clock className="w-3.5 h-3.5 text-amber-400" />;
       default: return <Loader2 className="w-3.5 h-3.5 text-red-400 animate-spin" />;
@@ -194,25 +194,25 @@ export default function AccountStock() {
     if (items.length === 0) {
       return (
         <div className="text-center py-8 font-mono" data-testid="text-no-accounts">
-          <p className="text-cyan-400/20 text-[11px]">[ No records in this category ]</p>
+          <p className="text-emerald-400/20 text-[11px]">[ No records in this category ]</p>
         </div>
       );
     }
     return (
-      <div className="rounded-md overflow-x-auto" style={{ border: '1px solid rgba(0,240,255,0.06)' }}>
+      <div className="rounded-md overflow-x-auto" style={{ border: '1px solid rgba(0,255,65,0.06)' }}>
         <Table>
           <TableHeader>
-            <TableRow className="border-cyan-500/[0.06] hover:bg-transparent">
-              <TableHead className="w-8 text-cyan-400/25 font-mono text-[10px]">#</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Status</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Module</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Identity</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Email</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Zip</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Passkey</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Code</TableHead>
-              <TableHead className="text-cyan-400/25 font-mono text-[10px]">Timestamp</TableHead>
-              <TableHead className="w-24 text-cyan-400/25 font-mono text-[10px]">Ops</TableHead>
+            <TableRow className="border-emerald-500/[0.06] hover:bg-transparent">
+              <TableHead className="w-8 text-emerald-400/25 font-mono text-[10px]">#</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Status</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Module</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Identity</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Email</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Zip</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Passkey</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Code</TableHead>
+              <TableHead className="text-emerald-400/25 font-mono text-[10px]">Timestamp</TableHead>
+              <TableHead className="w-24 text-emerald-400/25 font-mono text-[10px]">Ops</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -220,15 +220,15 @@ export default function AccountStock() {
               const badge = statusBadge[acc.status] || statusBadge.pending;
               const plat = platformLabel[acc.platform] || { name: acc.platform, color: "bg-zinc-500/8 text-zinc-400 border-zinc-500/15" };
               return (
-                <TableRow key={acc.id} className="border-cyan-500/[0.04] hover:bg-cyan-500/[0.02]" data-testid={`row-account-${acc.id}`}>
+                <TableRow key={acc.id} className="border-emerald-500/[0.04] hover:bg-emerald-500/[0.02]" data-testid={`row-account-${acc.id}`}>
                   <TableCell className="text-zinc-600 text-[10px] font-mono">{i + 1}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5" title={statusTooltip[acc.status] || acc.status}>
                       {getStatusIcon(acc.status)}
                       <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-sm border ${
                         acc.status === "completed" ? "bg-emerald-400/8 text-emerald-400 border-emerald-400/15" :
-                        acc.status === "verified" ? "bg-cyan-400/8 text-cyan-400 border-cyan-400/15" :
-                        acc.status === "draw_registering" ? "bg-violet-400/8 text-violet-400 border-violet-400/15" :
+                        acc.status === "verified" ? "bg-emerald-400/8 text-emerald-400 border-emerald-400/15" :
+                        acc.status === "draw_registering" ? "bg-amber-400/8 text-amber-400 border-amber-400/15" :
                         acc.status === "profile_saving" ? "bg-blue-400/8 text-blue-400 border-blue-400/15" :
                         acc.status === "failed" ? "bg-red-400/8 text-red-400 border-red-400/15" :
                         "bg-amber-400/8 text-amber-400 border-amber-400/15"
@@ -242,7 +242,7 @@ export default function AccountStock() {
                   </TableCell>
                   <TableCell className="font-mono text-[11px] text-zinc-300">{acc.firstName} {acc.lastName}</TableCell>
                   <TableCell>
-                    <code className="text-[10px] text-cyan-400/50 font-mono">{acc.email}</code>
+                    <code className="text-[10px] text-emerald-400/50 font-mono">{acc.email}</code>
                   </TableCell>
                   <TableCell>
                     {acc.zipCode ? (
@@ -294,7 +294,7 @@ export default function AccountStock() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 px-1.5 text-cyan-400/30 hover:text-cyan-400"
+                          className="h-6 px-1.5 text-emerald-400/30 hover:text-emerald-400"
                           onClick={() => { sounds.click(); copyToClipboard(`${acc.email}\t${acc.la28Password}`); }}
                           data-testid={`button-copy-${acc.id}`}
                         >
@@ -317,15 +317,15 @@ export default function AccountStock() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2.5">
-            <Database className="w-5 h-5 text-cyan-400/50" />
+            <Database className="w-5 h-5 text-emerald-400/50" />
             <h1 className="text-xl font-bold tracking-tight text-white font-mono" data-testid="text-account-stock-title">
-              Account<span className="text-cyan-400">_</span>Stock
+              Account<span className="text-emerald-400">_</span>Stock
             </h1>
           </div>
-          <p className="text-cyan-400/30 mt-1 text-[11px] font-mono pl-7.5">
+          <p className="text-emerald-400/30 mt-1 text-[11px] font-mono pl-7.5">
             <span className="text-emerald-400/50">{drawOk.length} draw_ok</span>
             {" / "}
-            <span className="text-cyan-400/50">{verifiedOnly.length} verified</span>
+            <span className="text-emerald-400/50">{verifiedOnly.length} verified</span>
             {" / "}
             <span className="text-amber-400/50">{inProgress.length} active</span>
             {" / "}
@@ -333,11 +333,11 @@ export default function AccountStock() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportVerified} className="border-cyan-500/15 text-cyan-400/60 hover:bg-cyan-500/5 hover:text-cyan-400 hover:border-cyan-500/25 font-mono text-[11px] h-8" data-testid="button-export-accounts">
+          <Button variant="outline" onClick={exportVerified} className="border-emerald-500/15 text-emerald-400/60 hover:bg-emerald-500/5 hover:text-emerald-400 hover:border-emerald-500/25 font-mono text-[11px] h-8" data-testid="button-export-accounts">
             <Download className="w-3.5 h-3.5 mr-1.5" />
             Export
           </Button>
-          <Button variant="outline" onClick={fetchAccounts} className="border-cyan-500/15 text-cyan-400/60 hover:bg-cyan-500/5 hover:text-cyan-400 hover:border-cyan-500/25 font-mono text-[11px] h-8" data-testid="button-refresh-accounts">
+          <Button variant="outline" onClick={fetchAccounts} className="border-emerald-500/15 text-emerald-400/60 hover:bg-emerald-500/5 hover:text-emerald-400 hover:border-emerald-500/25 font-mono text-[11px] h-8" data-testid="button-refresh-accounts">
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
             Sync
           </Button>
@@ -345,11 +345,11 @@ export default function AccountStock() {
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[9px] text-cyan-400/20 font-mono uppercase tracking-wider mr-1">Filter:</span>
+        <span className="text-[9px] text-emerald-400/20 font-mono uppercase tracking-wider mr-1">Filter:</span>
         <Button
           variant={platformFilter === "all" ? "default" : "outline"}
           size="sm"
-          className={`h-6 text-[10px] font-mono ${platformFilter === "all" ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/25 hover:bg-cyan-500/20" : "border-cyan-500/10 text-zinc-500 hover:bg-cyan-500/[0.03] hover:text-zinc-400"}`}
+          className={`h-6 text-[10px] font-mono ${platformFilter === "all" ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20" : "border-emerald-500/10 text-zinc-500 hover:bg-emerald-500/[0.03] hover:text-zinc-400"}`}
           onClick={() => setPlatformFilter("all")}
           data-testid="filter-all"
         >
@@ -363,7 +363,7 @@ export default function AccountStock() {
               key={p}
               variant={platformFilter === p ? "default" : "outline"}
               size="sm"
-              className={`h-6 text-[10px] font-mono ${platformFilter === p ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/25 hover:bg-cyan-500/20" : "border-cyan-500/10 text-zinc-500 hover:bg-cyan-500/[0.03] hover:text-zinc-400"}`}
+              className={`h-6 text-[10px] font-mono ${platformFilter === p ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20" : "border-emerald-500/10 text-zinc-500 hover:bg-emerald-500/[0.03] hover:text-zinc-400"}`}
               onClick={() => setPlatformFilter(p)}
               data-testid={`filter-${p}`}
             >
@@ -375,11 +375,11 @@ export default function AccountStock() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-5 h-5 animate-spin text-cyan-400/40" />
+          <Loader2 className="w-5 h-5 animate-spin text-emerald-400/40" />
         </div>
       ) : (
         <Tabs defaultValue="available" className="space-y-3">
-          <TabsList className="bg-black/30 border border-cyan-500/[0.08]">
+          <TabsList className="bg-black/30 border border-emerald-500/[0.08]">
             <TabsTrigger value="available" className="data-[state=active]:bg-emerald-500/10 data-[state=active]:text-emerald-400 font-mono text-[11px]" data-testid="tab-available">
               Available ({availableAccounts.length})
             </TabsTrigger>
@@ -393,8 +393,8 @@ export default function AccountStock() {
 
           <TabsContent value="available">
             <div className="cyber-card rounded-lg">
-              <div className="px-4 py-3 border-b border-cyan-500/[0.06]">
-                <span className="text-[9px] font-mono text-cyan-400/30 uppercase tracking-wider">Available Records</span>
+              <div className="px-4 py-3 border-b border-emerald-500/[0.06]">
+                <span className="text-[9px] font-mono text-emerald-400/30 uppercase tracking-wider">Available Records</span>
               </div>
               <div className="p-3">
                 {renderTable(availableAccounts, true, "Use", <Check className="w-3 h-3 text-amber-400" />)}
@@ -404,8 +404,8 @@ export default function AccountStock() {
 
           <TabsContent value="used">
             <div className="cyber-card rounded-lg">
-              <div className="px-4 py-3 border-b border-cyan-500/[0.06]">
-                <span className="text-[9px] font-mono text-cyan-400/30 uppercase tracking-wider">Used Records</span>
+              <div className="px-4 py-3 border-b border-emerald-500/[0.06]">
+                <span className="text-[9px] font-mono text-emerald-400/30 uppercase tracking-wider">Used Records</span>
               </div>
               <div className="p-3">
                 {renderTable(usedAccounts, true, "Undo", <RotateCcw className="w-3 h-3 text-emerald-400" />)}
@@ -415,8 +415,8 @@ export default function AccountStock() {
 
           <TabsContent value="other">
             <div className="cyber-card rounded-lg">
-              <div className="px-4 py-3 border-b border-cyan-500/[0.06]">
-                <span className="text-[9px] font-mono text-cyan-400/30 uppercase tracking-wider">Pending / Active / Failed</span>
+              <div className="px-4 py-3 border-b border-emerald-500/[0.06]">
+                <span className="text-[9px] font-mono text-emerald-400/30 uppercase tracking-wider">Pending / Active / Failed</span>
               </div>
               <div className="p-3">
                 {renderTable(otherAccounts, false, "", null)}

@@ -24,14 +24,14 @@ function getLogColor(msg: string) {
   const m = msg.toLowerCase();
   if (m.includes("error") || m.includes("failed") || m.includes("fail") || m.includes("❌")) return "text-red-400";
   if (m.includes("success") || m.includes("complete") || m.includes("verified") || m.includes("✅")) return "text-emerald-400";
-  if (m.includes("phase 1") || m.includes("tm account")) return "text-cyan-300";
+  if (m.includes("phase 1") || m.includes("tm account")) return "text-emerald-300";
   if (m.includes("phase 2") || m.includes("presale")) return "text-purple-400";
   if (m.includes("selecting") || m.includes("event") || m.includes("☑")) return "text-amber-400";
   if (m.includes("form") || m.includes("filling") || m.includes("submit") || m.includes("✏️")) return "text-blue-400";
-  if (m.includes("navigat") || m.includes("connect") || m.includes("loading") || m.includes("browser") || m.includes("🌐")) return "text-cyan-400";
+  if (m.includes("navigat") || m.includes("connect") || m.includes("loading") || m.includes("browser") || m.includes("🌐")) return "text-emerald-400";
   if (m.includes("sms") || m.includes("phone") || m.includes("📱") || m.includes("📲")) return "text-orange-400";
   if (m.includes("captcha") || m.includes("🛡️")) return "text-yellow-400";
-  if (m.includes("code") || m.includes("otp") || m.includes("verification")) return "text-violet-400";
+  if (m.includes("code") || m.includes("otp") || m.includes("verification")) return "text-amber-400";
   if (m.includes("status:")) return "text-sky-400";
   if (m.includes("starting") || m.includes("creating")) return "text-zinc-300";
   return "text-zinc-500";
@@ -41,14 +41,14 @@ function getStepInfo(status: string): { label: string; color: string; icon: Reac
   switch (status) {
     case "completed": return { label: "Complete", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
     case "failed": return { label: "Failed", color: "text-red-400", icon: <XCircle className="w-3.5 h-3.5" /> };
-    case "registering": return { label: "TM: Registering", color: "text-cyan-400", icon: <Globe className="w-3.5 h-3.5" /> };
+    case "registering": return { label: "TM: Registering", color: "text-emerald-400", icon: <Globe className="w-3.5 h-3.5" /> };
     case "waiting_code": return { label: "TM: Waiting Code", color: "text-amber-400", icon: <Clock className="w-3.5 h-3.5" /> };
     case "verifying": return { label: "TM: Verifying", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };
     case "verified": return { label: "TM: Verified", color: "text-emerald-400", icon: <CheckCircle2 className="w-3.5 h-3.5" /> };
     case "presale_loading": return { label: "Presale: Loading", color: "text-purple-400", icon: <Globe className="w-3.5 h-3.5" /> };
     case "presale_filling": return { label: "Presale: Filling", color: "text-blue-400", icon: <Shield className="w-3.5 h-3.5" /> };
     case "presale_events": return { label: "Presale: Events", color: "text-amber-400", icon: <Music className="w-3.5 h-3.5" /> };
-    case "presale_submitting": return { label: "Presale: Submit", color: "text-violet-400", icon: <Rocket className="w-3.5 h-3.5" /> };
+    case "presale_submitting": return { label: "Presale: Submit", color: "text-amber-400", icon: <Rocket className="w-3.5 h-3.5" /> };
     case "pending": return { label: "Queued", color: "text-zinc-500", icon: <Clock className="w-3.5 h-3.5" /> };
     default: 
       if (status?.startsWith("phone_retry")) return { label: "TM: Phone Retry", color: "text-orange-400", icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> };
@@ -170,7 +170,7 @@ export default function BrunoMarsCreate() {
   const failed = accounts.filter(a => a.status === "failed").length;
   const processing = accounts.filter(a => !["completed", "failed", "pending"].includes(a.status)).length;
 
-  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-5">
@@ -347,7 +347,7 @@ export default function BrunoMarsCreate() {
               <Terminal className="w-4 h-4 text-purple-400" />
               <span className="text-xs font-semibold text-zinc-400">Live Output</span>
               {filterAccountId && (
-                <Badge className="text-[10px] bg-violet-500/10 text-violet-400 border-violet-500/20">
+                <Badge className="text-[10px] bg-amber-500/10 text-amber-400 border-amber-500/20">
                   Filtered: {accounts.find(a => a.id === filterAccountId)?.firstName || "Account"}
                 </Badge>
               )}

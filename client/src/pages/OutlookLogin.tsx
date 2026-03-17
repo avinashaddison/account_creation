@@ -86,26 +86,26 @@ export default function OutlookLogin() {
     }
   }, [email, password]);
 
-  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full" /></div>;
+  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/admin/create-server">
-            <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 hover:bg-cyan-500/5 font-mono text-xs" data-testid="button-back-create-server">
+            <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/5 font-mono text-xs" data-testid="button-back-create-server">
               <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
               Back
             </Button>
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(168,85,247,0.1) 100%)', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(255,176,0,0.1) 100%)', border: '1px solid rgba(59,130,246,0.2)' }}>
                 <Mail className="w-4 h-4 text-blue-400" />
               </div>
               <h1 className="text-lg font-bold text-white font-mono tracking-tight" data-testid="text-page-title">Outlook Login</h1>
             </div>
-            <p className="text-[10px] text-cyan-400/30 font-mono mt-0.5 tracking-wide">MICROSOFT ACCOUNT AUTOMATION</p>
+            <p className="text-[10px] text-emerald-400/30 font-mono mt-0.5 tracking-wide">MICROSOFT ACCOUNT AUTOMATION</p>
           </div>
         </div>
         {isRunning && (
@@ -118,10 +118,10 @@ export default function OutlookLogin() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="space-y-4">
-          <div className="rounded-xl p-5 space-y-4" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.8) 0%, rgba(13,17,23,0.9) 100%)', border: '1px solid rgba(0,240,255,0.08)' }}>
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.8) 0%, rgba(13,17,23,0.9) 100%)', border: '1px solid rgba(0,255,65,0.08)' }}>
             <div className="flex items-center gap-2 mb-1">
-              <Shield className="w-3.5 h-3.5 text-cyan-400/50" />
-              <span className="text-[10px] font-mono text-cyan-400/40 uppercase tracking-wider">Login Credentials</span>
+              <Shield className="w-3.5 h-3.5 text-emerald-400/50" />
+              <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Login Credentials</span>
             </div>
 
             <div className="space-y-1.5">
@@ -135,7 +135,7 @@ export default function OutlookLogin() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="user@outlook.com"
                 disabled={isRunning}
-                className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
+                className="h-9 bg-black/30 border-emerald-500/10 text-emerald-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
                 data-testid="input-outlook-email"
               />
             </div>
@@ -151,7 +151,7 @@ export default function OutlookLogin() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Account password"
                 disabled={isRunning}
-                className="h-9 bg-black/30 border-cyan-500/10 text-cyan-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
+                className="h-9 bg-black/30 border-emerald-500/10 text-emerald-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
                 onKeyDown={(e) => { if (e.key === "Enter" && !isRunning) handleLogin(); }}
                 data-testid="input-outlook-password"
               />
@@ -167,7 +167,7 @@ export default function OutlookLogin() {
               onClick={handleLogin}
               disabled={isRunning || !email.trim() || !password.trim()}
               className="w-full h-10 font-mono text-sm rounded-lg"
-              style={{ background: isRunning ? 'rgba(59,130,246,0.2)' : 'linear-gradient(135deg, rgba(59,130,246,0.3) 0%, rgba(168,85,247,0.2) 100%)', border: '1px solid rgba(59,130,246,0.3)' }}
+              style={{ background: isRunning ? 'rgba(59,130,246,0.2)' : 'linear-gradient(135deg, rgba(59,130,246,0.3) 0%, rgba(255,176,0,0.2) 100%)', border: '1px solid rgba(59,130,246,0.3)' }}
               data-testid="button-outlook-login"
             >
               {isRunning ? (
@@ -238,35 +238,35 @@ export default function OutlookLogin() {
             </div>
           )}
 
-          <div className="rounded-xl p-4 space-y-2" style={{ background: 'rgba(15,21,32,0.5)', border: '1px solid rgba(0,240,255,0.05)' }}>
-            <span className="text-[10px] font-mono text-cyan-400/30 uppercase tracking-wider">Notes</span>
+          <div className="rounded-xl p-4 space-y-2" style={{ background: 'rgba(15,21,32,0.5)', border: '1px solid rgba(0,255,65,0.05)' }}>
+            <span className="text-[10px] font-mono text-emerald-400/30 uppercase tracking-wider">Notes</span>
             <ul className="space-y-1.5 text-[11px] text-zinc-500 font-mono">
               <li className="flex items-start gap-2">
-                <span className="text-cyan-400/30 mt-0.5">*</span>
+                <span className="text-emerald-400/30 mt-0.5">*</span>
                 Uses ZenRows residential browser to bypass bot detection
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-cyan-400/30 mt-0.5">*</span>
+                <span className="text-emerald-400/30 mt-0.5">*</span>
                 FunCaptcha (Arkose Labs) auto-solved via CapSolver
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-cyan-400/30 mt-0.5">*</span>
+                <span className="text-emerald-400/30 mt-0.5">*</span>
                 2FA (phone/authenticator) is not supported
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-cyan-400/30 mt-0.5">*</span>
+                <span className="text-emerald-400/30 mt-0.5">*</span>
                 Credentials are not stored
               </li>
             </ul>
           </div>
         </div>
 
-        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,240,255,0.08)' }}>
-          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: 'rgba(0,240,255,0.03)', borderBottom: '1px solid rgba(0,240,255,0.06)' }}>
-            <Terminal className="w-3.5 h-3.5 text-cyan-400/50" />
-            <span className="text-[10px] font-mono text-cyan-400/40 uppercase tracking-wider">Live Logs</span>
+        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,255,65,0.08)' }}>
+          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: 'rgba(0,255,65,0.03)', borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
+            <Terminal className="w-3.5 h-3.5 text-emerald-400/50" />
+            <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Live Logs</span>
             {logs.length > 0 && (
-              <Badge variant="outline" className="ml-auto border-cyan-500/15 text-cyan-400/40 text-[9px] font-mono" data-testid="badge-log-count">
+              <Badge variant="outline" className="ml-auto border-emerald-500/15 text-emerald-400/40 text-[9px] font-mono" data-testid="badge-log-count">
                 {logs.length}
               </Badge>
             )}
@@ -287,7 +287,7 @@ export default function OutlookLogin() {
                       className={`py-1 px-2 rounded ${isError ? 'text-red-400/80 bg-red-500/5' : isSuccess ? 'text-emerald-400/80 bg-emerald-500/5' : 'text-zinc-400'}`}
                       data-testid={`log-entry-${i}`}
                     >
-                      <span className="text-cyan-400/20 mr-2">
+                      <span className="text-emerald-400/20 mr-2">
                         {new Date(log.timestamp).toLocaleTimeString("en-US", { hour12: false })}
                       </span>
                       {log.message}

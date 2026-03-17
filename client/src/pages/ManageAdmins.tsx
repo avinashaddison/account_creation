@@ -354,7 +354,7 @@ export default function ManageAdmins() {
 
       <div className="rounded-xl glass-panel bg-transparent border border-white/[0.04] p-5">
         <div className="flex items-center gap-2 mb-4">
-          <div className="p-1.5 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 text-white">
+          <div className="p-1.5 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
             <Globe className="w-3.5 h-3.5" />
           </div>
           <span className="text-sm font-semibold text-zinc-200">Browser API Proxy</span>
@@ -362,7 +362,7 @@ export default function ManageAdmins() {
         <form onSubmit={updateProxy} className="space-y-3">
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current Proxy URL</Label>
-            <div className="text-xs font-mono text-cyan-400 bg-white/[0.02] border border-white/[0.04] rounded-lg px-3 py-2 truncate" data-testid="text-current-proxy">
+            <div className="text-xs font-mono text-emerald-400 bg-white/[0.02] border border-white/[0.04] rounded-lg px-3 py-2 truncate" data-testid="text-current-proxy">
               {browserProxy || "Not set"}
             </div>
           </div>
@@ -379,7 +379,7 @@ export default function ManageAdmins() {
           <Button
             type="submit"
             disabled={savingProxy || newBrowserProxy === browserProxy || !newBrowserProxy.trim()}
-            className="h-9 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 border-0"
+            className="h-9 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 border-0"
             data-testid="button-update-proxy"
           >
             {savingProxy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update Proxy"}
