@@ -8,6 +8,7 @@ import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha } from "./capsolverService";
+import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 
 const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
@@ -7099,7 +7100,7 @@ export async function registerZenrowsAccount(
       try {
         const url = response.url();
         const status = response.status();
-        if (status >= 200 && status < 300 && (url.includes("zenrows.com") || url.includes("api"))) {
+        if (status >= 200 && status < 300 && url.includes("zenrows.com") && !url.includes("intercom") && !url.includes("analytics") && !url.includes("segment") && !url.includes("hotjar") && !url.includes("sentry")) {
           const contentType = response.headers()["content-type"] || "";
           if (contentType.includes("json")) {
             const text = await response.text().catch(() => "");
@@ -7497,11 +7498,169 @@ export async function registerZenrowsAccount(
           log("JS discovery error: " + (jsErr.message || "").substring(0, 100));
         }
 
-        log("All phone bypass strategies exhausted. Account created but phone-gated.");
+        log("All bypass strategies exhausted. Attempting phone verification via SMSPool...");
+
+        let smsOrderId: string | undefined;
+        try {
+          await page.goto("https://app.zenrows.com/phone/input", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(2000);
+
+          const smsOrder = await orderSMSNumber(1, "817");
+          if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
+            log("SMSPool order failed: " + (smsOrder.error || "no number returned"));
+            try { await page.close(); } catch {}
+            try { await context.close(); } catch {}
+            try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+            return { success: false, zenrowsPassword, error: "ZenRows account created but phone verification failed — SMSPool could not provide a number: " + (smsOrder.error || "unknown") };
+          }
+
+          smsOrderId = smsOrder.orderId;
+          let phoneNumber = smsOrder.number!;
+          if (!phoneNumber.startsWith("+")) phoneNumber = "+1" + phoneNumber.replace(/\D/g, "");
+          log("SMSPool number ordered: " + phoneNumber + " (order: " + smsOrderId + ")");
+
+          const phoneInput = await page.waitForSelector('input[name="phone_number"], input#phone_number, input[type="tel"]', { timeout: 10000 });
+          if (phoneInput) {
+            await phoneInput.click({ clickCount: 3 });
+            await phoneInput.fill(phoneNumber);
+            await page.waitForTimeout(500);
+            log("Phone number entered: " + phoneNumber);
+
+            const submitBtn = await page.$('button[type="submit"], button:has-text("Send code"), button:has-text("Send"), button:has-text("Verify")');
+            if (submitBtn) {
+              await submitBtn.click();
+              log("Send code button clicked, waiting for SMS...");
+              await page.waitForTimeout(3000);
+
+              const currentUrl = page.url();
+              const pageText = await page.textContent("body").catch(() => "");
+              log("After send code: URL=" + currentUrl.substring(0, 100));
+
+              if (currentUrl.includes("/phone/verify") || currentUrl.includes("/phone/code") || (pageText || "").toLowerCase().includes("enter") || (pageText || "").toLowerCase().includes("code")) {
+                log("Code input page detected, polling SMSPool for code...");
+                const smsCode = await pollForSMSCode(smsOrderId, 40, 5000);
+
+                if (smsCode) {
+                  log("SMS code received: " + smsCode);
+
+                  const codeInput = await page.waitForSelector('input[name="code"], input[name="verification_code"], input[name="otp"], input[type="text"], input[type="number"], input[type="tel"]', { timeout: 10000 }).catch(() => null);
+                  if (codeInput) {
+                    await codeInput.click({ clickCount: 3 });
+                    await codeInput.fill(smsCode);
+                    await page.waitForTimeout(500);
+
+                    const verifyBtn = await page.$('button[type="submit"], button:has-text("Verify"), button:has-text("Confirm"), button:has-text("Submit")');
+                    if (verifyBtn) {
+                      await verifyBtn.click();
+                      log("Verification code submitted, waiting for redirect...");
+                      await page.waitForTimeout(5000);
+
+                      const postVerifyUrl = page.url();
+                      log("After verification: URL=" + postVerifyUrl.substring(0, 100));
+
+                      if (!postVerifyUrl.includes("/phone")) {
+                        log("Phone verification SUCCESS! Navigating to dashboard for API key...");
+
+                        const dashPages = ["https://app.zenrows.com/builder", "https://app.zenrows.com/dashboard", "https://app.zenrows.com/onboarding", "https://app.zenrows.com/settings"];
+                        for (const dp of dashPages) {
+                          try {
+                            await page.goto(dp, { waitUntil: "domcontentloaded", timeout: 20000 });
+                            await page.waitForTimeout(3000);
+                            const dpUrl = page.url();
+                            if (dpUrl.includes("/phone") || dpUrl.includes("/login")) continue;
+
+                            const extractedKey = await page.evaluate(() => {
+                              const keyRe = /^[a-f0-9]{40,80}$/;
+                              const inputs = document.querySelectorAll('input[readonly], input[type="text"], input.api-key, [data-testid*="key"], [class*="apikey"], [class*="api-key"]');
+                              for (const input of inputs) {
+                                const val = (input as HTMLInputElement).value;
+                                if (val && keyRe.test(val)) return val;
+                              }
+                              const codeEls = document.querySelectorAll('code, pre, .font-mono, [class*="mono"]');
+                              for (const el of codeEls) {
+                                const text = el.textContent || "";
+                                const m = text.match(/[a-f0-9]{40,80}/);
+                                if (m && keyRe.test(m[0])) return m[0];
+                              }
+                              const bodyText = document.body.innerText || "";
+                              const match = bodyText.match(/\b[a-f0-9]{40,}\b/);
+                              if (match && keyRe.test(match[0])) return match[0];
+                              return "";
+                            }).catch(() => "");
+
+                            if (extractedKey) {
+                              log("API key extracted after phone verification: " + extractedKey.substring(0, 8) + "...");
+                              try { await page.close(); } catch {}
+                              try { await context.close(); } catch {}
+                              try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+                              return { success: true, apiKey: extractedKey, zenrowsPassword, outlookEmail, outlookPassword, message: "ZenRows account created — phone verified via SMSPool, API key extracted" };
+                            }
+                          } catch {}
+                        }
+
+                        const apiEndpointsPost = [
+                          "https://app.zenrows.com/api/me",
+                          "https://app.zenrows.com/api/user",
+                          "https://app.zenrows.com/api/v1/me",
+                          "https://app.zenrows.com/api/v1/user",
+                        ];
+                        for (const ep of apiEndpointsPost) {
+                          try {
+                            const resp = await page.evaluate(async (url: string) => {
+                              const r = await fetch(url, { credentials: "include" });
+                              return await r.text();
+                            }, ep);
+                            const keyMatch = (resp || "").match(/[a-f0-9]{40,80}/);
+                            if (keyMatch && /^[a-f0-9]{40,80}$/.test(keyMatch[0])) {
+                              log("API key from API after phone verify: " + keyMatch[0].substring(0, 8) + "...");
+                              try { await page.close(); } catch {}
+                              try { await context.close(); } catch {}
+                              try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+                              return { success: true, apiKey: keyMatch[0], zenrowsPassword, outlookEmail, outlookPassword, message: "ZenRows account created — phone verified via SMSPool, API key from internal API" };
+                            }
+                          } catch {}
+                        }
+
+                        log("Phone verified but could not extract API key from dashboard/API");
+                        try { await page.close(); } catch {}
+                        try { await context.close(); } catch {}
+                        try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
+                        return { success: false, zenrowsPassword, outlookEmail, outlookPassword, error: "ZenRows account created and phone verified, but API key could not be found on dashboard. Login manually to retrieve it." };
+                      } else {
+                        log("Still on phone page after code submission — verification may have failed");
+                      }
+                    } else {
+                      log("Could not find verify/submit button on code page");
+                    }
+                  } else {
+                    log("Could not find code input field");
+                  }
+                } else {
+                  log("SMSPool timed out waiting for verification code");
+                  try { await cancelSMSOrder(smsOrderId); } catch {}
+                }
+              } else if (currentUrl.includes("/phone/input")) {
+                log("Still on phone input page — number may have been rejected. Page: " + (pageText || "").replace(/\s+/g, " ").substring(0, 200));
+                try { await cancelSMSOrder(smsOrderId); } catch {}
+              } else {
+                log("Unexpected page after phone submit: " + currentUrl.substring(0, 100));
+              }
+            } else {
+              log("Could not find send code button on phone page");
+            }
+          } else {
+            log("Could not find phone input field");
+          }
+        } catch (smsErr: any) {
+          log("SMSPool phone verification error: " + (smsErr.message || "").substring(0, 200));
+          if (smsOrderId) { try { await cancelSMSOrder(smsOrderId); } catch {} }
+        }
+
+        log("Phone verification via SMSPool did not succeed. Account created but phone-gated.");
         try { await page.close(); } catch {}
         try { await context.close(); } catch {}
         try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
-        return { success: false, zenrowsPassword, error: "ZenRows account created but requires phone verification which cannot be bypassed. The account exists with email: " + outlookEmail };
+        return { success: false, zenrowsPassword, error: "ZenRows account created but phone verification could not be completed. The account exists with email: " + outlookEmail };
       }
     } else if (needsVerification) {
       log("ZenRows requires email verification");
