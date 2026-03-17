@@ -1013,12 +1013,18 @@ export async function registerRoutes(
             if (cancelledBatches.has(batchId)) return Promise.resolve();
             const baseProxy = proxies[(i + j) % proxies.length];
             const proxy = uniqueProxySession(baseProxy);
-            broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
-            return processAccountWithToken(
-              acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-              acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy,
-              emailTokens.get(acc.id)
-            );
+            const staggerDelay = j * 3000;
+            return new Promise<void>((resolve) => {
+              setTimeout(async () => {
+                broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
+                await processAccountWithToken(
+                  acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
+                  acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy,
+                  emailTokens.get(acc.id)
+                );
+                resolve();
+              }, staggerDelay);
+            });
           }));
         }
         broadcastBatchComplete(batchId, userId);

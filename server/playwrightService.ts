@@ -4984,21 +4984,43 @@ async function doRegistration(
 
   try {
     await onStatusUpdate("registering");
-    console.log("[Playwright] Navigating to LA28 registration...");
-    await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    
+    let formFound = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[Playwright] Navigating to LA28 registration... (attempt ${attempt}/3)`);
+      try {
+        await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
+      } catch (navErr: any) {
+        console.log(`[Playwright] Navigation error attempt ${attempt}: ${navErr.message}`);
+        if (attempt < 3) { await page.waitForTimeout(3000); continue; }
+        await context.close();
+        return { success: false, error: `Navigation failed: ${navErr.message}` };
+      }
 
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 30000 });
-    } catch {
-      console.log("[Playwright] Network idle timeout, continuing...");
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 30000 });
+      } catch {
+        console.log("[Playwright] Network idle timeout, continuing...");
+      }
+
+      await page.waitForTimeout(5000);
+      await forceRemoveOverlays(page);
+      await page.waitForTimeout(2000);
+
+      console.log("[Playwright] Waiting for Gigya registration form...");
+      formFound = await waitForGigyaForm(page, 30);
+      if (formFound) break;
+
+      console.log(`[Playwright] Form not found attempt ${attempt}, will retry...`);
+      if (attempt < 3) {
+        await page.waitForTimeout(3000);
+        try {
+          await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+        } catch { /* ignore reload errors */ }
+        await page.waitForTimeout(3000);
+      }
     }
-
-    await page.waitForTimeout(5000);
-    await forceRemoveOverlays(page);
-    await page.waitForTimeout(2000);
-
-    console.log("[Playwright] Waiting for Gigya registration form...");
-    const formFound = await waitForGigyaForm(page, 30);
+    
     if (!formFound) {
       const snapshot = (await getPageText(page)).substring(0, 500);
       await context.close();
@@ -5163,10 +5185,48 @@ async function doRegistration(
       return { success: false, error: realErrors.join("; ") };
     }
 
-    const lowerText = pageText.toLowerCase();
-    const needsCode = lowerText.includes("code") ||
+    let lowerText = pageText.toLowerCase();
+    let needsCode = lowerText.includes("code") ||
                       lowerText.includes("verify") ||
                       lowerText.includes("confirmation");
+
+    if (!needsCode && (lowerText.includes("welcome") || lowerText.includes("already have an account"))) {
+      console.log("[Playwright] Page bounced back to welcome page after submit, retrying registration...");
+      log("Submit bounced — retrying registration form...");
+      try {
+        await page.goto("https://la28id.la28.org/register/", { waitUntil: "domcontentloaded", timeout: 60000 });
+        try { await page.waitForLoadState("networkidle", { timeout: 30000 }); } catch {}
+        await page.waitForTimeout(5000);
+        await forceRemoveOverlays(page);
+        await page.waitForTimeout(2000);
+        const retryForm = await waitForGigyaForm(page, 30);
+        if (retryForm) {
+          await forceRemoveOverlays(page);
+          await fillViaJS(page, "email", email);
+          await fillViaJS(page, "profile.firstName", firstName);
+          await fillViaJS(page, "profile.lastName", lastName);
+          await fillPasswordViaJS(page, password);
+          await selectCountryViaJS(page, country);
+          await selectLanguageViaJS(page, language);
+          await page.waitForTimeout(500);
+          await fillViaJS(page, "profile.zip", usedZipCode);
+          await checkAllCheckboxesViaJS(page);
+          await page.waitForTimeout(500);
+          await clickSubmitViaJS(page);
+          await page.waitForTimeout(8000);
+          pageText = await getPageText(page);
+          console.log("[Playwright] Retry page text (first 200):", pageText.substring(0, 200));
+          lowerText = pageText.toLowerCase();
+          needsCode = lowerText.includes("code") || lowerText.includes("verify") || lowerText.includes("confirmation");
+          if (pageText.includes("already exists")) {
+            await context.close();
+            return { success: false, error: "Account already exists for this email" };
+          }
+        }
+      } catch (retryErr: any) {
+        console.log("[Playwright] Retry registration error:", retryErr.message);
+      }
+    }
 
     if (!needsCode) {
       await context.close();
