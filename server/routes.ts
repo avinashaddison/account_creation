@@ -208,6 +208,27 @@ async function processAccount(
       const updateData: any = { status: finalStatus };
       if (result.zipCode) updateData.zipCode = result.zipCode;
 
+      if (finalStatus === "draw_registering") {
+        broadcastLog(batchId, accountId, `⚡ Draw step incomplete — retrying with fresh session...`, ownerId);
+        const log = (msg: string) => { broadcastLog(batchId, accountId, msg, ownerId); };
+        for (let retry = 0; retry < 2; retry++) {
+          try {
+            await new Promise(r => setTimeout(r, 3000));
+            const drawResult = await completeDrawViaGigyaBrowser(addisonEmail, password, result.zipCode || undefined, log);
+            if (drawResult.formSubmitted) {
+              finalStatus = "completed";
+              updateData.status = "completed";
+              broadcastLog(batchId, accountId, `✅ Draw retry ${retry + 1} succeeded!`, ownerId);
+              break;
+            } else {
+              broadcastLog(batchId, accountId, `Draw retry ${retry + 1} did not complete form. ${retry < 1 ? 'Trying again...' : 'Will rely on auto-retry.'}`, ownerId);
+            }
+          } catch (retryErr: any) {
+            broadcastLog(batchId, accountId, `Draw retry ${retry + 1} error: ${retryErr.message.substring(0, 80)}. ${retry < 1 ? 'Trying again...' : 'Will rely on auto-retry.'}`, ownerId);
+          }
+        }
+      }
+
       if (finalStatus === "completed") {
         broadcastLog(batchId, accountId, `📧 Checking inbox for LA28 draw confirmation email...`, ownerId);
         try {
@@ -242,9 +263,46 @@ async function processAccount(
         await storage.updateUserFreeAccountsUsed(ownerId, user.freeAccountsUsed + 1);
       }
     } else {
-      const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: result.error || "Failed" });
-      if (updated) broadcastAccountUpdate(updated, ownerId);
-      broadcastLog(batchId, accountId, `Failed: ${result.error}`, ownerId);
+      const errMsg = result.error || "Failed";
+      const isDrawFailure = errMsg.includes("browser has been closed") || errMsg.includes("Target page") || errMsg.includes("session");
+      const currentAccount = await storage.getAccount(accountId);
+      const currentStatus = currentAccount?.status || "";
+
+      if (isDrawFailure && (currentStatus === "draw_registering" || currentStatus === "verified")) {
+        broadcastLog(batchId, accountId, `⚡ Session closed during draw — retrying with fresh session...`, ownerId);
+        const log = (msg: string) => { broadcastLog(batchId, accountId, msg, ownerId); };
+        let rescued = false;
+        for (let retry = 0; retry < 2; retry++) {
+          try {
+            await new Promise(r => setTimeout(r, 3000));
+            const drawResult = await completeDrawViaGigyaBrowser(addisonEmail, password, result.zipCode || undefined, log);
+            if (drawResult.formSubmitted) {
+              rescued = true;
+              const updated2 = await storage.updateAccount(accountId, { status: "completed" });
+              if (updated2) broadcastAccountUpdate(updated2, ownerId);
+              broadcastLog(batchId, accountId, `✅ Rescued! Draw retry ${retry + 1} succeeded: ${addisonEmail}`, ownerId);
+              const billingPrice = await getCostPerAccount();
+              await storage.createBillingRecord({ accountId, amount: billingPrice.toFixed(2), description: `Account creation: ${firstName} ${lastName} (${addisonEmail})`, ownerId });
+              const user = await storage.getUser(ownerId);
+              if (user) await storage.updateUserFreeAccountsUsed(ownerId, user.freeAccountsUsed + 1);
+              break;
+            } else {
+              broadcastLog(batchId, accountId, `Draw rescue ${retry + 1} did not complete. ${retry < 1 ? 'Trying again...' : ''}`, ownerId);
+            }
+          } catch (retryErr: any) {
+            broadcastLog(batchId, accountId, `Draw rescue ${retry + 1} error: ${retryErr.message.substring(0, 80)}`, ownerId);
+          }
+        }
+        if (!rescued) {
+          const updated = await storage.updateAccount(accountId, { status: "draw_registering", errorMessage: "Draw step failed, queued for auto-retry" });
+          if (updated) broadcastAccountUpdate(updated, ownerId);
+          broadcastLog(batchId, accountId, `⏳ Marked for auto-retry (account exists, draw pending): ${addisonEmail}`, ownerId);
+        }
+      } else {
+        const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: errMsg });
+        if (updated) broadcastAccountUpdate(updated, ownerId);
+        broadcastLog(batchId, accountId, `Failed: ${errMsg}`, ownerId);
+      }
     }
   } catch (err: any) {
     const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: err.message });
@@ -348,7 +406,7 @@ export async function registerRoutes(
     try {
       const allAccounts = await storage.getAllAccounts();
       const now = Date.now();
-      const staleTimeout = 30 * 60 * 1000;
+      const staleTimeout = 60 * 60 * 1000;
       let cleaned = 0;
       for (const acc of allAccounts) {
         if (
@@ -381,7 +439,7 @@ export async function registerRoutes(
     if (autoRetryRunning) return;
     autoRetryRunning = true;
     try {
-      const stuckRows = await db.execute(sql`SELECT id, temp_email, la28_password, zip_code, batch_id, owner_id FROM accounts WHERE status = 'draw_registering' AND platform = 'la28' LIMIT 3`);
+      const stuckRows = await db.execute(sql`SELECT id, temp_email, la28_password, zip_code, batch_id, owner_id FROM accounts WHERE status = 'draw_registering' AND platform = 'la28' LIMIT 5`);
       if (stuckRows.rows.length === 0) { autoRetryRunning = false; return; }
       console.log(`[AutoRetry] Found ${stuckRows.rows.length} stuck draw_registering accounts`);
       for (const row of stuckRows.rows) {
@@ -420,8 +478,8 @@ export async function registerRoutes(
     autoRetryRunning = false;
   }
 
-  setInterval(autoRetryDrawAccounts, 15 * 60 * 1000);
-  setTimeout(autoRetryDrawAccounts, 60 * 1000);
+  setInterval(autoRetryDrawAccounts, 5 * 60 * 1000);
+  setTimeout(autoRetryDrawAccounts, 30 * 1000);
 
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -886,15 +944,18 @@ export async function registerRoutes(
 
       const proxies = await getDefaultProxies(proxyList);
 
+      const CONCURRENCY = 3;
       (async () => {
-        for (let i = 0; i < created.length; i++) {
-          const acc = created[i];
-          const proxy = proxies[i % proxies.length];
-          broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
-          await processAccount(
-            acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy
-          );
+        for (let i = 0; i < created.length; i += CONCURRENCY) {
+          const chunk = created.slice(i, i + CONCURRENCY);
+          await Promise.all(chunk.map((acc, j) => {
+            const proxy = proxies[(i + j) % proxies.length];
+            broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
+            return processAccount(
+              acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
+              acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy
+            );
+          }));
         }
         broadcastBatchComplete(batchId, userId);
       })();
