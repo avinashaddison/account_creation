@@ -5810,10 +5810,48 @@ export async function createOutlookAccount(
     await page.setDefaultTimeout(30000);
 
     log("Navigating to Microsoft signup...");
-    await page.goto("https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
+    try {
+      await page.goto("https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1", {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+    } catch (navErr: any) {
+      const errMsg = (navErr.message || "").substring(0, 120);
+      log("Navigation failed with proxy: " + errMsg);
+      if (usingProxy && (errMsg.includes("ERR_TUNNEL") || errMsg.includes("ERR_PROXY") || errMsg.includes("ERR_CONNECTION") || errMsg.includes("ERR_TIMED_OUT"))) {
+        log("Proxy connection failed. Retrying with direct connection (no proxy)...");
+        try { await page.close(); } catch {}
+        try { await context.close(); } catch {}
+        try { if (browser && browser.isConnected()) await browser.close(); } catch {}
+        await ensureBrowserInstalled();
+        browser = await chromium.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+        });
+        usingProxy = false;
+        context = await browser.newContext({
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          viewport: { width: 1920, height: 1080 },
+          locale: "en-US",
+        });
+        await context.addInitScript(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => false });
+          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+          Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+          (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+        });
+        page = await context.newPage();
+        await page.setDefaultNavigationTimeout(120000);
+        await page.setDefaultTimeout(30000);
+        log("Direct browser launched (no proxy). Navigating to Microsoft signup...");
+        await page.goto("https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1", {
+          waitUntil: "domcontentloaded",
+          timeout: 60000,
+        });
+      } else {
+        throw navErr;
+      }
+    }
     await page.waitForTimeout(3000 + Math.random() * 2000);
     log("Signup page loaded: " + page.url().substring(0, 80));
 
