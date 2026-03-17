@@ -7072,15 +7072,13 @@ export async function registerZenrowsAccount(
       }
     }
 
-    try { await page.close(); } catch {}
-    try { await context.close(); } catch {}
-
     } // end if (!restSignupDone)
 
     log("Step 2/6: Logging into Outlook to get verification email...");
 
-    try { if (localBrowser && localBrowser.isConnected()) await localBrowser.close(); } catch {}
-    localBrowser = null as any;
+    let zenrowsRegPage = page;
+    let zenrowsRegContext = context;
+    let zenrowsRegBrowserRef = localBrowser;
 
     let outlookBrowser: any = null;
     let useZenRowsForOutlook = false;
@@ -7271,8 +7269,8 @@ export async function registerZenrowsAccount(
     log("Inbox loaded: " + outlookPage.url().substring(0, 80));
 
     let verifyLink = "";
-    for (let attempt = 0; attempt < 12; attempt++) {
-      log(`Searching for ZenRows verification email (attempt ${attempt + 1}/12)...`);
+    for (let attempt = 0; attempt < 15; attempt++) {
+      log(`Searching for ZenRows verification email (attempt ${attempt + 1}/15)...`);
 
       try {
         const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], div[aria-label*="message"] div[tabindex="0"], div[class*="customScrollBar"] div[role="option"], div[class*="lvHighlightAllClass"], div[class*="hcpHN"] div[role="option"], div[class*="jGG6V"]');
@@ -7396,7 +7394,7 @@ export async function registerZenrowsAccount(
           log("Found 'zenrows' in page text near: " + snippet.replace(/\s+/g, " ").substring(0, 120));
         }
 
-        if (!verifyLink && (attempt === 1 || attempt === 3 || attempt === 6)) {
+        if (!verifyLink && (attempt === 1 || attempt === 3 || attempt === 5 || attempt === 8 || attempt === 11)) {
           log("Checking junk/other folder (attempt " + (attempt + 1) + ")...");
           try {
             await outlookPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -7444,14 +7442,107 @@ export async function registerZenrowsAccount(
           }
         }
 
-        if (!verifyLink && attempt < 11) {
+        if (!verifyLink && (attempt === 3 || attempt === 6 || attempt === 9)) {
+          log("Attempting to resend verification email from ZenRows (attempt " + (attempt + 1) + ")...");
+          try {
+            if (zenrowsRegPage && zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) {
+              await zenrowsRegPage.goto("https://app.zenrows.com/email/verify", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await zenrowsRegPage.waitForTimeout(3000);
+              const verifyPageText = await zenrowsRegPage.textContent("body").catch(() => "");
+              log("ZenRows verify page: " + (verifyPageText || "").replace(/\s+/g, " ").substring(0, 200));
+
+              const resendBtn = await zenrowsRegPage.$('button:has-text("Resend"), button:has-text("resend"), a:has-text("Resend"), a:has-text("resend"), button:has-text("Send again"), a:has-text("Send again"), button:has-text("send again"), [data-testid*="resend"], button:has-text("Didn"), a:has-text("Didn")');
+              if (resendBtn) {
+                await resendBtn.click();
+                log("Clicked resend verification email button!");
+                await zenrowsRegPage.waitForTimeout(3000);
+                const afterResendText = await zenrowsRegPage.textContent("body").catch(() => "");
+                log("After resend: " + (afterResendText || "").replace(/\s+/g, " ").substring(0, 150));
+              } else {
+                const allBtns = await zenrowsRegPage.$$eval('button, a[role="button"], a[href]', (els: any[]) =>
+                  els.map((e: any) => ({ tag: e.tagName, text: (e.textContent || "").trim().substring(0, 60), href: (e as any).href || "" })).filter((e: any) => e.text.length > 0)
+                ).catch(() => []);
+                log("No resend button found. Available buttons: " + JSON.stringify(allBtns.slice(0, 10)));
+
+                const clickableResend = allBtns.find((b: any) => 
+                  b.text.toLowerCase().includes("resend") || b.text.toLowerCase().includes("send again") || 
+                  b.text.toLowerCase().includes("didn't receive") || b.text.toLowerCase().includes("send verification")
+                );
+                if (clickableResend) {
+                  log("Found resend-like button via text search: " + clickableResend.text);
+                  if (clickableResend.href) {
+                    await zenrowsRegPage.goto(clickableResend.href, { waitUntil: "domcontentloaded", timeout: 15000 });
+                  } else {
+                    await zenrowsRegPage.evaluate((text: string) => {
+                      const btns = Array.from(document.querySelectorAll('button, a'));
+                      const match = btns.find(b => (b.textContent || "").trim().toLowerCase().includes(text.toLowerCase()));
+                      if (match) (match as any).click();
+                    }, clickableResend.text.substring(0, 20));
+                  }
+                  log("Clicked resend button via text match");
+                  await zenrowsRegPage.waitForTimeout(3000);
+                }
+              }
+            } else {
+              log("ZenRows registration browser no longer available for resend, launching new one...");
+              try {
+                const soaxResend = await getSoaxProxyForAccount();
+                if (soaxResend) {
+                  await ensureBrowserInstalled();
+                  const resendBrowser = await chromium.launch({
+                    headless: true,
+                    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors"],
+                    proxy: (() => { const u = new URL(soaxResend); return { server: `${u.protocol}//${u.hostname}:${u.port}`, username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) }; })(),
+                  });
+                  zenrowsRegBrowserRef = resendBrowser;
+                  const resendCtx = await resendBrowser.newContext({
+                    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                    viewport: { width: 1920, height: 1080 }, ignoreHTTPSErrors: true,
+                  });
+                  zenrowsRegContext = resendCtx;
+                  zenrowsRegPage = await resendCtx.newPage();
+
+                  await zenrowsRegPage.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+                  await zenrowsRegPage.waitForTimeout(5000);
+                  const loginEmail = await zenrowsRegPage.$('input[type="email"], input[name="email"]');
+                  if (loginEmail) {
+                    await loginEmail.fill(outlookEmail);
+                    const loginPass = await zenrowsRegPage.$('input[type="password"]');
+                    if (loginPass) {
+                      await loginPass.fill(zenrowsPassword);
+                      const loginBtn = await zenrowsRegPage.$('button[type="submit"]:has-text("Log"), button[type="submit"]:has-text("Sign"), button:has-text("Log In"), button:has-text("Sign In")');
+                      if (loginBtn) await loginBtn.click();
+                      else await zenrowsRegPage.keyboard.press("Enter");
+                      await zenrowsRegPage.waitForTimeout(5000);
+                      log("Re-logged into ZenRows for resend, navigating to verify page...");
+                      await zenrowsRegPage.goto("https://app.zenrows.com/email/verify", { waitUntil: "domcontentloaded", timeout: 30000 });
+                      await zenrowsRegPage.waitForTimeout(3000);
+                      const resendBtn2 = await zenrowsRegPage.$('button:has-text("Resend"), button:has-text("resend"), a:has-text("Resend"), button:has-text("Send again"), button:has-text("Didn")');
+                      if (resendBtn2) {
+                        await resendBtn2.click();
+                        log("Clicked resend on re-opened ZenRows session!");
+                        await zenrowsRegPage.waitForTimeout(3000);
+                      }
+                    }
+                  }
+                }
+              } catch (resendErr: any) {
+                log("Resend via new browser failed: " + (resendErr.message || "").substring(0, 100));
+              }
+            }
+          } catch (resendErr: any) {
+            log("Resend verification error: " + (resendErr.message || "").substring(0, 100));
+          }
+        }
+
+        if (!verifyLink && attempt < 14) {
           log("Verification email not found yet, refreshing inbox...");
           try {
             await outlookPage.keyboard.press("F5");
           } catch {
             await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 60000 });
           }
-          await outlookPage.waitForTimeout(8000 + Math.random() * 4000);
+          await outlookPage.waitForTimeout(10000 + Math.random() * 5000);
         }
       } catch (searchErr: any) {
         log("Inbox search error: " + (searchErr.message || "").substring(0, 100));
@@ -7475,13 +7566,15 @@ export async function registerZenrowsAccount(
       try { await outlookPage.close(); } catch {}
       try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
       zenrowsBrowser = null;
-      return { success: false, error: "Could not find ZenRows verification email after 12 attempts. The email may not have arrived yet." };
+      try { if (zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) await zenrowsRegBrowserRef.close(); } catch {}
+      return { success: false, error: "Could not find ZenRows verification email after 15 attempts (with resend). The email may not have arrived." };
     }
 
     log("Step 4/6: Clicking verification link...");
     try { await outlookPage.close(); } catch {}
     try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
     zenrowsBrowser = null;
+    try { if (zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) await zenrowsRegBrowserRef.close(); } catch {};
 
     if (!localBrowser || !localBrowser.isConnected()) {
       await ensureBrowserInstalled();
