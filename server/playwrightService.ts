@@ -5730,17 +5730,30 @@ export async function createOutlookAccount(
       log("Using Addison Residential proxy for account creation");
       browser = await getBrowser(soaxProxy);
       usingProxy = true;
+    } else if (DECODO_USER && DECODO_PASS && DECODO_HOST) {
+      const decodoUrl = getDecodoProxyUrl(10001);
+      log("Using Decodo residential proxy for account creation");
+      browser = await getBrowser(decodoUrl);
+      usingProxy = true;
     } else {
-      log("No proxy available, launching direct browser");
-      await ensureBrowserInstalled();
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-          "--disable-blink-features=AutomationControlled",
-          "--disable-features=IsolateOrigins,site-per-process",
-        ],
-      });
+      const browserProxyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+      const browserProxyUrl = browserProxyResult.rows.length > 0 ? (browserProxyResult.rows[0].value as string) : null;
+      if (browserProxyUrl) {
+        log("Using browser proxy for account creation");
+        browser = await getBrowser(browserProxyUrl);
+        usingProxy = true;
+      } else {
+        log("No proxy available, launching direct browser");
+        await ensureBrowserInstalled();
+        browser = await chromium.launch({
+          headless: true,
+          args: [
+            "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+          ],
+        });
+      }
     }
 
     const context = await browser.newContext({
