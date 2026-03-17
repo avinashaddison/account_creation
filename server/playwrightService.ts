@@ -7601,118 +7601,216 @@ export async function registerZenrowsAccount(
     await outlookPage.setDefaultTimeout(30000);
 
     log("Navigating to Outlook login...");
-    await outlookPage.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 120000 });
-    await outlookPage.waitForTimeout(2000 + Math.random() * 1500);
+    await outlookPage.goto("https://outlook.live.com/mail/", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
 
-    const olEmailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 15000 });
-    if (olEmailInput) {
-      await olEmailInput.click();
-      await outlookPage.waitForTimeout(300);
-      for (const char of outlookEmail) {
-        await outlookPage.keyboard.type(char, { delay: 0 });
-        await outlookPage.waitForTimeout(30 + Math.random() * 50);
-      }
-      log("Outlook email typed");
+    const currentLoginUrl = outlookPage.url();
+    log("Outlook login page URL: " + currentLoginUrl.substring(0, 120));
+
+    if (!currentLoginUrl.includes("login.live.com") && !currentLoginUrl.includes("login.microsoftonline.com")) {
+      log("Not redirected to login, trying login.live.com directly...");
+      await outlookPage.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 120000 });
+      await outlookPage.waitForTimeout(3000 + Math.random() * 1500);
     }
 
-    await outlookPage.waitForTimeout(500 + Math.random() * 500);
-    const nextBtn = await outlookPage.$('input[type="submit"]#idSIButton9, input[value="Next"]');
-    if (nextBtn) await nextBtn.click();
-    else await outlookPage.keyboard.press("Enter");
+    const olEmailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 20000 });
+    if (olEmailInput) {
+      await olEmailInput.click();
+      await outlookPage.waitForTimeout(500);
+      await olEmailInput.fill("");
+      await outlookPage.waitForTimeout(200);
+      await olEmailInput.type(outlookEmail, { delay: 50 + Math.random() * 30 });
+      log("Outlook email typed: " + outlookEmail.substring(0, 15) + "...");
+    }
 
-    await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
-    log("After email submit: " + outlookPage.url().substring(0, 80));
+    await outlookPage.waitForTimeout(1000 + Math.random() * 500);
+
+    let emailSubmitted = false;
+    for (let attempt = 0; attempt < 3 && !emailSubmitted; attempt++) {
+      const nextBtn = await outlookPage.$('input[type="submit"]#idSIButton9, input[value="Next"], #idSIButton9');
+      if (nextBtn) {
+        try {
+          await nextBtn.click();
+          log("Clicked Next button (attempt " + (attempt + 1) + ")");
+        } catch {
+          await outlookPage.keyboard.press("Enter");
+          log("Pressed Enter as fallback (attempt " + (attempt + 1) + ")");
+        }
+      } else {
+        await outlookPage.keyboard.press("Enter");
+        log("No Next button found, pressed Enter (attempt " + (attempt + 1) + ")");
+      }
+
+      await outlookPage.waitForTimeout(4000 + Math.random() * 2000);
+      const afterEmailUrl = outlookPage.url();
+      log("After email submit attempt " + (attempt + 1) + ": " + afterEmailUrl.substring(0, 100));
+
+      const passFieldCheck = await outlookPage.$('input[type="password"], input[name="passwd"]');
+      if (passFieldCheck) {
+        emailSubmitted = true;
+        log("Password field appeared after email submit");
+        break;
+      }
+
+      const pageState = await outlookPage.evaluate(() => {
+        const body = document.body.innerText || "";
+        const hasError = body.includes("doesn't exist") || body.includes("couldn't find") || body.includes("Try again") || body.includes("account doesn't");
+        const hasPasswordLink = body.toLowerCase().includes("use your password") || body.toLowerCase().includes("use a password");
+        const emailField = document.querySelector('input[type="email"], input[name="loginfmt"]') as HTMLInputElement;
+        const emailValue = emailField ? emailField.value : "";
+        return { hasError, hasPasswordLink, emailValue, bodySnippet: body.substring(0, 300).replace(/\s+/g, " ") };
+      }).catch(() => ({ hasError: false, hasPasswordLink: false, emailValue: "", bodySnippet: "" }));
+
+      log("Page state: error=" + pageState.hasError + " pwdLink=" + pageState.hasPasswordLink + " emailVal=" + (pageState.emailValue || "").substring(0, 20));
+
+      if (pageState.hasError) {
+        log("Microsoft shows error: " + pageState.bodySnippet.substring(0, 200));
+        break;
+      }
+
+      if (pageState.hasPasswordLink) {
+        emailSubmitted = true;
+        log("Email submitted — passwordless flow detected, will click 'Use your password'");
+        break;
+      }
+
+      if (!pageState.emailValue && attempt < 2) {
+        log("Email field cleared — re-entering email...");
+        const reEmailInput = await outlookPage.$('input[type="email"], input[name="loginfmt"]');
+        if (reEmailInput) {
+          await reEmailInput.fill(outlookEmail);
+          await outlookPage.waitForTimeout(500);
+        }
+      }
+    }
 
     let olPassInput = null;
     try {
-      olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 });
-    } catch (passErr: any) {
+      olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 8000 });
+    } catch {
+      log("Password field not visible yet, checking for 'Use your password' link...");
       const loginPageText = await outlookPage.textContent("body").catch(() => "");
-      log("Password field not found. Page text: " + (loginPageText || "").substring(0, 200).replace(/\s+/g, " "));
-      log("Login URL: " + outlookPage.url().substring(0, 120));
+      log("Page text: " + (loginPageText || "").substring(0, 250).replace(/\s+/g, " "));
+      log("Current URL: " + outlookPage.url().substring(0, 120));
 
-      const allClickables = await outlookPage.$$eval('a, button, span[role="link"], div[role="link"], [role="button"]', (els: any[]) =>
-        els.map((e: any) => ({ tag: e.tagName, id: e.id, text: (e.textContent || '').trim().substring(0, 60), href: (e as any).href || '' }))
-      ).catch(() => []);
-      log("Clickable elements: " + JSON.stringify(allClickables.filter((e: any) => e.text.length > 0)).substring(0, 500));
-
-      const usePasswordLink = await outlookPage.$('a:has-text("Use your password"), a[id*="password"], #idA_PWD_SwitchToPassword, a#idA_PWD_SwitchToPassword');
-      if (usePasswordLink) {
+      const passwordLinkSelectors = [
+        '#idA_PWD_SwitchToPassword',
+        'a[id*="PWD_Switch"]',
+        'a:has-text("Use your password")',
+        'a:has-text("Use a password")',
+        '#iShowSkip',
+      ];
+      for (const sel of passwordLinkSelectors) {
         try {
-          await usePasswordLink.click();
-          log("Clicked 'Use your password' link via selector");
-          await outlookPage.waitForTimeout(3000 + Math.random() * 1500);
-          try {
-            olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
-          } catch {}
-        } catch (clickErr: any) {
-          log("Selector click failed: " + (clickErr.message || "").substring(0, 60));
-        }
+          const link = await outlookPage.$(sel);
+          if (link) {
+            await link.click();
+            log("Clicked password switch link: " + sel);
+            await outlookPage.waitForTimeout(3000 + Math.random() * 1500);
+            try {
+              olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 8000 });
+              log("Password field appeared after clicking link");
+              break;
+            } catch {}
+          }
+        } catch {}
       }
+
       if (!olPassInput) {
         try {
-          await outlookPage.locator('text=Use your password').first().click({ force: true, timeout: 5000 });
-          log("Clicked 'Use your password' via locator with force");
-          await outlookPage.waitForTimeout(4000 + Math.random() * 2000);
-          try {
-            olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
-            log("Password field appeared after clicking 'Use your password'");
-          } catch {
-            log("Password field still not found after locator click");
-
-            const pageAfter = await outlookPage.textContent("body").catch(() => "");
-            log("Page after password link click: " + (pageAfter || "").substring(0, 200).replace(/\s+/g, " "));
-          }
-        } catch (locErr: any) {
-          log("Locator click failed: " + (locErr.message || "").substring(0, 80));
-
-          try {
-            await outlookPage.evaluate(() => {
-              const allEls = document.querySelectorAll('*');
-              for (const el of allEls) {
-                if (el.children.length === 0) {
-                  const text = (el.textContent || '').trim().toLowerCase();
-                  if (text === 'use your password') {
-                    const parent = el.parentElement;
-                    if (parent) (parent as HTMLElement).click();
-                    (el as HTMLElement).click();
-                    break;
-                  }
-                }
+          const clicked = await outlookPage.evaluate(() => {
+            const allEls = document.querySelectorAll('a, button, span, div');
+            for (const el of allEls) {
+              const text = (el.textContent || '').trim().toLowerCase();
+              if (text.includes('use your password') || text.includes('use a password') || text === 'password') {
+                (el as HTMLElement).click();
+                return text;
               }
-            });
-            log("Clicked 'Use your password' via leaf element + parent evaluate");
+            }
+            return null;
+          });
+          if (clicked) {
+            log("Clicked password link via evaluate: '" + clicked + "'");
             await outlookPage.waitForTimeout(4000 + Math.random() * 2000);
             try {
               olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
             } catch {}
-          } catch {}
-        }
+          }
+        } catch {}
       }
 
       if (!olPassInput) {
-        const setupBtn = await outlookPage.$('#idSIButton9, input[type="submit"], button[type="submit"], #acceptButton, #iNext');
-        if (setupBtn) {
-          await setupBtn.click();
+        log("Trying direct password page URL...");
+        try {
+          const currentUrl = new URL(outlookPage.url());
+          const params = currentUrl.searchParams;
+          const pwdUrl = "https://login.live.com/ppsecure/post.srf?" + params.toString();
+          log("Attempting password URL approach...");
+
+          await outlookPage.evaluate(() => {
+            const submitBtn = document.querySelector('#idSIButton9, input[type="submit"]') as HTMLElement;
+            if (submitBtn) submitBtn.click();
+          });
           await outlookPage.waitForTimeout(3000);
-          log("Clicked setup/continue button, retrying password field...");
           try {
             olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
           } catch {}
+        } catch {}
+      }
+
+      if (!olPassInput) {
+        log("Retrying with login.live.com directly...");
+        try {
+          await outlookPage.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 60000 });
+          await outlookPage.waitForTimeout(3000);
+          const retryEmailInput = await outlookPage.$('input[type="email"], input[name="loginfmt"]');
+          if (retryEmailInput) {
+            await retryEmailInput.fill(outlookEmail);
+            await outlookPage.waitForTimeout(500);
+            await outlookPage.keyboard.press("Enter");
+            await outlookPage.waitForTimeout(5000 + Math.random() * 2000);
+            try {
+              olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 });
+              log("Password field found on retry");
+            } catch {
+              const retryText = await outlookPage.textContent("body").catch(() => "");
+              log("Retry page text: " + (retryText || "").substring(0, 200).replace(/\s+/g, " "));
+
+              for (const sel of passwordLinkSelectors) {
+                try {
+                  const link2 = await outlookPage.$(sel);
+                  if (link2) {
+                    await link2.click();
+                    log("Retry: Clicked password switch: " + sel);
+                    await outlookPage.waitForTimeout(4000);
+                    try {
+                      olPassInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 10000 });
+                      break;
+                    } catch {}
+                  }
+                } catch {}
+              }
+            }
+          }
+        } catch (retryErr: any) {
+          log("Retry login error: " + (retryErr.message || "").substring(0, 80));
         }
       }
 
       if (!olPassInput) {
+        const allClickables = await outlookPage.$$eval('a, button, span[role="link"], [role="button"], input[type="submit"]', (els: any[]) =>
+          els.map((e: any) => ({ tag: e.tagName, id: e.id, text: (e.textContent || '').trim().substring(0, 60), type: (e as any).type || '' }))
+        ).catch(() => []);
+        log("All clickables on page: " + JSON.stringify(allClickables.filter((e: any) => e.text.length > 0)).substring(0, 500));
         throw new Error("Cannot find password field during Outlook login. Page may require email verification or account setup.");
       }
     }
     if (olPassInput) {
       await olPassInput.click();
       await outlookPage.waitForTimeout(300);
-      for (const char of outlookPassword) {
-        await outlookPage.keyboard.type(char, { delay: 0 });
-        await outlookPage.waitForTimeout(30 + Math.random() * 50);
-      }
+      await olPassInput.fill("");
+      await outlookPage.waitForTimeout(200);
+      await olPassInput.type(outlookPassword, { delay: 40 + Math.random() * 30 });
       log("Outlook password typed");
     }
 
