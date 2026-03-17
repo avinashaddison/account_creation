@@ -5709,8 +5709,8 @@ export async function createOutlookAccount(
   const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
 
   const randomStr = Math.random().toString(36).substring(2, 8) + Math.floor(Math.random() * 900 + 100);
-  const emailUsername = (firstName.toLowerCase() + lastName.toLowerCase().charAt(0) + randomStr).substring(0, 20);
-  const email = emailUsername + "@outlook.com";
+  let emailUsername = (firstName.toLowerCase() + lastName.toLowerCase().charAt(0) + randomStr).substring(0, 20);
+  let email = emailUsername + "@outlook.com";
   const chars = "abcdefghijklmnopqrstuvwxyz";
   const randChars = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   const password = firstName.charAt(0).toUpperCase() + lastName.charAt(0).toLowerCase() +
@@ -5817,77 +5817,119 @@ export async function createOutlookAccount(
     await page.waitForTimeout(3000 + Math.random() * 2000);
     log("Signup page loaded: " + page.url().substring(0, 80));
 
-    const emailInput = await page.waitForSelector('input[type="email"], input[name="MemberName"], #MemberName, #iSignupMemberName', { timeout: 15000 });
-    if (!emailInput) {
-      return { success: false, error: "Could not find email input on signup page" };
-    }
-    await emailInput.click();
-    await page.waitForTimeout(300);
-    for (const char of emailUsername) {
-      await page.keyboard.type(char, { delay: 0 });
-      await page.waitForTimeout(20 + Math.random() * 40);
-    }
-    log("Email username typed: " + emailUsername);
+    let currentEmailUsername = emailUsername;
+    let emailAccepted = false;
+    for (let emailRetry = 0; emailRetry < 5; emailRetry++) {
+      const emailInput = await page.waitForSelector('input[type="email"], input[name="MemberName"], #MemberName, #iSignupMemberName', { timeout: 15000 });
+      if (!emailInput) {
+        return { success: false, error: "Could not find email input on signup page" };
+      }
 
-    let passInput = await page.$('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword');
-    if (passInput) {
-      log("Password field on same page as email — filling both before submit");
-      await passInput.click();
-      await page.waitForTimeout(300);
-      for (const char of password) {
+      if (emailRetry > 0) {
+        const rndSuffix = Math.random().toString(36).substring(2, 8) + Math.floor(Math.random() * 999);
+        currentEmailUsername = (firstName.toLowerCase() + rndSuffix).substring(0, 20);
+        email = currentEmailUsername + "@outlook.com";
+        log("Retrying with new email: " + email + " (attempt " + (emailRetry + 1) + "/5)");
+        await emailInput.click({ clickCount: 3 });
+        await page.waitForTimeout(200);
+        await page.keyboard.press("Backspace");
+        await emailInput.fill("");
+        await page.waitForTimeout(300);
+      } else {
+        await emailInput.click();
+        await page.waitForTimeout(300);
+      }
+
+      for (const char of currentEmailUsername) {
         await page.keyboard.type(char, { delay: 0 });
         await page.waitForTimeout(20 + Math.random() * 40);
       }
-      log("Password typed");
-    }
+      log("Email username typed: " + currentEmailUsername);
 
-    await page.waitForTimeout(500 + Math.random() * 500);
-    const nextBtn = await page.$('input[type="submit"], #iSignupAction, #iNext');
-    if (nextBtn) await nextBtn.click();
-    else await page.keyboard.press("Enter");
-
-    await page.waitForTimeout(4000 + Math.random() * 2000);
-
-    const emailError = await page.$('#MemberNameError');
-    if (emailError) {
-      const errText = await emailError.textContent().catch(() => "");
-      if (errText && errText.trim().length > 0 && !errText.toLowerCase().includes("password")) {
-        log("Email error: " + errText.trim().substring(0, 100));
-        return { success: false, error: "Email error: " + errText.trim() };
+      let passInput = await page.$('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword');
+      if (passInput) {
+        log("Password field on same page as email — filling both before submit");
+        await passInput.click();
+        await page.waitForTimeout(300);
+        for (const char of password) {
+          await page.keyboard.type(char, { delay: 0 });
+          await page.waitForTimeout(20 + Math.random() * 40);
+        }
+        log("Password typed");
       }
-    }
-
-    const passError = await page.$('#PasswordError');
-    if (passError) {
-      const errText = await passError.textContent().catch(() => "");
-      if (errText && errText.trim().length > 0) {
-        log("Password error: " + errText.trim().substring(0, 100));
-        return { success: false, error: "Password error: " + errText.trim() };
-      }
-    }
-
-    if (!passInput) {
-      log("Looking for password field on next page...");
-      passInput = await page.waitForSelector('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword', { timeout: 15000 }).catch(() => null);
-      if (!passInput) {
-        const currentContent = await page.textContent("body").catch(() => "");
-        log("No password field. Page: " + (currentContent || "").substring(0, 150).replace(/\s+/g, " "));
-        return { success: false, error: "Password field not found on signup page" };
-      }
-      await passInput.click();
-      await page.waitForTimeout(300);
-      for (const char of password) {
-        await page.keyboard.type(char, { delay: 0 });
-        await page.waitForTimeout(20 + Math.random() * 40);
-      }
-      log("Password typed");
 
       await page.waitForTimeout(500 + Math.random() * 500);
-      const passNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
-      if (passNext) await passNext.click();
+      const nextBtn = await page.$('input[type="submit"], #iSignupAction, #iNext');
+      if (nextBtn) await nextBtn.click();
       else await page.keyboard.press("Enter");
 
-      await page.waitForTimeout(3000 + Math.random() * 2000);
+      await page.waitForTimeout(4000 + Math.random() * 2000);
+
+      const pageContent = await page.textContent("body").catch(() => "");
+      const isNotAvailable = (pageContent || "").toLowerCase().includes("isn't available") || (pageContent || "").toLowerCase().includes("is not available") || (pageContent || "").toLowerCase().includes("already taken");
+
+      const emailError = await page.$('#MemberNameError');
+      if (emailError) {
+        const errText = await emailError.textContent().catch(() => "");
+        if (errText && errText.trim().length > 0 && !errText.toLowerCase().includes("password")) {
+          log("Email error: " + errText.trim().substring(0, 100));
+          if (errText.toLowerCase().includes("available") || errText.toLowerCase().includes("taken") || isNotAvailable) {
+            log("Email taken, will retry with different email...");
+            continue;
+          }
+          return { success: false, error: "Email error: " + errText.trim() };
+        }
+      }
+
+      if (isNotAvailable && emailRetry < 4) {
+        log("Email '" + currentEmailUsername + "' not available, trying another...");
+        continue;
+      }
+
+      const passError = await page.$('#PasswordError');
+      if (passError) {
+        const errText = await passError.textContent().catch(() => "");
+        if (errText && errText.trim().length > 0) {
+          log("Password error: " + errText.trim().substring(0, 100));
+          return { success: false, error: "Password error: " + errText.trim() };
+        }
+      }
+
+      if (!passInput) {
+        log("Looking for password field on next page...");
+        passInput = await page.waitForSelector('input[type="password"], input[name="Password"], #PasswordInput, #iSignupPassword', { timeout: 15000 }).catch(() => null);
+        if (!passInput) {
+          const currentContent = await page.textContent("body").catch(() => "");
+          if ((currentContent || "").toLowerCase().includes("isn't available") || (currentContent || "").toLowerCase().includes("not available")) {
+            log("Email still not available on password page, retrying...");
+            continue;
+          }
+          log("No password field. Page: " + (currentContent || "").substring(0, 150).replace(/\s+/g, " "));
+          return { success: false, error: "Password field not found on signup page" };
+        }
+        await passInput.click();
+        await page.waitForTimeout(300);
+        for (const char of password) {
+          await page.keyboard.type(char, { delay: 0 });
+          await page.waitForTimeout(20 + Math.random() * 40);
+        }
+        log("Password typed");
+
+        await page.waitForTimeout(500 + Math.random() * 500);
+        const passNext = await page.$('input[type="submit"], #iSignupAction, #iNext');
+        if (passNext) await passNext.click();
+        else await page.keyboard.press("Enter");
+
+        await page.waitForTimeout(3000 + Math.random() * 2000);
+      }
+
+      emailAccepted = true;
+      emailUsername = currentEmailUsername;
+      break;
+    }
+
+    if (!emailAccepted) {
+      return { success: false, error: "Could not find an available Outlook email after 5 attempts" };
     }
 
     log("After email/password: " + page.url().substring(0, 80));
