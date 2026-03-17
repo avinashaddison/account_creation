@@ -7404,29 +7404,44 @@ export async function registerZenrowsAccount(
           log("Found 'zenrows' in page text near: " + snippet.replace(/\s+/g, " ").substring(0, 120));
         }
 
-        if (!verifyLink && (attempt === 1 || attempt === 3 || attempt === 5 || attempt === 8 || attempt === 11)) {
-          log("Checking junk/other folder (attempt " + (attempt + 1) + ")...");
+        if (!verifyLink && attempt >= 1) {
+          log("Checking junk/spam folder (attempt " + (attempt + 1) + ")...");
           try {
             await outlookPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await outlookPage.waitForTimeout(4000);
-            const junkRaw = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], [aria-label*="message list"] [role="treeitem"], [aria-label*="Message list"] div[role="option"]');
+            await outlookPage.waitForTimeout(5000);
+
+            const junkBodyText = await outlookPage.textContent("body").catch(() => "");
+            log("Junk page text length: " + (junkBodyText || "").length);
+
+            const junkRaw = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], [aria-label*="message list"] [role="treeitem"], [aria-label*="Message list"] div[role="option"], div[role="row"], div[class*="jGG6V"], div[tabindex="0"][role="option"]');
             const junkItems = [];
+            const folderNames = ["inbox", "sent items", "drafts", "junk email", "deleted items", "archive", "folders", "favorites", "notes", "file", "navigation", "groups"];
             for (const ji of junkRaw) {
               const jt = await ji.textContent().catch(() => "");
-              if ((jt || "").trim().length > 10 && !(jt || "").trim().startsWith("File") && !(jt || "").trim().startsWith("Navigation")) junkItems.push(ji);
+              const t = (jt || "").trim().toLowerCase();
+              if (t.length > 10 && !folderNames.some(fn => t === fn || t.startsWith(fn + "selected") || t.match(new RegExp("^" + fn + "\\d")))) {
+                junkItems.push(ji);
+              }
             }
-            log(`Junk folder: ${junkItems.length} email items`);
+            log(`Junk folder: ${junkItems.length} email items (raw: ${junkRaw.length})`);
+
             for (const item of junkItems) {
               const text = await item.textContent().catch(() => "");
-              if ((text || "").toLowerCase().includes("zenrows") || ((text || "").toLowerCase().includes("verify") && (text || "").toLowerCase().includes("email"))) {
-                log("Found ZenRows email in junk folder: " + (text || "").replace(/\s+/g, " ").substring(0, 100));
+              const tl = (text || "").toLowerCase();
+              if (tl.includes("zenrows") || tl.includes("verify your email") || 
+                  (tl.includes("verify") && tl.includes("email")) ||
+                  tl.includes("verify@") || tl.includes("e.zenrows") ||
+                  tl.includes("activate your") || tl.includes("confirm your email")) {
+                log("Found ZenRows/verify email in junk: " + (text || "").replace(/\s+/g, " ").substring(0, 120));
                 try { await item.click({ force: true, timeout: 5000 }); } catch { await outlookPage.evaluate((el: any) => el.click(), item).catch(() => {}); }
-                await outlookPage.waitForTimeout(5000);
+                await outlookPage.waitForTimeout(4000);
+
                 const junkLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
                   links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
                 );
                 const externalJunkLinks = junkLinks.filter((l: any) => l.href && l.href.startsWith("http") && !l.href.includes("outlook.live.com") && !l.href.includes("microsoft.com") && !l.href.includes("office.com") && !l.href.includes("aka.ms") && !l.href.startsWith("mailto:"));
                 log("External links in junk email: " + JSON.stringify(externalJunkLinks.slice(0, 8).map((l: any) => ({ href: l.href.substring(0, 120), text: l.text.substring(0, 40) }))));
+
                 for (const link of externalJunkLinks) {
                   if (link.href && (link.href.includes("zenrows") || link.text.toLowerCase().includes("verify") || link.text.toLowerCase().includes("confirm") || link.text.toLowerCase().includes("activate"))) {
                     verifyLink = link.href;
@@ -7441,12 +7456,39 @@ export async function registerZenrowsAccount(
                 break;
               }
             }
+
+            if (!verifyLink && junkItems.length > 0) {
+              const firstTexts = [];
+              for (let i = 0; i < Math.min(5, junkItems.length); i++) {
+                const t = await junkItems[i].textContent().catch(() => "");
+                firstTexts.push((t || "").replace(/\s+/g, " ").substring(0, 100));
+              }
+              log("Junk emails preview: " + JSON.stringify(firstTexts));
+
+              for (const item of junkItems) {
+                const text = await item.textContent().catch(() => "");
+                if ((text || "").length > 10) {
+                  try { await item.click({ force: true, timeout: 5000 }); } catch { await outlookPage.evaluate((el: any) => el.click(), item).catch(() => {}); }
+                  await outlookPage.waitForTimeout(3000);
+                  const readLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
+                    links.map((a: any) => ({ href: a.href, text: (a.textContent || "").substring(0, 100) }))
+                  );
+                  const zenrowsLink = readLinks.find((l: any) => l.href && l.href.includes("zenrows"));
+                  if (zenrowsLink) {
+                    verifyLink = zenrowsLink.href;
+                    log("Found ZenRows link by clicking junk email: " + verifyLink.substring(0, 150));
+                    break;
+                  }
+                }
+              }
+            }
+
             if (!verifyLink) {
               await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
               await outlookPage.waitForTimeout(4000);
             }
           } catch (junkErr: any) {
-            log("Junk folder check error: " + (junkErr.message || "").substring(0, 60));
+            log("Junk folder check error: " + (junkErr.message || "").substring(0, 100));
             await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
             await outlookPage.waitForTimeout(3000);
           }
