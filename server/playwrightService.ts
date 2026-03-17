@@ -6629,12 +6629,12 @@ export async function registerZenrowsAccount(
       }
     } catch {}
 
+    let context: any;
+    let page: any;
+
     if (!restSignupDone) {
 
     log("Launching browser for ZenRows registration (cannot use ZenRows browser for its own site)...");
-
-    let context: any;
-    let page: any;
 
     let browserProxyUrl = "";
     const soaxProxy = await getSoaxProxyForAccount();

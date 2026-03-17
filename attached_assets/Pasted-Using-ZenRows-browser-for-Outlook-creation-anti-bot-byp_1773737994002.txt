@@ -1,0 +1,72 @@
+Using ZenRows browser for Outlook creation (anti-bot bypass)...
+14:26:46ZenRows browser connected successfully
+14:26:46Navigating to Microsoft signup...
+14:26:55Signup page loaded: https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uifla
+14:27:00Email username typed: avaw3qh0gc964
+14:27:07Looking for password field on next page...
+14:27:09Password typed
+14:27:13After email/password: https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uifla
+14:27:13DOB/country page detected, looking for form elements...
+14:27:13Form elements: [{"tag":"BUTTON","id":"countryDropdownId","name":"countryDropdownName","ariaLabel":"Country/Region","role":"combobox","type":"button","optionCount":0,"text":"United States"},{"tag":"BUTTON","id":"BirthMonthDropdown","name":"BirthMonth","ariaLabel":"Birth month","role":"combobox","type":"button","optionCount":0,"text":""},{"tag":"BUTTON","id":"BirthDayDropdown","name":"BirthDay","ariaLabel":"Birth day","role":"combobox","type":"button","optionCount":0,"text":""},{"tag":"INPUT","id":"floatingLabel
+14:27:13DOB page detected, trying custom dropdown approach...
+14:27:31Month selected: December
+14:27:36Day selected: 17
+14:27:37Year filled: 1996
+14:27:37DOB filled: 12/17/1996
+14:27:43After DOB submit: https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uifla
+14:27:43Name page appeared after DOB, filling name...
+14:27:44Name inputs: [{"id":"firstNameInput","name":"firstNameInput","ariaLabel":"","placeholder":"","type":"text"},{"id":"lastNameInput","name":"lastNameInput","ariaLabel":"","placeholder":"","type":"text"}]
+14:27:44First name filled via generic input[0]: Ava
+14:27:44Last name filled via generic input[1]: White
+14:27:44Name filled: Ava White
+14:27:51After name submit: https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uifla
+14:27:51After name page: i6209 avaw3qh0gc964@outlook.comLet's prove you're humanPress and hold the button.Help and feedbackTerms of usePrivacy and cookiesU
+14:27:51Checking for captcha...
+14:27:51PerimeterX press-and-hold challenge detected (attempt 1/8)...
+14:27:51Found PerimeterX iframe: https://iframe.hsprotect.net/index.html?app_id=PXzC5j78di&session_id=76d2df30a03
+14:27:51Actual iframe bounding box: {"x":588,"y":486.5,"width":360,"height":90}
+14:27:53px-captcha raw box: {"x":-9451,"y":109.5,"width":0,"height":0}
+14:27:53px-captcha inner rect: {"x":0,"y":0,"width":0,"height":0}
+14:27:53Computed captcha box: {"x":618,"y":506.5,"width":300,"height":50}
+14:27:54Mouse down on px-captcha at (819,536), holding...
+14:27:54Hold time: 16702ms in 50 steps
+14:28:17Mouse up after hold, waiting for result...
+14:28:23PerimeterX challenge solved! Page moved past challenge
+14:28:27After captcha/submit: https://login.live.com/ppsecure/post.srf?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&ua
+14:28:30Outlook account created successfully!
+14:28:30Email: avaw3qh0gc964@outlook.com
+14:28:30Outlook account ready: avaw3qh0gc964@outlook.com
+14:28:30Step 1/6: Registering on ZenRows...
+14:28:30Using email: avaw3qh0gc964@outlook.com
+14:28:30Generated ZenRows password: Zrafqhevrc!686
+14:28:30Attempting ZenRows signup via direct HTTP...
+14:28:30Fetching register page directly...
+14:28:30Register page response: 403 (length=5492)
+14:28:30REST API error: <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=Edge"><meta nam
+14:28:30REST API signup failed: ZenRows REST API returned 403: <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta http-equiv="Content-Typ — falling back to browser signup
+14:28:30Launching browser for ZenRows registration (cannot use ZenRows browser for its own site)...
+14:28:30Using SOAX residential proxy for ZenRows registration
+14:28:35Local browser launched (with proxy)
+14:28:35Navigating to ZenRows register page...
+14:28:35Navigation failed with proxy: page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://app.zenrows.com/register Call log: [2m - navigating to "https://app.zenrows.com/register", w
+14:28:35Proxy connection failed. Retrying with direct connection (no proxy)...
+14:28:35Direct browser launched (no proxy). Navigating to ZenRows...
+14:28:41Initial page: https://app.zenrows.com/register
+14:28:41Page title: Sign Up - Web Data Automation Made Easy - ZenRows, body preview:
+14:28:41Cloudflare challenge detected, waiting up to 45s for auto-solve...
+14:28:46Cloudflare challenge resolved after 5s
+14:28:46After CF wait: https://app.zenrows.com/register
+14:28:46Found email input with: input[type="email"]
+14:28:47Email filled: avaw3qh0gc964@outlook.com
+14:28:49Password filled
+14:28:50Checking for captcha on registration page...
+14:28:50Captcha scan: turnstile=none recaptchaV2=none recaptchaV3=none hcaptcha=none
+14:28:50Iframes: (no src), (no src), (no src), (no src), (no src), (no src)
+14:28:50Buttons found: submit|Sign up with Google|inline-flex items-center gap-1 justify-c | submit|Sign up with Github|inline-flex items-center gap-1 justify-c | button||absolute right-2 top-1/2 transform -tran | submit|Sign Up|inline-flex items-center gap-1 justify-c
+14:28:51Found email signup button: 'Sign Up'
+14:28:53Clicked signup button
+14:29:03After signup: https://app.zenrows.com/phone/input
+14:29:03ZenRows redirected to verification/phone page: https://app.zenrows.com/phone/input
+14:29:03Step 2/6: Logging into Outlook to get verification email...
+14:29:03Error: page is not defined
+14:29:03Registration failed: page is not defined
