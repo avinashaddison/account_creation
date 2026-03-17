@@ -7203,13 +7203,15 @@ export async function registerZenrowsAccount(
             "https://app.zenrows.com/api/v1/scrapers",
             "https://app.zenrows.com/api/v1/user",
             "https://app.zenrows.com/api/v1/account",
+            "https://app.zenrows.com/api/v1/apikey",
+            "https://app.zenrows.com/api/v1/api-key",
           ];
           for (const endpoint of apiEndpoints) {
             try {
               const resp = await page.evaluate(async (url: string) => {
                 const r = await fetch(url, { credentials: "include" });
                 const text = await r.text();
-                return { status: r.status, body: text.substring(0, 500) };
+                return { status: r.status, body: text.substring(0, 2000) };
               }, endpoint);
               const sanitizedBody = (resp.body || "").replace(/[a-f0-9]{40,}/g, (m: string) => m.substring(0, 8) + "***").substring(0, 200);
               log("API " + endpoint.split("/").pop() + ": " + resp.status + " → " + sanitizedBody);
