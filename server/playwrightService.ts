@@ -5720,56 +5720,92 @@ export async function createOutlookAccount(
   const birthMonth = Math.floor(Math.random() * 12) + 1;
   const birthDay = Math.floor(Math.random() * 28) + 1;
 
+  let useZenRowsBrowser = false;
+
   try {
     log("Creating new Outlook account...");
     log("Generated email: " + email);
     log("Generated password: " + password.substring(0, 3) + "***");
 
-    const soaxProxy = await getSoaxProxyForAccount();
-    if (soaxProxy) {
-      log("Using Addison Residential proxy for account creation");
-      browser = await getBrowser(soaxProxy);
-      usingProxy = true;
-    } else if (DECODO_USER && DECODO_PASS && DECODO_HOST) {
-      const decodoUrl = getDecodoProxyUrl(10001);
-      log("Using Decodo residential proxy for account creation");
-      browser = await getBrowser(decodoUrl);
-      usingProxy = true;
-    } else {
-      const browserProxyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
-      const browserProxyUrl = browserProxyResult.rows.length > 0 ? (browserProxyResult.rows[0].value as string) : null;
-      if (browserProxyUrl) {
-        log("Using browser proxy for account creation");
-        browser = await getBrowser(browserProxyUrl);
+    let zenrowsUrl = "";
+    try {
+      const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+      if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
+        zenrowsUrl = zrRow.rows[0].value as string;
+      }
+    } catch {}
+
+    if (zenrowsUrl) {
+      log("Using ZenRows browser for Outlook creation (anti-bot bypass)...");
+      if (!zenrowsUrl.includes('proxy_country=')) {
+        zenrowsUrl += (zenrowsUrl.includes('?') ? '&' : '?') + 'proxy_country=us';
+      }
+      try {
+        browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+        useZenRowsBrowser = true;
         usingProxy = true;
-      } else {
-        log("No proxy available, launching direct browser");
-        await ensureBrowserInstalled();
-        browser = await chromium.launch({
-          headless: true,
-          args: [
-            "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process",
-          ],
-        });
+        log("ZenRows browser connected successfully");
+      } catch (zrErr: any) {
+        log("ZenRows browser connection failed: " + (zrErr.message || "").substring(0, 100) + ", falling back to proxy...");
+        zenrowsUrl = "";
       }
     }
 
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      viewport: { width: 1920, height: 1080 },
-      locale: "en-US",
-    });
+    if (!useZenRowsBrowser) {
+      const soaxProxy = await getSoaxProxyForAccount();
+      if (soaxProxy) {
+        log("Using Addison Residential proxy for account creation");
+        browser = await getBrowser(soaxProxy);
+        usingProxy = true;
+      } else if (DECODO_USER && DECODO_PASS && DECODO_HOST) {
+        const decodoUrl = getDecodoProxyUrl(10001);
+        log("Using Decodo residential proxy for account creation");
+        browser = await getBrowser(decodoUrl);
+        usingProxy = true;
+      } else {
+        const browserProxyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`);
+        const browserProxyUrl = browserProxyResult.rows.length > 0 ? (browserProxyResult.rows[0].value as string) : null;
+        if (browserProxyUrl) {
+          log("Using browser proxy for account creation");
+          browser = await getBrowser(browserProxyUrl);
+          usingProxy = true;
+        } else {
+          log("No proxy available, launching direct browser");
+          await ensureBrowserInstalled();
+          browser = await chromium.launch({
+            headless: true,
+            args: [
+              "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+              "--disable-blink-features=AutomationControlled",
+              "--disable-features=IsolateOrigins,site-per-process",
+            ],
+          });
+        }
+      }
+    }
 
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-      (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
-    });
+    let context: any;
+    let page: any;
 
-    const page = await context.newPage();
+    if (useZenRowsBrowser) {
+      context = browser.contexts()[0] || await browser.newContext();
+      page = await context.newPage();
+    } else {
+      context = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1920, height: 1080 },
+        locale: "en-US",
+      });
+
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+      });
+
+      page = await context.newPage();
+    }
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
 
