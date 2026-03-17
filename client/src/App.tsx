@@ -23,6 +23,7 @@ import Settings from "@/pages/Settings";
 import OutlookLogin from "@/pages/OutlookLogin";
 import OutlookCreate from "@/pages/OutlookCreate";
 import ZenRowsRegister from "@/pages/ZenRowsRegister";
+import PrivateAccount from "@/pages/PrivateAccount";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -62,6 +63,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
             <Route path="/admin/earnings" component={Earnings} />
             <Route path="/admin/manage-admins" component={ManageAdmins} />
             <Route path="/admin/settings" component={Settings} />
+            <Route path="/admin/private-account" component={PrivateAccount} />
           </>
         )}
         <Route component={NotFound} />

@@ -50,6 +50,7 @@ The application features a modern full-stack architecture.
     -   **UEFA:** Account creation with email verification.
     -   **Outlook Create:** Automated Microsoft/Outlook account creation with random identity generation (name, email, DOB), FunCaptcha solving via CapSolver, and batch support (up to 10 accounts). Accessible via `/admin/outlook-create`. Uses the `outlook` service access permission.
     -   **Outlook Login:** Automated Outlook/Microsoft account login via ZenRows browser with FunCaptcha solving. Accessible via `/admin/outlook-login`.
+    -   **Private Account (Superadmin):** Private stock management for Outlook accounts and ZenRows API keys. Two tabs: "Outlook Accounts" shows all created Outlook accounts (auto-saved when created), "ZenRows API Stock" shows all ZenRows API keys (auto-saved on registration). Manual add and delete supported. Tables: `private_outlook_accounts`, `private_zenrows_keys`. Accessible via `/admin/private-account`.
 
 ## External Dependencies
 -   **Email Service:** mail.tm API (branded as "Addison Mail") for temporary email address generation and inbox access.

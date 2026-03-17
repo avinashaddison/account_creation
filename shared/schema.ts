@@ -93,6 +93,25 @@ export const tempEmails = pgTable("temp_emails", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const privateOutlookAccounts = pgTable("private_outlook_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  password: text("password").notNull(),
+  status: text("status").notNull().default("active"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const privateZenrowsKeys = pgTable("private_zenrows_keys", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  apiKey: text("api_key").notNull(),
+  outlookEmail: text("outlook_email"),
+  outlookPassword: text("outlook_password"),
+  status: text("status").notNull().default("active"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -115,3 +134,17 @@ export const insertTempEmailSchema = createInsertSchema(tempEmails).omit({
 });
 export type TempEmail = typeof tempEmails.$inferSelect;
 export type InsertTempEmail = z.infer<typeof insertTempEmailSchema>;
+
+export const insertPrivateOutlookSchema = createInsertSchema(privateOutlookAccounts).omit({
+  id: true,
+  createdAt: true,
+});
+export type PrivateOutlookAccount = typeof privateOutlookAccounts.$inferSelect;
+export type InsertPrivateOutlook = z.infer<typeof insertPrivateOutlookSchema>;
+
+export const insertPrivateZenrowsKeySchema = createInsertSchema(privateZenrowsKeys).omit({
+  id: true,
+  createdAt: true,
+});
+export type PrivateZenrowsKey = typeof privateZenrowsKeys.$inferSelect;
+export type InsertPrivateZenrowsKey = z.infer<typeof insertPrivateZenrowsKeySchema>;

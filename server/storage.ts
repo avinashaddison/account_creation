@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -40,6 +40,14 @@ export interface IStorage {
   getAllTempEmails(): Promise<TempEmail[]>;
   getTempEmail(id: string): Promise<TempEmail | undefined>;
   deleteTempEmail(id: string): Promise<void>;
+  createPrivateOutlook(data: InsertPrivateOutlook): Promise<PrivateOutlookAccount>;
+  getAllPrivateOutlooks(): Promise<PrivateOutlookAccount[]>;
+  deletePrivateOutlook(id: string): Promise<void>;
+  createPrivateZenrowsKey(data: InsertPrivateZenrowsKey): Promise<PrivateZenrowsKey>;
+  getAllPrivateZenrowsKeys(): Promise<PrivateZenrowsKey[]>;
+  deletePrivateZenrowsKey(id: string): Promise<void>;
+  updatePrivateZenrowsKeyStatus(id: string, status: string): Promise<void>;
+  updatePrivateOutlookStatus(id: string, status: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -279,6 +287,40 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTempEmail(id: string): Promise<void> {
     await db.delete(tempEmails).where(eq(tempEmails.id, id));
+  }
+
+  async createPrivateOutlook(data: InsertPrivateOutlook): Promise<PrivateOutlookAccount> {
+    const [row] = await db.insert(privateOutlookAccounts).values(data).returning();
+    return row;
+  }
+
+  async getAllPrivateOutlooks(): Promise<PrivateOutlookAccount[]> {
+    return db.select().from(privateOutlookAccounts).orderBy(desc(privateOutlookAccounts.createdAt));
+  }
+
+  async deletePrivateOutlook(id: string): Promise<void> {
+    await db.delete(privateOutlookAccounts).where(eq(privateOutlookAccounts.id, id));
+  }
+
+  async updatePrivateOutlookStatus(id: string, status: string): Promise<void> {
+    await db.update(privateOutlookAccounts).set({ status }).where(eq(privateOutlookAccounts.id, id));
+  }
+
+  async createPrivateZenrowsKey(data: InsertPrivateZenrowsKey): Promise<PrivateZenrowsKey> {
+    const [row] = await db.insert(privateZenrowsKeys).values(data).returning();
+    return row;
+  }
+
+  async getAllPrivateZenrowsKeys(): Promise<PrivateZenrowsKey[]> {
+    return db.select().from(privateZenrowsKeys).orderBy(desc(privateZenrowsKeys.createdAt));
+  }
+
+  async deletePrivateZenrowsKey(id: string): Promise<void> {
+    await db.delete(privateZenrowsKeys).where(eq(privateZenrowsKeys.id, id));
+  }
+
+  async updatePrivateZenrowsKeyStatus(id: string, status: string): Promise<void> {
+    await db.update(privateZenrowsKeys).set({ status }).where(eq(privateZenrowsKeys.id, id));
   }
 }
 

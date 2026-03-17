@@ -1931,6 +1931,9 @@ export async function registerRoutes(
             );
             if (result.success && result.email && result.password) {
               results.push({ email: result.email, password: result.password });
+              try {
+                await storage.createPrivateOutlook({ email: result.email, password: result.password, status: "active", createdBy: userId });
+              } catch (saveErr: any) {}
               broadcastLog(batchId, `acc-${i}`, `[${accountNum}] Account created: ${result.email}`, userId);
               broadcast({ type: "outlook_create_result", batchId, index: i, success: true, email: result.email, password: result.password }, userId);
             } else {
@@ -2027,6 +2030,15 @@ export async function registerRoutes(
             } catch (saveErr: any) {
               broadcastLog(batchId, regId, `Warning: Could not auto-save API key: ${saveErr.message}`, userId);
             }
+            try {
+              await storage.createPrivateZenrowsKey({
+                apiKey: result.apiKey,
+                outlookEmail: result.outlookEmail || null,
+                outlookPassword: result.outlookPassword || null,
+                status: "active",
+                createdBy: userId,
+              });
+            } catch (zkErr: any) {}
             broadcast({ type: "zenrows_register_result", regId, batchId, success: true, apiKey: result.apiKey, outlookEmail: result.outlookEmail, outlookPassword: result.outlookPassword }, userId);
           } else {
             broadcastLog(batchId, regId, `Registration failed: ${result.error || "Unknown error"}`, userId);
@@ -2041,6 +2053,60 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get("/api/private/outlook", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const accounts = await storage.getAllPrivateOutlooks();
+    res.json(accounts);
+  });
+
+  app.post("/api/private/outlook", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+    const account = await storage.createPrivateOutlook({ email, password, status: "active", createdBy: req.session.userId });
+    res.json(account);
+  });
+
+  app.delete("/api/private/outlook/:id", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    await storage.deletePrivateOutlook(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.patch("/api/private/outlook/:id/status", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const { status } = req.body;
+    await storage.updatePrivateOutlookStatus(req.params.id, status);
+    res.json({ success: true });
+  });
+
+  app.get("/api/private/zenrows", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const keys = await storage.getAllPrivateZenrowsKeys();
+    res.json(keys);
+  });
+
+  app.post("/api/private/zenrows", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const { apiKey, outlookEmail, outlookPassword } = req.body;
+    if (!apiKey) return res.status(400).json({ error: "API key required" });
+    const key = await storage.createPrivateZenrowsKey({ apiKey, outlookEmail, outlookPassword, status: "active", createdBy: req.session.userId });
+    res.json(key);
+  });
+
+  app.delete("/api/private/zenrows/:id", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    await storage.deletePrivateZenrowsKey(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.patch("/api/private/zenrows/:id/status", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const { status } = req.body;
+    await storage.updatePrivateZenrowsKeyStatus(req.params.id, status);
+    res.json({ success: true });
   });
 
   return httpServer;
