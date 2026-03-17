@@ -6192,7 +6192,7 @@ export async function createOutlookAccount(
 
         if (captchaAttempt > 0 && captchaAttempt % 3 === 0) {
           log("Waiting extra time before retry " + (captchaAttempt + 1) + "...");
-          await page.waitForTimeout(5000 + Math.random() * 5000);
+          await page.waitForTimeout(2000 + Math.random() * 2000);
         }
 
         const hsFrame = page.frames().find((f: any) => f.url().includes('hsprotect.net') || f.url().includes('human'));
@@ -6282,8 +6282,8 @@ export async function createOutlookAccount(
               await page.mouse.down();
               log("Mouse down on px-captcha at (" + Math.round(cx) + "," + Math.round(cy) + "), holding...");
 
-              const holdTime = 12000 + Math.random() * 6000;
-              const holdSteps = 40 + Math.floor(Math.random() * 20);
+              const holdTime = 10000 + Math.random() * 4000;
+              const holdSteps = 35 + Math.floor(Math.random() * 15);
               log("Hold time: " + Math.round(holdTime) + "ms in " + holdSteps + " steps");
               for (let s = 0; s < holdSteps; s++) {
                 const stepDelay = (holdTime / holdSteps) * (0.7 + Math.random() * 0.6);
@@ -6296,7 +6296,7 @@ export async function createOutlookAccount(
 
               await page.mouse.up();
               log("Mouse up after hold, waiting for result...");
-              await page.waitForTimeout(4000 + Math.random() * 4000);
+              await page.waitForTimeout(3000 + Math.random() * 2000);
 
               const afterHoldText = await page.textContent("body").catch(() => "");
               const afterLower = (afterHoldText || "").toLowerCase();
@@ -6599,12 +6599,29 @@ export async function registerZenrowsAccount(
   try {
     if (!outlookEmail || !outlookPassword) {
       log("Step 0/6: Creating fresh Outlook account...");
-      const outlookResult = await createOutlookAccount(log);
-      if (!outlookResult.success || !outlookResult.email || !outlookResult.password) {
-        return { success: false, error: "Failed to create Outlook account: " + (outlookResult.error || "Unknown error") };
+      let outlookCreated = false;
+      for (let outlookRetry = 0; outlookRetry < 3; outlookRetry++) {
+        if (outlookRetry > 0) {
+          log("Retrying Outlook creation (attempt " + (outlookRetry + 1) + "/3) — previous session timed out...");
+          await new Promise(r => setTimeout(r, 3000));
+        }
+        const outlookResult = await createOutlookAccount(log);
+        if (outlookResult.success && outlookResult.email && outlookResult.password) {
+          outlookEmail = outlookResult.email;
+          outlookPassword = outlookResult.password;
+          outlookCreated = true;
+          break;
+        }
+        const errMsg = outlookResult.error || "Unknown error";
+        if (errMsg.includes("browser has been closed") || errMsg.includes("Target page") || errMsg.includes("Target context")) {
+          log("ZenRows browser session timed out during Outlook creation. Will retry with fresh session...");
+          continue;
+        }
+        return { success: false, error: "Failed to create Outlook account: " + errMsg };
       }
-      outlookEmail = outlookResult.email;
-      outlookPassword = outlookResult.password;
+      if (!outlookCreated) {
+        return { success: false, error: "Failed to create Outlook account after 3 attempts (ZenRows session keeps timing out)" };
+      }
       log("Outlook account ready: " + outlookEmail);
     }
 
@@ -7093,6 +7110,17 @@ export async function registerZenrowsAccount(
       log("ZenRows shows 'Invalid email address' — will try ZenRows login as fallback (account may already exist).");
     } else if (afterSignupUrl.includes("/phone/input") || afterSignupUrl.includes("/verify") || afterSignupUrl.includes("/confirm")) {
       log("ZenRows redirected to verification/phone page: " + afterSignupUrl.substring(0, 100));
+      const sendCodeBtn = await page.$('button:has-text("Send code"), button:has-text("send code"), button:has-text("Send Code")');
+      if (sendCodeBtn) {
+        const scText = await sendCodeBtn.textContent().catch(() => "");
+        await sendCodeBtn.click();
+        log("Clicked '" + (scText || "").trim() + "' button immediately after signup to trigger verification email");
+        await page.waitForTimeout(3000);
+        const afterSendCodeText = await page.textContent("body").catch(() => "");
+        log("After Send code: " + (afterSendCodeText || "").replace(/\s+/g, " ").substring(0, 200));
+      } else {
+        log("No 'Send code' button found on verification page. Page text: " + (pageContent || "").replace(/\s+/g, " ").substring(0, 200));
+      }
     } else if (needsVerification) {
       log("ZenRows requires email verification");
     } else if (alreadyExists) {
@@ -7372,6 +7400,7 @@ export async function registerZenrowsAccount(
     log("Inbox loaded: " + outlookPage.url().substring(0, 80));
 
     let verifyLink = "";
+    let verifyCode = "";
     for (let attempt = 0; attempt < 15; attempt++) {
       log(`Searching for ZenRows verification email (attempt ${attempt + 1}/15)...`);
 
@@ -7468,7 +7497,7 @@ export async function registerZenrowsAccount(
           log("Found verification link: " + verifyLink.substring(0, 120));
         }
 
-        if (!verifyLink && emailClicked) {
+        if (!verifyLink && !verifyCode && emailClicked) {
           const readingPaneLinks = allLinks.filter((link: any) =>
             link.href &&
             !link.href.includes("outlook.live.com") &&
@@ -7486,9 +7515,21 @@ export async function registerZenrowsAccount(
               log("Found ZenRows link in email: " + verifyLink.substring(0, 120));
             }
           }
+
+          const emailBodyText = await outlookPage.textContent("body").catch(() => "");
+          if ((emailBodyText || "").toLowerCase().includes("zenrows") || (emailBodyText || "").toLowerCase().includes("verification code") || (emailBodyText || "").toLowerCase().includes("verify your")) {
+            const codeMatch = (emailBodyText || "").match(/\b(\d{4,8})\b/g);
+            if (codeMatch) {
+              const candidateCodes = codeMatch.filter((c: string) => c.length >= 4 && c.length <= 8 && !/^(19|20)\d{2}$/.test(c));
+              if (candidateCodes.length > 0) {
+                verifyCode = candidateCodes[0];
+                log("Found verification code in email: " + verifyCode);
+              }
+            }
+          }
         }
 
-        if (verifyLink) break;
+        if (verifyLink || verifyCode) break;
 
         const bodyText = await outlookPage.textContent("body").catch(() => "");
         const zenrowsMention = (bodyText || "").toLowerCase().indexOf("zenrows");
@@ -7546,6 +7587,20 @@ export async function registerZenrowsAccount(
                   verifyLink = externalJunkLinks[0].href;
                   log("Using first external link from junk as verification: " + verifyLink.substring(0, 150));
                 }
+
+                if (!verifyLink && !verifyCode) {
+                  const junkBodyText = await outlookPage.textContent("body").catch(() => "");
+                  if ((junkBodyText || "").toLowerCase().includes("zenrows") || (junkBodyText || "").toLowerCase().includes("verification code")) {
+                    const junkCodeMatch = (junkBodyText || "").match(/\b(\d{4,8})\b/g);
+                    if (junkCodeMatch) {
+                      const junkCodes = junkCodeMatch.filter((c: string) => c.length >= 4 && c.length <= 8 && !/^(19|20)\d{2}$/.test(c));
+                      if (junkCodes.length > 0) {
+                        verifyCode = junkCodes[0];
+                        log("Found verification code in junk email: " + verifyCode);
+                      }
+                    }
+                  }
+                }
                 break;
               }
             }
@@ -7591,30 +7646,51 @@ export async function registerZenrowsAccount(
           log("Attempting to resend verification email from ZenRows (attempt " + (attempt + 1) + ")...");
           try {
             if (zenrowsRegPage && zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) {
-              await zenrowsRegPage.goto("https://app.zenrows.com/email/verify", { waitUntil: "domcontentloaded", timeout: 30000 });
-              await zenrowsRegPage.waitForTimeout(3000);
+              const verifyUrls = ["https://app.zenrows.com/phone/input", "https://app.zenrows.com/email/verify"];
+              let verifyPageLoaded = false;
+              for (const vUrl of verifyUrls) {
+                try {
+                  await zenrowsRegPage.goto(vUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+                  await zenrowsRegPage.waitForTimeout(3000);
+                  const vText = await zenrowsRegPage.textContent("body").catch(() => "");
+                  if ((vText || "").length > 50) {
+                    verifyPageLoaded = true;
+                    log("ZenRows verify page (" + vUrl + "): " + (vText || "").replace(/\s+/g, " ").substring(0, 200));
+                    break;
+                  }
+                } catch {}
+              }
+              if (!verifyPageLoaded) {
+                log("Could not load ZenRows verify page");
+              }
               const verifyPageText = await zenrowsRegPage.textContent("body").catch(() => "");
-              log("ZenRows verify page: " + (verifyPageText || "").replace(/\s+/g, " ").substring(0, 200));
 
-              const resendBtn = await zenrowsRegPage.$('button:has-text("Resend"), button:has-text("resend"), a:has-text("Resend"), a:has-text("resend"), button:has-text("Send again"), a:has-text("Send again"), button:has-text("send again"), [data-testid*="resend"], button:has-text("Didn"), a:has-text("Didn")');
+              const resendBtn = await zenrowsRegPage.$('button:has-text("Resend"), button:has-text("resend"), a:has-text("Resend"), a:has-text("resend"), button:has-text("Send again"), a:has-text("Send again"), button:has-text("send again"), button:has-text("Send code"), button:has-text("send code"), [data-testid*="resend"], button:has-text("Didn"), a:has-text("Didn")');
               if (resendBtn) {
+                const btnText = await resendBtn.textContent().catch(() => "");
                 await resendBtn.click();
-                log("Clicked resend verification email button!");
+                log("Clicked '" + (btnText || "").trim() + "' button on ZenRows verify page!");
                 await zenrowsRegPage.waitForTimeout(3000);
                 const afterResendText = await zenrowsRegPage.textContent("body").catch(() => "");
-                log("After resend: " + (afterResendText || "").replace(/\s+/g, " ").substring(0, 150));
+                log("After clicking: " + (afterResendText || "").replace(/\s+/g, " ").substring(0, 200));
+
+                const codeInput = await zenrowsRegPage.$('input[type="text"], input[type="number"], input[name*="code"], input[placeholder*="code"], input[placeholder*="Code"]').catch(() => null);
+                if (codeInput) {
+                  log("Found verification code input field on ZenRows page — will look for code in email");
+                }
               } else {
                 const allBtns = await zenrowsRegPage.$$eval('button, a[role="button"], a[href]', (els: any[]) =>
                   els.map((e: any) => ({ tag: e.tagName, text: (e.textContent || "").trim().substring(0, 60), href: (e as any).href || "" })).filter((e: any) => e.text.length > 0)
                 ).catch(() => []);
-                log("No resend button found. Available buttons: " + JSON.stringify(allBtns.slice(0, 10)));
+                log("No resend/send button found. Available buttons: " + JSON.stringify(allBtns.slice(0, 10)));
 
                 const clickableResend = allBtns.find((b: any) => 
                   b.text.toLowerCase().includes("resend") || b.text.toLowerCase().includes("send again") || 
-                  b.text.toLowerCase().includes("didn't receive") || b.text.toLowerCase().includes("send verification")
+                  b.text.toLowerCase().includes("didn't receive") || b.text.toLowerCase().includes("send verification") ||
+                  b.text.toLowerCase().includes("send code")
                 );
                 if (clickableResend) {
-                  log("Found resend-like button via text search: " + clickableResend.text);
+                  log("Found send-like button via text search: " + clickableResend.text);
                   if (clickableResend.href) {
                     await zenrowsRegPage.goto(clickableResend.href, { waitUntil: "domcontentloaded", timeout: 15000 });
                   } else {
@@ -7624,7 +7700,7 @@ export async function registerZenrowsAccount(
                       if (match) (match as any).click();
                     }, clickableResend.text.substring(0, 20));
                   }
-                  log("Clicked resend button via text match");
+                  log("Clicked send button via text match");
                   await zenrowsRegPage.waitForTimeout(3000);
                 }
               }
@@ -7660,12 +7736,19 @@ export async function registerZenrowsAccount(
                       else await zenrowsRegPage.keyboard.press("Enter");
                       await zenrowsRegPage.waitForTimeout(5000);
                       log("Re-logged into ZenRows for resend, navigating to verify page...");
-                      await zenrowsRegPage.goto("https://app.zenrows.com/email/verify", { waitUntil: "domcontentloaded", timeout: 30000 });
-                      await zenrowsRegPage.waitForTimeout(3000);
-                      const resendBtn2 = await zenrowsRegPage.$('button:has-text("Resend"), button:has-text("resend"), a:has-text("Resend"), button:has-text("Send again"), button:has-text("Didn")');
+                      const resendUrls = ["https://app.zenrows.com/phone/input", "https://app.zenrows.com/email/verify"];
+                      for (const rUrl of resendUrls) {
+                        try {
+                          await zenrowsRegPage.goto(rUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+                          await zenrowsRegPage.waitForTimeout(3000);
+                          const rText = await zenrowsRegPage.textContent("body").catch(() => "");
+                          if ((rText || "").length > 50) break;
+                        } catch {}
+                      }
+                      const resendBtn2 = await zenrowsRegPage.$('button:has-text("Resend"), button:has-text("resend"), a:has-text("Resend"), button:has-text("Send again"), button:has-text("Send code"), button:has-text("Didn")');
                       if (resendBtn2) {
                         await resendBtn2.click();
-                        log("Clicked resend on re-opened ZenRows session!");
+                        log("Clicked resend/send code on re-opened ZenRows session!");
                         await zenrowsRegPage.waitForTimeout(3000);
                       }
                     }
@@ -7680,7 +7763,7 @@ export async function registerZenrowsAccount(
           }
         }
 
-        if (!verifyLink && attempt < 14) {
+        if (!verifyLink && !verifyCode && attempt < 14) {
           log("Verification email not found yet, refreshing inbox...");
           try {
             await outlookPage.keyboard.press("F5");
@@ -7695,7 +7778,7 @@ export async function registerZenrowsAccount(
       }
     }
 
-    if (!verifyLink) {
+    if (!verifyLink && !verifyCode) {
       try {
         const allText = await outlookPage.textContent("body").catch(() => "");
         const linkRegex = /https?:\/\/[^\s"'<>]*zenrows[^\s"'<>]*/gi;
@@ -7707,7 +7790,7 @@ export async function registerZenrowsAccount(
       } catch {}
     }
 
-    if (!verifyLink) {
+    if (!verifyLink && !verifyCode) {
       try { await outlookPage.close(); } catch {}
       try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
       zenrowsBrowser = null;
@@ -7715,39 +7798,126 @@ export async function registerZenrowsAccount(
       return { success: false, error: "Could not find ZenRows verification email after 15 attempts (with resend). The email may not have arrived." };
     }
 
-    log("Step 4/6: Clicking verification link...");
-    try { await outlookPage.close(); } catch {}
-    try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
-    zenrowsBrowser = null;
-    try { if (zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) await zenrowsRegBrowserRef.close(); } catch {};
-
-    if (!localBrowser || !localBrowser.isConnected()) {
-      await ensureBrowserInstalled();
-      localBrowser = await chromium.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
-      });
-    }
-    const verifyCtx = await localBrowser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    });
-    const verifyPage = await verifyCtx.newPage();
-    await verifyPage.setDefaultNavigationTimeout(60000);
-
-    await verifyPage.goto(verifyLink, { waitUntil: "domcontentloaded" });
-    await verifyPage.waitForTimeout(5000 + Math.random() * 3000);
-    const verifyUrl = verifyPage.url();
-    log("After verification: " + verifyUrl.substring(0, 100));
-
-    const verifyText = await verifyPage.textContent("body").catch(() => "");
-    if ((verifyText || "").toLowerCase().includes("verified") || (verifyText || "").toLowerCase().includes("confirmed") || (verifyText || "").toLowerCase().includes("success")) {
-      log("Email verified successfully!");
+    if (verifyCode) {
+      log("Step 4/6: Entering verification code on ZenRows page...");
+      try {
+        if (zenrowsRegPage && zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) {
+          const currentZrUrl = zenrowsRegPage.url();
+          if (!currentZrUrl.includes("zenrows")) {
+            await zenrowsRegPage.goto("https://app.zenrows.com/phone/input", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await zenrowsRegPage.waitForTimeout(3000);
+          }
+          const codeInput = await zenrowsRegPage.$('input[type="text"], input[type="number"], input[name*="code"], input[placeholder*="code"], input[placeholder*="Code"], input[name*="otp"], input[placeholder*="enter"]');
+          if (codeInput) {
+            await codeInput.fill(verifyCode);
+            log("Entered verification code: " + verifyCode);
+            await zenrowsRegPage.waitForTimeout(1000);
+            const submitBtn = await zenrowsRegPage.$('button[type="submit"], button:has-text("Verify"), button:has-text("Submit"), button:has-text("Confirm"), button:has-text("Continue")');
+            if (submitBtn) {
+              await submitBtn.click();
+              log("Clicked verify/submit button");
+            } else {
+              await zenrowsRegPage.keyboard.press("Enter");
+              log("Pressed Enter to submit code");
+            }
+            await zenrowsRegPage.waitForTimeout(5000 + Math.random() * 3000);
+            const afterCodeUrl = zenrowsRegPage.url();
+            const afterCodeText = await zenrowsRegPage.textContent("body").catch(() => "");
+            log("After code entry: URL=" + afterCodeUrl.substring(0, 100) + " body=" + (afterCodeText || "").replace(/\s+/g, " ").substring(0, 200));
+            if (afterCodeUrl.includes("dashboard") || afterCodeUrl.includes("onboarding") || afterCodeUrl.includes("builder") || (afterCodeText || "").toLowerCase().includes("verified") || (afterCodeText || "").toLowerCase().includes("success")) {
+              log("Code verification successful!");
+            }
+          } else {
+            log("No code input field found on ZenRows page. Page URL: " + zenrowsRegPage.url());
+            const pageText = await zenrowsRegPage.textContent("body").catch(() => "");
+            log("Page text: " + (pageText || "").replace(/\s+/g, " ").substring(0, 200));
+          }
+        } else {
+          log("ZenRows registration browser not available for code entry — launching new browser...");
+          await ensureBrowserInstalled();
+          if (!localBrowser || !localBrowser.isConnected()) {
+            localBrowser = await chromium.launch({
+              headless: true,
+              args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+            });
+          }
+          const codeCtx = await localBrowser.newContext({
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          });
+          const codePage = await codeCtx.newPage();
+          await codePage.goto("https://app.zenrows.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+          await codePage.waitForTimeout(5000);
+          const loginCf = await codePage.textContent("body").catch(() => "");
+          if ((loginCf || "").length < 50 || (loginCf || "").includes("challenge")) {
+            await codePage.waitForTimeout(10000);
+          }
+          const leInput = await codePage.$('input[type="email"], input[name="email"]');
+          const lpInput = await codePage.$('input[type="password"]');
+          if (leInput) {
+            await leInput.fill(outlookEmail.toLowerCase());
+            if (lpInput) await lpInput.fill(zenrowsPassword);
+            await codePage.waitForTimeout(500);
+            const lBtn = await codePage.$('button[type="submit"]');
+            if (lBtn) await lBtn.click();
+            else await codePage.keyboard.press("Enter");
+            await codePage.waitForTimeout(5000);
+          }
+          const codeInput2 = await codePage.$('input[type="text"], input[type="number"], input[name*="code"], input[placeholder*="code"]');
+          if (codeInput2) {
+            await codeInput2.fill(verifyCode);
+            log("Entered verification code on new ZenRows session: " + verifyCode);
+            const submitBtn2 = await codePage.$('button[type="submit"], button:has-text("Verify"), button:has-text("Submit"), button:has-text("Confirm")');
+            if (submitBtn2) await submitBtn2.click();
+            else await codePage.keyboard.press("Enter");
+            await codePage.waitForTimeout(5000);
+            const afterUrl2 = codePage.url();
+            log("After code entry (new session): " + afterUrl2.substring(0, 100));
+          }
+          try { await codePage.close(); } catch {}
+          try { await codeCtx.close(); } catch {}
+        }
+      } catch (codeErr: any) {
+        log("Code entry error: " + (codeErr.message || "").substring(0, 100));
+      }
+      try { await outlookPage.close(); } catch {}
+      try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
+      zenrowsBrowser = null;
+      try { if (zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) await zenrowsRegBrowserRef.close(); } catch {}
     } else {
-      log("Verification page content: " + (verifyText || "").substring(0, 150).replace(/\s+/g, " "));
-    }
+      log("Step 4/6: Clicking verification link...");
+      try { await outlookPage.close(); } catch {}
+      try { if (zenrowsBrowser) await zenrowsBrowser.close(); } catch {}
+      zenrowsBrowser = null;
+      try { if (zenrowsRegBrowserRef && zenrowsRegBrowserRef.isConnected()) await zenrowsRegBrowserRef.close(); } catch {};
 
-    try { await verifyPage.close(); } catch {}
-    try { await verifyCtx.close(); } catch {}
+      if (!localBrowser || !localBrowser.isConnected()) {
+        await ensureBrowserInstalled();
+        localBrowser = await chromium.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+        });
+      }
+      const verifyCtx = await localBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      });
+      const verifyPage = await verifyCtx.newPage();
+      await verifyPage.setDefaultNavigationTimeout(60000);
+
+      await verifyPage.goto(verifyLink, { waitUntil: "domcontentloaded" });
+      await verifyPage.waitForTimeout(5000 + Math.random() * 3000);
+      const verifyUrl = verifyPage.url();
+      log("After verification: " + verifyUrl.substring(0, 100));
+
+      const verifyText = await verifyPage.textContent("body").catch(() => "");
+      if ((verifyText || "").toLowerCase().includes("verified") || (verifyText || "").toLowerCase().includes("confirmed") || (verifyText || "").toLowerCase().includes("success")) {
+        log("Email verified successfully!");
+      } else {
+        log("Verification page content: " + (verifyText || "").substring(0, 150).replace(/\s+/g, " "));
+      }
+
+      try { await verifyPage.close(); } catch {}
+      try { await verifyCtx.close(); } catch {}
+    }
 
     log("Step 5/6: Logging into ZenRows to get API key...");
     if (!localBrowser || !localBrowser.isConnected()) {
