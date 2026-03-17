@@ -165,6 +165,23 @@ function broadcastBatchComplete(batchId: string, ownerId?: string) {
   broadcast({ type: "batch_complete", batchId }, ownerId);
 }
 
+async function processAccountWithToken(
+  accountId: string,
+  batchId: string,
+  firstName: string,
+  lastName: string,
+  password: string,
+  country: string,
+  language: string,
+  addisonEmail: string,
+  addisonEmailPassword: string,
+  ownerId: string,
+  proxyUrl: string = "",
+  preToken?: string
+) {
+  return processAccount(accountId, batchId, firstName, lastName, password, country, language, addisonEmail, addisonEmailPassword, ownerId, proxyUrl, preToken);
+}
+
 async function processAccount(
   accountId: string,
   batchId: string,
@@ -176,13 +193,20 @@ async function processAccount(
   addisonEmail: string,
   addisonEmailPassword: string,
   ownerId: string,
-  proxyUrl: string = ""
+  proxyUrl: string = "",
+  preToken?: string
 ) {
   try {
-    broadcastLog(batchId, accountId, `Creating Addison email: ${addisonEmail}`, ownerId);
-    await createTempEmail(addisonEmail, addisonEmailPassword);
-    const token = await getAuthToken(addisonEmail, addisonEmailPassword);
-    broadcastLog(batchId, accountId, `Addison email ready, starting registration...`, ownerId);
+    let token: string;
+    if (preToken) {
+      token = preToken;
+      broadcastLog(batchId, accountId, `Email pre-created, starting registration...`, ownerId);
+    } else {
+      broadcastLog(batchId, accountId, `Creating Addison email: ${addisonEmail}`, ownerId);
+      await createTempEmail(addisonEmail, addisonEmailPassword);
+      token = await getAuthToken(addisonEmail, addisonEmailPassword);
+      broadcastLog(batchId, accountId, `Addison email ready, starting registration...`, ownerId);
+    }
 
     const result = await fullRegistrationFlow(
       addisonEmail,
@@ -903,7 +927,7 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      const { count = 1, country = "United States", language = "English", proxyList } = req.body;
+      const { count = 1, country = "United States", language = "English", proxyList, concurrency: reqConcurrency } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
 
       const costPerAccount = await getCostPerAccount();
@@ -959,8 +983,26 @@ export async function registerRoutes(
 
       const proxies = await getDefaultProxies(proxyList);
 
-      const CONCURRENCY = 3;
+      const CONCURRENCY = Math.min(Math.max(parseInt(reqConcurrency) || 5, 1), 10);
       (async () => {
+        broadcastLog(batchId, "system", `⚡ Pre-creating ${created.length} emails (concurrency: ${CONCURRENCY})...`, userId);
+        const EMAIL_BATCH = 20;
+        const emailTokens: Map<string, string> = new Map();
+        for (let i = 0; i < created.length; i += EMAIL_BATCH) {
+          if (cancelledBatches.has(batchId)) break;
+          const emailChunk = created.slice(i, i + EMAIL_BATCH);
+          await Promise.all(emailChunk.map(async (acc) => {
+            try {
+              await createTempEmail(acc.email, acc.emailPassword);
+              const token = await getAuthToken(acc.email, acc.emailPassword);
+              emailTokens.set(acc.id, token);
+            } catch (err: any) {
+              broadcastLog(batchId, acc.id, `Email setup failed: ${err.message.substring(0, 60)}`, userId);
+            }
+          }));
+        }
+        broadcastLog(batchId, "system", `✅ ${emailTokens.size}/${created.length} emails ready. Starting registrations...`, userId);
+
         for (let i = 0; i < created.length; i += CONCURRENCY) {
           if (cancelledBatches.has(batchId)) {
             broadcastLog(batchId, "system", `Batch stopped. Skipped ${created.length - i} remaining accounts.`, userId);
@@ -972,9 +1014,10 @@ export async function registerRoutes(
             const baseProxy = proxies[(i + j) % proxies.length];
             const proxy = uniqueProxySession(baseProxy);
             broadcastLog(batchId, acc.id, `Starting registration for ${acc.firstName} ${acc.lastName}...`, userId);
-            return processAccount(
+            return processAccountWithToken(
               acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-              acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy
+              acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy,
+              emailTokens.get(acc.id)
             );
           }));
         }

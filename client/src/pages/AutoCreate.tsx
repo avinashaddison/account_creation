@@ -36,6 +36,7 @@ export default function AutoCreate() {
   const [proxyList] = useState("");
   const [country, setCountry] = useState("United States");
   const [language, setLanguage] = useState("English");
+  const [speed, setSpeed] = useState(5);
   const [isRunning, setIsRunning] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchAccounts, setBatchAccounts] = useState<BatchAccount[]>([]);
@@ -149,7 +150,7 @@ export default function AutoCreate() {
       const res = await fetch("/api/create-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ count: numAccounts, country, language, proxyList: proxyList.trim() ? proxyList.trim().split('\n').map(p => p.trim()).filter(Boolean) : undefined }),
+        body: JSON.stringify({ count: numAccounts, country, language, concurrency: speed, proxyList: proxyList.trim() ? proxyList.trim().split('\n').map(p => p.trim()).filter(Boolean) : undefined }),
         credentials: "include",
       });
       if (res.status === 401) { const { handleUnauthorized } = await import("@/lib/auth"); handleUnauthorized(); return; }
@@ -277,10 +278,36 @@ export default function AutoCreate() {
                 </div>
               </div>
 
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Zap className="w-3 h-3" /> Speed (Parallel)
+                </Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={speed}
+                    onChange={(e) => setSpeed(parseInt(e.target.value))}
+                    disabled={isRunning}
+                    className="flex-1 h-2 accent-amber-500 bg-white/5 rounded-full cursor-pointer"
+                    data-testid="input-speed-slider"
+                  />
+                  <span className="text-sm font-bold text-amber-400 w-8 text-center" data-testid="text-speed-value">{speed}x</span>
+                </div>
+                <p className="text-[10px] text-zinc-600">
+                  {speed <= 3 ? "Safe — low resource usage" : speed <= 6 ? "Balanced — good speed" : "Fast — high resource usage"}
+                </p>
+              </div>
+
               <div className="rounded-xl bg-white/[0.02] border border-white/5 p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Accounts</span>
                   <span className="font-semibold text-zinc-300">{count}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-500">Speed</span>
+                  <span className="font-medium text-amber-400">{speed} parallel</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-500">Cost per account</span>
