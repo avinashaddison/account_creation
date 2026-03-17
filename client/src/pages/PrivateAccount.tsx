@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database } from "lucide-react";
+import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
@@ -30,6 +30,16 @@ type ZenrowsKey = {
 
 type TabType = "outlook" | "zenrows";
 
+type ZenrowsRegJob = {
+  regId: string;
+  batchId: string;
+  outlookEmail: string;
+  status: "running" | "success" | "failed";
+  logs: string[];
+  apiKey?: string;
+  error?: string;
+};
+
 export default function PrivateAccount() {
   const [tab, setTab] = useState<TabType>("outlook");
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
@@ -45,7 +55,83 @@ export default function PrivateAccount() {
   const [newZenrowsEmail, setNewZenrowsEmail] = useState("");
   const [newZenrowsPassword, setNewZenrowsPassword] = useState("");
   const [saving, setSaving] = useState(false);
+  const [zenrowsRegJobs, setZenrowsRegJobs] = useState<Record<string, ZenrowsRegJob>>({});
+  const [registeringAccountIds, setRegisteringAccountIds] = useState<Set<string>>(new Set());
+  const wsRef = useRef<WebSocket | null>(null);
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
+
+  const handleWsMessage = useCallback((event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === "log" && data.batchId?.startsWith("zenrows-reg-")) {
+        setZenrowsRegJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          const newLogs = [...job.logs, data.message].slice(-50);
+          return { ...prev, [data.batchId]: { ...job, logs: newLogs } };
+        });
+      }
+      if (data.type === "zenrows_register_result") {
+        setZenrowsRegJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          return {
+            ...prev,
+            [data.batchId]: {
+              ...job,
+              status: data.success ? "success" : "failed",
+              apiKey: data.apiKey,
+              error: data.error,
+            },
+          };
+        });
+        if (data.success) {
+          fetchZenrows();
+          toast({ title: "ZenRows API Key Generated", description: `API key created using ${data.outlookEmail || "Outlook account"}` });
+          sounds.navigate();
+        } else {
+          toast({ title: "Registration Failed", description: data.error || "Unknown error", variant: "destructive" });
+        }
+        setRegisteringAccountIds((prev) => {
+          const next = new Set(prev);
+          for (const [, job] of Object.entries(zenrowsRegJobs)) {
+            if (job.batchId === data.batchId) {
+              for (const acc of outlookAccounts) {
+                if (acc.email === job.outlookEmail) next.delete(acc.id);
+              }
+            }
+          }
+          return next;
+        });
+      }
+      if (data.type === "batch_complete" && data.batchId?.startsWith("zenrows-reg-")) {
+        setZenrowsRegJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          if (job.status === "running") {
+            return { ...prev, [data.batchId]: { ...job, status: "failed", error: "Batch completed without result" } };
+          }
+          return prev;
+        });
+      }
+    } catch {}
+  }, [outlookAccounts, zenrowsRegJobs, toast]);
+
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    wsRef.current = ws;
+    ws.onmessage = handleWsMessage;
+    ws.onclose = () => {
+      setTimeout(() => {
+        const newWs = new WebSocket(`${protocol}//${window.location.host}/ws`);
+        wsRef.current = newWs;
+        newWs.onmessage = handleWsMessage;
+      }, 3000);
+    };
+    return () => { ws.close(); };
+  }, [handleWsMessage]);
 
   function fetchOutlook() {
     fetch("/api/private/outlook", { credentials: "include" })
@@ -142,12 +228,65 @@ export default function PrivateAccount() {
     } catch {}
   }
 
+  async function registerZenrowsWithOutlook(acc: OutlookAccount) {
+    if (registeringAccountIds.has(acc.id)) return;
+    setRegisteringAccountIds((prev) => new Set(prev).add(acc.id));
+    try {
+      const res = await fetch("/api/zenrows-register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outlookEmail: acc.email, outlookPassword: acc.password }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        toast({ title: "Failed to start", description: err.error || "Unknown error", variant: "destructive" });
+        setRegisteringAccountIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
+        return;
+      }
+      const data = await res.json();
+      setZenrowsRegJobs((prev) => ({
+        ...prev,
+        [data.batchId]: {
+          regId: data.regId,
+          batchId: data.batchId,
+          outlookEmail: acc.email,
+          status: "running",
+          logs: ["Starting ZenRows registration with " + acc.email + "..."],
+        },
+      }));
+      toast({ title: "Registration Started", description: `Registering ZenRows with ${acc.email}` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to start registration", variant: "destructive" });
+      setRegisteringAccountIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
+    }
+  }
+
+  function dismissJob(batchId: string) {
+    setZenrowsRegJobs((prev) => {
+      const next = { ...prev };
+      const job = next[batchId];
+      if (job) {
+        setRegisteringAccountIds((ids) => {
+          const n = new Set(ids);
+          for (const a of outlookAccounts) {
+            if (a.email === job.outlookEmail) n.delete(a.id);
+          }
+          return n;
+        });
+      }
+      delete next[batchId];
+      return next;
+    });
+  }
+
   function formatDate(d: string) {
     return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
   }
 
   const activeOutlook = outlookAccounts.filter((a) => a.status === "active").length;
   const activeZenrows = zenrowsKeys.filter((k) => k.status === "active").length;
+  const activeJobs = Object.values(zenrowsRegJobs).filter((j) => j.status !== "running" || j.logs.length > 0);
 
   return (
     <div className="space-y-6">
@@ -206,6 +345,61 @@ export default function PrivateAccount() {
           </CardContent>
         </Card>
       </div>
+
+      {activeJobs.length > 0 && (
+        <div className="space-y-3">
+          {Object.values(zenrowsRegJobs).map((job) => (
+            <Card key={job.batchId} className={`border-cyan-500/10 bg-black/20 ${job.status === "success" ? "border-emerald-500/20" : job.status === "failed" ? "border-red-500/20" : "border-purple-500/20"}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    {job.status === "running" && <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />}
+                    {job.status === "success" && <Check className="w-4 h-4 text-emerald-400" />}
+                    {job.status === "failed" && <X className="w-4 h-4 text-red-400" />}
+                    <span className="text-xs font-mono text-cyan-50">
+                      ZenRows Registration — {job.outlookEmail}
+                    </span>
+                    <Badge variant="outline" className={`text-[9px] font-mono ${
+                      job.status === "running" ? "border-purple-500/20 text-purple-400" :
+                      job.status === "success" ? "border-emerald-500/20 text-emerald-400" :
+                      "border-red-500/20 text-red-400"
+                    }`} data-testid={`badge-reg-status-${job.regId}`}>
+                      {job.status.toUpperCase()}
+                    </Badge>
+                  </div>
+                  {job.status !== "running" && (
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-zinc-500 hover:text-zinc-300" onClick={() => dismissJob(job.batchId)} data-testid={`button-dismiss-job-${job.regId}`}>
+                      <X className="w-3 h-3" />
+                    </Button>
+                  )}
+                </div>
+                {job.apiKey && (
+                  <div className="mb-3 p-3 rounded-lg border border-emerald-500/15" style={{ background: "rgba(16,185,129,0.04)" }}>
+                    <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-1">Generated API Key</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-emerald-400 break-all" data-testid={`text-generated-key-${job.regId}`}>{job.apiKey}</span>
+                      <button onClick={() => copyToClipboard(job.apiKey!, `gen-${job.regId}`)} className="text-zinc-600 hover:text-emerald-400 transition-colors flex-shrink-0" data-testid={`button-copy-generated-key-${job.regId}`}>
+                        {copied === `gen-${job.regId}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {job.error && (
+                  <div className="mb-3 p-2 rounded border border-red-500/15" style={{ background: "rgba(239,68,68,0.04)" }}>
+                    <p className="text-[10px] text-red-400 font-mono">{job.error}</p>
+                  </div>
+                )}
+                <div className="max-h-32 overflow-y-auto rounded border border-cyan-500/8 p-2" style={{ background: "rgba(0,0,0,0.3)" }}>
+                  {job.logs.map((log, i) => (
+                    <p key={i} className="text-[10px] text-zinc-500 font-mono leading-relaxed">{log}</p>
+                  ))}
+                  <div ref={logsEndRef} />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Button
@@ -329,9 +523,30 @@ export default function PrivateAccount() {
                           <span className="text-[10px] text-zinc-600 font-mono">{formatDate(acc.createdAt)}</span>
                         </TableCell>
                         <TableCell className="py-2.5 text-right">
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteOutlook(acc.id)} data-testid={`button-delete-outlook-${acc.id}`}>
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
+                          <div className="flex items-center gap-1 justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className={`h-6 px-2 font-mono text-[10px] ${
+                                registeringAccountIds.has(acc.id)
+                                  ? "text-purple-400/50 cursor-not-allowed"
+                                  : "text-purple-400/70 hover:text-purple-400 hover:bg-purple-500/10"
+                              }`}
+                              onClick={() => registerZenrowsWithOutlook(acc)}
+                              disabled={registeringAccountIds.has(acc.id) || acc.status !== "active"}
+                              data-testid={`button-register-zenrows-${acc.id}`}
+                            >
+                              {registeringAccountIds.has(acc.id) ? (
+                                <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                              ) : (
+                                <Zap className="w-3 h-3 mr-1" />
+                              )}
+                              {registeringAccountIds.has(acc.id) ? "Registering..." : "ZenRows"}
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteOutlook(acc.id)} data-testid={`button-delete-outlook-${acc.id}`}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
