@@ -1,23 +1,33 @@
-const BASE_URL = "https://api.mail.tm";
+const PROVIDERS = {
+  "mail.tm": "https://api.mail.tm",
+  "mail.gw": "https://api.mail.gw",
+} as const;
 
-let activeProvider: "mail.tm" | "mail.gw" = "mail.tm";
+type Provider = keyof typeof PROVIDERS;
 
-function getBaseUrl(): string {
-  return activeProvider === "mail.gw" ? "https://api.mail.gw" : BASE_URL;
+const MAIL_TM_DOMAINS = new Set<string>();
+const MAIL_GW_DOMAINS = new Set<string>();
+
+export function detectProviderFromDomain(domain: string): Provider {
+  if (MAIL_TM_DOMAINS.has(domain)) return "mail.tm";
+  if (MAIL_GW_DOMAINS.has(domain)) return "mail.gw";
+  return "mail.tm";
 }
 
 export async function getAvailableDomain(): Promise<string> {
-  for (const provider of ["mail.tm", "mail.gw"] as const) {
+  for (const provider of ["mail.tm", "mail.gw"] as Provider[]) {
     try {
-      const url = provider === "mail.gw" ? "https://api.mail.gw" : BASE_URL;
-      const res = await fetch(`${url}/domains`, { signal: AbortSignal.timeout(10000) });
+      const baseUrl = PROVIDERS[provider];
+      const res = await fetch(`${baseUrl}/domains`, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) continue;
       const data = await res.json();
       const members = data["hydra:member"];
       if (members && members.length > 0) {
-        activeProvider = provider;
-        console.log(`[Mail] Using provider: ${provider}, domain: ${members[0].domain}`);
-        return members[0].domain;
+        const domain = members[0].domain;
+        if (provider === "mail.tm") MAIL_TM_DOMAINS.add(domain);
+        else MAIL_GW_DOMAINS.add(domain);
+        console.log(`[Mail] Using provider: ${provider}, domain: ${domain}`);
+        return domain;
       }
     } catch (err: any) {
       console.log(`[Mail] Provider ${provider} failed: ${err.message}`);
@@ -26,9 +36,12 @@ export async function getAvailableDomain(): Promise<string> {
   throw new Error("No email domains available from any provider");
 }
 
-export async function createTempEmail(address: string, password: string): Promise<{ id: string; address: string }> {
+export async function createTempEmail(address: string, password: string): Promise<{ id: string; address: string; provider: Provider }> {
+  const domain = address.split("@")[1] || "";
+  const provider = detectProviderFromDomain(domain);
+  const baseUrl = PROVIDERS[provider];
   const maxRetries = 5;
-  const baseUrl = getBaseUrl();
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(`${baseUrl}/accounts`, {
@@ -37,11 +50,14 @@ export async function createTempEmail(address: string, password: string): Promis
         body: JSON.stringify({ address, password }),
         signal: AbortSignal.timeout(15000),
       });
-      if (res.ok) return res.json();
+      if (res.ok) {
+        const data = await res.json();
+        return { ...data, provider };
+      }
       const text = await res.text();
       if (res.status === 422 && text.includes("already")) {
-        console.log(`[Mail] Account ${address} already exists, continuing...`);
-        return { id: "existing", address };
+        console.log(`[Mail] Account ${address} already exists (${provider}), continuing...`);
+        return { id: "existing", address, provider };
       }
       if (res.status === 429 && attempt < maxRetries) {
         const delay = Math.min(attempt * 3000, 15000);
@@ -67,9 +83,11 @@ export async function createTempEmail(address: string, password: string): Promis
   throw new Error(`Failed to create email account after ${maxRetries} retries`);
 }
 
-export async function getAuthToken(address: string, password: string): Promise<string> {
+export async function getAuthToken(address: string, password: string, provider?: Provider): Promise<string> {
+  const resolvedProvider: Provider = provider || detectProviderFromDomain(address.split("@")[1] || "");
+  const baseUrl = PROVIDERS[resolvedProvider];
   const maxRetries = 4;
-  const baseUrl = getBaseUrl();
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(`${baseUrl}/token`, {
@@ -80,6 +98,7 @@ export async function getAuthToken(address: string, password: string): Promise<s
       });
       if (res.ok) {
         const data = await res.json();
+        console.log(`[Mail] Token obtained from ${resolvedProvider} for ${address}`);
         return data.token;
       }
       if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
@@ -102,8 +121,8 @@ export async function getAuthToken(address: string, password: string): Promise<s
   throw new Error(`Failed to get token after ${maxRetries} retries`);
 }
 
-export async function fetchMessages(token: string): Promise<any[]> {
-  const baseUrl = getBaseUrl();
+export async function fetchMessages(token: string, provider: Provider = "mail.tm"): Promise<any[]> {
+  const baseUrl = PROVIDERS[provider];
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetch(`${baseUrl}/messages`, {
@@ -119,13 +138,13 @@ export async function fetchMessages(token: string): Promise<any[]> {
         continue;
       }
       if (res.status === 401) {
-        console.log(`[Mail] Token expired (401), cannot fetch messages`);
+        console.log(`[Mail] Token expired (401) on ${provider}, cannot fetch messages`);
         return [];
       }
       throw new Error(`Failed to fetch messages: ${res.status}`);
     } catch (err: any) {
       if (err.name === "TimeoutError" && attempt < 3) {
-        console.log(`[Mail] Fetch timeout, retry ${attempt}/3...`);
+        console.log(`[Mail] Fetch timeout on ${provider}, retry ${attempt}/3...`);
         await new Promise(r => setTimeout(r, 2000));
         continue;
       }
@@ -135,8 +154,8 @@ export async function fetchMessages(token: string): Promise<any[]> {
   return [];
 }
 
-export async function fetchMessageContent(token: string, messageId: string): Promise<string> {
-  const baseUrl = getBaseUrl();
+export async function fetchMessageContent(token: string, messageId: string, provider: Provider = "mail.tm"): Promise<string> {
+  const baseUrl = PROVIDERS[provider];
   const res = await fetch(`${baseUrl}/messages/${messageId}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(15000),
@@ -144,43 +163,62 @@ export async function fetchMessageContent(token: string, messageId: string): Pro
   if (!res.ok) throw new Error(`Failed to fetch message: ${res.status}`);
   const data = await res.json();
   let content: string = "";
-  if (typeof data.text === 'string' && data.text.length > 0) {
+  if (typeof data.text === "string" && data.text.length > 0) {
     content = data.text;
   } else if (data.html) {
-    if (Array.isArray(data.html)) {
-      content = data.html.join("\n");
-    } else if (typeof data.html === 'string') {
-      content = data.html;
-    } else {
-      content = JSON.stringify(data.html);
-    }
+    if (Array.isArray(data.html)) content = data.html.join("\n");
+    else if (typeof data.html === "string") content = data.html;
+    else content = JSON.stringify(data.html);
   }
   console.log(`[Mail] Content length: ${content.length}, preview: ${content.substring(0, 200)}`);
   return content;
 }
 
-export async function pollForVerificationCode(token: string, maxAttempts: number = 30, intervalMs: number = 3000): Promise<string | null> {
+export async function pollForVerificationCode(
+  address: string,
+  password: string,
+  provider: Provider,
+  maxAttempts: number = 70,
+  intervalMs: number = 3000
+): Promise<string | null> {
+  let token = await getAuthToken(address, password, provider).catch(() => null);
+  if (!token) {
+    console.log(`[Mail] Failed to get initial token for ${address}, aborting poll`);
+    return null;
+  }
+
   for (let i = 0; i < maxAttempts; i++) {
-    console.log(`[Mail] Polling for verification email... attempt ${i + 1}/${maxAttempts}`);
+    if (i > 0 && i % 40 === 0) {
+      console.log(`[Mail] Refreshing token at attempt ${i + 1}/${maxAttempts}...`);
+      const freshToken = await getAuthToken(address, password, provider).catch(() => null);
+      if (freshToken) token = freshToken;
+      else console.log(`[Mail] Token refresh failed, continuing with old token`);
+    }
+
+    console.log(`[Mail] Polling for verification email (${provider})... attempt ${i + 1}/${maxAttempts}`);
     try {
-      const messages = await fetchMessages(token);
+      const messages = await fetchMessages(token, provider);
+      console.log(`[Mail] Inbox has ${messages.length} message(s)`);
 
       if (messages.length > 0) {
-        const latestId = messages[0].id;
-        const content = await fetchMessageContent(token, latestId);
-        console.log(`[Mail] Got email with subject: ${messages[0].subject}`);
+        for (const msg of messages) {
+          const latestId = msg.id;
+          const subject = msg.subject || "";
+          console.log(`[Mail] Checking message: subject="${subject}"`);
+          const content = await fetchMessageContent(token, latestId, provider);
 
-        const codeMatch = content.match(/\b(\d{6})\b/);
-        if (codeMatch) {
-          console.log(`[Mail] Extracted verification code: ${codeMatch[1]}`);
-          return codeMatch[1];
+          const codeMatch = content.match(/\b(\d{6})\b/);
+          if (codeMatch) {
+            console.log(`[Mail] Extracted verification code: ${codeMatch[1]}`);
+            return codeMatch[1];
+          }
+          const codeMatch2 = content.match(/code[:\s]*(\d{4,6})/i);
+          if (codeMatch2) {
+            console.log(`[Mail] Extracted verification code (alt): ${codeMatch2[1]}`);
+            return codeMatch2[1];
+          }
         }
-
-        const codeMatch2 = content.match(/code[:\s]*(\d{4,6})/i);
-        if (codeMatch2) {
-          console.log(`[Mail] Extracted verification code (alt): ${codeMatch2[1]}`);
-          return codeMatch2[1];
-        }
+        console.log(`[Mail] No code found in ${messages.length} message(s), continuing...`);
       }
     } catch (err: any) {
       console.log(`[Mail] Poll error (attempt ${i + 1}): ${err.message}`);
@@ -193,11 +231,23 @@ export async function pollForVerificationCode(token: string, maxAttempts: number
   return null;
 }
 
-export async function pollForDrawConfirmation(token: string, maxAttempts: number = 20, intervalMs: number = 5000): Promise<boolean> {
+export async function pollForDrawConfirmation(
+  address: string,
+  password: string,
+  provider: Provider,
+  maxAttempts: number = 20,
+  intervalMs: number = 5000
+): Promise<boolean> {
+  let token = await getAuthToken(address, password, provider).catch(() => null);
+  if (!token) {
+    console.log(`[Mail] Failed to get token for draw confirmation poll`);
+    return false;
+  }
+
   for (let i = 0; i < maxAttempts; i++) {
-    console.log(`[Mail] Polling for draw confirmation email... attempt ${i + 1}/${maxAttempts}`);
+    console.log(`[Mail] Polling for draw confirmation email (${provider})... attempt ${i + 1}/${maxAttempts}`);
     try {
-      const messages = await fetchMessages(token);
+      const messages = await fetchMessages(token, provider);
       for (const msg of messages) {
         const subject = (msg.subject || "").toLowerCase();
         const from = (msg.from?.address || msg.from?.name || "").toLowerCase();

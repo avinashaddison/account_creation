@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent } from "./mailService";
+import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain } from "./mailService";
 import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
@@ -224,14 +224,13 @@ async function processAccount(
   preToken?: string
 ) {
   try {
-    let token: string;
+    let emailProvider = detectProviderFromDomain(addisonEmail.split("@")[1] || "");
     if (preToken) {
-      token = preToken;
       broadcastLog(batchId, accountId, `Email pre-created, starting registration...`, ownerId);
     } else {
       broadcastLog(batchId, accountId, `Creating Addison email: ${addisonEmail}`, ownerId);
-      await createTempEmail(addisonEmail, addisonEmailPassword);
-      token = await getAuthToken(addisonEmail, addisonEmailPassword);
+      const created = await createTempEmail(addisonEmail, addisonEmailPassword);
+      emailProvider = created.provider;
       broadcastLog(batchId, accountId, `Addison email ready, starting registration...`, ownerId);
     }
 
@@ -249,7 +248,7 @@ async function processAccount(
       },
       async () => {
         broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-        const code = await pollForVerificationCode(token, 70, 3000);
+        const code = await pollForVerificationCode(addisonEmail, addisonEmailPassword, emailProvider, 70, 3000);
         if (code) {
           await storage.updateAccount(accountId, { verificationCode: code });
           broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -298,7 +297,7 @@ async function processAccount(
       if (finalStatus === "completed") {
         broadcastLog(batchId, accountId, `📧 Checking inbox for LA28 draw confirmation email...`, ownerId);
         try {
-          const confirmed = await pollForDrawConfirmation(token, 20, 5000);
+          const confirmed = await pollForDrawConfirmation(addisonEmail, addisonEmailPassword, emailProvider, 20, 5000);
           if (confirmed) {
             broadcastLog(batchId, accountId, `✅ Draw confirmation email received! Registration verified by LA28.`, ownerId);
           } else {
@@ -1018,21 +1017,20 @@ export async function registerRoutes(
       (async () => {
         broadcastLog(batchId, "system", `⚡ Pre-creating ${created.length} emails (concurrency: ${CONCURRENCY})...`, userId);
         const EMAIL_BATCH = 5;
-        const emailTokens: Map<string, string> = new Map();
+        const emailCreated: Set<string> = new Set();
         for (let i = 0; i < created.length; i += EMAIL_BATCH) {
           if (cancelledBatches.has(batchId)) break;
           const emailChunk = created.slice(i, i + EMAIL_BATCH);
           await Promise.all(emailChunk.map(async (acc) => {
             try {
               await createTempEmail(acc.email, acc.emailPassword);
-              const token = await getAuthToken(acc.email, acc.emailPassword);
-              emailTokens.set(acc.id, token);
+              emailCreated.add(acc.id);
             } catch (err: any) {
               broadcastLog(batchId, acc.id, `Email setup failed: ${err.message.substring(0, 60)}`, userId);
             }
           }));
         }
-        broadcastLog(batchId, "system", `✅ ${emailTokens.size}/${created.length} emails ready. Starting registrations...`, userId);
+        broadcastLog(batchId, "system", `✅ ${emailCreated.size}/${created.length} emails ready. Starting registrations...`, userId);
 
         for (let i = 0; i < created.length; i += CONCURRENCY) {
           if (cancelledBatches.has(batchId)) {
@@ -1051,7 +1049,7 @@ export async function registerRoutes(
                 await processAccountWithToken(
                   acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
                   acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy,
-                  emailTokens.get(acc.id)
+                  emailCreated.has(acc.id) ? "pre-created" : undefined
                 );
                 resolve();
               }, staggerDelay);
@@ -1080,16 +1078,12 @@ export async function registerRoutes(
               await storage.updateAccount(acc.id, { status: "pending" as any, errorMessage: null });
               broadcastLog(batchId, acc.id, `🔄 Retry ${retryRound}: Re-creating email & retrying registration...`, userId);
 
-              let retryToken: string | undefined;
+              let emailReady = false;
               try {
                 await createTempEmail(acc.email, acc.emailPassword);
-                retryToken = await getAuthToken(acc.email, acc.emailPassword);
+                emailReady = true;
               } catch (emailErr: any) {
-                try {
-                  retryToken = await getAuthToken(acc.email, acc.emailPassword);
-                } catch {
-                  broadcastLog(batchId, acc.id, `Email re-setup failed: ${emailErr.message.substring(0, 60)}`, userId);
-                }
+                broadcastLog(batchId, acc.id, `Email re-setup failed: ${emailErr.message.substring(0, 60)}`, userId);
               }
 
               const baseProxy = proxies[failedAccounts.indexOf(acc) % proxies.length];
@@ -1097,7 +1091,7 @@ export async function registerRoutes(
               await processAccountWithToken(
                 acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
                 acc.country, acc.language, acc.email, acc.emailPassword, userId, proxy,
-                retryToken
+                emailReady ? "pre-created" : undefined
               );
 
               await new Promise(r => setTimeout(r, 3000));
@@ -1364,8 +1358,8 @@ export async function registerRoutes(
           const emailPassword = account.emailPassword || account.la28Password;
           if (account.email && emailPassword) {
             log("📧 Checking inbox for LA28 draw confirmation email...");
-            const mailToken = await getAuthToken(account.email, emailPassword);
-            const confirmed = await pollForDrawConfirmation(mailToken, 20, 5000);
+            const drawProvider = detectProviderFromDomain(account.email.split("@")[1] || "");
+            const confirmed = await pollForDrawConfirmation(account.email, emailPassword, drawProvider, 20, 5000);
             if (confirmed) {
               log("✅ Draw confirmation email received! Registration verified by LA28.");
             } else {
@@ -1556,12 +1550,13 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const token = await getAuthToken(account.email, account.emailPassword);
-      const messages = await fetchMessages(token);
+      const inboxProvider = detectProviderFromDomain(account.email.split("@")[1] || "");
+      const inboxToken = await getAuthToken(account.email, account.emailPassword, inboxProvider);
+      const messages = await fetchMessages(inboxToken, inboxProvider);
 
       const fullMessages = [];
       for (const msg of messages.slice(0, 20)) {
-        const content = await fetchMessageContent(token, msg.id);
+        const content = await fetchMessageContent(inboxToken, msg.id, inboxProvider);
         fullMessages.push({
           id: msg.id,
           from: msg.from?.address || "unknown",
@@ -1614,11 +1609,12 @@ export async function registerRoutes(
       if (req.session.role !== "superadmin" && te.ownerId !== req.session.userId) {
         return res.status(403).json({ error: "Access denied" });
       }
-      const token = await getAuthToken(te.address, te.password);
-      const messages = await fetchMessages(token);
+      const teProvider = detectProviderFromDomain(te.address.split("@")[1] || "");
+      const teToken = await getAuthToken(te.address, te.password, teProvider);
+      const messages = await fetchMessages(teToken, teProvider);
       const fullMessages = [];
       for (const msg of messages.slice(0, 30)) {
-        const content = await fetchMessageContent(token, msg.id);
+        const content = await fetchMessageContent(teToken, msg.id, teProvider);
         const plainText = content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
         fullMessages.push({
           id: msg.id,
@@ -1662,8 +1658,7 @@ export async function registerRoutes(
   ) {
     try {
       broadcastLog(batchId, accountId, `Creating temp email: ${addisonEmail}`, ownerId);
-      await createTempEmail(addisonEmail, addisonEmailPassword);
-      const token = await getAuthToken(addisonEmail, addisonEmailPassword);
+      const { provider: tmEmailProvider } = await createTempEmail(addisonEmail, addisonEmailPassword);
       broadcastLog(batchId, accountId, `Email ready, starting TM registration...`, ownerId);
 
       const result = await tmFullRegistrationFlow(
@@ -1678,7 +1673,7 @@ export async function registerRoutes(
         },
         async () => {
           broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-          const code = await pollForVerificationCode(token, 70, 3000);
+          const code = await pollForVerificationCode(addisonEmail, addisonEmailPassword, tmEmailProvider, 70, 3000);
           if (code) {
             await storage.updateAccount(accountId, { verificationCode: code });
             broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -1843,8 +1838,7 @@ export async function registerRoutes(
   ) {
     try {
       broadcastLog(batchId, accountId, `Creating temp email: ${addisonEmail}`, ownerId);
-      await createTempEmail(addisonEmail, addisonEmailPassword);
-      const token = await getAuthToken(addisonEmail, addisonEmailPassword);
+      const { provider: uefaEmailProvider } = await createTempEmail(addisonEmail, addisonEmailPassword);
       broadcastLog(batchId, accountId, `Email ready, starting UEFA registration...`, ownerId);
 
       const result = await uefaFullRegistrationFlow(
@@ -1859,7 +1853,7 @@ export async function registerRoutes(
         },
         async () => {
           broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-          const code = await pollForVerificationCode(token, 70, 3000);
+          const code = await pollForVerificationCode(addisonEmail, addisonEmailPassword, uefaEmailProvider, 70, 3000);
           if (code) {
             await storage.updateAccount(accountId, { verificationCode: code });
             broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -2050,8 +2044,7 @@ export async function registerRoutes(
           try {
             broadcastLog(batchId, acc.id, `📧 Phase 1: Creating TM account...`, userId);
             broadcastLog(batchId, acc.id, `Creating temp email: ${acc.email}`, userId);
-            await createTempEmail(acc.email, acc.emailPassword);
-            const token = await getAuthToken(acc.email, acc.emailPassword);
+            const { provider: brunoEmailProvider } = await createTempEmail(acc.email, acc.emailPassword);
             broadcastLog(batchId, acc.id, `Email ready, starting TM registration...`, userId);
 
             const tmResult = await tmFullRegistrationFlow(
@@ -2066,7 +2059,7 @@ export async function registerRoutes(
               },
               async () => {
                 broadcastLog(batchId, acc.id, `Polling for verification code...`, userId);
-                const code = await pollForVerificationCode(token, 70, 3000);
+                const code = await pollForVerificationCode(acc.email, acc.emailPassword, brunoEmailProvider, 70, 3000);
                 if (code) {
                   await storage.updateAccount(acc.id, { verificationCode: code });
                   broadcastLog(batchId, acc.id, `Got verification code: ${code}`, userId);
