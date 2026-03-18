@@ -167,8 +167,8 @@ export default function ReplitCreate() {
         <p className="text-violet-400/30 mt-1 text-[11px] font-mono pl-7.5">Automate Replit account creation using stored Outlook emails</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl p-5 space-y-4" style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.15)" }}>
+      <div className="grid gap-4 md:grid-cols-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div className="min-w-0 rounded-xl p-5 space-y-4" style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.15)" }}>
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-violet-400/60" />
             <span className="text-[11px] font-mono text-violet-400/60 uppercase tracking-wider">Configuration</span>
@@ -302,8 +302,8 @@ export default function ReplitCreate() {
           )}
         </div>
 
-        <div className="sticky top-4">
-        <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(124,58,237,0.12)" }}>
+        <div className="min-w-0 sticky top-4">
+        <div className="rounded-xl overflow-hidden flex flex-col min-w-0" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(124,58,237,0.12)" }}>
           <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid rgba(124,58,237,0.08)", background: "rgba(124,58,237,0.04)" }}>
             <div className="flex items-center gap-2">
               <Terminal className="w-3 h-3 text-violet-400/50" />
@@ -322,7 +322,7 @@ export default function ReplitCreate() {
             </div>
           </div>
 
-          <div className="flex-1 h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono" data-testid="container-logs">
+          <div className="flex-1 h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono" style={{ wordBreak: "break-all", overflowWrap: "anywhere" }} data-testid="container-logs">
             {logs.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center gap-2">
                 <Terminal className="w-6 h-6 text-white/10" />
