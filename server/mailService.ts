@@ -14,26 +14,52 @@ export function detectProviderFromDomain(domain: string): Provider {
   return "mail.tm";
 }
 
-export async function getAvailableDomain(): Promise<string> {
-  for (const provider of ["mail.tm", "mail.gw"] as Provider[]) {
-    try {
+export async function getAvailableDomain(preferGw = true): Promise<string> {
+  const results = await Promise.allSettled(
+    (["mail.tm", "mail.gw"] as Provider[]).map(async (provider) => {
       const baseUrl = PROVIDERS[provider];
       const res = await fetch(`${baseUrl}/domains`, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) continue;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const members = data["hydra:member"];
-      if (members && members.length > 0) {
-        const domain = members[0].domain;
+      const members: any[] = data["hydra:member"] || [];
+      return members.map((m: any) => ({ domain: m.domain as string, provider }));
+    })
+  );
+
+  const allDomains: { domain: string; provider: Provider }[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const provider = i === 0 ? "mail.tm" : "mail.gw";
+    if (r.status === "fulfilled") {
+      for (const { domain } of r.value) {
         if (provider === "mail.tm") MAIL_TM_DOMAINS.add(domain);
         else MAIL_GW_DOMAINS.add(domain);
-        console.log(`[Mail] Using provider: ${provider}, domain: ${domain}`);
-        return domain;
+        allDomains.push({ domain, provider });
       }
-    } catch (err: any) {
-      console.log(`[Mail] Provider ${provider} failed: ${err.message}`);
+    } else {
+      console.log(`[Mail] Provider ${provider} domain fetch failed: ${(r as any).reason?.message}`);
     }
   }
-  throw new Error("No email domains available from any provider");
+
+  if (allDomains.length === 0) throw new Error("No email domains available from any provider");
+
+  const gwDomains = allDomains.filter(d => d.provider === "mail.gw");
+  const tmDomains = allDomains.filter(d => d.provider === "mail.tm");
+
+  let pool: { domain: string; provider: Provider }[];
+  if (preferGw && gwDomains.length > 0) {
+    pool = Math.random() < 0.85 ? gwDomains : allDomains;
+  } else {
+    pool = allDomains;
+  }
+
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  console.log(`[Mail] Using provider: ${chosen.provider}, domain: ${chosen.domain} (${gwDomains.length} gw + ${tmDomains.length} tm available)`);
+  return chosen.domain;
+}
+
+export async function getMailGwDomain(): Promise<string> {
+  return getAvailableDomain(true);
 }
 
 export async function createTempEmail(address: string, password: string): Promise<{ id: string; address: string; provider: Provider }> {

@@ -224,44 +224,71 @@ async function processAccount(
   preToken?: string
 ) {
   try {
+    let currentEmail = addisonEmail;
     let emailProvider = detectProviderFromDomain(addisonEmail.split("@")[1] || "");
+    const MAX_EMAIL_RETRIES = 2;
+
+    const runRegistration = async () => {
+      const result = await fullRegistrationFlow(
+        currentEmail,
+        firstName,
+        lastName,
+        password,
+        country,
+        language,
+        async (status) => {
+          const updated = await storage.updateAccount(accountId, { status: status as any });
+          if (updated) broadcastAccountUpdate(updated, ownerId);
+          broadcastLog(batchId, accountId, `Status: ${status}`, ownerId);
+        },
+        async () => {
+          broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
+          const code = await pollForVerificationCode(currentEmail, addisonEmailPassword, emailProvider, 70, 3000);
+          if (code) {
+            await storage.updateAccount(accountId, { verificationCode: code });
+            broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
+          } else {
+            broadcastLog(batchId, accountId, `Timed out waiting for code`, ownerId);
+          }
+          return code;
+        },
+        (message) => {
+          broadcastLog(batchId, accountId, message, ownerId);
+        },
+        proxyUrl
+      );
+      return result;
+    };
+
     if (preToken) {
       broadcastLog(batchId, accountId, `Email pre-created, starting registration...`, ownerId);
     } else {
-      broadcastLog(batchId, accountId, `Creating Addison email: ${addisonEmail}`, ownerId);
-      const created = await createTempEmail(addisonEmail, addisonEmailPassword);
+      broadcastLog(batchId, accountId, `Creating Addison email: ${currentEmail}`, ownerId);
+      const created = await createTempEmail(currentEmail, addisonEmailPassword);
       emailProvider = created.provider;
-      broadcastLog(batchId, accountId, `Addison email ready, starting registration...`, ownerId);
+      broadcastLog(batchId, accountId, `Addison email ready (${created.provider}), starting registration...`, ownerId);
     }
 
-    const result = await fullRegistrationFlow(
-      addisonEmail,
-      firstName,
-      lastName,
-      password,
-      country,
-      language,
-      async (status) => {
-        const updated = await storage.updateAccount(accountId, { status: status as any });
-        if (updated) broadcastAccountUpdate(updated, ownerId);
-        broadcastLog(batchId, accountId, `Status: ${status}`, ownerId);
-      },
-      async () => {
-        broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-        const code = await pollForVerificationCode(addisonEmail, addisonEmailPassword, emailProvider, 70, 3000);
-        if (code) {
-          await storage.updateAccount(accountId, { verificationCode: code });
-          broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
-        } else {
-          broadcastLog(batchId, accountId, `Timed out waiting for code`, ownerId);
-        }
-        return code;
-      },
-      (message) => {
-        broadcastLog(batchId, accountId, message, ownerId);
-      },
-      proxyUrl
-    );
+    let result = await runRegistration();
+
+    for (let emailRetry = 0; emailRetry < MAX_EMAIL_RETRIES && !result.success && (result.error || "").includes("Timed out waiting for verification email"); emailRetry++) {
+      broadcastLog(batchId, accountId, `📧 Email not delivered to ${currentEmail} — switching to alternate email domain...`, ownerId);
+      try {
+        const newDomain = await getAvailableDomain(true);
+        const newUsername = generateRandomUsername();
+        const newEmail = `${newUsername}@${newDomain}`;
+        broadcastLog(batchId, accountId, `🔄 Email retry ${emailRetry + 1}/${MAX_EMAIL_RETRIES}: creating ${newEmail}...`, ownerId);
+        const created = await createTempEmail(newEmail, addisonEmailPassword);
+        emailProvider = created.provider;
+        currentEmail = newEmail;
+        const accUpdated = await storage.updateAccount(accountId, { email: newEmail, status: "registering" as any });
+        if (accUpdated) broadcastAccountUpdate(accUpdated, ownerId);
+        result = await runRegistration();
+      } catch (retryErr: any) {
+        broadcastLog(batchId, accountId, `Email retry ${emailRetry + 1} setup error: ${retryErr.message.substring(0, 80)}`, ownerId);
+        break;
+      }
+    }
 
     if (result.success) {
       const currentAccount = await storage.getAccount(accountId);
@@ -279,7 +306,7 @@ async function processAccount(
         for (let retry = 0; retry < 2; retry++) {
           try {
             await new Promise(r => setTimeout(r, 3000));
-            const drawResult = await completeDrawViaGigyaBrowser(addisonEmail, password, result.zipCode || undefined, log);
+            const drawResult = await completeDrawViaGigyaBrowser(currentEmail, password, result.zipCode || undefined, log);
             if (drawResult.formSubmitted) {
               finalStatus = "completed";
               updateData.status = "completed";
@@ -297,7 +324,7 @@ async function processAccount(
       if (finalStatus === "completed") {
         broadcastLog(batchId, accountId, `📧 Checking inbox for LA28 draw confirmation email...`, ownerId);
         try {
-          const confirmed = await pollForDrawConfirmation(addisonEmail, addisonEmailPassword, emailProvider, 20, 5000);
+          const confirmed = await pollForDrawConfirmation(currentEmail, addisonEmailPassword, emailProvider, 20, 5000);
           if (confirmed) {
             broadcastLog(batchId, accountId, `✅ Draw confirmation email received! Registration verified by LA28.`, ownerId);
           } else {
@@ -311,15 +338,15 @@ async function processAccount(
       const updated = await storage.updateAccount(accountId, updateData);
       if (updated) broadcastAccountUpdate(updated, ownerId);
       const successMsg = finalStatus === "completed"
-        ? `✅ Full flow complete! Draw registered: ${addisonEmail}`
-        : `✅ Account created successfully! Email: ${addisonEmail}`;
+        ? `✅ Full flow complete! Draw registered: ${currentEmail}`
+        : `✅ Account created successfully! Email: ${currentEmail}`;
       broadcastLog(batchId, accountId, successMsg, ownerId);
 
       const billingPrice = await getCostPerAccount();
       await storage.createBillingRecord({
         accountId,
         amount: billingPrice.toFixed(2),
-        description: `Account creation: ${firstName} ${lastName} (${addisonEmail})`,
+        description: `Account creation: ${firstName} ${lastName} (${currentEmail})`,
         ownerId,
       });
 
@@ -340,14 +367,14 @@ async function processAccount(
         for (let retry = 0; retry < 2; retry++) {
           try {
             await new Promise(r => setTimeout(r, 3000));
-            const drawResult = await completeDrawViaGigyaBrowser(addisonEmail, password, result.zipCode || undefined, log);
+            const drawResult = await completeDrawViaGigyaBrowser(currentEmail, password, result.zipCode || undefined, log);
             if (drawResult.formSubmitted) {
               rescued = true;
               const updated2 = await storage.updateAccount(accountId, { status: "completed" });
               if (updated2) broadcastAccountUpdate(updated2, ownerId);
-              broadcastLog(batchId, accountId, `✅ Rescued! Draw retry ${retry + 1} succeeded: ${addisonEmail}`, ownerId);
+              broadcastLog(batchId, accountId, `✅ Rescued! Draw retry ${retry + 1} succeeded: ${currentEmail}`, ownerId);
               const billingPrice = await getCostPerAccount();
-              await storage.createBillingRecord({ accountId, amount: billingPrice.toFixed(2), description: `Account creation: ${firstName} ${lastName} (${addisonEmail})`, ownerId });
+              await storage.createBillingRecord({ accountId, amount: billingPrice.toFixed(2), description: `Account creation: ${firstName} ${lastName} (${currentEmail})`, ownerId });
               const user = await storage.getUser(ownerId);
               if (user) await storage.updateUserFreeAccountsUsed(ownerId, user.freeAccountsUsed + 1);
               break;
@@ -361,7 +388,7 @@ async function processAccount(
         if (!rescued) {
           const updated = await storage.updateAccount(accountId, { status: "draw_registering", errorMessage: "Draw step failed, queued for auto-retry" });
           if (updated) broadcastAccountUpdate(updated, ownerId);
-          broadcastLog(batchId, accountId, `⏳ Marked for auto-retry (account exists, draw pending): ${addisonEmail}`, ownerId);
+          broadcastLog(batchId, accountId, `⏳ Marked for auto-retry (account exists, draw pending): ${currentEmail}`, ownerId);
         }
       } else {
         const updated = await storage.updateAccount(accountId, { status: "failed", errorMessage: errMsg });
