@@ -77,6 +77,8 @@ export default function TMEventScanner() {
       return res.json();
     },
     refetchInterval: 30_000,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   const trackMutation = useMutation({
