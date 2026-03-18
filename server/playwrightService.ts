@@ -11137,8 +11137,8 @@ export async function registerLovableAccount(
       return { success: false, error: `Lovable signup did not proceed — ended up at unexpected URL: ${afterUrl.substring(0, 100)}` };
     }
 
-    log("Waiting 25s before checking Outlook inbox for Lovable verification email...");
-    await page.waitForTimeout(25000);
+    log("Waiting 40s before checking Outlook inbox for Lovable verification email...");
+    await page.waitForTimeout(40000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
@@ -11215,12 +11215,14 @@ export async function registerLovableAccount(
 
       if (isOnOutlookHost) {
         log("✅ Logged into Outlook Web — searching inbox for Lovable email...");
-        await owaPage.waitForTimeout(3000);
+        await owaPage.waitForTimeout(2000);
         await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(4000);
+        await owaPage.waitForTimeout(7000);
 
-        const emailItems = await owaPage.$$('[data-convid], [role="row"]');
-        log(`Found ${emailItems.length} email items in inbox`);
+        const emailItems = await owaPage.$$('[data-convid]');
+        const emailItemsAlt = emailItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
+        const allEmailItems = emailItems.length > 0 ? emailItems : emailItemsAlt;
+        log(`Found ${allEmailItems.length} email items in inbox ([data-convid]=${emailItems.length}, [role="option"]=${emailItemsAlt.length})`);
 
         async function extractLinkFromCurrentEmail(): Promise<boolean> {
           const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
@@ -11256,38 +11258,47 @@ export async function registerLovableAccount(
 
         let foundLovableEmail = false;
 
-        for (const item of emailItems.slice(0, 15)) {
-          const itemText = await item.innerText().catch(() => "");
-          if (itemText.toLowerCase().includes("lovable") || itemText.toLowerCase().includes("magic link") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("sign in") || itemText.toLowerCase().includes("login link") || itemText.toLowerCase().includes("noreply")) {
-            log(`Found Lovable-related email (keyword match): ${itemText.substring(0, 100)}`);
-            await item.click();
-            await owaPage.waitForTimeout(2500);
-            foundLovableEmail = true;
-            await extractLinkFromCurrentEmail();
-            break;
+        async function scanEmailList(items: any[], label: string): Promise<boolean> {
+          for (const item of items.slice(0, 15)) {
+            const itemText = await item.innerText().catch(() => "");
+            if (itemText.toLowerCase().includes("lovable") || itemText.toLowerCase().includes("magic link") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("sign in") || itemText.toLowerCase().includes("login link") || itemText.toLowerCase().includes("noreply")) {
+              log(`Found Lovable-related email in ${label} (keyword match): ${itemText.substring(0, 100)}`);
+              await item.click();
+              await owaPage.waitForTimeout(2500);
+              return await extractLinkFromCurrentEmail();
+            }
           }
+          if (items.length > 0) {
+            log(`No keyword match in ${label} — opening most recent emails as fallback...`);
+            for (const item of items.slice(0, 5)) {
+              const itemText = await item.innerText().catch(() => "");
+              if (itemText.trim().length < 5) continue;
+              log(`Opening recent email in ${label}: ${itemText.substring(0, 80)}`);
+              await item.click();
+              await owaPage.waitForTimeout(2500);
+              const found = await extractLinkFromCurrentEmail();
+              if (found) return true;
+              log("No link found in this email — trying next...");
+            }
+          }
+          return false;
         }
 
-        if (!foundLovableEmail && emailItems.length > 0) {
-          log("No keyword match — opening most recent email as fallback...");
-          const candidates = emailItems.slice(0, 5);
-          for (const item of candidates) {
-            const itemText = await item.innerText().catch(() => "");
-            if (itemText.trim().length < 5) continue;
-            log(`Opening recent email: ${itemText.substring(0, 80)}`);
-            await item.click();
-            await owaPage.waitForTimeout(2500);
-            const found = await extractLinkFromCurrentEmail();
-            if (found) {
-              foundLovableEmail = true;
-              break;
-            }
-            log("No link found in this email — trying next...");
-          }
+        foundLovableEmail = await scanEmailList(allEmailItems, "inbox");
+
+        if (!foundLovableEmail) {
+          log("Lovable email not found in inbox — checking Junk/Spam folder...");
+          await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 20000 });
+          await owaPage.waitForTimeout(5000);
+          const junkItems = await owaPage.$$('[data-convid]');
+          const junkItemsAlt = junkItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
+          const allJunkItems = junkItems.length > 0 ? junkItems : junkItemsAlt;
+          log(`Found ${allJunkItems.length} emails in junk folder`);
+          foundLovableEmail = await scanEmailList(allJunkItems, "junk");
         }
 
         if (!foundLovableEmail) {
-          log("No Lovable verification email found in inbox — may be delayed");
+          log("No Lovable verification email found in inbox or junk — may be delayed");
         }
       } else {
         log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
