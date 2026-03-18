@@ -5,6 +5,8 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
+import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
+import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
 import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
@@ -2568,6 +2570,106 @@ export async function registerRoutes(
       res.status(500).json({ error: err.message });
     }
   });
+
+  // ── TICKET MASTER DISCOVERY MODULE ───────────────────────────────────────
+
+  app.get("/api/tm-discovery/events", requireAuth, async (req, res) => {
+    try {
+      const keyword = (req.query.keyword as string) || (await storage.getSetting("tm_keyword")) || "";
+      const page = parseInt((req.query.page as string) || "0", 10);
+      const size = parseInt((req.query.size as string) || "20", 10);
+      const classificationName = (req.query.classificationName as string) || undefined;
+      const result = await searchEvents({ keyword, page, size, classificationName });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/tm-discovery/tracked", requireAuth, async (req, res) => {
+    try {
+      const events = await storage.getTmTrackedEvents();
+      res.json(events);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/tm-discovery/track", requireAuth, async (req, res) => {
+    try {
+      const { eventId, name, date, venue, city, priceMin, priceMax, currency, url, status } = req.body;
+      if (!eventId || !name) return res.status(400).json({ error: "eventId and name are required" });
+      const existing = await storage.getTmTrackedEventByEventId(eventId);
+      if (existing) return res.status(409).json({ error: "Event already tracked", event: existing });
+      const event = await storage.createTmTrackedEvent({
+        eventId, name, date: date || null, venue: venue || null, city: city || null,
+        priceMin: priceMin || null, priceMax: priceMax || null, currency: currency || "USD",
+        url: url || null, status: status || "active", ownerId: req.session.userId,
+      });
+      res.json(event);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/tm-discovery/tracked/:id", requireAuth, async (req, res) => {
+    try {
+      await storage.deleteTmTrackedEvent(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/tm-discovery/alerts", requireAuth, async (req, res) => {
+    try {
+      const limit = parseInt((req.query.limit as string) || "100", 10);
+      const alerts = await storage.getTmAlerts(undefined, limit);
+      res.json(alerts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/tm-discovery/settings", requireAuth, async (req, res) => {
+    try {
+      const [keyword, botToken, chatId, monitoring] = await Promise.all([
+        storage.getSetting("tm_keyword"),
+        storage.getSetting("tm_telegram_bot_token"),
+        storage.getSetting("tm_telegram_chat_id"),
+        storage.getSetting("tm_monitoring_enabled"),
+      ]);
+      res.json({ keyword: keyword || "", botToken: botToken || "", chatId: chatId || "", monitoringEnabled: monitoring !== "false" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/tm-discovery/settings", requireAuth, async (req, res) => {
+    try {
+      const { keyword, botToken, chatId, monitoringEnabled } = req.body;
+      if (keyword !== undefined) await storage.setSetting("tm_keyword", keyword);
+      if (botToken !== undefined) await storage.setSetting("tm_telegram_bot_token", botToken);
+      if (chatId !== undefined) await storage.setSetting("tm_telegram_chat_id", chatId);
+      if (monitoringEnabled !== undefined) await storage.setSetting("tm_monitoring_enabled", String(monitoringEnabled));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/tm-discovery/test-telegram", requireAuth, async (req, res) => {
+    try {
+      const { botToken, chatId } = req.body;
+      if (!botToken || !chatId) return res.status(400).json({ error: "botToken and chatId required" });
+      const sent = await sendTelegramMessage(botToken, chatId, "✅ <b>Addison Panel</b> — Telegram alert test successful!");
+      res.json({ success: sent });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  startMonitoring();
 
   // ── POST /api/private/gmail/create ───────────────────────────────────────
   app.post("/api/private/gmail/create", requireAuth, async (req, res) => {

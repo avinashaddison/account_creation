@@ -164,3 +164,39 @@ export const insertPrivateGmailSchema = createInsertSchema(privateGmailAccounts)
 });
 export type PrivateGmailAccount = typeof privateGmailAccounts.$inferSelect;
 export type InsertPrivateGmail = z.infer<typeof insertPrivateGmailSchema>;
+
+export const tmTrackedEvents = pgTable("tm_tracked_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: text("event_id").notNull(),
+  name: text("name").notNull(),
+  date: text("date"),
+  venue: text("venue"),
+  city: text("city"),
+  priceMin: text("price_min"),
+  priceMax: text("price_max"),
+  currency: text("currency").default("USD"),
+  url: text("url"),
+  status: text("status").notNull().default("active"),
+  ownerId: varchar("owner_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const tmAlerts = pgTable("tm_alerts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: text("event_id").notNull(),
+  eventName: text("event_name").notNull(),
+  alertType: text("alert_type").notNull(),
+  message: text("message").notNull(),
+  oldPrice: text("old_price"),
+  newPrice: text("new_price"),
+  sentViaTelegram: boolean("sent_via_telegram").notNull().default(false),
+  ownerId: varchar("owner_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertTmTrackedEventSchema = createInsertSchema(tmTrackedEvents).omit({ id: true, createdAt: true });
+export const insertTmAlertSchema = createInsertSchema(tmAlerts).omit({ id: true, createdAt: true });
+export type TmTrackedEvent = typeof tmTrackedEvents.$inferSelect;
+export type InsertTmTrackedEvent = z.infer<typeof insertTmTrackedEventSchema>;
+export type TmAlert = typeof tmAlerts.$inferSelect;
+export type InsertTmAlert = z.infer<typeof insertTmAlertSchema>;

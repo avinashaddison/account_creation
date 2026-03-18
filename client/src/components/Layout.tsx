@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu, Settings, Shield } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -12,12 +12,20 @@ type LayoutProps = {
   onPanelNameChange?: (name: string) => void;
 };
 
+const TM_SUBNAV = [
+  { href: "/admin/tm-event-scanner", label: "Event Scanner", icon: Search },
+  { href: "/admin/tm-live-alerts", label: "Live Alerts", icon: Bell },
+  { href: "/admin/tm-tracked-events", label: "Tracked Events", icon: Bookmark },
+  { href: "/admin/tm-settings", label: "Settings", icon: SlidersHorizontal },
+];
+
 export default function Layout({ children, user, onLogout, onPanelNameChange }: LayoutProps) {
   const [location] = useLocation();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(user.panelName || "Addison Panel");
   const [saving, setSaving] = useState(false);
   const [time, setTime] = useState(new Date());
+  const [tmExpanded, setTmExpanded] = useState(() => location.startsWith("/admin/tm-"));
 
   const panelName = user.panelName || "Addison Panel";
 
@@ -148,6 +156,51 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
               </Link>
             );
           })}
+
+          <div className="mt-1">
+            <div className="px-4 pt-2 pb-1 flex items-center gap-1.5">
+              <Ticket className="w-2.5 h-2.5 text-emerald-400/25" />
+              <span className="text-[9px] font-mono text-emerald-400/25 uppercase tracking-[0.15em]">Ticket Master</span>
+            </div>
+            <div
+              onClick={() => { setTmExpanded((v) => !v); sounds.navigate(); }}
+              onMouseEnter={() => sounds.hover()}
+              className={`group/item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-medium cursor-pointer transition-all duration-150 relative ${
+                location.startsWith("/admin/tm-") ? "text-emerald-300" : "text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/[0.03]"
+              }`}
+              style={location.startsWith("/admin/tm-") ? { background: 'linear-gradient(135deg, rgba(0,255,65,0.06) 0%, rgba(255,176,0,0.04) 100%)', border: '1px solid rgba(0,255,65,0.1)' } : { border: '1px solid transparent' }}
+              data-testid="nav-ticket-master"
+            >
+              <Ticket className={`w-[14px] h-[14px] shrink-0 ${location.startsWith("/admin/tm-") ? "text-emerald-400" : "text-zinc-600 group-hover/item:text-zinc-400"}`} />
+              <span className="flex-1 font-mono">Ticket Master</span>
+              <span className="text-[8px] font-mono tracking-wider text-zinc-700">TKT</span>
+              <ChevronRight className={`w-3 h-3 transition-transform duration-200 ${tmExpanded ? "rotate-90 text-emerald-400/40" : "text-zinc-700"}`} />
+            </div>
+            {tmExpanded && (
+              <div className="ml-3 mt-0.5 pl-3 border-l border-emerald-500/[0.08] space-y-0.5">
+                {TM_SUBNAV.map((item) => {
+                  const isActive = location === item.href;
+                  return (
+                    <Link key={item.href} href={item.href}>
+                      <div
+                        onClick={() => sounds.navigate()}
+                        onMouseEnter={() => sounds.hover()}
+                        className={`group/sub flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150 relative ${
+                          isActive ? "text-emerald-300" : "text-zinc-600 hover:text-zinc-300 hover:bg-emerald-500/[0.03]"
+                        }`}
+                        style={isActive ? { background: 'linear-gradient(135deg, rgba(0,255,65,0.05) 0%, rgba(0,0,0,0.2) 100%)', border: '1px solid rgba(0,255,65,0.08)' } : { border: '1px solid transparent' }}
+                        data-testid={`nav-tm-${item.label.toLowerCase().replace(/ /g, "-")}`}
+                      >
+                        {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3 rounded-r-full bg-emerald-400 shadow-[0_0_4px_rgba(0,255,65,0.4)]" />}
+                        <item.icon className={`w-[12px] h-[12px] shrink-0 ${isActive ? "text-emerald-400" : "text-zinc-700 group-hover/sub:text-zinc-500"}`} />
+                        <span className="font-mono">{item.label}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="p-3 mx-2 mb-2 rounded-lg cyber-card">

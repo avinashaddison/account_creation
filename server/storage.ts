@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -52,6 +52,14 @@ export interface IStorage {
   getAllPrivateGmails(): Promise<PrivateGmailAccount[]>;
   deletePrivateGmail(id: string): Promise<void>;
   updatePrivateGmailStatus(id: string, status: string): Promise<void>;
+  getTmTrackedEvents(ownerId?: string): Promise<TmTrackedEvent[]>;
+  getTmTrackedEventByEventId(eventId: string, ownerId?: string): Promise<TmTrackedEvent | undefined>;
+  createTmTrackedEvent(data: InsertTmTrackedEvent): Promise<TmTrackedEvent>;
+  updateTmTrackedEvent(id: string, updates: Partial<TmTrackedEvent>): Promise<void>;
+  deleteTmTrackedEvent(id: string): Promise<void>;
+  getTmAlerts(ownerId?: string, limit?: number): Promise<TmAlert[]>;
+  createTmAlert(data: InsertTmAlert): Promise<TmAlert>;
+  deleteTmAlertsOlderThan(days: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -342,6 +350,51 @@ export class DatabaseStorage implements IStorage {
 
   async updatePrivateGmailStatus(id: string, status: string): Promise<void> {
     await db.update(privateGmailAccounts).set({ status }).where(eq(privateGmailAccounts.id, id));
+  }
+
+  async getTmTrackedEvents(ownerId?: string): Promise<TmTrackedEvent[]> {
+    if (ownerId) {
+      return db.select().from(tmTrackedEvents).where(eq(tmTrackedEvents.ownerId, ownerId)).orderBy(desc(tmTrackedEvents.createdAt));
+    }
+    return db.select().from(tmTrackedEvents).orderBy(desc(tmTrackedEvents.createdAt));
+  }
+
+  async getTmTrackedEventByEventId(eventId: string, ownerId?: string): Promise<TmTrackedEvent | undefined> {
+    const conditions = ownerId
+      ? and(eq(tmTrackedEvents.eventId, eventId), eq(tmTrackedEvents.ownerId, ownerId))
+      : eq(tmTrackedEvents.eventId, eventId);
+    const [row] = await db.select().from(tmTrackedEvents).where(conditions);
+    return row;
+  }
+
+  async createTmTrackedEvent(data: InsertTmTrackedEvent): Promise<TmTrackedEvent> {
+    const [row] = await db.insert(tmTrackedEvents).values(data).returning();
+    return row;
+  }
+
+  async updateTmTrackedEvent(id: string, updates: Partial<TmTrackedEvent>): Promise<void> {
+    await db.update(tmTrackedEvents).set(updates).where(eq(tmTrackedEvents.id, id));
+  }
+
+  async deleteTmTrackedEvent(id: string): Promise<void> {
+    await db.delete(tmTrackedEvents).where(eq(tmTrackedEvents.id, id));
+  }
+
+  async getTmAlerts(ownerId?: string, limit = 100): Promise<TmAlert[]> {
+    if (ownerId) {
+      return db.select().from(tmAlerts).where(eq(tmAlerts.ownerId, ownerId)).orderBy(desc(tmAlerts.createdAt)).limit(limit);
+    }
+    return db.select().from(tmAlerts).orderBy(desc(tmAlerts.createdAt)).limit(limit);
+  }
+
+  async createTmAlert(data: InsertTmAlert): Promise<TmAlert> {
+    const [row] = await db.insert(tmAlerts).values(data).returning();
+    return row;
+  }
+
+  async deleteTmAlertsOlderThan(days: number): Promise<void> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    await db.delete(tmAlerts).where(sql`${tmAlerts.createdAt} < ${cutoff}`);
   }
 }
 

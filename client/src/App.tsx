@@ -24,6 +24,10 @@ import OutlookLogin from "@/pages/OutlookLogin";
 import OutlookCreate from "@/pages/OutlookCreate";
 import ZenRowsRegister from "@/pages/ZenRowsRegister";
 import PrivateAccount from "@/pages/PrivateAccount";
+import TMEventScanner from "@/pages/TMEventScanner";
+import TMLiveAlerts from "@/pages/TMLiveAlerts";
+import TMTrackedEvents from "@/pages/TMTrackedEvents";
+import TMSettings from "@/pages/TMSettings";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -54,6 +58,10 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/outlook-login" component={OutlookLogin} />
         <Route path="/admin/outlook-create" component={OutlookCreate} />
         <Route path="/admin/zenrows-register" component={ZenRowsRegister} />
+        <Route path="/admin/tm-event-scanner" component={TMEventScanner} />
+        <Route path="/admin/tm-live-alerts" component={TMLiveAlerts} />
+        <Route path="/admin/tm-tracked-events" component={TMTrackedEvents} />
+        <Route path="/admin/tm-settings" component={TMSettings} />
         <Route path="/admin/auto-create"><Redirect to="/admin/create-server" /></Route>
         <Route path="/admin/email-server"><Redirect to="/admin/email-workspace" /></Route>
         <Route path="/admin/email-workspace" component={EmailWorkspace} />
