@@ -132,17 +132,15 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
         </div>
 
         <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {nav.map((item) => {
-            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create" || location === "/admin/brunomars-create" || location === "/admin/outlook-login" || location === "/admin/outlook-create" || location === "/admin/zenrows-register"));
+          {[nav[0]].map((item) => {
+            const isActive = location === item.href;
             return (
               <Link key={item.href} href={item.href}>
                 <div
                   onClick={() => sounds.navigate()}
                   onMouseEnter={() => sounds.hover()}
                   className={`group/item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-medium cursor-pointer transition-all duration-150 relative ${
-                    isActive
-                      ? "text-emerald-300"
-                      : "text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/[0.03]"
+                    isActive ? "text-emerald-300" : "text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/[0.03]"
                   }`}
                   style={isActive ? { background: 'linear-gradient(135deg, rgba(0,255,65,0.06) 0%, rgba(255,176,0,0.04) 100%)', border: '1px solid rgba(0,255,65,0.1)' } : { border: '1px solid transparent' }}
                   data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
@@ -201,6 +199,29 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
               </div>
             )}
           </div>
+
+          {nav.slice(1).map((item) => {
+            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create" || location === "/admin/brunomars-create" || location === "/admin/outlook-login" || location === "/admin/outlook-create" || location === "/admin/zenrows-register"));
+            return (
+              <Link key={item.href} href={item.href}>
+                <div
+                  onClick={() => sounds.navigate()}
+                  onMouseEnter={() => sounds.hover()}
+                  className={`group/item flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-medium cursor-pointer transition-all duration-150 relative ${
+                    isActive ? "text-emerald-300" : "text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/[0.03]"
+                  }`}
+                  style={isActive ? { background: 'linear-gradient(135deg, rgba(0,255,65,0.06) 0%, rgba(255,176,0,0.04) 100%)', border: '1px solid rgba(0,255,65,0.1)' } : { border: '1px solid transparent' }}
+                  data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
+                >
+                  {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 rounded-r-full bg-emerald-400 shadow-[0_0_6px_rgba(0,255,65,0.5)]" />}
+                  <item.icon className={`w-[14px] h-[14px] shrink-0 ${isActive ? "text-emerald-400" : "text-zinc-600 group-hover/item:text-zinc-400"}`} />
+                  <span className="flex-1 font-mono">{item.label}</span>
+                  <span className={`text-[8px] font-mono tracking-wider ${isActive ? "text-emerald-400/40" : "text-zinc-700"}`}>{item.tag}</span>
+                  {isActive && <ChevronRight className="w-3 h-3 text-emerald-400/40" />}
+                </div>
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="p-3 mx-2 mb-2 rounded-lg cyber-card">
