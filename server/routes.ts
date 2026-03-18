@@ -18,6 +18,8 @@ import { randomUUID, createHash } from "crypto";
 async function getDefaultBrowserApiUrl(): Promise<string | null> {
   const residential = await storage.getSetting("residential_proxy_url");
   if (residential) return residential;
+  const soaxTemplate = await storage.getSetting("soax_proxy_template");
+  if (soaxTemplate) return soaxTemplate;
   const saved = await storage.getSetting("browser_proxy_url");
   return saved || null;
 }

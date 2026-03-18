@@ -851,12 +851,26 @@ async function doTMRegistration(
         return { success: false, error: `Failed to launch browser: ${err.message}` };
       }
 
-      context = await browser.newContext({
+      const contextOptions: any = {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         viewport: { width: 1280, height: 720 },
         locale: "en-US",
         timezoneId: "America/New_York",
-      });
+      };
+      if (proxyUrl && proxyUrl.startsWith("http")) {
+        try {
+          const parsed = new URL(proxyUrl);
+          contextOptions.proxy = {
+            server: `${parsed.protocol}//${parsed.hostname}:${parsed.port}`,
+            username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+            password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+          };
+          console.log(`[TM-Playwright] Using proxy server: ${parsed.hostname}:${parsed.port}`);
+        } catch (e: any) {
+          console.log(`[TM-Playwright] Could not parse proxy URL: ${e.message}`);
+        }
+      }
+      context = await browser.newContext(contextOptions);
 
       page = await context.newPage();
       page.setDefaultTimeout(30000);
