@@ -2672,9 +2672,10 @@ export async function registerRoutes(
       const postalCode = (req.query.postalCode as string) || undefined;
       const radius = (req.query.radius as string) || undefined;
       const sort = (req.query.sort as string) || "date,asc";
-      // Default startDateTime to today to prevent showing past events
-      const today = new Date().toISOString().split("T")[0] + "T00:00:00Z";
-      const startDateTime = (req.query.startDateTime as string) || today;
+      // Default startDateTime to RIGHT NOW so truly past events are excluded
+      // Ticketmaster requires format: YYYY-MM-DDTHH:mm:ssZ (no milliseconds)
+      const now = new Date().toISOString().split(".")[0] + "Z";
+      const startDateTime = (req.query.startDateTime as string) || now;
       const endDateTime = (req.query.endDateTime as string) || undefined;
       const result = await searchEvents({
         keyword, page, size, classificationName,
