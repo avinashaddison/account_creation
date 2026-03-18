@@ -58,7 +58,21 @@ export async function pollGmailForVerificationCode(
 
   try {
     await client.connect();
-    const lock = await client.getMailboxLock("INBOX");
+
+    // Search All Mail (includes Spam/Promotions) so we never miss LA28 emails
+    const mailboxesToTry = ["[Gmail]/All Mail", "INBOX", "[Gmail]/Spam"];
+    let activeLock: any = null;
+    for (const box of mailboxesToTry) {
+      try {
+        activeLock = await client.getMailboxLock(box);
+        console.log(`[Gmail] Opened mailbox: ${box}`);
+        break;
+      } catch {
+        console.log(`[Gmail] Could not open ${box}, trying next...`);
+      }
+    }
+    if (!activeLock) throw new Error("Could not open any Gmail mailbox");
+    const lock = activeLock;
 
     try {
       for (let i = 0; i < maxAttempts; i++) {
