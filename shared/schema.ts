@@ -112,6 +112,15 @@ export const privateZenrowsKeys = pgTable("private_zenrows_keys", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const privateGmailAccounts = pgTable("private_gmail_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  password: text("password").notNull(),
+  status: text("status").notNull().default("active"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -148,3 +157,10 @@ export const insertPrivateZenrowsKeySchema = createInsertSchema(privateZenrowsKe
 });
 export type PrivateZenrowsKey = typeof privateZenrowsKeys.$inferSelect;
 export type InsertPrivateZenrowsKey = z.infer<typeof insertPrivateZenrowsKeySchema>;
+
+export const insertPrivateGmailSchema = createInsertSchema(privateGmailAccounts).omit({
+  id: true,
+  createdAt: true,
+});
+export type PrivateGmailAccount = typeof privateGmailAccounts.$inferSelect;
+export type InsertPrivateGmail = z.infer<typeof insertPrivateGmailSchema>;

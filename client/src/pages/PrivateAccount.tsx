@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap } from "lucide-react";
+import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
@@ -28,7 +28,16 @@ type ZenrowsKey = {
   createdAt: string;
 };
 
-type TabType = "outlook" | "zenrows";
+type GmailAccount = {
+  id: string;
+  email: string;
+  password: string;
+  status: string;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+type TabType = "outlook" | "zenrows" | "gmail";
 
 type ZenrowsRegJob = {
   regId: string;
@@ -55,6 +64,10 @@ export default function PrivateAccount() {
   const [newZenrowsEmail, setNewZenrowsEmail] = useState("");
   const [newZenrowsPassword, setNewZenrowsPassword] = useState("");
   const [saving, setSaving] = useState(false);
+  const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
+  const [addGmailOpen, setAddGmailOpen] = useState(false);
+  const [newGmailEmail, setNewGmailEmail] = useState("");
+  const [newGmailPassword, setNewGmailPassword] = useState("");
   const [zenrowsRegJobs, setZenrowsRegJobs] = useState<Record<string, ZenrowsRegJob>>({});
   const [registeringAccountIds, setRegisteringAccountIds] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
@@ -153,9 +166,19 @@ export default function PrivateAccount() {
       .catch(() => {});
   }
 
+  function fetchGmail() {
+    fetch("/api/private/gmail", { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) { handleUnauthorized(); return []; }
+        return r.json();
+      })
+      .then(setGmailAccounts)
+      .catch(() => {});
+  }
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchOutlook(), fetchZenrows()]).finally(() => setLoading(false));
+    Promise.all([fetchOutlook(), fetchZenrows(), fetchGmail()]).finally(() => setLoading(false));
   }, []);
 
   function copyToClipboard(text: string, id: string) {
@@ -226,6 +249,47 @@ export default function PrivateAccount() {
       sounds.navigate();
       fetchZenrows();
     } catch {}
+  }
+
+  async function addGmailAccount() {
+    if (!newGmailEmail.trim() || !newGmailPassword.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/private/gmail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: newGmailEmail.trim(), password: newGmailPassword.trim() }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        toast({ title: "Account added", description: "Gmail account saved successfully" });
+        sounds.navigate();
+        setNewGmailEmail("");
+        setNewGmailPassword("");
+        setAddGmailOpen(false);
+        fetchGmail();
+      }
+    } catch {} finally { setSaving(false); }
+  }
+
+  async function deleteGmail(id: string) {
+    try {
+      await fetch(`/api/private/gmail/${id}`, { method: "DELETE", credentials: "include" });
+      sounds.navigate();
+      fetchGmail();
+    } catch {}
+  }
+
+  function exportGmailCsv() {
+    const rows = ["email,password", ...gmailAccounts.map((a) => `${a.email},${a.password}`)];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "gmail_accounts.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    sounds.navigate();
   }
 
   async function registerZenrowsWithOutlook(acc: OutlookAccount) {
@@ -302,7 +366,7 @@ export default function PrivateAccount() {
           variant="ghost"
           size="sm"
           className="text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/5 font-mono text-xs"
-          onClick={() => { fetchOutlook(); fetchZenrows(); sounds.navigate(); }}
+          onClick={() => { fetchOutlook(); fetchZenrows(); fetchGmail(); sounds.navigate(); }}
           data-testid="button-refresh-private"
         >
           <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
@@ -310,7 +374,7 @@ export default function PrivateAccount() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("outlook"); sounds.hover(); }} data-testid="card-outlook-summary">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -340,6 +404,23 @@ export default function PrivateAccount() {
               </div>
               <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
                 {activeZenrows} active
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("gmail"); sounds.hover(); }} data-testid="card-gmail-summary">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(234,67,53,0.08)", border: "1px solid rgba(234,67,53,0.15)" }}>
+                <Mail className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Gmail Accounts</p>
+                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-gmail-count">{gmailAccounts.length}</p>
+              </div>
+              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
+                {gmailAccounts.filter((a) => a.status === "active").length} active
               </Badge>
             </div>
           </CardContent>
@@ -421,6 +502,16 @@ export default function PrivateAccount() {
         >
           <Key className="w-3.5 h-3.5 mr-1.5" />
           Proxy API Stock
+        </Button>
+        <Button
+          variant={tab === "gmail" ? "default" : "ghost"}
+          size="sm"
+          className={`font-mono text-xs ${tab === "gmail" ? "bg-red-500/15 text-red-400 border border-red-500/20 hover:bg-red-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
+          onClick={() => { setTab("gmail"); sounds.hover(); }}
+          data-testid="tab-gmail"
+        >
+          <Mail className="w-3.5 h-3.5 mr-1.5" />
+          Gmail Accounts
         </Button>
       </div>
 
@@ -547,6 +638,133 @@ export default function PrivateAccount() {
                               <Trash2 className="w-3 h-3" />
                             </Button>
                           </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === "gmail" && (
+        <Card className="border-emerald-500/10 bg-black/20">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-mono text-emerald-50 flex items-center gap-2">
+                <Mail className="w-4 h-4 text-red-400" />
+                Gmail Accounts
+                <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/15 text-emerald-400/60 ml-2">{gmailAccounts.length} total</Badge>
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {gmailAccounts.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 font-mono text-xs"
+                    onClick={exportGmailCsv}
+                    data-testid="button-export-gmail-csv"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1" />
+                    Export CSV
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-mono text-xs"
+                  onClick={() => { setAddGmailOpen(!addGmailOpen); sounds.navigate(); }}
+                  data-testid="button-add-gmail"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Add Manual
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          {addGmailOpen && (
+            <div className="mx-6 mb-4 p-4 rounded-lg border border-red-500/10" style={{ background: "rgba(234,67,53,0.02)" }}>
+              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-3">Add Gmail Account</p>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <Input
+                  placeholder="email@gmail.com"
+                  value={newGmailEmail}
+                  onChange={(e) => setNewGmailEmail(e.target.value)}
+                  className="h-8 text-xs bg-black/30 border-red-500/10 text-emerald-50 font-mono"
+                  data-testid="input-gmail-email"
+                />
+                <Input
+                  placeholder="Password"
+                  value={newGmailPassword}
+                  onChange={(e) => setNewGmailPassword(e.target.value)}
+                  className="h-8 text-xs bg-black/30 border-red-500/10 text-emerald-50 font-mono"
+                  data-testid="input-gmail-password"
+                />
+              </div>
+              <Button size="sm" className="bg-red-500/15 text-red-400 border border-red-500/20 hover:bg-red-500/25 font-mono text-xs" onClick={addGmailAccount} disabled={saving} data-testid="button-save-gmail">
+                {saving ? "Saving..." : "Save Account"}
+              </Button>
+            </div>
+          )}
+
+          <CardContent className="pt-0">
+            {gmailAccounts.length === 0 ? (
+              <div className="text-center py-12">
+                <Mail className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
+                <p className="text-sm text-zinc-500 font-mono">No Gmail accounts yet</p>
+                <p className="text-xs text-zinc-600 font-mono mt-1">Add accounts manually using the button above</p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-emerald-500/8 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-emerald-500/8 hover:bg-transparent">
+                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Email</TableHead>
+                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Password</TableHead>
+                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Status</TableHead>
+                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Created</TableHead>
+                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {gmailAccounts.map((acc) => (
+                      <TableRow key={acc.id} className="border-emerald-500/5 hover:bg-emerald-500/[0.02]" data-testid={`row-gmail-${acc.id}`}>
+                        <TableCell className="py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-emerald-50" data-testid={`text-gmail-email-${acc.id}`}>{acc.email}</span>
+                            <button onClick={() => copyToClipboard(acc.email, `ge-${acc.id}`)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-copy-gmail-email-${acc.id}`}>
+                              {copied === `ge-${acc.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-zinc-400" data-testid={`text-gmail-password-${acc.id}`}>
+                              {showPasswords[`gm-${acc.id}`] ? acc.password : "••••••••"}
+                            </span>
+                            <button onClick={() => togglePassword(`gm-${acc.id}`)} className="text-zinc-600 hover:text-red-400 transition-colors" data-testid={`button-toggle-gmail-password-${acc.id}`}>
+                              {showPasswords[`gm-${acc.id}`] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
+                            <button onClick={() => copyToClipboard(acc.password, `gp-${acc.id}`)} className="text-zinc-600 hover:text-red-400 transition-colors" data-testid={`button-copy-gmail-password-${acc.id}`}>
+                              {copied === `gp-${acc.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <Badge variant="outline" className={`text-[9px] font-mono ${acc.status === "active" ? "border-emerald-500/20 text-emerald-400" : "border-red-500/20 text-red-400"}`} data-testid={`badge-gmail-status-${acc.id}`}>
+                            {acc.status.toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <span className="text-[10px] text-zinc-600 font-mono">{formatDate(acc.createdAt)}</span>
+                        </TableCell>
+                        <TableCell className="py-2.5 text-right">
+                          <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteGmail(acc.id)} data-testid={`button-delete-gmail-${acc.id}`}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

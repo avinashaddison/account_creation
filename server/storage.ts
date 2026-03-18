@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -48,6 +48,9 @@ export interface IStorage {
   deletePrivateZenrowsKey(id: string): Promise<void>;
   updatePrivateZenrowsKeyStatus(id: string, status: string): Promise<void>;
   updatePrivateOutlookStatus(id: string, status: string): Promise<void>;
+  createPrivateGmail(data: InsertPrivateGmail): Promise<PrivateGmailAccount>;
+  getAllPrivateGmails(): Promise<PrivateGmailAccount[]>;
+  deletePrivateGmail(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -321,6 +324,19 @@ export class DatabaseStorage implements IStorage {
 
   async updatePrivateZenrowsKeyStatus(id: string, status: string): Promise<void> {
     await db.update(privateZenrowsKeys).set({ status }).where(eq(privateZenrowsKeys.id, id));
+  }
+
+  async createPrivateGmail(data: InsertPrivateGmail): Promise<PrivateGmailAccount> {
+    const [row] = await db.insert(privateGmailAccounts).values(data).returning();
+    return row;
+  }
+
+  async getAllPrivateGmails(): Promise<PrivateGmailAccount[]> {
+    return db.select().from(privateGmailAccounts).orderBy(desc(privateGmailAccounts.createdAt));
+  }
+
+  async deletePrivateGmail(id: string): Promise<void> {
+    await db.delete(privateGmailAccounts).where(eq(privateGmailAccounts.id, id));
   }
 }
 

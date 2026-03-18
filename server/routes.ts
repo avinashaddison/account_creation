@@ -2450,5 +2450,25 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  app.get("/api/private/gmail", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const accounts = await storage.getAllPrivateGmails();
+    res.json(accounts);
+  });
+
+  app.post("/api/private/gmail", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+    const account = await storage.createPrivateGmail({ email, password, status: "active", createdBy: req.session.userId });
+    res.json(account);
+  });
+
+  app.delete("/api/private/gmail/:id", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    await storage.deletePrivateGmail(req.params.id);
+    res.json({ success: true });
+  });
+
   return httpServer;
 }
