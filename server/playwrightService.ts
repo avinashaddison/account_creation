@@ -6343,32 +6343,48 @@ export async function createOutlookAccount(
               // Wait longer for canvas-based captcha to fully render
               await zrPg2.waitForTimeout(6000 + Math.random() * 2000);
 
-              // Use evaluate for bounding rect — more reliable than Playwright's boundingBox for canvas elements
+              // Target the canvas element directly — it's the actual hold target inside #px-captcha
               const zrRect2: any = await zrPg2.evaluate(() => {
+                // Try canvas first (the actual interactive element)
+                const canvas = document.querySelector('canvas') as HTMLElement | null;
+                if (canvas) {
+                  const r = canvas.getBoundingClientRect();
+                  if (r.width > 10 && r.height > 10) {
+                    return { x: r.left, y: r.top, width: r.width, height: r.height, source: 'canvas' };
+                  }
+                }
+                // Fallback to #px-captcha
                 const el = document.querySelector('#px-captcha') as HTMLElement | null;
-                if (!el) return null;
-                const r = el.getBoundingClientRect();
-                return { x: r.left, y: r.top, width: r.width, height: r.height, exists: true };
+                if (el) {
+                  const r = el.getBoundingClientRect();
+                  return { x: r.left, y: r.top, width: r.width, height: r.height, source: 'px-captcha' };
+                }
+                // Last resort: find any div with significant size
+                const allDivs = Array.from(document.querySelectorAll('div'));
+                const bigDiv = allDivs.find((d: any) => {
+                  const r = d.getBoundingClientRect();
+                  return r.width > 50 && r.height > 30 && r.height < 200;
+                });
+                if (bigDiv) {
+                  const r = (bigDiv as HTMLElement).getBoundingClientRect();
+                  return { x: r.left, y: r.top, width: r.width, height: r.height, source: 'div-fallback' };
+                }
+                return null;
               }).catch(() => null);
-              log("Addison Proxy px-captcha rect: " + JSON.stringify(zrRect2));
+              log("Addison Proxy target rect: " + JSON.stringify(zrRect2));
 
               const pgSize2 = zrPg2.viewportSize() || { width: 1280, height: 720 };
 
               let zcx2: number, zcy2: number;
-              // Use rect if element found with real height; otherwise use upper-center area where PX button typically renders
-              if (zrRect2 && zrRect2.width > 20 && zrRect2.height > 20) {
+              if (zrRect2 && zrRect2.width > 10 && zrRect2.height > 10) {
                 zcx2 = zrRect2.x + zrRect2.width * (0.35 + Math.random() * 0.3);
                 zcy2 = zrRect2.y + zrRect2.height * (0.35 + Math.random() * 0.3);
-                log("Addison Proxy using element rect: (" + Math.round(zcx2) + "," + Math.round(zcy2) + ")");
-              } else if (zrRect2 && zrRect2.width > 20) {
-                // Has width but height=0 (canvas not measured) — use x from rect, y at 40% of viewport
-                zcx2 = pgSize2.width / 2 + (Math.random() - 0.5) * 60;
-                zcy2 = pgSize2.height * 0.40 + (Math.random() - 0.5) * 20;
-                log("Addison Proxy height=0 fallback: (" + Math.round(zcx2) + "," + Math.round(zcy2) + ")");
+                log("Addison Proxy using " + (zrRect2.source || 'element') + " rect: (" + Math.round(zcx2) + "," + Math.round(zcy2) + ")");
               } else {
-                zcx2 = pgSize2.width / 2 + (Math.random() - 0.5) * 60;
-                zcy2 = pgSize2.height * 0.42 + (Math.random() - 0.5) * 20;
-                log("Addison Proxy no element, using viewport guess: (" + Math.round(zcx2) + "," + Math.round(zcy2) + ")");
+                // PX hold button is center-bottom of the page
+                zcx2 = pgSize2.width / 2 + (Math.random() - 0.5) * 40;
+                zcy2 = pgSize2.height * 0.55 + (Math.random() - 0.5) * 30;
+                log("Addison Proxy using center-page guess: (" + Math.round(zcx2) + "," + Math.round(zcy2) + ")");
               }
 
               // Approach mouse naturally from upper-left
@@ -6430,10 +6446,29 @@ export async function createOutlookAccount(
           }
 
           if (zenrowsCaptchaSolved) {
-            await page.waitForTimeout(2500);
+            await page.waitForTimeout(1500);
+            // Inject postMessage from inside the SOAX iframe to signal the parent page that PX is solved
+            // This mimics what the real iframe sends on success
+            const pxAppId = pxIframeUrl.match(/app_id=([^&]+)/)?.[1] || 'PXzC5j78di';
+            try {
+              await hsFrame.evaluate((appId: string) => {
+                const msgs = [
+                  { messageType: "PX_CHALLENGE_PASSED", appId },
+                  { type: "px-captcha-success", appId },
+                  { messageType: "PASSED", appId },
+                  { event: "px_passed", appId },
+                ];
+                for (const msg of msgs) {
+                  try { window.parent.postMessage(msg, "*"); } catch {}
+                  try { window.top!.postMessage(msg, "*"); } catch {}
+                }
+              }, pxAppId).catch(() => {});
+              log("Injected PX success postMessage from iframe to parent (appId=" + pxAppId + ")");
+            } catch {}
+            await page.waitForTimeout(3000);
             const mainCheck = (await page.textContent("body").catch(() => "")) || "";
             if (!mainCheck.toLowerCase().includes("prove you're human") && !mainCheck.toLowerCase().includes("press and hold")) {
-              log("Main page passed captcha after Addison Proxy solve!");
+              log("Main page passed captcha after Addison Proxy solve + postMessage inject!");
               captchaSolved = true;
               break;
             }
