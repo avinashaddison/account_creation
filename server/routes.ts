@@ -2425,6 +2425,92 @@ export async function registerRoutes(
     res.json({ success: true });
   });
 
+  app.post("/api/outlook-bulk-login", requireAuth, requireServiceAccess("outlook"), async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const { accountIds } = req.body;
+
+      const allAccounts = await storage.getAllPrivateOutlooks();
+      const targets = accountIds && accountIds.length > 0
+        ? allAccounts.filter((a: any) => accountIds.includes(a.id))
+        : allAccounts;
+
+      if (targets.length === 0) {
+        return res.status(400).json({ error: "No accounts found to test" });
+      }
+
+      const batchId = `outlook-bulk-${randomUUID().substring(0, 8)}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId, total: targets.length });
+
+      (async () => {
+        broadcastLog(batchId, "bulk", `Starting bulk login test for ${targets.length} account(s)...`, userId);
+        let passed = 0;
+        let failed = 0;
+
+        for (let i = 0; i < targets.length; i++) {
+          const acct = targets[i] as any;
+          broadcastLog(batchId, "bulk", `[${i + 1}/${targets.length}] Testing ${acct.email}...`, userId);
+          try {
+            const result = await loginOutlookAccount(
+              acct.email,
+              acct.password,
+              (msg) => broadcastLog(batchId, "bulk", `  ${msg}`, userId)
+            );
+
+            const newStatus = result.success ? "working" : "dead";
+            await storage.updatePrivateOutlookStatus(acct.id, newStatus);
+
+            if (result.success) {
+              passed++;
+              broadcastLog(batchId, "bulk", `✓ ${acct.email} — Login successful (${result.cookies?.length || 0} cookies)`, userId);
+            } else {
+              failed++;
+              broadcastLog(batchId, "bulk", `✗ ${acct.email} — Failed: ${result.error || "Unknown"}`, userId);
+            }
+
+            broadcast({
+              type: "outlook_bulk_login_result",
+              batchId,
+              accountId: acct.id,
+              email: acct.email,
+              success: result.success,
+              error: result.error,
+              cookieCount: result.cookies?.length || 0,
+              index: i,
+              total: targets.length,
+            }, userId);
+          } catch (err: any) {
+            failed++;
+            await storage.updatePrivateOutlookStatus(acct.id, "dead");
+            broadcastLog(batchId, "bulk", `✗ ${acct.email} — Error: ${(err.message || "").substring(0, 100)}`, userId);
+            broadcast({
+              type: "outlook_bulk_login_result",
+              batchId,
+              accountId: acct.id,
+              email: acct.email,
+              success: false,
+              error: err.message,
+              index: i,
+              total: targets.length,
+            }, userId);
+          }
+
+          if (i < targets.length - 1) {
+            broadcastLog(batchId, "bulk", `Waiting 3s before next account...`, userId);
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+        }
+
+        broadcastLog(batchId, "bulk", `Bulk test complete: ${passed} passed, ${failed} failed`, userId);
+        broadcast({ type: "outlook_bulk_complete", batchId, passed, failed, total: targets.length }, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/private/zenrows", requireAuth, async (req, res) => {
     if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
     const keys = await storage.getAllPrivateZenrowsKeys();
