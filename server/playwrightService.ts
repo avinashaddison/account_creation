@@ -10329,6 +10329,80 @@ export interface GmailCheckResult {
   note?: string;
 }
 
+async function handleReplitOnboarding(page: any, log: (msg: string) => void): Promise<void> {
+  try {
+    await page.waitForTimeout(3000);
+
+    const firstNames = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Jamie", "Drew", "Quinn", "Avery"];
+    const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Davis", "Miller", "Wilson", "Moore", "Anderson"];
+    const fullName = firstNames[Math.floor(Math.random() * firstNames.length)] + " " + lastNames[Math.floor(Math.random() * lastNames.length)];
+
+    // Step 1: "Let's set up your account" — fill full name and click Next
+    const step1Heading = await page.locator('text="Let\'s set up your account"').first().isVisible().catch(() => false);
+    if (!step1Heading) {
+      log("No onboarding wizard detected — skipping");
+      return;
+    }
+    log("Onboarding wizard detected — completing setup...");
+
+    const fullNameInput = await page.$('input[placeholder*="name" i], input[name*="fullName" i], input[name*="full_name" i]');
+    if (fullNameInput) {
+      await fullNameInput.triple_click?.().catch(() => {});
+      await fullNameInput.fill(fullName);
+      log(`Filled full name: ${fullName}`);
+    } else {
+      const inputs = await page.$$('input[type="text"], input:not([type])');
+      for (const inp of inputs) {
+        const ph = await inp.getAttribute("placeholder").catch(() => "");
+        if ((ph || "").toLowerCase().includes("name")) {
+          await inp.fill(fullName);
+          log(`Filled full name (fallback): ${fullName}`);
+          break;
+        }
+      }
+    }
+
+    await page.locator('button:has-text("Next")').last().click().catch(() => {});
+    log("Step 1 → Next clicked");
+    await page.waitForTimeout(2000);
+
+    // Step 2: "What describes you best?" — select Developer
+    const step2Visible = await page.locator('text="What describes you best?"').first().isVisible().catch(() => false);
+    if (step2Visible) {
+      log("Step 2: selecting Developer");
+      await page.locator('button:has-text("Developer")').first().click().catch(() => {});
+      await page.waitForTimeout(500);
+      await page.locator('button:has-text("Next")').last().click().catch(() => {});
+      log("Step 2 → Next clicked");
+      await page.waitForTimeout(2000);
+    }
+
+    // Step 3: "How did you hear about Replit?" — select Google search
+    const step3Visible = await page.locator('text="How did you hear about Replit?"').first().isVisible().catch(() => false);
+    if (step3Visible) {
+      log("Step 3: selecting Google search");
+      await page.locator('button:has-text("Google search")').first().click().catch(() => {});
+      await page.waitForTimeout(500);
+      await page.locator('button:has-text("Next")').last().click().catch(() => {});
+      log("Step 3 → Next clicked");
+      await page.waitForTimeout(2000);
+    }
+
+    // Step 4: "Compare Replit plans" — click Continue with Starter
+    const step4Visible = await page.locator('text="Compare Replit plans"').first().isVisible().catch(() => false);
+    if (step4Visible) {
+      log("Step 4: selecting Continue with Starter plan");
+      await page.locator('button:has-text("Continue with Starter")').first().click().catch(() => {});
+      log("✅ Clicked Continue with Starter — onboarding complete!");
+      await page.waitForTimeout(3000);
+    } else {
+      log("Plan selection page not detected — onboarding may have finished already");
+    }
+  } catch (err: any) {
+    log(`⚠️ Onboarding wizard error: ${(err.message || String(err)).substring(0, 150)}`);
+  }
+}
+
 export async function registerReplitAccount(
   outlookEmail: string,
   outlookPassword: string,
@@ -10763,6 +10837,8 @@ export async function registerReplitAccount(
     } else {
       log("⚠️ No verification link or code found in inbox — account may still verify automatically or email was delayed");
     }
+
+    await handleReplitOnboarding(page, log);
 
     log(`✅ Replit account creation complete: username=${username} email=${outlookEmail} password=${password}`);
     return { success: true, username, email: outlookEmail, password };
