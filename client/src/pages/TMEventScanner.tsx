@@ -85,7 +85,7 @@ export default function TMEventScanner() {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>({
     city: "", stateCode: "", classificationName: "", minPrice: "", maxPrice: "",
-    startDate: "", endDate: "", radius: "", postalCode: "", sort: "date,asc"
+    startDate: "", endDate: "", radius: "", postalCode: "", sort: "relevance,desc"
   });
 
   function setFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
@@ -99,7 +99,7 @@ export default function TMEventScanner() {
   }
 
   function clearFilters() {
-    setFilters({ city: "", stateCode: "", classificationName: "", minPrice: "", maxPrice: "", startDate: "", endDate: "", radius: "", postalCode: "", sort: "date,asc" });
+    setFilters({ city: "", stateCode: "", classificationName: "", minPrice: "", maxPrice: "", startDate: "", endDate: "", radius: "", postalCode: "", sort: "relevance,desc" });
     setKeyword("");
     setSearchTerm("");
     setPage(0);
@@ -116,12 +116,14 @@ export default function TMEventScanner() {
       if (filters.stateCode) params.set("stateCode", filters.stateCode);
       if (filters.classificationName) params.set("classificationName", filters.classificationName);
       
-      // Always filter for future events (from right now) unless user specifies a start date
+      // Only force startDateTime when sorting by date (TM's relevance sort naturally returns upcoming events)
       // Ticketmaster requires format: YYYY-MM-DDTHH:mm:ssZ (no milliseconds)
-      const startDateTime = filters.startDate
-        ? filters.startDate + "T00:00:00Z"
-        : new Date().toISOString().split(".")[0] + "Z";
-      params.set("startDateTime", startDateTime);
+      if (filters.startDate) {
+        params.set("startDateTime", filters.startDate + "T00:00:00Z");
+      } else if (filters.sort.startsWith("date")) {
+        const today = new Date().toISOString().split("T")[0] + "T00:00:00Z";
+        params.set("startDateTime", today);
+      }
       
       if (filters.endDate) params.set("endDateTime", filters.endDate + "T23:59:59Z");
       if (filters.postalCode && filters.radius) {

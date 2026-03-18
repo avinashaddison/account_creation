@@ -2671,11 +2671,13 @@ export async function registerRoutes(
       const stateCode = (req.query.stateCode as string) || undefined;
       const postalCode = (req.query.postalCode as string) || undefined;
       const radius = (req.query.radius as string) || undefined;
-      const sort = (req.query.sort as string) || "date,asc";
-      // Default startDateTime to RIGHT NOW so truly past events are excluded
+      const sort = (req.query.sort as string) || "relevance,desc";
+      // Only force startDateTime when sorting by date (to exclude past events).
+      // When using relevance sort, TM naturally returns upcoming events.
       // Ticketmaster requires format: YYYY-MM-DDTHH:mm:ssZ (no milliseconds)
-      const now = new Date().toISOString().split(".")[0] + "Z";
-      const startDateTime = (req.query.startDateTime as string) || now;
+      const explicitStart = req.query.startDateTime as string | undefined;
+      const today = new Date().toISOString().split("T")[0] + "T00:00:00Z";
+      const startDateTime = explicitStart || (sort.startsWith("date") ? today : undefined);
       const endDateTime = (req.query.endDateTime as string) || undefined;
       const result = await searchEvents({
         keyword, page, size, classificationName,
