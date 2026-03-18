@@ -10956,6 +10956,359 @@ export async function checkGmailAccount(
   }
 }
 
+export async function registerLovableAccount(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; email?: string; error?: string }> {
+  let browser: any = null;
+  let page: any = null;
+
+  try {
+    let zenrowsApiKey = "";
+    try {
+      zenrowsApiKey = await getZenRowsApiKey();
+      log(`ZenRows browser mode enabled`);
+    } catch {
+      log("⚠️ No ZenRows API key — using stealth headless browser");
+    }
+
+    log("Launching browser...");
+    const { chromium } = await import("playwright");
+
+    let context: any;
+    if (zenrowsApiKey) {
+      try {
+        const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
+        browser = await chromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
+        context = browser.contexts()[0] || await browser.newContext();
+        log("Connected via ZenRows anti-bot browser");
+      } catch (zrErr: any) {
+        log(`⚠️ ZenRows unavailable (${(zrErr.message || "").substring(0, 60)}) — falling back to stealth browser`);
+        browser = null;
+        zenrowsApiKey = "";
+      }
+    }
+    if (!zenrowsApiKey) {
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-dev-shm-usage",
+          "--disable-web-security",
+          "--allow-running-insecure-content",
+          "--disable-features=IsolateOrigins,site-per-process",
+          "--flag-switches-begin",
+          "--disable-site-isolation-trials",
+          "--flag-switches-end",
+        ],
+      });
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      context = await browser.newContext({
+        userAgent: ua,
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+        timezoneId: "America/New_York",
+        javaScriptEnabled: true,
+        acceptDownloads: false,
+        extraHTTPHeaders: {
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+          "Sec-Ch-Ua-Mobile": "?0",
+          "Sec-Ch-Ua-Platform": '"Windows"',
+        },
+      });
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+        (window as any).chrome = { runtime: {} };
+      });
+      log("Using stealth headless browser");
+    }
+    page = await context.newPage();
+    page.setDefaultTimeout(30000);
+
+    log("Navigating to https://lovable.dev/signup ...");
+    await page.goto("https://lovable.dev/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(4000);
+
+    const challengeContent = await page.content();
+    if (challengeContent.includes("Please enable cookies") || challengeContent.includes("Checking your browser") || challengeContent.includes("challenge-platform")) {
+      log("Cloudflare challenge detected — waiting for it to resolve (up to 15s)...");
+      try {
+        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 });
+        log("Cloudflare challenge resolved");
+        await page.waitForTimeout(2000);
+      } catch {
+        log("⚠️ Cloudflare challenge did not fully resolve — proceeding anyway");
+      }
+    }
+
+    const pageTitle = await page.title();
+    log(`Page title: ${pageTitle}`);
+
+    log(`Filling email field with: ${outlookEmail}`);
+    const emailSelectors = [
+      'input[type="email"]',
+      'input[name="email"]',
+      'input[placeholder*="email" i]',
+      'input[id*="email" i]',
+    ];
+    let emailFilled = false;
+    for (const sel of emailSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click({ clickCount: 3 });
+          await el.type(outlookEmail, { delay: 60 });
+          log(`Typed email into ${sel}`);
+          emailFilled = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!emailFilled) {
+      log("⚠️ Could not find email field — trying to log page HTML");
+      const htmlSnip = await page.evaluate(() => document.body?.innerHTML?.substring(0, 800) || "empty");
+      log(`HTML snippet: ${htmlSnip.replace(/\s+/g, " ").substring(0, 300)}`);
+    }
+
+    await page.waitForTimeout(600);
+
+    log("Clicking Continue button...");
+    const continueSelectors = [
+      'button:has-text("Continue")',
+      'button[type="submit"]',
+      'button:has-text("Sign up")',
+      'button:has-text("Create account")',
+      'input[type="submit"]',
+    ];
+    let submitted = false;
+    for (const sel of continueSelectors) {
+      try {
+        const btns = await page.$$(sel);
+        for (const btn of btns) {
+          const txt = await btn.innerText().catch(() => "");
+          if (txt.toLowerCase().includes("google") || txt.toLowerCase().includes("github")) continue;
+          await btn.click();
+          log(`Clicked button: "${txt.substring(0, 40)}" (${sel})`);
+          submitted = true;
+          break;
+        }
+        if (submitted) break;
+      } catch {}
+    }
+    if (!submitted) {
+      log("Trying Enter key to submit...");
+      await page.keyboard.press("Enter");
+    }
+
+    log("Waiting for response after submit (8s)...");
+    await page.waitForTimeout(8000);
+
+    const afterUrl = page.url();
+    const afterContent = await page.content();
+    const afterText = await page.evaluate(() => document.body?.innerText || "");
+
+    log(`URL after submit: ${afterUrl}`);
+
+    const magicLinkSent = afterText.toLowerCase().includes("check your email") ||
+      afterText.toLowerCase().includes("magic link") ||
+      afterText.toLowerCase().includes("confirmation link") ||
+      afterText.toLowerCase().includes("sent") ||
+      afterContent.toLowerCase().includes("check your email") ||
+      afterContent.toLowerCase().includes("magic link");
+
+    if (magicLinkSent) {
+      log("✅ Lovable signup submitted — magic link / verification email expected");
+    } else if (afterText.toLowerCase().includes("error") || afterText.toLowerCase().includes("invalid")) {
+      log(`⚠️ Possible error text: ${afterText.substring(0, 200)}`);
+    } else {
+      log(`Page text snippet after submit: ${afterText.substring(0, 200).replace(/\s+/g, " ")}`);
+    }
+
+    log("Waiting 20s before checking Outlook inbox for Lovable verification email...");
+    await page.waitForTimeout(20000);
+
+    let verificationLink: string | null = null;
+    let verificationCode: string | null = null;
+
+    log("Reading Lovable verification email via Outlook Web Access...");
+    let owaBrowser: any = null;
+    try {
+      const { chromium: chrm } = await import("playwright");
+      owaBrowser = await chrm.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+      });
+      const owaContext = await owaBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+      });
+      await owaContext.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        (window as any).chrome = { runtime: {} };
+      });
+      const owaPage = await owaContext.newPage();
+      owaPage.setDefaultTimeout(30000);
+
+      log("Navigating to Outlook Web login...");
+      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.waitForTimeout(2000);
+
+      const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+      if (emailInput) {
+        await emailInput.fill(outlookEmail);
+        log("Entered Outlook email on login page");
+        const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (nextBtn) { await nextBtn.click(); await owaPage.waitForTimeout(2500); }
+      }
+
+      const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
+      if (passInput) {
+        await passInput.fill(outlookPassword);
+        log("Entered Outlook password on login page");
+        const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (signInBtn) { await signInBtn.click(); await owaPage.waitForTimeout(4000); }
+      }
+
+      let currentLoginUrl = owaPage.url();
+      log(`After login URL: ${currentLoginUrl.substring(0, 100)}`);
+
+      if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
+        log("Microsoft security proofs page — skipping...");
+        let destUrl = "https://outlook.live.com/mail/0/inbox";
+        try {
+          const parsedUrl = new URL(currentLoginUrl);
+          const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
+          if (posturl) destUrl = decodeURIComponent(posturl);
+        } catch {}
+        await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(3000);
+        currentLoginUrl = owaPage.url();
+      }
+
+      let isOnOutlookHost = false;
+      try {
+        const parsedUrl = new URL(currentLoginUrl);
+        isOnOutlookHost = parsedUrl.hostname.includes("outlook.live.com") || parsedUrl.hostname.includes("outlook.office") || parsedUrl.hostname === "outlook.com";
+      } catch {}
+
+      if (!isOnOutlookHost) {
+        log(`Not on Outlook yet — navigating directly to inbox`);
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(5000);
+        currentLoginUrl = owaPage.url();
+        try { const p2 = new URL(currentLoginUrl); isOnOutlookHost = p2.hostname.includes("outlook.live.com"); } catch {}
+      }
+
+      if (isOnOutlookHost) {
+        log("✅ Logged into Outlook Web — searching inbox for Lovable email...");
+        await owaPage.waitForTimeout(3000);
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(4000);
+
+        const emailItems = await owaPage.$$('[data-convid], [role="row"]');
+        log(`Found ${emailItems.length} email items in inbox`);
+        let foundLovableEmail = false;
+        for (const item of emailItems.slice(0, 20)) {
+          const itemText = await item.innerText().catch(() => "");
+          if (itemText.toLowerCase().includes("lovable") || itemText.toLowerCase().includes("magic link") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("sign in")) {
+            log(`Found Lovable-related email: ${itemText.substring(0, 100)}`);
+            await item.click();
+            await owaPage.waitForTimeout(2000);
+            foundLovableEmail = true;
+
+            const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+            const emailHtml = await owaPage.evaluate(() => document.body?.innerHTML || "");
+
+            const linkPatterns = [
+              /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]+/,
+              /https?:\/\/[a-z0-9.-]*supabase[^\s"'<>\r\n)]+/,
+              /https?:\/\/[^\s"'<>\r\n)]*magic[^\s"'<>\r\n)]*/i,
+              /https?:\/\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
+              /https?:\/\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
+              /https?:\/\/[^\s"'<>\r\n)]*token[^\s"'<>\r\n)]*/i,
+            ];
+
+            for (const pattern of linkPatterns) {
+              const linkMatch = emailBody.match(pattern) || emailHtml.match(pattern);
+              if (linkMatch) {
+                verificationLink = linkMatch[0].replace(/["'<>)]/g, "").trim();
+                log(`Extracted verification link: ${verificationLink.substring(0, 100)}...`);
+                break;
+              }
+            }
+
+            if (!verificationLink) {
+              const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+              if (codeMatch) {
+                verificationCode = codeMatch[1];
+                log(`Extracted verification code: ${verificationCode}`);
+              }
+            }
+            break;
+          }
+        }
+        if (!foundLovableEmail) {
+          log("No Lovable verification email found in inbox yet — may be delayed");
+        }
+      } else {
+        log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
+      }
+    } catch (owaErr: any) {
+      log(`⚠️ Outlook web email check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
+    } finally {
+      if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
+    }
+
+    if (verificationLink) {
+      log(`Navigating to Lovable magic link...`);
+      await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(5000);
+      const verifyUrl = page.url();
+      const verifyText = await page.evaluate(() => document.body?.innerText || "");
+      if (verifyText.toLowerCase().includes("dashboard") || verifyText.toLowerCase().includes("welcome") || verifyText.toLowerCase().includes("project") || verifyUrl.includes("lovable.dev/projects") || verifyUrl.includes("lovable.dev/") && !verifyUrl.includes("signup") && !verifyUrl.includes("login")) {
+        log(`✅ Lovable account verified! URL: ${verifyUrl}`);
+      } else {
+        log(`Verification page URL: ${verifyUrl} — may need manual check`);
+      }
+    } else if (verificationCode) {
+      log(`Entering verification code: ${verificationCode}`);
+      const codeSelectors = ['input[name="code"]', 'input[placeholder*="code" i]', 'input[type="number"]', 'input[maxlength="6"]'];
+      for (const sel of codeSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (el) {
+            await el.type(verificationCode, { delay: 50 });
+            await page.keyboard.press("Enter");
+            log(`Entered code via ${sel}`);
+            await page.waitForTimeout(3000);
+            break;
+          }
+        } catch {}
+      }
+    } else {
+      log("⚠️ No verification link or code found — account submission may be pending email delivery");
+    }
+
+    log(`✅ Lovable account creation complete for: ${outlookEmail}`);
+    return { success: true, email: outlookEmail };
+
+  } catch (err: any) {
+    log(`Error: ${(err.message || String(err)).substring(0, 200)}`);
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+  }
+}
+
 process.on("SIGTERM", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

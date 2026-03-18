@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -64,6 +64,10 @@ export interface IStorage {
   getAllReplitAccounts(): Promise<ReplitAccount[]>;
   getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]>;
   deleteReplitAccount(id: string): Promise<void>;
+  createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount>;
+  getAllLovableAccounts(): Promise<LovableAccount[]>;
+  getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]>;
+  deleteLovableAccount(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -416,6 +420,23 @@ export class DatabaseStorage implements IStorage {
 
   async deleteReplitAccount(id: string): Promise<void> {
     await db.delete(replitAccounts).where(eq(replitAccounts.id, id));
+  }
+
+  async createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount> {
+    const [row] = await db.insert(lovableAccounts).values(data).returning();
+    return row;
+  }
+
+  async getAllLovableAccounts(): Promise<LovableAccount[]> {
+    return db.select().from(lovableAccounts).orderBy(desc(lovableAccounts.createdAt));
+  }
+
+  async getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]> {
+    return db.select().from(lovableAccounts).where(eq(lovableAccounts.createdBy, ownerId)).orderBy(desc(lovableAccounts.createdAt));
+  }
+
+  async deleteLovableAccount(id: string): Promise<void> {
+    await db.delete(lovableAccounts).where(eq(lovableAccounts.id, id));
   }
 }
 

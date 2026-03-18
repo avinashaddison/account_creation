@@ -47,7 +47,16 @@ type ReplitAccount = {
   createdAt: string;
 };
 
-type TabType = "outlook" | "zenrows" | "gmail" | "replit";
+type LovableAccount = {
+  id: string;
+  email: string;
+  outlookEmail: string | null;
+  status: string;
+  error: string | null;
+  createdAt: string;
+};
+
+type TabType = "outlook" | "zenrows" | "gmail" | "replit" | "lovable";
 
 type ZenrowsRegJob = {
   regId: string;
@@ -118,6 +127,7 @@ export default function PrivateAccount() {
   const [creatingGmail, setCreatingGmail] = useState(false);
   const [replitAccounts, setReplitAccounts] = useState<ReplitAccount[]>([]);
   const [replitShowPasswords, setReplitShowPasswords] = useState<Record<string, boolean>>({});
+  const [lovableAccounts, setLovableAccounts] = useState<LovableAccount[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -375,9 +385,19 @@ export default function PrivateAccount() {
       .catch(() => {});
   }
 
+  function fetchLovable() {
+    fetch("/api/lovable-accounts", { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) { handleUnauthorized(); return []; }
+        return r.json();
+      })
+      .then(setLovableAccounts)
+      .catch(() => {});
+  }
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchOutlook(), fetchZenrows(), fetchGmail(), fetchReplit()]).finally(() => setLoading(false));
+    Promise.all([fetchOutlook(), fetchZenrows(), fetchGmail(), fetchReplit(), fetchLovable()]).finally(() => setLoading(false));
   }, []);
 
   function copyToClipboard(text: string, id: string) {
@@ -738,6 +758,23 @@ export default function PrivateAccount() {
             </div>
           </CardContent>
         </Card>
+
+        <Card className="border-pink-500/10 bg-black/20 cursor-pointer transition-all hover:border-pink-500/25" onClick={() => { setTab("lovable"); sounds.hover(); }} data-testid="card-lovable-summary">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(236,72,153,0.08)", border: "1px solid rgba(236,72,153,0.15)" }}>
+                <Mail className="w-5 h-5 text-pink-400" />
+              </div>
+              <div>
+                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Lovable Accounts</p>
+                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-lovable-count">{lovableAccounts.length}</p>
+              </div>
+              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-pink-500/20 text-pink-400">
+                {lovableAccounts.filter((a) => a.status === "created").length} ready
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {activeJobs.length > 0 && (
@@ -835,6 +872,16 @@ export default function PrivateAccount() {
         >
           <Code2 className="w-3.5 h-3.5 mr-1.5" />
           Replit Accounts
+        </Button>
+        <Button
+          variant={tab === "lovable" ? "default" : "ghost"}
+          size="sm"
+          className={`font-mono text-xs ${tab === "lovable" ? "bg-pink-500/15 text-pink-400 border border-pink-500/20 hover:bg-pink-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
+          onClick={() => { setTab("lovable"); sounds.hover(); }}
+          data-testid="tab-lovable"
+        >
+          <Mail className="w-3.5 h-3.5 mr-1.5" />
+          Lovable Accounts
         </Button>
       </div>
 
@@ -1561,6 +1608,108 @@ export default function PrivateAccount() {
                                 } catch {}
                               }}
                               data-testid={`button-delete-replit-${acct.id}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === "lovable" && (
+        <Card className="border-pink-500/10 bg-black/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-mono text-zinc-300 flex items-center gap-2">
+              <Mail className="w-4 h-4 text-pink-400" />
+              Lovable Accounts
+              <Badge variant="outline" className="text-[9px] font-mono border-pink-500/15 text-pink-400/60 ml-2">{lovableAccounts.length} total</Badge>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-zinc-500 hover:text-zinc-300 ml-auto" onClick={fetchLovable} data-testid="button-refresh-lovable">
+                <RefreshCw className="w-3 h-3" />
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {lovableAccounts.length === 0 ? (
+              <div className="text-center py-12">
+                <Mail className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
+                <p className="text-zinc-600 text-sm font-mono">No Lovable accounts yet</p>
+                <p className="text-zinc-700 text-xs font-mono mt-1">Use the Create Server module to create accounts</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-pink-500/10">
+                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Email</TableHead>
+                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Outlook Source</TableHead>
+                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Status</TableHead>
+                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Created</TableHead>
+                      <TableHead className="text-right text-[10px] font-mono text-zinc-500 uppercase">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {lovableAccounts.map((acct) => (
+                      <TableRow key={acct.id} className="border-pink-500/5 hover:bg-pink-500/[0.02]" data-testid={`row-lovable-${acct.id}`}>
+                        <TableCell className="py-2.5">
+                          <div className="flex items-center gap-2">
+                            <Mail className="w-3 h-3 text-pink-400/50 flex-shrink-0" />
+                            <span className="text-xs font-mono text-zinc-200">{acct.email}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-5 w-5 p-0 text-zinc-600 hover:text-pink-400"
+                              onClick={() => copyToClipboard(acct.email, `lem-${acct.id}`)}
+                              data-testid={`button-copy-lovable-email-${acct.id}`}
+                            >
+                              {copied === `lem-${acct.id}` ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[140px] block">{acct.outlookEmail || "—"}</span>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <Badge
+                            variant="outline"
+                            className={`text-[9px] font-mono ${acct.status === "created" ? "border-emerald-500/30 text-emerald-400" : "border-zinc-700 text-zinc-500"}`}
+                          >
+                            {acct.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-2.5">
+                          <span className="text-[10px] text-zinc-600 font-mono">{new Date(acct.createdAt).toLocaleDateString()}</span>
+                        </TableCell>
+                        <TableCell className="py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
+                              onClick={() => copyToClipboard(acct.email, `lall-${acct.id}`)}
+                              title="Copy email"
+                              data-testid={`button-copy-lovable-all-${acct.id}`}
+                            >
+                              {copied === `lall-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10"
+                              onClick={async () => {
+                                try {
+                                  await fetch(`/api/lovable-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
+                                  fetchLovable();
+                                  toast({ title: "Deleted", description: "Lovable account removed" });
+                                } catch {}
+                              }}
+                              data-testid={`button-delete-lovable-${acct.id}`}
                             >
                               <Trash2 className="w-3 h-3" />
                             </Button>

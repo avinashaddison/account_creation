@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, registerLovableAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -2964,6 +2964,159 @@ export async function registerRoutes(
   app.delete("/api/replit-accounts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       await storage.deleteReplitAccount(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/lovable-create/bulk", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
+    try {
+      const { count = 1 } = req.body;
+      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 20);
+      const userId = req.session.userId;
+
+      const allOutlook = await storage.getAllPrivateOutlooks();
+      const lovableAccts = await storage.getAllLovableAccounts();
+      const usedEmails = new Set(lovableAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+
+      if (available.length === 0) {
+        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Lovable" });
+      }
+
+      const shuffled = [...available].sort(() => Math.random() - 0.5);
+      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
+
+      const bulkId = randomUUID().substring(0, 8);
+      const batchId = `lovable-bulk-${bulkId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
+
+      (async () => {
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} Lovable account(s) queued`, userId);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < toUse.length; i++) {
+          const acc = toUse[i];
+          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
+          try {
+            const result = await registerLovableAccount(
+              acc.email,
+              acc.password,
+              (msg) => broadcastLog(batchId, bulkId, msg, userId)
+            );
+            if (result.success) {
+              try {
+                await storage.createLovableAccount({
+                  email: result.email!,
+                  outlookEmail: acc.email,
+                  status: "created",
+                  createdBy: userId,
+                });
+                successCount++;
+                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — ${result.email}`, userId);
+              } catch (dbErr: any) {
+                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+              }
+              broadcast({ type: "lovable_create_result", bulkId, batchId, success: true, email: result.email, index: i + 1, total: toUse.length }, userId);
+            } else {
+              failCount++;
+              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
+              broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: toUse.length }, userId);
+            }
+          } catch (err: any) {
+            failCount++;
+            broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Error: ${(err.message || "").substring(0, 100)}`, userId);
+            broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: toUse.length }, userId);
+          }
+        }
+
+        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/lovable-create", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
+    try {
+      const { outlookEmail, outlookPassword } = req.body;
+      if (!outlookEmail || !outlookPassword) {
+        return res.status(400).json({ error: "Outlook email and password are required" });
+      }
+
+      const existingAccts = await storage.getAllLovableAccounts();
+      const alreadyUsed = existingAccts.some(
+        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
+      );
+      if (alreadyUsed) {
+        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Lovable account` });
+      }
+
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `lovable-create-${createId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "Lovable account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, `Starting Lovable account creation for ${outlookEmail}...`, userId);
+        try {
+          const result = await registerLovableAccount(
+            outlookEmail,
+            outlookPassword,
+            (msg) => broadcastLog(batchId, createId, msg, userId)
+          );
+
+          if (result.success) {
+            try {
+              await storage.createLovableAccount({
+                email: result.email!,
+                outlookEmail,
+                status: "created",
+                createdBy: userId,
+              });
+              broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
+            } catch (dbErr: any) {
+              broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
+            }
+            broadcast({ type: "lovable_create_result", createId, batchId, success: true, email: result.email }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ Lovable creation failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "lovable_create_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "lovable_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/lovable-accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin"
+        ? await storage.getAllLovableAccounts()
+        : await storage.getLovableAccountsByOwner(userId);
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/lovable-accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteLovableAccount(req.params.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
