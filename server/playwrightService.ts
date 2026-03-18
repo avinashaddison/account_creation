@@ -5760,14 +5760,12 @@ export async function createOutlookAccount(
 
     if (zenrowsUrl) {
       log("Using Addison Proxy browser for Outlook creation (anti-bot bypass)...");
-      zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-      const resProxyOC = await getResidentialProxyUrl();
-      zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxyOC);
+      const cleanZenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/[&?]proxy=[^&]*/g, '').replace(/\?$/, '');
       try {
-        browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
+        browser = await chromium.connectOverCDP(cleanZenrowsUrl, { timeout: 60000 });
         useZenRowsBrowser = true;
         usingProxy = true;
-        log("Addison Proxy browser connected successfully");
+        log("Addison Proxy browser connected successfully (native routing)");
       } catch (zrErr: any) {
         log("Addison Proxy browser connection failed: " + (zrErr.message || "").substring(0, 100) + ", falling back to proxy...");
         zenrowsUrl = "";
@@ -5808,10 +5806,20 @@ export async function createOutlookAccount(
       });
 
       await context.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        const pluginData = [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ];
+        Object.defineProperty(navigator, 'plugins', { get: () => pluginData });
+        (window as any).chrome = { runtime: { id: undefined }, loadTimes: () => ({}), csi: () => ({}) };
+        delete (window as any).__playwright;
+        delete (window as any).__pw_manual;
       });
 
       page = await context.newPage();
@@ -5866,10 +5874,78 @@ export async function createOutlookAccount(
     await page.waitForTimeout(3000 + Math.random() * 2000);
     log("Signup page loaded: " + page.url().substring(0, 80));
 
+    const pagePreview = (await page.textContent("body").catch(() => "")).replace(/\s+/g, " ").substring(0, 300);
+    log("Page content preview: " + pagePreview);
+
+    if (pagePreview.toLowerCase().includes("host_not_allowed") || pagePreview.toLowerCase().includes("host not allowed") || pagePreview.toLowerCase().includes("access denied") || pagePreview.toLowerCase().includes("blocked")) {
+      log("Proxy blocked this host. Falling back to SOAX residential proxy...");
+      try { await page.close(); } catch {}
+      try { await context.close(); } catch {}
+      try { if (browser && browser.isConnected && browser.isConnected()) await browser.close(); else if (browser && browser.close) await browser.close(); } catch {}
+      useZenRowsBrowser = false;
+      usingProxy = true;
+      await ensureBrowserInstalled();
+      browser = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+      });
+      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const soaxProxyUrl = soaxTemplate ? soaxTemplate.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
+      const fallbackCtxOptions: any = {
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: { width: 1920, height: 1080 },
+        locale: "en-US",
+      };
+      if (soaxProxyUrl) {
+        try {
+          const parsed = new URL(soaxProxyUrl);
+          fallbackCtxOptions.proxy = {
+            server: `${parsed.protocol}//${parsed.hostname}:${parsed.port}`,
+            username: decodeURIComponent(parsed.username),
+            password: decodeURIComponent(parsed.password),
+          };
+          log("SOAX residential proxy configured: " + parsed.hostname);
+        } catch {}
+      }
+      context = await browser.newContext(fallbackCtxOptions);
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        const pluginData = [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ];
+        Object.defineProperty(navigator, 'plugins', { get: () => pluginData });
+        Object.defineProperty(navigator, 'mimeTypes', { get: () => [{ type: 'application/pdf', suffixes: 'pdf', description: '' }] });
+        (window as any).chrome = { runtime: { id: undefined }, loadTimes: () => ({}), csi: () => ({}) };
+        delete (window as any).__playwright;
+        delete (window as any).__pw_manual;
+      });
+      page = await context.newPage();
+      await optimizePageBandwidth(page, { allowStylesheets: true });
+      await page.setDefaultNavigationTimeout(120000);
+      await page.setDefaultTimeout(30000);
+      log("Retrying navigation via SOAX residential proxy...");
+      await page.goto("https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1", {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+      await page.waitForTimeout(3000);
+      const retryPreview = (await page.textContent("body").catch(() => "")).replace(/\s+/g, " ").substring(0, 200);
+      log("Retry page preview: " + retryPreview);
+    }
+
     let currentEmailUsername = emailUsername;
     let emailAccepted = false;
     for (let emailRetry = 0; emailRetry < 5; emailRetry++) {
-      const emailInput = await page.waitForSelector('input[type="email"], input[name="MemberName"], #MemberName, #iSignupMemberName', { timeout: 15000 });
+      const emailInput = await page.waitForSelector(
+        'input[type="email"], input[name="MemberName"], #MemberName, #iSignupMemberName, input[aria-label="New email"], input[name="New email"], input[aria-label*="email" i], input[placeholder*="email" i]',
+        { timeout: 20000 }
+      );
       if (!emailInput) {
         return { success: false, error: "Could not find email input on signup page" };
       }
@@ -6331,21 +6407,30 @@ export async function createOutlookAccount(
               await page.mouse.down();
               log("Mouse down on px-captcha at (" + Math.round(cx) + "," + Math.round(cy) + "), holding...");
 
-              const holdTime = 10000 + Math.random() * 4000;
-              const holdSteps = 35 + Math.floor(Math.random() * 15);
+              const holdTime = 3200 + Math.random() * 1800;
+              const holdSteps = 12 + Math.floor(Math.random() * 8);
               log("Hold time: " + Math.round(holdTime) + "ms in " + holdSteps + " steps");
+              let earlyRelease = false;
               for (let s = 0; s < holdSteps; s++) {
-                const stepDelay = (holdTime / holdSteps) * (0.7 + Math.random() * 0.6);
+                const stepDelay = holdTime / holdSteps;
                 await page.waitForTimeout(stepDelay);
-                const drift = Math.min(s * 0.15, 3);
+                const drift = Math.min(s * 0.1, 2);
                 const jx = cx + (Math.random() - 0.5) * drift;
                 const jy = cy + (Math.random() - 0.5) * drift;
                 await page.mouse.move(jx, jy);
+                if (s === Math.floor(holdSteps / 2)) {
+                  const midText = await page.textContent("body").catch(() => "");
+                  if (midText && !midText.toLowerCase().includes("press and hold") && !midText.toLowerCase().includes("prove you're human")) {
+                    log("Challenge resolved during hold at step " + s + ", releasing early");
+                    earlyRelease = true;
+                    break;
+                  }
+                }
               }
 
               await page.mouse.up();
-              log("Mouse up after hold, waiting for result...");
-              await page.waitForTimeout(3000 + Math.random() * 2000);
+              log("Mouse up after hold" + (earlyRelease ? " (early release)" : "") + ", waiting for result...");
+              await page.waitForTimeout(2000 + Math.random() * 1500);
 
               const afterHoldText = await page.textContent("body").catch(() => "");
               const afterLower = (afterHoldText || "").toLowerCase();
@@ -6368,8 +6453,8 @@ export async function createOutlookAccount(
                   el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
                 }
               }).catch(() => {});
-              log("Dispatched mousedown via JS, holding 14s...");
-              await page.waitForTimeout(14000 + Math.random() * 4000);
+              log("Dispatched mousedown via JS, holding 4s...");
+              await page.waitForTimeout(3500 + Math.random() * 1500);
               await hsFrame.evaluate(() => {
                 const el = document.getElementById('px-captcha');
                 if (el) {
@@ -6381,7 +6466,7 @@ export async function createOutlookAccount(
                 }
               }).catch(() => {});
               log("Dispatched mouseup via JS");
-              await page.waitForTimeout(5000 + Math.random() * 3000);
+              await page.waitForTimeout(2000 + Math.random() * 1500);
 
               const afterJsText = await page.textContent("body").catch(() => "");
               if (!(afterJsText || "").toLowerCase().includes("press and hold") && !(afterJsText || "").toLowerCase().includes("prove you're human")) {
