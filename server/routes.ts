@@ -2661,11 +2661,26 @@ export async function registerRoutes(
 
   app.get("/api/tm-discovery/events", requireAuth, async (req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
       const keyword = (req.query.keyword as string) || (await storage.getSetting("tm_keyword")) || "";
       const page = parseInt((req.query.page as string) || "0", 10);
       const size = parseInt((req.query.size as string) || "20", 10);
       const classificationName = (req.query.classificationName as string) || undefined;
-      const result = await searchEvents({ keyword, page, size, classificationName });
+      const city = (req.query.city as string) || undefined;
+      const stateCode = (req.query.stateCode as string) || undefined;
+      const postalCode = (req.query.postalCode as string) || undefined;
+      const radius = (req.query.radius as string) || undefined;
+      const sort = (req.query.sort as string) || "date,asc";
+      // Default startDateTime to today to prevent showing past events
+      const today = new Date().toISOString().split("T")[0] + "T00:00:00Z";
+      const startDateTime = (req.query.startDateTime as string) || today;
+      const endDateTime = (req.query.endDateTime as string) || undefined;
+      const result = await searchEvents({
+        keyword, page, size, classificationName,
+        city, stateCode, postalCode, radius, sort,
+        startDateTime, endDateTime,
+      });
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -65,18 +65,27 @@ export async function searchEvents(options: {
   classificationName?: string;
   startDateTime?: string;
   endDateTime?: string;
+  city?: string;
+  stateCode?: string;
+  postalCode?: string;
+  radius?: string;
+  sort?: string;
 }): Promise<{ events: TmEvent[]; total: number; page: number; totalPages: number }> {
   const params = new URLSearchParams();
   params.set("apikey", TM_API_KEY);
   params.set("countryCode", options.countryCode ?? "US");
   params.set("size", String(options.size ?? 20));
   params.set("page", String(options.page ?? 0));
-  params.set("sort", "date,asc");
+  params.set("sort", options.sort ?? "date,asc");
 
   if (options.keyword) params.set("keyword", options.keyword);
   if (options.classificationName) params.set("classificationName", options.classificationName);
   if (options.startDateTime) params.set("startDateTime", options.startDateTime);
   if (options.endDateTime) params.set("endDateTime", options.endDateTime);
+  if (options.city) params.set("city", options.city);
+  if (options.stateCode) params.set("stateCode", options.stateCode);
+  if (options.postalCode) params.set("postalCode", options.postalCode);
+  if (options.radius) { params.set("radius", options.radius); params.set("unit", "miles"); }
 
   const url = `${TM_BASE_URL}/events.json?${params.toString()}`;
 
