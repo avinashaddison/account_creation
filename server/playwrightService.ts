@@ -9597,12 +9597,18 @@ export async function checkGmailAccount(
       auth: { user: email, pass: password },
       logger: false,
       tls: { rejectUnauthorized: false },
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
     } as any);
+
+    client.on("error", (err: any) => {
+    });
 
     try {
       await client.connect();
       log("✅ IMAP connection successful — credentials verified!");
-      await client.logout();
+      try { await client.logout(); } catch {}
       return { success: true };
     } catch (imapErr: any) {
       const rawMsg = imapErr?.responseText || imapErr?.response || imapErr?.message || String(imapErr);
