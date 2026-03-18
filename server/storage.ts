@@ -51,6 +51,7 @@ export interface IStorage {
   createPrivateGmail(data: InsertPrivateGmail): Promise<PrivateGmailAccount>;
   getAllPrivateGmails(): Promise<PrivateGmailAccount[]>;
   deletePrivateGmail(id: string): Promise<void>;
+  updatePrivateGmailStatus(id: string, status: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -337,6 +338,10 @@ export class DatabaseStorage implements IStorage {
 
   async deletePrivateGmail(id: string): Promise<void> {
     await db.delete(privateGmailAccounts).where(eq(privateGmailAccounts.id, id));
+  }
+
+  async updatePrivateGmailStatus(id: string, status: string): Promise<void> {
+    await db.update(privateGmailAccounts).set({ status }).where(eq(privateGmailAccounts.id, id));
   }
 }
 

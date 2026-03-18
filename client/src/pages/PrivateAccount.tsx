@@ -49,6 +49,16 @@ type ZenrowsRegJob = {
   error?: string;
 };
 
+type GmailCheckJob = {
+  checkId: string;
+  batchId: string;
+  accountId: string;
+  email: string;
+  status: "running" | "success" | "failed";
+  logs: string[];
+  error?: string;
+};
+
 export default function PrivateAccount() {
   const [tab, setTab] = useState<TabType>("outlook");
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
@@ -70,6 +80,8 @@ export default function PrivateAccount() {
   const [newGmailPassword, setNewGmailPassword] = useState("");
   const [zenrowsRegJobs, setZenrowsRegJobs] = useState<Record<string, ZenrowsRegJob>>({});
   const [registeringAccountIds, setRegisteringAccountIds] = useState<Set<string>>(new Set());
+  const [gmailCheckJobs, setGmailCheckJobs] = useState<Record<string, GmailCheckJob>>({});
+  const [checkingGmailIds, setCheckingGmailIds] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -124,6 +136,54 @@ export default function PrivateAccount() {
           if (!job) return prev;
           if (job.status === "running") {
             return { ...prev, [data.batchId]: { ...job, status: "failed", error: "Batch completed without result" } };
+          }
+          return prev;
+        });
+      }
+
+      if (data.type === "log" && data.batchId?.startsWith("gmail-check-")) {
+        setGmailCheckJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          const newLogs = [...job.logs, data.message].slice(-60);
+          return { ...prev, [data.batchId]: { ...job, logs: newLogs } };
+        });
+      }
+
+      if (data.type === "gmail_check_result") {
+        setGmailCheckJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          return {
+            ...prev,
+            [data.batchId]: {
+              ...job,
+              status: data.success ? "success" : "failed",
+              error: data.error,
+            },
+          };
+        });
+        setCheckingGmailIds((prev) => {
+          const next = new Set(prev);
+          next.delete(data.accountId);
+          return next;
+        });
+        if (data.success) {
+          fetchGmail();
+          toast({ title: "Gmail Login Verified", description: "Account credentials are valid!" });
+          sounds.navigate();
+        } else {
+          fetchGmail();
+          toast({ title: "Gmail Login Failed", description: data.error || "Invalid credentials", variant: "destructive" });
+        }
+      }
+
+      if (data.type === "batch_complete" && data.batchId?.startsWith("gmail-check-")) {
+        setGmailCheckJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          if (job.status === "running") {
+            return { ...prev, [data.batchId]: { ...job, status: "failed", error: "Check completed without result" } };
           }
           return prev;
         });
@@ -278,6 +338,39 @@ export default function PrivateAccount() {
       sounds.navigate();
       fetchGmail();
     } catch {}
+  }
+
+  async function checkGmailLogin(acc: GmailAccount) {
+    if (checkingGmailIds.has(acc.id)) return;
+    setCheckingGmailIds((prev) => new Set(prev).add(acc.id));
+    try {
+      const res = await fetch(`/api/private/gmail/${acc.id}/check`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        setCheckingGmailIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
+        toast({ title: "Check Failed", description: "Could not start Gmail check", variant: "destructive" });
+        return;
+      }
+      const data = await res.json();
+      setGmailCheckJobs((prev) => ({
+        ...prev,
+        [data.batchId]: {
+          checkId: data.checkId,
+          batchId: data.batchId,
+          accountId: acc.id,
+          email: acc.email,
+          status: "running",
+          logs: [],
+        },
+      }));
+      toast({ title: "Gmail Check Started", description: `Checking login for ${acc.email}` });
+    } catch (err: any) {
+      setCheckingGmailIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
+      toast({ title: "Error", description: err.message || "Failed to start check", variant: "destructive" });
+    }
   }
 
   function exportGmailCsv() {
@@ -754,22 +847,78 @@ export default function PrivateAccount() {
                           </div>
                         </TableCell>
                         <TableCell className="py-2.5">
-                          <Badge variant="outline" className={`text-[9px] font-mono ${acc.status === "active" ? "border-emerald-500/20 text-emerald-400" : "border-red-500/20 text-red-400"}`} data-testid={`badge-gmail-status-${acc.id}`}>
-                            {acc.status.toUpperCase()}
-                          </Badge>
+                          {checkingGmailIds.has(acc.id) ? (
+                            <Badge variant="outline" className="text-[9px] font-mono border-yellow-500/20 text-yellow-400" data-testid={`badge-gmail-status-${acc.id}`}>
+                              <Loader2 className="w-2.5 h-2.5 mr-1 animate-spin inline" />CHECKING
+                            </Badge>
+                          ) : acc.status === "verified" ? (
+                            <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/25 text-emerald-400" data-testid={`badge-gmail-status-${acc.id}`}>
+                              ✅ VERIFIED
+                            </Badge>
+                          ) : acc.status === "failed" ? (
+                            <Badge variant="outline" className="text-[9px] font-mono border-red-500/25 text-red-400" data-testid={`badge-gmail-status-${acc.id}`}>
+                              ❌ FAILED
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[9px] font-mono border-zinc-500/20 text-zinc-400" data-testid={`badge-gmail-status-${acc.id}`}>
+                              {acc.status.toUpperCase()}
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="py-2.5">
                           <span className="text-[10px] text-zinc-600 font-mono">{formatDate(acc.createdAt)}</span>
                         </TableCell>
                         <TableCell className="py-2.5 text-right">
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteGmail(acc.id)} data-testid={`button-delete-gmail-${acc.id}`}>
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
+                          <div className="flex items-center gap-1 justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-emerald-400/50 hover:text-emerald-400 hover:bg-emerald-500/10 font-mono text-[10px]"
+                              onClick={() => checkGmailLogin(acc)}
+                              disabled={checkingGmailIds.has(acc.id)}
+                              data-testid={`button-check-gmail-${acc.id}`}
+                              title="Test Gmail login"
+                            >
+                              {checkingGmailIds.has(acc.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteGmail(acc.id)} data-testid={`button-delete-gmail-${acc.id}`}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+            )}
+
+            {Object.values(gmailCheckJobs).length > 0 && (
+              <div className="mt-4 space-y-3">
+                {Object.values(gmailCheckJobs).map((job) => (
+                  <div key={job.batchId} className={`rounded-lg border p-3 ${job.status === "success" ? "border-emerald-500/20 bg-emerald-500/5" : job.status === "failed" ? "border-red-500/20 bg-red-500/5" : "border-yellow-500/15 bg-yellow-500/5"}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {job.status === "running" && <Loader2 className="w-3 h-3 text-yellow-400 animate-spin" />}
+                        {job.status === "success" && <Check className="w-3 h-3 text-emerald-400" />}
+                        {job.status === "failed" && <X className="w-3 h-3 text-red-400" />}
+                        <span className="text-[10px] font-mono text-zinc-300">{job.email}</span>
+                        <Badge variant="outline" className={`text-[9px] font-mono ${job.status === "success" ? "border-emerald-500/20 text-emerald-400" : job.status === "failed" ? "border-red-500/20 text-red-400" : "border-yellow-500/20 text-yellow-400"}`}>
+                          {job.status === "running" ? "CHECKING" : job.status.toUpperCase()}
+                        </Badge>
+                      </div>
+                      <button onClick={() => setGmailCheckJobs((prev) => { const n = { ...prev }; delete n[job.batchId]; return n; })} className="text-zinc-600 hover:text-zinc-400">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="bg-black/40 rounded p-2 max-h-32 overflow-y-auto font-mono text-[10px] text-zinc-400 space-y-0.5">
+                      {job.logs.map((line, i) => (
+                        <div key={i} className={line.startsWith("✅") ? "text-emerald-400" : line.startsWith("❌") ? "text-red-400" : "text-zinc-400"}>{line}</div>
+                      ))}
+                      {job.logs.length === 0 && <div className="text-zinc-600">Waiting for logs...</div>}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>

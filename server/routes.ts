@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -2468,6 +2468,52 @@ export async function registerRoutes(
     if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
     await storage.deletePrivateGmail(req.params.id);
     res.json({ success: true });
+  });
+
+  app.post("/api/private/gmail/:id/check", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+
+      const { id } = req.params;
+      const accounts = await storage.getAllPrivateGmails();
+      const acc = accounts.find((a) => a.id === id);
+      if (!acc) return res.status(404).json({ error: "Gmail account not found" });
+
+      const userId = req.session.userId;
+      const checkId = randomUUID().substring(0, 8);
+      const batchId = `gmail-check-${checkId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, checkId, batchId, message: `Gmail login check started for ${acc.email}` });
+
+      (async () => {
+        broadcastLog(batchId, checkId, `Starting Gmail login check for ${acc.email}...`, userId);
+        try {
+          const result = await checkGmailAccount(
+            acc.email,
+            acc.password,
+            (msg) => broadcastLog(batchId, checkId, msg, userId)
+          );
+
+          if (result.success) {
+            await storage.updatePrivateGmailStatus(id, "verified");
+            broadcastLog(batchId, checkId, `✅ Gmail login SUCCESSFUL — account is valid`, userId);
+            broadcast({ type: "gmail_check_result", checkId, batchId, accountId: id, success: true }, userId);
+          } else {
+            await storage.updatePrivateGmailStatus(id, "failed");
+            broadcastLog(batchId, checkId, `❌ Gmail login FAILED: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "gmail_check_result", checkId, batchId, accountId: id, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          await storage.updatePrivateGmailStatus(id, "failed");
+          broadcastLog(batchId, checkId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "gmail_check_result", checkId, batchId, accountId: id, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return httpServer;
