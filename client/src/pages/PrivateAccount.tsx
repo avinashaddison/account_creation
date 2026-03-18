@@ -954,7 +954,7 @@ export default function PrivateAccount() {
                   data-testid="button-create-gmail"
                 >
                   {creatingGmail ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />}
-                  {creatingGmail ? "Creating..." : "Auto-Create"}
+                  {creatingGmail ? "Creating..." : "Create Gmail"}
                 </Button>
                 <Button
                   variant="ghost"

@@ -9858,7 +9858,8 @@ export async function createGmailAccount(
             log(`✅ OTP received: ${otpCode}`);
             break;
           } else {
-            log(`⚠️ No OTP received (attempt ${attempt}) — trying new number`);
+            log(`⚠️ No OTP received (attempt ${attempt}) — cancelling order and trying new number`);
+            try { await (await import("./smspoolService")).cancelSMSOrder(order.orderId); } catch {}
             smsOrderId = undefined;
           }
         }
