@@ -9809,84 +9809,121 @@ export async function createGmailAccount(
     if (!clicked) { await page.keyboard.press("Enter"); }
     await page.waitForTimeout(2500);
 
-    // ── Step 6: Phone verification (with retry) ───────────────────────────
+    // ── Step 6: Phone verification (skip or SMS) ─────────────────────────
     const phoneFieldVisible = await page.$('input[type="tel"], input[id="phoneNumberId"]').then(el => !!el).catch(() => false);
     if (phoneFieldVisible) {
-      log("📱 Phone verification required — ordering SMS number...");
-      let otpCode: string | null = null;
-      let phoneNumber: string | undefined;
+      log("📱 Phone verification step detected — trying to skip first...");
 
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        log(`SMS attempt ${attempt}/3...`);
-        const order = await (await import("./smspoolService")).orderSMSNumber(1, "Google");
-        if (!order.success || !order.number || !order.orderId) {
-          log(`⚠️ SMS order failed (attempt ${attempt}): ${order.error}`);
-          continue;
+      // Try to skip phone verification if Google offers the option
+      let skipped = false;
+      for (const sel of [
+        'button:has-text("Skip")',
+        'button:has-text("Not now")',
+        'a:has-text("Skip")',
+        '[data-primary-action-label="Skip"] button',
+        'button[jsname="e57aD"]',
+        '#skipPhoneDiv button',
+        'button:has-text("Maybe later")',
+      ]) {
+        try {
+          const el = await page.$(sel);
+          if (el) {
+            await el.click();
+            log("⏭️ Phone verification skipped");
+            skipped = true;
+            await page.waitForTimeout(2500);
+            break;
+          }
+        } catch {}
+      }
+
+      if (!skipped) {
+        log("Skip not available — ordering SMS number...");
+        let otpCode: string | null = null;
+        let phoneNumber: string | undefined;
+
+        // SMSPool service ID 395 = Google/Gmail
+        // Country 1 = United States, 22 = US Virtual
+        // Combos: [country, serviceId, pool]
+        const googleCombos: Array<[number, string, string]> = [
+          [1, "395", "1"], [22, "395", "1"], [1, "395", "3"], [22, "395", "3"],
+        ];
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const [country, serviceName, pool] = googleCombos[(attempt - 1) % googleCombos.length];
+          log(`SMS attempt ${attempt}/3 (service: ${serviceName}, country: ${country}, pool: ${pool})...`);
+          const order = await (await import("./smspoolService")).orderSMSNumber(country, serviceName, pool);
+          if (!order.success || !order.number || !order.orderId) {
+            log(`⚠️ SMS order failed (attempt ${attempt}): ${order.error}`);
+            continue;
+          }
+          smsOrderId = order.orderId;
+          phoneNumber = order.number;
+          log(`Phone number ordered: ${phoneNumber}`);
+
+          await page.fill('input[type="tel"], input[id="phoneNumberId"]', phoneNumber);
+          await page.waitForTimeout(500);
+
+          // Click "Send" / "Get code"
+          for (const sel of ['button[jsname="LgbsSe"]', '#phoneNext button', '#phoneNext', 'button:has-text("Next")', 'button:has-text("Send")', 'button:has-text("Get code")']) {
+            try { await page.click(sel, { timeout: 2000 }); break; } catch {}
+          }
+          await page.waitForTimeout(3000);
+
+          // Check for rejection (invalid number message)
+          let rejected = false;
+          try {
+            const errEl = await page.$('[aria-live="assertive"] .o6cuMc, .dEOOab, .Ekjuhf');
+            if (errEl) {
+              const txt = await errEl.textContent();
+              if (txt && (txt.includes("can't use") || txt.includes("number") || txt.includes("invalid"))) {
+                log(`⚠️ Number rejected (attempt ${attempt}): ${txt?.trim()}`);
+                await (await import("./smspoolService")).cancelSMSOrder(order.orderId);
+                smsOrderId = undefined;
+                rejected = true;
+              }
+            }
+          } catch {}
+
+          if (!rejected) {
+            log(`Polling for OTP code (order ${order.orderId})...`);
+            otpCode = await (await import("./smspoolService")).pollForSMSCode(order.orderId, 40, 3000);
+            if (otpCode) {
+              log(`✅ OTP received: ${otpCode}`);
+              break;
+            } else {
+              log(`⚠️ No OTP received (attempt ${attempt}) — cancelling order and trying new number`);
+              try { await (await import("./smspoolService")).cancelSMSOrder(order.orderId); } catch {}
+              smsOrderId = undefined;
+            }
+          }
         }
-        smsOrderId = order.orderId;
-        phoneNumber = order.number;
-        log(`Phone number ordered: ${phoneNumber}`);
 
-        await page.fill('input[type="tel"], input[id="phoneNumberId"]', phoneNumber);
-        await page.waitForTimeout(500);
+        if (!otpCode) {
+          return { success: false, error: "Phone verification failed — no OTP received after 3 attempts" };
+        }
 
-        // Click "Send" / "Get code"
-        for (const sel of ['button[jsname="LgbsSe"]', '#phoneNext button', '#phoneNext', 'button:has-text("Next")', 'button:has-text("Send")', 'button:has-text("Get code")']) {
+        // Enter OTP
+        log("Entering OTP code...");
+        try {
+          await page.waitForSelector('input[id="code"], input[name="code"], input[type="tel"]', { timeout: 10000 });
+          await page.fill('input[id="code"], input[name="code"]', otpCode);
+          log("OTP entered");
+        } catch {
+          try { await page.fill('input[type="tel"]', otpCode); log("OTP entered (tel input)"); } catch {}
+        }
+        await page.waitForTimeout(400);
+
+        // Verify
+        for (const sel of ['button[jsname="LgbsSe"]', '#code-button button', 'button:has-text("Next")', 'button:has-text("Verify")']) {
           try { await page.click(sel, { timeout: 2000 }); break; } catch {}
         }
         await page.waitForTimeout(3000);
-
-        // Check for rejection (invalid number message)
-        let rejected = false;
-        try {
-          const errEl = await page.$('[aria-live="assertive"] .o6cuMc, .dEOOab, .Ekjuhf');
-          if (errEl) {
-            const txt = await errEl.textContent();
-            if (txt && (txt.includes("can't use") || txt.includes("number") || txt.includes("invalid"))) {
-              log(`⚠️ Number rejected (attempt ${attempt}): ${txt?.trim()}`);
-              await (await import("./smspoolService")).cancelSMSOrder(order.orderId);
-              smsOrderId = undefined;
-              rejected = true;
-            }
-          }
-        } catch {}
-
-        if (!rejected) {
-          log(`Polling for OTP code (order ${order.orderId})...`);
-          otpCode = await (await import("./smspoolService")).pollForSMSCode(order.orderId, 40, 3000);
-          if (otpCode) {
-            log(`✅ OTP received: ${otpCode}`);
-            break;
-          } else {
-            log(`⚠️ No OTP received (attempt ${attempt}) — cancelling order and trying new number`);
-            try { await (await import("./smspoolService")).cancelSMSOrder(order.orderId); } catch {}
-            smsOrderId = undefined;
-          }
-        }
+        log("OTP submitted");
+        smsOrderId = undefined;
+      } else {
+        log("Continuing past phone step...");
       }
-
-      if (!otpCode) {
-        return { success: false, error: "Phone verification failed — no OTP received after 3 attempts" };
-      }
-
-      // Enter OTP
-      log("Entering OTP code...");
-      try {
-        await page.waitForSelector('input[id="code"], input[name="code"], input[type="tel"]', { timeout: 10000 });
-        await page.fill('input[id="code"], input[name="code"]', otpCode);
-        log("OTP entered");
-      } catch {
-        try { await page.fill('input[type="tel"]', otpCode); log("OTP entered (tel input)"); } catch {}
-      }
-      await page.waitForTimeout(400);
-
-      // Verify
-      for (const sel of ['button[jsname="LgbsSe"]', '#code-button button', 'button:has-text("Next")', 'button:has-text("Verify")']) {
-        try { await page.click(sel, { timeout: 2000 }); break; } catch {}
-      }
-      await page.waitForTimeout(3000);
-      log("OTP submitted");
-      smsOrderId = undefined; // order resolved
     } else {
       log("No phone verification step detected — proceeding...");
     }
