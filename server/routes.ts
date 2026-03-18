@@ -2876,6 +2876,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Outlook email and password are required" });
       }
 
+      const existingAccts = await storage.getAllReplitAccounts();
+      const alreadyUsed = existingAccts.some(
+        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
+      );
+      if (alreadyUsed) {
+        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
+      }
+
       const userId = req.session.userId;
       const createId = randomUUID().substring(0, 8);
       const batchId = `replit-create-${createId}`;
