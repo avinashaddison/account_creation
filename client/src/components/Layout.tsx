@@ -56,11 +56,11 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
   const nav = [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard, tag: "SYS" },
+    { href: "/admin/create-server", label: "Create Server", icon: Server, tag: "OPS" },
     { href: "/admin/accounts", label: "Account Stock", icon: Archive, tag: "DB" },
     { href: "/admin/email-workspace", label: "Email Workspace", icon: Mail, tag: "NET" },
     { href: "/admin/billing", label: "Billing", icon: Receipt, tag: "FIN" },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet, tag: "FIN" },
-    { href: "/admin/create-server", label: "Create Server", icon: Server, tag: "OPS" },
     ...(user.role === "superadmin" ? [
       { href: "/admin/private-account", label: "Private Account", icon: Shield, tag: "PVT" },
       { href: "/admin/earnings", label: "Earnings", icon: TrendingUp, tag: "ADM" },

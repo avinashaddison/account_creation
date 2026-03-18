@@ -137,8 +137,8 @@ const platforms: Platform[] = [
   },
   {
     id: "replit",
-    name: "Replit Create",
-    description: "Auto-create Replit accounts using stored Outlook emails with IMAP verification",
+    name: "Create Account",
+    description: "Auto-create Replit accounts using stored Outlook emails with OWA verification & onboarding",
     href: "/admin/replit-create",
     gradient: "from-violet-600/80 via-purple-700/60 to-indigo-900/80",
     badge: "ACTIVE",
@@ -147,7 +147,7 @@ const platforms: Platform[] = [
     comingSoon: false,
     stats: [
       { label: "Auto Create", icon: Shield },
-      { label: "IMAP Verify", icon: Mail },
+      { label: "OWA Verify", icon: Mail },
       { label: "Outlook Auth", icon: Zap },
     ],
   },
