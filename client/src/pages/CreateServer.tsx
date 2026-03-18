@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { ArrowRight, Globe, Shield, Zap, Server, Ticket, Trophy, Lock, Cpu, Radio, Mail } from "lucide-react";
+import { ArrowRight, Globe, Shield, Zap, Server, Ticket, Trophy, Lock, Cpu, Radio, Mail, Code2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
 import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
@@ -135,6 +135,22 @@ const platforms: Platform[] = [
       { label: "API Key", icon: Zap },
     ],
   },
+  {
+    id: "replit",
+    name: "Replit Create",
+    description: "Auto-create Replit accounts using stored Outlook emails with IMAP verification",
+    href: "/admin/replit-create",
+    gradient: "from-violet-600/80 via-purple-700/60 to-indigo-900/80",
+    badge: "ACTIVE",
+    badgeColor: "text-emerald-400",
+    borderColor: "rgba(124,58,237,0.2)",
+    comingSoon: false,
+    stats: [
+      { label: "Auto Create", icon: Shield },
+      { label: "IMAP Verify", icon: Mail },
+      { label: "Outlook Auth", icon: Zap },
+    ],
+  },
 ];
 
 export default function CreateServer() {
@@ -218,6 +234,10 @@ export default function CreateServer() {
                     ) : platform.id === "outlook" ? (
                       <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(56,189,248,0.2)' }}>
                         <Mail className="w-7 h-7 text-white" />
+                      </div>
+                    ) : platform.id === "replit" ? (
+                      <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center overflow-hidden" style={{ boxShadow: '0 0 20px rgba(124,58,237,0.3)' }}>
+                        <Code2 className="w-7 h-7 text-white" />
                       </div>
                     ) : (
                       <div className="w-16 h-16 rounded-xl bg-white flex items-center justify-center overflow-hidden p-2" style={{ boxShadow: '0 0 20px rgba(0,255,65,0.2)' }}>

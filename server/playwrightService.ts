@@ -10329,6 +10329,286 @@ export interface GmailCheckResult {
   note?: string;
 }
 
+export async function registerReplitAccount(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; username?: string; email?: string; password?: string; error?: string }> {
+  const { ImapFlow } = await import("imapflow");
+
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const rand = (n: number) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const randUpper = (n: number) => Array.from({ length: n }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
+  const randSym = () => ["!", "@", "#", "$", "%"][Math.floor(Math.random() * 5)];
+
+  const emailPrefix = outlookEmail.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase().substring(0, 10);
+  const username = emailPrefix + rand(5);
+  const password = randUpper(2) + rand(6) + randSym() + Math.floor(Math.random() * 90 + 10);
+
+  log(`Generated username: ${username}`);
+  log(`Generated password: ${password}`);
+
+  let browser: any = null;
+  let page: any = null;
+
+  try {
+    const zenrowsApiKey = process.env.ZENROWS_API_KEY || "";
+    if (!zenrowsApiKey) {
+      log("⚠️ No ZenRows API key — proceeding without proxy browser (may be blocked)");
+    }
+
+    log("Launching browser...");
+    const { chromium } = await import("playwright");
+
+    let context: any;
+    if (zenrowsApiKey) {
+      const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
+      browser = await chromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
+      context = browser.contexts()[0] || await browser.newContext();
+    } else {
+      browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+      context = await browser.newContext();
+    }
+    page = await context.newPage();
+    page.setDefaultTimeout(30000);
+
+    log("Navigating to https://replit.com/signup ...");
+    await page.goto("https://replit.com/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(3000);
+
+    log("Looking for email signup option...");
+    const emailBtnSelectors = [
+      'button:has-text("Continue with email")',
+      'button:has-text("Sign up with email")',
+      'a:has-text("Continue with email")',
+      '[data-cy="email-signup"]',
+      'button[class*="email"]',
+    ];
+    let clicked = false;
+    for (const sel of emailBtnSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click();
+          log(`Clicked email signup button (${sel})`);
+          clicked = true;
+          await page.waitForTimeout(2000);
+          break;
+        }
+      } catch {}
+    }
+    if (!clicked) {
+      log("No separate email button found — form may already be visible");
+    }
+
+    log("Filling signup form...");
+    const usernameSelectors = ['input[name="username"]', 'input[placeholder*="username" i]', 'input[id*="username" i]', 'input[autocomplete="username"]'];
+    let usernameFilled = false;
+    for (const sel of usernameSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click({ clickCount: 3 });
+          await el.type(username, { delay: 50 });
+          log(`Typed username into ${sel}`);
+          usernameFilled = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!usernameFilled) log("⚠️ Could not find username field");
+
+    await page.waitForTimeout(500);
+
+    const emailSelectors = ['input[name="email"]', 'input[type="email"]', 'input[placeholder*="email" i]', 'input[id*="email" i]'];
+    let emailFilled = false;
+    for (const sel of emailSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click({ clickCount: 3 });
+          await el.type(outlookEmail, { delay: 50 });
+          log(`Typed email into ${sel}`);
+          emailFilled = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!emailFilled) log("⚠️ Could not find email field");
+
+    await page.waitForTimeout(500);
+
+    const passwordSelectors = ['input[name="password"]', 'input[type="password"]', 'input[placeholder*="password" i]', 'input[id*="password" i]'];
+    let passwordFilled = false;
+    for (const sel of passwordSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click({ clickCount: 3 });
+          await el.type(password, { delay: 50 });
+          log(`Typed password into ${sel}`);
+          passwordFilled = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!passwordFilled) log("⚠️ Could not find password field");
+
+    await page.waitForTimeout(500);
+
+    log("Submitting signup form...");
+    const submitSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Create Account")',
+      'button:has-text("Sign Up")',
+      'button:has-text("Continue")',
+      'button:has-text("Create my account")',
+      'input[type="submit"]',
+    ];
+    let submitted = false;
+    for (const sel of submitSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click();
+          log(`Clicked submit button (${sel})`);
+          submitted = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!submitted) {
+      log("Trying Enter key to submit...");
+      await page.keyboard.press("Enter");
+    }
+
+    log("Waiting for signup response...");
+    await page.waitForTimeout(5000);
+
+    const currentUrl = page.url();
+    const pageContent = await page.content();
+
+    if (pageContent.toLowerCase().includes("verify") || pageContent.toLowerCase().includes("check your email") || pageContent.toLowerCase().includes("verification") || currentUrl.includes("verify") || currentUrl.includes("confirm")) {
+      log("✅ Signup submitted — verification email expected");
+    } else if (pageContent.toLowerCase().includes("error") || pageContent.toLowerCase().includes("already taken") || pageContent.toLowerCase().includes("invalid")) {
+      const errText = await page.evaluate(() => {
+        const el = document.querySelector('[class*="error"], [class*="Error"], [role="alert"], .alert');
+        return el ? el.textContent?.trim().substring(0, 200) : null;
+      });
+      log(`⚠️ Page error detected: ${errText || "unknown error"}`);
+      log(`Current URL: ${currentUrl}`);
+      if (errText && errText.toLowerCase().includes("already taken")) {
+        log("Username already taken — this account may have been partially created");
+      }
+    } else {
+      log(`Current URL after submit: ${currentUrl}`);
+    }
+
+    log("Now waiting 10s before checking Outlook inbox for verification email...");
+    await page.waitForTimeout(10000);
+
+    log(`Connecting to Outlook IMAP (imap.outlook.com:993) for ${outlookEmail}...`);
+    const imapClient = new ImapFlow({
+      host: "imap.outlook.com",
+      port: 993,
+      secure: true,
+      auth: { user: outlookEmail, pass: outlookPassword },
+      logger: false,
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 20000,
+      greetingTimeout: 15000,
+      socketTimeout: 30000,
+    } as any);
+
+    imapClient.on("error", () => {});
+
+    let verificationLink: string | null = null;
+    let verificationCode: string | null = null;
+
+    try {
+      await imapClient.connect();
+      log("✅ Outlook IMAP connected");
+
+      const lock = await (imapClient as any).getMailboxLock("INBOX");
+      try {
+        const status = await (imapClient as any).status("INBOX", { messages: true });
+        const total: number = status?.messages ?? 0;
+        log(`Inbox has ${total} messages — scanning last 20 for Replit email...`);
+
+        if (total > 0) {
+          const start = Math.max(1, total - 19);
+          for await (const msg of (imapClient as any).fetch(`${start}:${total}`, { envelope: true, bodyStructure: true, source: true })) {
+            const from = msg.envelope?.from?.[0]?.address || "";
+            const subject = msg.envelope?.subject || "";
+            if (from.toLowerCase().includes("replit") || subject.toLowerCase().includes("replit") || subject.toLowerCase().includes("verify") || subject.toLowerCase().includes("confirm")) {
+              log(`Found Replit email: FROM=${from} SUBJECT=${subject}`);
+              const rawSource = msg.source?.toString() || "";
+
+              const linkMatch = rawSource.match(/https:\/\/replit\.com\/[^\s"'<>]+/);
+              if (linkMatch) {
+                verificationLink = linkMatch[0].replace(/=\r?\n/g, "").replace(/=3D/g, "=");
+                log(`Extracted verification link: ${verificationLink.substring(0, 80)}...`);
+              }
+
+              const codeMatch = rawSource.match(/\b([0-9]{6})\b/);
+              if (!verificationLink && codeMatch) {
+                verificationCode = codeMatch[1];
+                log(`Extracted verification code: ${verificationCode}`);
+              }
+              break;
+            }
+          }
+        }
+      } finally {
+        lock.release();
+      }
+      try { await (imapClient as any).logout(); } catch {}
+    } catch (imapErr: any) {
+      log(`⚠️ IMAP error: ${(imapErr.message || String(imapErr)).substring(0, 150)}`);
+    }
+
+    if (verificationLink) {
+      log(`Navigating to verification link...`);
+      await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(4000);
+      const verifyUrl = page.url();
+      const verifyContent = await page.content();
+      if (verifyContent.toLowerCase().includes("verified") || verifyContent.toLowerCase().includes("success") || verifyUrl.includes("home") || verifyUrl.includes("dashboard") || verifyUrl === "https://replit.com/~" || verifyUrl.includes("replit.com/@")) {
+        log(`✅ Account verified! URL: ${verifyUrl}`);
+      } else {
+        log(`Verification page URL: ${verifyUrl} — may need manual check`);
+      }
+    } else if (verificationCode) {
+      log(`Entering verification code: ${verificationCode}`);
+      const codeSelectors = ['input[name="code"]', 'input[placeholder*="code" i]', 'input[type="number"]', 'input[maxlength="6"]'];
+      for (const sel of codeSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (el) {
+            await el.type(verificationCode, { delay: 50 });
+            await page.keyboard.press("Enter");
+            log(`Entered code via ${sel}`);
+            await page.waitForTimeout(3000);
+            break;
+          }
+        } catch {}
+      }
+    } else {
+      log("⚠️ No verification link or code found in inbox — account may still verify automatically or email was delayed");
+    }
+
+    log(`✅ Replit account creation complete: username=${username} email=${outlookEmail}`);
+    return { success: true, username, email: outlookEmail, password };
+
+  } catch (err: any) {
+    log(`Error: ${(err.message || String(err)).substring(0, 200)}`);
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+  }
+}
+
 export async function checkGmailAccount(
   email: string,
   password: string,

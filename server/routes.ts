@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -2790,6 +2790,81 @@ export async function registerRoutes(
         }
         broadcastBatchComplete(batchId, userId);
       })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const { outlookEmail, outlookPassword } = req.body;
+      if (!outlookEmail || !outlookPassword) {
+        return res.status(400).json({ error: "Outlook email and password are required" });
+      }
+
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `replit-create-${createId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "Replit account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, `Starting Replit account creation for ${outlookEmail}...`, userId);
+        try {
+          const result = await registerReplitAccount(
+            outlookEmail,
+            outlookPassword,
+            (msg) => broadcastLog(batchId, createId, msg, userId)
+          );
+
+          if (result.success) {
+            try {
+              await storage.createReplitAccount({
+                username: result.username!,
+                email: result.email!,
+                password: result.password!,
+                outlookEmail,
+                status: "created",
+                createdBy: userId,
+              });
+              broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
+            } catch (dbErr: any) {
+              broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
+            }
+            broadcast({ type: "replit_create_result", createId, batchId, success: true, username: result.username, email: result.email, password: result.password }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ Replit creation failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "replit_create_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "replit_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/replit-accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/replit-accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteReplitAccount(req.params.id);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

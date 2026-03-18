@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -60,6 +60,10 @@ export interface IStorage {
   getTmAlerts(ownerId?: string, limit?: number): Promise<TmAlert[]>;
   createTmAlert(data: InsertTmAlert): Promise<TmAlert>;
   deleteTmAlertsOlderThan(days: number): Promise<void>;
+  createReplitAccount(data: InsertReplitAccount): Promise<ReplitAccount>;
+  getAllReplitAccounts(): Promise<ReplitAccount[]>;
+  getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]>;
+  deleteReplitAccount(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -395,6 +399,23 @@ export class DatabaseStorage implements IStorage {
   async deleteTmAlertsOlderThan(days: number): Promise<void> {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     await db.delete(tmAlerts).where(sql`${tmAlerts.createdAt} < ${cutoff}`);
+  }
+
+  async createReplitAccount(data: InsertReplitAccount): Promise<ReplitAccount> {
+    const [row] = await db.insert(replitAccounts).values(data).returning();
+    return row;
+  }
+
+  async getAllReplitAccounts(): Promise<ReplitAccount[]> {
+    return db.select().from(replitAccounts).orderBy(desc(replitAccounts.createdAt));
+  }
+
+  async getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]> {
+    return db.select().from(replitAccounts).where(eq(replitAccounts.createdBy, ownerId)).orderBy(desc(replitAccounts.createdAt));
+  }
+
+  async deleteReplitAccount(id: string): Promise<void> {
+    await db.delete(replitAccounts).where(eq(replitAccounts.id, id));
   }
 }
 

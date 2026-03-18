@@ -201,7 +201,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
           </div>
 
           {nav.slice(1).map((item) => {
-            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create" || location === "/admin/brunomars-create" || location === "/admin/outlook-login" || location === "/admin/outlook-create" || location === "/admin/zenrows-register"));
+            const isActive = location === item.href || (item.href === "/admin/create-server" && (location === "/admin/la28-create" || location === "/admin/tm-create" || location === "/admin/uefa-create" || location === "/admin/brunomars-create" || location === "/admin/outlook-login" || location === "/admin/outlook-create" || location === "/admin/zenrows-register" || location === "/admin/replit-create"));
             return (
               <Link key={item.href} href={item.href}>
                 <div

@@ -7,7 +7,7 @@ export const roleEnum = pgEnum("role", ["superadmin", "admin", "user"]);
 export const accountStatusEnum = pgEnum("account_status", ["pending", "registering", "waiting_code", "verifying", "verified", "profile_saving", "draw_registering", "completed", "failed", "filling_form", "selecting_events", "submitting", "presale_loading", "presale_filling", "presale_events", "presale_submitting"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["pending", "approved", "rejected"]);
 
-export const ALL_SERVICES = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows"] as const;
+export const ALL_SERVICES = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows", "replit"] as const;
 export type ServiceId = typeof ALL_SERVICES[number];
 
 export const users = pgTable("users", {
@@ -164,6 +164,22 @@ export const insertPrivateGmailSchema = createInsertSchema(privateGmailAccounts)
 });
 export type PrivateGmailAccount = typeof privateGmailAccounts.$inferSelect;
 export type InsertPrivateGmail = z.infer<typeof insertPrivateGmailSchema>;
+
+export const replitAccounts = pgTable("replit_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  username: text("username").notNull(),
+  email: text("email").notNull(),
+  password: text("password").notNull(),
+  outlookEmail: text("outlook_email"),
+  status: text("status").notNull().default("created"),
+  error: text("error"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertReplitAccountSchema = createInsertSchema(replitAccounts).omit({ id: true, createdAt: true });
+export type ReplitAccount = typeof replitAccounts.$inferSelect;
+export type InsertReplitAccount = z.infer<typeof insertReplitAccountSchema>;
 
 export const tmTrackedEvents = pgTable("tm_tracked_events", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
