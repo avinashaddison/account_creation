@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -2561,6 +2561,44 @@ export async function registerRoutes(
           await storage.updatePrivateGmailStatus(id, "failed");
           broadcastLog(batchId, loginId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "gmail_login_result", loginId, batchId, accountId: id, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── POST /api/private/gmail/create ───────────────────────────────────────
+  app.post("/api/private/gmail/create", async (req, res) => {
+    try {
+      if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `gmail-create-${createId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "Gmail account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, "Starting Gmail account creation...", userId);
+        try {
+          const result = await createGmailAccount(
+            (msg) => broadcastLog(batchId, createId, msg, userId)
+          );
+
+          if (result.success && result.email && result.password) {
+            const newAccount = await storage.createPrivateGmail({ email: result.email, password: result.password, status: "active" });
+            broadcastLog(batchId, createId, `✅ Gmail account created: ${result.email}`, userId);
+            broadcast({ type: "gmail_create_result", createId, batchId, success: true, email: result.email, accountId: newAccount.id }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ Gmail creation FAILED: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "gmail_create_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "gmail_create_result", createId, batchId, success: false, error: err.message }, userId);
         }
         broadcastBatchComplete(batchId, userId);
       })();

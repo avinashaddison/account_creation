@@ -9574,6 +9574,365 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
+export interface GmailCreateResult {
+  success: boolean;
+  email?: string;
+  password?: string;
+  error?: string;
+}
+
+const FIRST_NAMES = ["James","Liam","Noah","Oliver","Ethan","Lucas","Mason","Logan","Aiden","Jackson","Ella","Mia","Sophia","Ava","Isabella","Chloe","Emma","Emily","Abby","Grace"];
+const LAST_NAMES  = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Wilson","Anderson","Taylor","Thomas","Harris","Martin","White","Lewis","Clark","Hall","Young","Allen"];
+
+function randomItem<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function randomInt(min: number, max: number): number { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+function generateStrongPassword(): string {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghjkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const special = "!@#$%&*";
+  let pw = randomItem([...upper]) + randomItem([...upper]) + randomItem([...lower]) + randomItem([...lower]) + randomItem([...digits]) + randomItem([...digits]) + randomItem([...special]);
+  for (let i = 0; i < 5; i++) pw += randomItem([...lower + digits]);
+  return pw.split("").sort(() => Math.random() - 0.5).join("");
+}
+
+export async function createGmailAccount(
+  log: (msg: string) => void
+): Promise<GmailCreateResult> {
+  let browser: any = null;
+  let smsOrderId: string | undefined;
+
+  try {
+    await ensureBrowserInstalled();
+    const residentialProxy = await getResidentialProxyUrl();
+
+    const firstName = randomItem(FIRST_NAMES);
+    const lastName  = randomItem(LAST_NAMES);
+    const birthYear  = randomInt(1985, 2002);
+    const birthMonth = randomInt(1, 12);
+    const birthDay   = randomInt(1, 28);
+    const password   = generateStrongPassword();
+
+    const usernameBase = `${firstName.toLowerCase()}${lastName.toLowerCase()}${randomInt(100, 9999)}`;
+    const email = `${usernameBase}@gmail.com`;
+
+    log(`Creating Gmail account: ${email}`);
+    log(`Name: ${firstName} ${lastName}  DOB: ${birthYear}-${String(birthMonth).padStart(2,"0")}-${String(birthDay).padStart(2,"0")}`);
+
+    const launchArgs = [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-extensions",
+      "--no-first-run",
+      "--no-zygote",
+    ];
+
+    log("Launching browser...");
+    browser = await chromium.launch({ headless: true, args: launchArgs });
+
+    const contextOptions: any = {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+      locale: "en-US",
+    };
+
+    if (residentialProxy) {
+      log("Using residential proxy...");
+      const rawProxy = residentialProxy.startsWith("http") ? residentialProxy : `http://${residentialProxy}`;
+      try {
+        const u = new URL(rawProxy);
+        contextOptions.proxy = { server: `${u.protocol}//${u.hostname}:${u.port}`, username: u.username || undefined, password: u.password || undefined };
+      } catch {
+        contextOptions.proxy = { server: rawProxy };
+      }
+    } else {
+      log("No proxy configured — using direct connection");
+    }
+
+    const context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    page.setDefaultTimeout(20000);
+
+    // ── Step 1: Navigate to Gmail signup ─────────────────────────────────
+    log("Opening Google signup page...");
+    await page.goto(
+      "https://accounts.google.com/signup/v2/createaccount?flowName=GlifWebSignIn&flowEntry=SignUp&hl=en",
+      { waitUntil: "domcontentloaded", timeout: 60000 }
+    );
+    await page.waitForTimeout(2000 + Math.random() * 1000);
+    log("Signup page loaded: " + page.url().substring(0, 80));
+
+    // ── Step 2: Fill first and last name ─────────────────────────────────
+    log("Filling name fields...");
+    try {
+      await page.waitForSelector('input[name="firstName"]', { timeout: 15000 });
+    } catch {
+      return { success: false, error: "First name field not found — Google may have changed signup layout" };
+    }
+    await page.fill('input[name="firstName"]', firstName);
+    await page.waitForTimeout(300 + Math.random() * 200);
+    await page.fill('input[name="lastName"]', lastName);
+    await page.waitForTimeout(400 + Math.random() * 300);
+    log(`Name filled: ${firstName} ${lastName}`);
+
+    // Click Next
+    log("Clicking Next (name step)...");
+    let clicked = false;
+    for (const sel of ['button[jsname="LgbsSe"]', '#collectNameNext button', '#collectNameNext', 'button:has-text("Next")']) {
+      try { await page.click(sel, { timeout: 3000 }); clicked = true; log("Next clicked via: " + sel); break; } catch {}
+    }
+    if (!clicked) { await page.keyboard.press("Tab"); await page.keyboard.press("Enter"); log("Next via Enter key"); }
+    await page.waitForTimeout(2000);
+
+    // ── Step 3: Birthday and gender ──────────────────────────────────────
+    log("Filling birthday and gender...");
+    try {
+      await page.waitForSelector('input[id="day"], select[id="month"], input[name="day"]', { timeout: 10000 });
+    } catch {
+      log("⚠️ Birthday fields not found — trying to continue");
+    }
+
+    const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    try {
+      const monthSel = await page.$('select[id="month"]');
+      if (monthSel) {
+        await monthSel.selectOption({ label: monthNames[birthMonth - 1] });
+        log(`Month set: ${monthNames[birthMonth - 1]}`);
+      }
+    } catch {}
+
+    try {
+      const dayInput = await page.$('input[id="day"]') || await page.$('input[name="day"]');
+      if (dayInput) { await dayInput.fill(String(birthDay)); log(`Day set: ${birthDay}`); }
+    } catch {}
+
+    try {
+      const yearInput = await page.$('input[id="year"]') || await page.$('input[name="year"]');
+      if (yearInput) { await yearInput.fill(String(birthYear)); log(`Year set: ${birthYear}`); }
+    } catch {}
+
+    try {
+      const genderSel = await page.$('select[id="gender"]');
+      if (genderSel) {
+        await genderSel.selectOption({ value: randomItem(["1","2"]) }); // 1=Female, 2=Male
+        log("Gender set");
+      }
+    } catch {}
+
+    await page.waitForTimeout(400 + Math.random() * 300);
+
+    // Click Next (birthday step)
+    log("Clicking Next (birthday step)...");
+    clicked = false;
+    for (const sel of ['button[jsname="LgbsSe"]', '#birthdaygenderNext button', '#birthdaygenderNext', 'button:has-text("Next")']) {
+      try { await page.click(sel, { timeout: 3000 }); clicked = true; log("Next clicked via: " + sel); break; } catch {}
+    }
+    if (!clicked) { await page.keyboard.press("Enter"); log("Next via Enter"); }
+    await page.waitForTimeout(2000);
+
+    // ── Step 4: Username (may be auto-shown or on next screen) ───────────
+    log("Looking for username field...");
+    let usernameUsed = usernameBase;
+    try {
+      const usernameInput = await page.waitForSelector('input[name="Username"]', { timeout: 8000 });
+      if (usernameInput) {
+        await page.fill('input[name="Username"]', usernameBase);
+        await page.waitForTimeout(300 + Math.random() * 200);
+        log(`Username filled: ${usernameBase}`);
+      }
+    } catch {
+      log("Username field not visible yet — may appear later");
+    }
+
+    // Click Next if username field was shown
+    const urlBeforeUser = page.url();
+    clicked = false;
+    for (const sel of ['button[jsname="LgbsSe"]', '#next button', 'button:has-text("Next")']) {
+      try { await page.click(sel, { timeout: 2000 }); clicked = true; break; } catch {}
+    }
+    if (clicked) {
+      await page.waitForTimeout(2000);
+      // Check for "username taken" error
+      try {
+        const errEl = await page.$('[aria-live="assertive"] .o6cuMc, .dEOOab');
+        if (errEl) {
+          const errText = await errEl.textContent();
+          if (errText?.includes("taken") || errText?.includes("unavailable")) {
+            log("⚠️ Username taken — trying alternative...");
+            const altUsername = `${usernameBase}${randomInt(1,99)}`;
+            usernameUsed = altUsername;
+            await page.fill('input[name="Username"]', altUsername);
+            await page.waitForTimeout(300);
+            for (const sel of ['button[jsname="LgbsSe"]', 'button:has-text("Next")']) {
+              try { await page.click(sel, { timeout: 2000 }); break; } catch {}
+            }
+            await page.waitForTimeout(2000);
+            log(`Alternative username: ${altUsername}`);
+          }
+        }
+      } catch {}
+    }
+
+    const finalEmail = `${usernameUsed}@gmail.com`;
+
+    // ── Step 5: Password ──────────────────────────────────────────────────
+    log("Looking for password fields...");
+    try {
+      await page.waitForSelector('input[name="Passwd"], input[type="password"]', { timeout: 10000 });
+      await page.fill('input[name="Passwd"]', password);
+      await page.waitForTimeout(300);
+      try { await page.fill('input[name="PasswdAgain"], input[id="confirm-passwd"]', password); } catch {}
+      log("Password filled");
+    } catch {
+      log("⚠️ Password field not found — trying to continue");
+    }
+
+    await page.waitForTimeout(400);
+    clicked = false;
+    for (const sel of ['button[jsname="LgbsSe"]', '#createpasswordNext button', '#createpasswordNext', 'button:has-text("Next")']) {
+      try { await page.click(sel, { timeout: 3000 }); clicked = true; break; } catch {}
+    }
+    if (!clicked) { await page.keyboard.press("Enter"); }
+    await page.waitForTimeout(2500);
+
+    // ── Step 6: Phone verification (with retry) ───────────────────────────
+    const phoneFieldVisible = await page.$('input[type="tel"], input[id="phoneNumberId"]').then(el => !!el).catch(() => false);
+    if (phoneFieldVisible) {
+      log("📱 Phone verification required — ordering SMS number...");
+      let otpCode: string | null = null;
+      let phoneNumber: string | undefined;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        log(`SMS attempt ${attempt}/3...`);
+        const order = await (await import("./smspoolService")).orderSMSNumber(1, "Google");
+        if (!order.success || !order.number || !order.orderId) {
+          log(`⚠️ SMS order failed (attempt ${attempt}): ${order.error}`);
+          continue;
+        }
+        smsOrderId = order.orderId;
+        phoneNumber = order.number;
+        log(`Phone number ordered: ${phoneNumber}`);
+
+        await page.fill('input[type="tel"], input[id="phoneNumberId"]', phoneNumber);
+        await page.waitForTimeout(500);
+
+        // Click "Send" / "Get code"
+        for (const sel of ['button[jsname="LgbsSe"]', '#phoneNext button', '#phoneNext', 'button:has-text("Next")', 'button:has-text("Send")', 'button:has-text("Get code")']) {
+          try { await page.click(sel, { timeout: 2000 }); break; } catch {}
+        }
+        await page.waitForTimeout(3000);
+
+        // Check for rejection (invalid number message)
+        let rejected = false;
+        try {
+          const errEl = await page.$('[aria-live="assertive"] .o6cuMc, .dEOOab, .Ekjuhf');
+          if (errEl) {
+            const txt = await errEl.textContent();
+            if (txt && (txt.includes("can't use") || txt.includes("number") || txt.includes("invalid"))) {
+              log(`⚠️ Number rejected (attempt ${attempt}): ${txt?.trim()}`);
+              await (await import("./smspoolService")).cancelSMSOrder(order.orderId);
+              smsOrderId = undefined;
+              rejected = true;
+            }
+          }
+        } catch {}
+
+        if (!rejected) {
+          log(`Polling for OTP code (order ${order.orderId})...`);
+          otpCode = await (await import("./smspoolService")).pollForSMSCode(order.orderId, 40, 3000);
+          if (otpCode) {
+            log(`✅ OTP received: ${otpCode}`);
+            break;
+          } else {
+            log(`⚠️ No OTP received (attempt ${attempt}) — trying new number`);
+            smsOrderId = undefined;
+          }
+        }
+      }
+
+      if (!otpCode) {
+        return { success: false, error: "Phone verification failed — no OTP received after 3 attempts" };
+      }
+
+      // Enter OTP
+      log("Entering OTP code...");
+      try {
+        await page.waitForSelector('input[id="code"], input[name="code"], input[type="tel"]', { timeout: 10000 });
+        await page.fill('input[id="code"], input[name="code"]', otpCode);
+        log("OTP entered");
+      } catch {
+        try { await page.fill('input[type="tel"]', otpCode); log("OTP entered (tel input)"); } catch {}
+      }
+      await page.waitForTimeout(400);
+
+      // Verify
+      for (const sel of ['button[jsname="LgbsSe"]', '#code-button button', 'button:has-text("Next")', 'button:has-text("Verify")']) {
+        try { await page.click(sel, { timeout: 2000 }); break; } catch {}
+      }
+      await page.waitForTimeout(3000);
+      log("OTP submitted");
+      smsOrderId = undefined; // order resolved
+    } else {
+      log("No phone verification step detected — proceeding...");
+    }
+
+    // ── Step 7: Accept Terms of Service ──────────────────────────────────
+    log("Looking for Terms of Service...");
+    await page.waitForTimeout(2000);
+    try {
+      const tosButtons = await page.$$('button');
+      for (const btn of tosButtons) {
+        const text = await btn.textContent();
+        if (text && (text.includes("Agree") || text.includes("I agree") || text.includes("Accept"))) {
+          await btn.click();
+          log("ToS accepted");
+          await page.waitForTimeout(2000);
+          break;
+        }
+      }
+    } catch {
+      log("⚠️ Could not find ToS button — trying general Next");
+      for (const sel of ['button[jsname="LgbsSe"]', 'button:has-text("Agree")', 'button:has-text("Next")']) {
+        try { await page.click(sel, { timeout: 2000 }); break; } catch {}
+      }
+      await page.waitForTimeout(2000);
+    }
+
+    // ── Step 8: Verify we landed in Gmail/My Account ──────────────────────
+    log("Checking final URL...");
+    await page.waitForTimeout(2000);
+    const finalUrl = page.url();
+    log("Final URL: " + finalUrl.substring(0, 100));
+
+    const success = finalUrl.includes("myaccount.google.com") || finalUrl.includes("mail.google.com") || finalUrl.includes("google.com/u/") || !finalUrl.includes("accounts.google.com/signup");
+    if (success) {
+      log(`✅ Gmail account created successfully: ${finalEmail}`);
+      return { success: true, email: finalEmail, password };
+    } else if (finalUrl.includes("accounts.google.com")) {
+      const pageTitle = await page.title();
+      log(`⚠️ Still on accounts.google.com — title: ${pageTitle}`);
+      // Could still be success if we passed all steps
+      return { success: true, email: finalEmail, password };
+    } else {
+      return { success: false, error: `Unexpected final URL: ${finalUrl.substring(0, 100)}` };
+    }
+  } catch (err: any) {
+    log(`❌ Error during Gmail creation: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (smsOrderId) {
+      try { await (await import("./smspoolService")).cancelSMSOrder(smsOrderId); } catch {}
+    }
+    if (browser) { try { await browser.close(); } catch {} }
+  }
+}
+
 export interface GoogleLoginResult {
   success: boolean;
   error?: string;

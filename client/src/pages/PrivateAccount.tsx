@@ -70,6 +70,15 @@ type GmailLoginJob = {
   cookieCount?: number;
 };
 
+type GmailCreateJob = {
+  createId: string;
+  batchId: string;
+  status: "running" | "success" | "failed";
+  logs: string[];
+  email?: string;
+  error?: string;
+};
+
 export default function PrivateAccount() {
   const [tab, setTab] = useState<TabType>("outlook");
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
@@ -95,6 +104,8 @@ export default function PrivateAccount() {
   const [checkingGmailIds, setCheckingGmailIds] = useState<Set<string>>(new Set());
   const [gmailLoginJobs, setGmailLoginJobs] = useState<Record<string, GmailLoginJob>>({});
   const [loggingInGmailIds, setLoggingInGmailIds] = useState<Set<string>>(new Set());
+  const [gmailCreateJobs, setGmailCreateJobs] = useState<Record<string, GmailCreateJob>>({});
+  const [creatingGmail, setCreatingGmail] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -253,6 +264,46 @@ export default function PrivateAccount() {
           }
           return prev;
         });
+      }
+
+      if (data.type === "log" && data.batchId?.startsWith("gmail-create-")) {
+        setGmailCreateJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          const newLogs = [...job.logs, data.message].slice(-200);
+          return { ...prev, [data.batchId]: { ...job, logs: newLogs } };
+        });
+      }
+
+      if (data.type === "gmail_create_result") {
+        setGmailCreateJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          return {
+            ...prev,
+            [data.batchId]: { ...job, status: data.success ? "success" : "failed", email: data.email, error: data.error },
+          };
+        });
+        setCreatingGmail(false);
+        if (data.success) {
+          fetchGmail();
+          toast({ title: "Gmail Account Created", description: `New account: ${data.email}` });
+          sounds.navigate();
+        } else {
+          toast({ title: "Gmail Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
+        }
+      }
+
+      if (data.type === "batch_complete" && data.batchId?.startsWith("gmail-create-")) {
+        setGmailCreateJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          if (job.status === "running") {
+            return { ...prev, [data.batchId]: { ...job, status: "failed", error: "Creation completed without result" } };
+          }
+          return prev;
+        });
+        setCreatingGmail(false);
       }
     } catch {}
   }, [outlookAccounts, zenrowsRegJobs, toast]);
@@ -469,6 +520,37 @@ export default function PrivateAccount() {
     } catch (err: any) {
       setLoggingInGmailIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
       toast({ title: "Error", description: err.message || "Failed to start login", variant: "destructive" });
+    }
+  }
+
+  async function createGmailWebAccount() {
+    if (creatingGmail) return;
+    setCreatingGmail(true);
+    try {
+      const res = await fetch("/api/private/gmail/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        setCreatingGmail(false);
+        toast({ title: "Creation Failed", description: "Could not start Gmail creation", variant: "destructive" });
+        return;
+      }
+      const data = await res.json();
+      setGmailCreateJobs((prev) => ({
+        ...prev,
+        [data.batchId]: {
+          createId: data.createId,
+          batchId: data.batchId,
+          status: "running",
+          logs: [],
+        },
+      }));
+      toast({ title: "Gmail Creation Started", description: "Automating Google signup..." });
+    } catch (err: any) {
+      setCreatingGmail(false);
+      toast({ title: "Error", description: err.message || "Failed to start creation", variant: "destructive" });
     }
   }
 
@@ -866,6 +948,17 @@ export default function PrivateAccount() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 font-mono text-xs"
+                  onClick={createGmailWebAccount}
+                  disabled={creatingGmail}
+                  data-testid="button-create-gmail"
+                >
+                  {creatingGmail ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />}
+                  {creatingGmail ? "Creating..." : "Auto-Create"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-mono text-xs"
                   onClick={() => { setAddGmailOpen(!addGmailOpen); sounds.navigate(); }}
                   data-testid="button-add-gmail"
@@ -1133,6 +1226,64 @@ export default function PrivateAccount() {
                             line.startsWith("❌") ? "text-red-400" :
                             line.startsWith("⚠️") ? "text-yellow-400" :
                             line.startsWith("Opening") || line.startsWith("Launching") || line.startsWith("Page loaded") || line.startsWith("After") || line.startsWith("Final") ? "text-blue-400/70" :
+                            "text-zinc-400"
+                          }>{line}</div>
+                        ))}
+                        {job.logs.length === 0 && <div className="text-zinc-600">Waiting for logs...</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {Object.values(gmailCreateJobs).length > 0 && (
+              <div className="mt-4 space-y-3">
+                {Object.values(gmailCreateJobs).map((job) => {
+                  const borderClass =
+                    job.status === "success" ? "border-emerald-500/20 bg-emerald-500/5" :
+                    job.status === "failed" ? "border-red-500/20 bg-red-500/5" :
+                    "border-purple-500/15 bg-purple-500/5";
+                  return (
+                    <div key={job.batchId} className={`rounded-lg border p-3 ${borderClass}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {job.status === "running" && <Loader2 className="w-3 h-3 text-purple-400 animate-spin" />}
+                          {job.status === "success" && <Check className="w-3 h-3 text-emerald-400" />}
+                          {job.status === "failed" && <X className="w-3 h-3 text-red-400" />}
+                          <Plus className="w-3 h-3 text-purple-400/60" />
+                          <span className="text-[10px] font-mono text-zinc-300">
+                            {job.status === "success" && job.email ? job.email : "Gmail Auto-Create"}
+                          </span>
+                          <Badge variant="outline" className={`text-[9px] font-mono ${
+                            job.status === "success" ? "border-emerald-500/20 text-emerald-400" :
+                            job.status === "failed" ? "border-red-500/20 text-red-400" :
+                            "border-purple-500/20 text-purple-400"
+                          }`}>
+                            {job.status === "running" ? "CREATING" : job.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                        <button onClick={() => setGmailCreateJobs((prev) => { const n = { ...prev }; delete n[job.batchId]; return n; })} className="text-zinc-600 hover:text-zinc-400">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {job.error && job.status !== "running" && (
+                        <p className="text-[9px] font-mono text-red-400/80 mb-2 px-1">{job.error}</p>
+                      )}
+                      {job.status === "success" && job.email && (
+                        <div className="flex items-center gap-2 mb-2 px-1 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/15">
+                          <Mail className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span className="text-[10px] font-mono text-emerald-300 font-semibold">{job.email}</span>
+                        </div>
+                      )}
+                      <div className="bg-black/40 rounded p-2 max-h-40 overflow-y-auto font-mono text-[10px] text-zinc-400 space-y-0.5">
+                        {job.logs.map((line, i) => (
+                          <div key={i} className={
+                            line.startsWith("✅") ? "text-emerald-400" :
+                            line.startsWith("❌") ? "text-red-400" :
+                            line.startsWith("⚠️") ? "text-yellow-400" :
+                            line.startsWith("📱") ? "text-blue-400" :
+                            line.startsWith("Creating") || line.startsWith("Launching") || line.startsWith("Opening") || line.startsWith("Final") ? "text-purple-400/70" :
                             "text-zinc-400"
                           }>{line}</div>
                         ))}
