@@ -302,6 +302,7 @@ export default function ReplitCreate() {
           )}
         </div>
 
+        <div className="sticky top-4">
         <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(124,58,237,0.12)" }}>
           <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid rgba(124,58,237,0.08)", background: "rgba(124,58,237,0.04)" }}>
             <div className="flex items-center gap-2">
@@ -321,7 +322,7 @@ export default function ReplitCreate() {
             </div>
           </div>
 
-          <div className="flex-1 h-64 overflow-y-auto p-3 space-y-px font-mono" data-testid="container-logs">
+          <div className="flex-1 h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono" data-testid="container-logs">
             {logs.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center gap-2">
                 <Terminal className="w-6 h-6 text-white/10" />
@@ -334,11 +335,11 @@ export default function ReplitCreate() {
                 return (
                   <div
                     key={i}
-                    className={`flex items-start gap-2 py-px ${isSeparator ? "mt-2 mb-1" : ""}`}
+                    className={`flex items-start gap-2 py-px min-w-0 ${isSeparator ? "mt-2 mb-1" : ""}`}
                   >
                     <span className="text-[9px] text-white/15 flex-shrink-0 mt-px tabular-nums">{line.time}</span>
                     {prefix && <span className={`text-[9px] flex-shrink-0 mt-px ${color}`}>{prefix}</span>}
-                    <span className={`text-[10px] leading-relaxed break-all ${color} ${isSeparator ? "font-semibold tracking-wide" : ""}`}>
+                    <span className={`text-[10px] leading-relaxed break-words min-w-0 overflow-hidden ${color} ${isSeparator ? "font-semibold tracking-wide" : ""}`}>
                       {line.text}
                     </span>
                   </div>
@@ -347,6 +348,7 @@ export default function ReplitCreate() {
             )}
             <div ref={logsEndRef} />
           </div>
+        </div>
         </div>
       </div>
 
