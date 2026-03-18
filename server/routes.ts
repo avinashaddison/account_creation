@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
+import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
 import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
@@ -1856,7 +1856,7 @@ export async function registerRoutes(
       }
 
       const batchId = randomUUID();
-      const domain = await getAvailableDomain();
+      const domain = await getMailTmOnlyDomain();
 
       const created: any[] = [];
       for (let i = 0; i < numAccounts; i++) {
@@ -1902,7 +1902,7 @@ export async function registerRoutes(
           if (afterAccount && afterAccount.status === "failed") {
             const retryProxy = uniqueProxySession(baseProxyUrl);
             broadcastLog(batchId, acc.id, `Retrying with new email address...`, userId);
-            const retryDomain = await getAvailableDomain();
+            const retryDomain = await getMailTmOnlyDomain();
             const retryUsername = generateRandomUsername();
             const retryEmail = `${retryUsername}@${retryDomain}`;
             await storage.updateAccount(acc.id, { email: retryEmail, status: "pending", errorMessage: null } as any);

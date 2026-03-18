@@ -33,8 +33,30 @@ export function hasGmailCredentials(): boolean {
 export function createGmailAddress(): string {
   if (!_gmailAddress) throw new Error("Gmail credentials not configured");
   const base = _gmailAddress.replace("@gmail.com", "");
-  const tag = Math.random().toString(36).substring(2, 10);
-  return `${base}+la28_${tag}@gmail.com`;
+
+  // Gmail dot trick: insert a dot at a random position in the username.
+  // All these addresses deliver to the same inbox but look unique to LA28.
+  // The username must have at least 2 chars with no leading/trailing dots.
+  const chars = base.split("");
+  // Build all valid insertion positions (between adjacent chars, not at start/end)
+  const positions: number[] = [];
+  for (let i = 1; i < chars.length; i++) {
+    if (chars[i - 1] !== "." && chars[i] !== ".") positions.push(i);
+  }
+
+  // Pick a random subset of positions (1 to 3 dots) for more combinations
+  const shuffled = positions.sort(() => Math.random() - 0.5);
+  const numDots = Math.floor(Math.random() * 3) + 1; // 1–3 dots
+  const chosen = shuffled.slice(0, numDots).sort((a, b) => a - b);
+
+  let dotted = base;
+  let offset = 0;
+  for (const pos of chosen) {
+    dotted = dotted.slice(0, pos + offset) + "." + dotted.slice(pos + offset);
+    offset++;
+  }
+
+  return `${dotted}@gmail.com`;
 }
 
 export async function pollGmailForVerificationCode(
@@ -79,12 +101,28 @@ export async function pollGmailForVerificationCode(
         console.log(`[Gmail] Polling for code to ${targetAddress}... attempt ${i + 1}/${maxAttempts}`);
 
         try {
-          const uids = await client.search({ to: targetAddress, since: startTime }, { uid: true });
-          console.log(`[Gmail] Found ${uids.length} matching message(s)`);
+          // Gmail IMAP TO: search doesn't work with + tagged addresses.
+          // Instead search by FROM domain (LA28 sends from olympicid.olympics.com)
+          // combined with the start time to avoid picking up old emails.
+          const uids = await client.search(
+            { from: "olympicid.olympics.com", since: startTime },
+            { uid: true }
+          );
+          console.log(`[Gmail] Found ${uids.length} LA28 message(s) since session start`);
 
           if (uids.length > 0) {
             const range = uids.join(",");
-            for await (const msg of client.fetch(range, { source: true }, { uid: true })) {
+            for await (const msg of client.fetch(range, { source: true, envelope: true }, { uid: true })) {
+              const toAddr = (msg.envelope?.to?.[0]?.address || "").toLowerCase();
+              // Verify it's addressed to a variant of our base Gmail address
+              // (Gmail dot-trick: a.vinash@gmail.com routes to avinash@gmail.com)
+              const baseUser = targetAddress.split("@")[0].replace(/\./g, "");
+              const toUser = toAddr.split("@")[0].replace(/\./g, "");
+              if (toUser !== baseUser) {
+                console.log(`[Gmail] Skipping - addressed to different user: ${toAddr}`);
+                continue;
+              }
+              console.log(`[Gmail] Matched message to: ${toAddr}`);
               const raw = msg.source.toString("utf8");
               const codeMatch = raw.match(/\b(\d{6})\b/);
               if (codeMatch) {
@@ -174,6 +212,20 @@ export async function getAvailableDomain(preferGw = true): Promise<string> {
 
 export async function getMailGwDomain(): Promise<string> {
   return getAvailableDomain(true);
+}
+
+export async function getMailTmOnlyDomain(): Promise<string> {
+  const baseUrl = PROVIDERS["mail.tm"];
+  const res = await fetch(`${baseUrl}/domains`, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`mail.tm domain fetch failed: HTTP ${res.status}`);
+  const data = await res.json();
+  const members: any[] = data["hydra:member"] || [];
+  if (members.length === 0) throw new Error("No mail.tm domains available");
+  const domains = members.map((m: any) => m.domain as string);
+  for (const d of domains) MAIL_TM_DOMAINS.add(d);
+  const chosen = domains[Math.floor(Math.random() * domains.length)];
+  console.log(`[Mail] mail.tm-only domain selected: ${chosen}`);
+  return chosen;
 }
 
 export async function createTempEmail(
