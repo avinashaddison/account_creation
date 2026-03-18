@@ -735,7 +735,7 @@ export async function registerRoutes(
       if (!Array.isArray(allowedServices)) {
         return res.status(400).json({ error: "allowedServices must be an array" });
       }
-      const validServices = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows"];
+      const validServices = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows", "replit", "lovable"];
       const filtered = allowedServices.filter((s: string) => validServices.includes(s));
       const user = await storage.getUser(req.params.id);
       if (!user) return res.status(404).json({ error: "User not found" });
@@ -3116,6 +3116,14 @@ export async function registerRoutes(
 
   app.delete("/api/lovable-accounts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = await storage.getAllLovableAccounts();
+      const acct = accounts.find((a) => a.id === req.params.id);
+      if (!acct) return res.status(404).json({ error: "Account not found" });
+      if (role !== "superadmin" && acct.createdBy !== userId) {
+        return res.status(403).json({ error: "Forbidden: not your account" });
+      }
       await storage.deleteLovableAccount(req.params.id);
       res.json({ success: true });
     } catch (err: any) {

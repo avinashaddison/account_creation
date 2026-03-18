@@ -11267,16 +11267,24 @@ export async function registerLovableAccount(
       if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
 
+    let accountVerified = false;
+
     if (verificationLink) {
       log(`Navigating to Lovable magic link...`);
       await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(5000);
       const verifyUrl = page.url();
       const verifyText = await page.evaluate(() => document.body?.innerText || "");
-      if (verifyText.toLowerCase().includes("dashboard") || verifyText.toLowerCase().includes("welcome") || verifyText.toLowerCase().includes("project") || verifyUrl.includes("lovable.dev/projects") || verifyUrl.includes("lovable.dev/") && !verifyUrl.includes("signup") && !verifyUrl.includes("login")) {
+      const onDashboard = verifyText.toLowerCase().includes("dashboard") ||
+        verifyText.toLowerCase().includes("welcome") ||
+        verifyText.toLowerCase().includes("project") ||
+        (verifyUrl.includes("lovable.dev") && !verifyUrl.includes("signup") && !verifyUrl.includes("login") && !verifyUrl.includes("auth"));
+      if (onDashboard) {
         log(`✅ Lovable account verified! URL: ${verifyUrl}`);
+        accountVerified = true;
       } else {
-        log(`Verification page URL: ${verifyUrl} — may need manual check`);
+        log(`Verification page URL: ${verifyUrl} — redirected but dashboard not confirmed`);
+        accountVerified = false;
       }
     } else if (verificationCode) {
       log(`Entering verification code: ${verificationCode}`);
@@ -11289,12 +11297,23 @@ export async function registerLovableAccount(
             await page.keyboard.press("Enter");
             log(`Entered code via ${sel}`);
             await page.waitForTimeout(3000);
+            const afterCodeUrl = page.url();
+            const afterCodeText = await page.evaluate(() => document.body?.innerText || "");
+            accountVerified = afterCodeText.toLowerCase().includes("dashboard") ||
+              afterCodeText.toLowerCase().includes("project") ||
+              (afterCodeUrl.includes("lovable.dev") && !afterCodeUrl.includes("signup") && !afterCodeUrl.includes("login"));
             break;
           }
         } catch {}
       }
     } else {
-      log("⚠️ No verification link or code found — account submission may be pending email delivery");
+      log("⚠️ No verification link or code found — email may not have arrived yet or signup was blocked");
+      return { success: false, error: "No verification link or code received from Lovable — email not found in inbox" };
+    }
+
+    if (!accountVerified) {
+      log(`⚠️ Lovable account not confirmed — verification may have failed or email is pending`);
+      return { success: false, error: "Lovable signup submitted but account verification could not be confirmed" };
     }
 
     log(`✅ Lovable account creation complete for: ${outlookEmail}`);
