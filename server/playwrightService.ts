@@ -10352,9 +10352,12 @@ export async function registerReplitAccount(
   let page: any = null;
 
   try {
-    const zenrowsApiKey = process.env.ZENROWS_API_KEY || "";
-    if (!zenrowsApiKey) {
-      log("⚠️ No ZenRows API key — proceeding without proxy browser (may be blocked)");
+    let zenrowsApiKey = "";
+    try {
+      zenrowsApiKey = await getZenRowsApiKey();
+      log(`ZenRows browser mode enabled`);
+    } catch {
+      log("⚠️ No ZenRows API key — using stealth headless browser");
     }
 
     log("Launching browser...");
@@ -10362,35 +10365,107 @@ export async function registerReplitAccount(
 
     let context: any;
     if (zenrowsApiKey) {
-      const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
-      browser = await chromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
-      context = browser.contexts()[0] || await browser.newContext();
-    } else {
-      browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
-      context = await browser.newContext();
+      try {
+        const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
+        browser = await chromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
+        context = browser.contexts()[0] || await browser.newContext();
+        log("Connected via ZenRows anti-bot browser");
+      } catch (zrErr: any) {
+        log(`⚠️ ZenRows unavailable (${(zrErr.message || "").substring(0, 60)}) — falling back to stealth browser`);
+        browser = null;
+        zenrowsApiKey = "";
+      }
+    }
+    if (!zenrowsApiKey) {
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-dev-shm-usage",
+          "--disable-web-security",
+          "--allow-running-insecure-content",
+          "--disable-features=IsolateOrigins,site-per-process",
+          "--flag-switches-begin",
+          "--disable-site-isolation-trials",
+          "--flag-switches-end",
+        ],
+      });
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      context = await browser.newContext({
+        userAgent: ua,
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+        timezoneId: "America/New_York",
+        javaScriptEnabled: true,
+        acceptDownloads: false,
+        extraHTTPHeaders: {
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+          "Sec-Ch-Ua-Mobile": "?0",
+          "Sec-Ch-Ua-Platform": '"Windows"',
+        },
+      });
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+        (window as any).chrome = { runtime: {} };
+      });
+      log("Using stealth headless browser");
     }
     page = await context.newPage();
     page.setDefaultTimeout(30000);
 
     log("Navigating to https://replit.com/signup ...");
     await page.goto("https://replit.com/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
 
-    log("Looking for email signup option...");
+    const challengeContent = await page.content();
+    if (challengeContent.includes("Please enable cookies") || challengeContent.includes("Checking your browser") || challengeContent.includes("challenge-platform")) {
+      log("Cloudflare challenge detected — waiting for it to resolve (up to 15s)...");
+      try {
+        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 });
+        log("Cloudflare challenge resolved");
+        await page.waitForTimeout(2000);
+      } catch {
+        log("⚠️ Cloudflare challenge did not fully resolve — proceeding anyway");
+      }
+    }
+
+    log("Looking for email signup option (avoiding Google/GitHub/Apple)...");
+    const pageTitle = await page.title();
+    log(`Page title: ${pageTitle}`);
+
+    const allButtons = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll("button, a[href*='signup'], a[href*='email']"));
+      return btns.map(b => ({ text: (b as HTMLElement).innerText?.trim().substring(0, 60), tag: b.tagName }));
+    });
+    log(`Buttons on page: ${JSON.stringify(allButtons.slice(0, 8))}`);
+
     const emailBtnSelectors = [
       'button:has-text("Continue with email")',
       'button:has-text("Sign up with email")',
+      'button:has-text("Use email")',
       'a:has-text("Continue with email")',
+      'a:has-text("Sign up with email")',
       '[data-cy="email-signup"]',
-      'button[class*="email"]',
+      'button:has-text("Email")',
     ];
     let clicked = false;
     for (const sel of emailBtnSelectors) {
       try {
         const el = await page.$(sel);
         if (el) {
+          const btnText = await el.innerText().catch(() => "");
+          if (btnText.toLowerCase().includes("google") || btnText.toLowerCase().includes("github") || btnText.toLowerCase().includes("apple")) {
+            log(`Skipping button with text: ${btnText}`);
+            continue;
+          }
           await el.click();
-          log(`Clicked email signup button (${sel})`);
+          log(`Clicked email signup button: "${btnText.substring(0, 40)}" (${sel})`);
           clicked = true;
           await page.waitForTimeout(2000);
           break;
@@ -10398,8 +10473,18 @@ export async function registerReplitAccount(
       } catch {}
     }
     if (!clicked) {
-      log("No separate email button found — form may already be visible");
+      log("No email button found — form may already be visible or page structure unknown");
     }
+
+    const afterClickUrl = page.url();
+    if (afterClickUrl.includes("google.com") || afterClickUrl.includes("github.com") || afterClickUrl.includes("apple.com")) {
+      log("⚠️ Navigated to OAuth provider — going back to signup page");
+      await page.goto("https://replit.com/signup", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(3000);
+    }
+
+    const htmlSnippet = await page.evaluate(() => document.body?.innerHTML?.substring(0, 1000) || "empty");
+    log(`Page HTML snippet (first 1000 chars): ${htmlSnippet.replace(/\s+/g, " ")}`);
 
     log("Filling signup form...");
     const usernameSelectors = ['input[name="username"]', 'input[placeholder*="username" i]', 'input[id*="username" i]', 'input[autocomplete="username"]'];
@@ -10460,21 +10545,35 @@ export async function registerReplitAccount(
     const submitSelectors = [
       'button[type="submit"]',
       'button:has-text("Create Account")',
+      'button:has-text("Create account")',
       'button:has-text("Sign Up")',
-      'button:has-text("Continue")',
+      'button:has-text("Sign up")',
       'button:has-text("Create my account")',
+      'button:has-text("Continue")',
       'input[type="submit"]',
     ];
     let submitted = false;
     for (const sel of submitSelectors) {
       try {
-        const el = await page.$(sel);
-        if (el) {
-          await el.click();
-          log(`Clicked submit button (${sel})`);
+        const btns = await page.$$(sel);
+        for (const btn of btns) {
+          const txt = await btn.innerText().catch(() => "");
+          if (
+            txt.toLowerCase().includes("google") ||
+            txt.toLowerCase().includes("github") ||
+            txt.toLowerCase().includes("apple") ||
+            txt.toLowerCase().includes("facebook")
+          ) {
+            log(`Skipping OAuth button: "${txt.substring(0, 30)}"`);
+            continue;
+          }
+          if (txt.trim().length === 0) continue;
+          await btn.click();
+          log(`Clicked submit button "${txt.substring(0, 40)}" (${sel})`);
           submitted = true;
           break;
         }
+        if (submitted) break;
       } catch {}
     }
     if (!submitted) {
@@ -10483,10 +10582,15 @@ export async function registerReplitAccount(
     }
 
     log("Waiting for signup response...");
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(6000);
 
     const currentUrl = page.url();
     const pageContent = await page.content();
+    const pageText = await page.evaluate(() => document.body?.innerText || "");
+    if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists")) {
+      const firstLine = pageText.split("\n").filter(l => l.trim().length > 5).slice(0, 5).join(" | ");
+      log(`⚠️ Possible form error text: ${firstLine.substring(0, 200)}`);
+    }
 
     if (pageContent.toLowerCase().includes("verify") || pageContent.toLowerCase().includes("check your email") || pageContent.toLowerCase().includes("verification") || currentUrl.includes("verify") || currentUrl.includes("confirm")) {
       log("✅ Signup submitted — verification email expected");
@@ -10504,67 +10608,130 @@ export async function registerReplitAccount(
       log(`Current URL after submit: ${currentUrl}`);
     }
 
-    log("Now waiting 10s before checking Outlook inbox for verification email...");
-    await page.waitForTimeout(10000);
-
-    log(`Connecting to Outlook IMAP (imap.outlook.com:993) for ${outlookEmail}...`);
-    const imapClient = new ImapFlow({
-      host: "imap.outlook.com",
-      port: 993,
-      secure: true,
-      auth: { user: outlookEmail, pass: outlookPassword },
-      logger: false,
-      tls: { rejectUnauthorized: false },
-      connectionTimeout: 20000,
-      greetingTimeout: 15000,
-      socketTimeout: 30000,
-    } as any);
-
-    imapClient.on("error", () => {});
+    log("Now waiting 20s before checking Outlook inbox for verification email...");
+    await page.waitForTimeout(20000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
+    log("Reading Replit verification email via Outlook Web Access...");
+    let owaBrowser: any = null;
     try {
-      await imapClient.connect();
-      log("✅ Outlook IMAP connected");
+      const { chromium: chrm } = await import("playwright");
+      owaBrowser = await chrm.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+      });
+      const owaContext = await owaBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+      });
+      await owaContext.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        (window as any).chrome = { runtime: {} };
+      });
+      const owaPage = await owaContext.newPage();
+      owaPage.setDefaultTimeout(30000);
 
-      const lock = await (imapClient as any).getMailboxLock("INBOX");
+      log("Navigating to Outlook Web login...");
+      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.waitForTimeout(2000);
+
+      const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+      if (emailInput) {
+        await emailInput.fill(outlookEmail);
+        log("Entered Outlook email on login page");
+        const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (nextBtn) { await nextBtn.click(); await owaPage.waitForTimeout(2500); }
+      }
+
+      const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
+      if (passInput) {
+        await passInput.fill(outlookPassword);
+        log("Entered Outlook password on login page");
+        const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (signInBtn) { await signInBtn.click(); await owaPage.waitForTimeout(4000); }
+      }
+
+      let currentLoginUrl = owaPage.url();
+      log(`After login URL: ${currentLoginUrl.substring(0, 100)}`);
+
+      if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
+        log("Microsoft security proofs / confirmation page — extracting posturl to skip...");
+        let destUrl = "https://outlook.live.com/mail/0/inbox";
+        try {
+          const parsedUrl = new URL(currentLoginUrl);
+          const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
+          if (posturl) {
+            destUrl = decodeURIComponent(posturl);
+            log(`Extracted posturl: ${destUrl.substring(0, 100)}`);
+          }
+        } catch {}
+        log(`Navigating directly to: ${destUrl.substring(0, 100)}`);
+        await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(3000);
+        currentLoginUrl = owaPage.url();
+        log(`URL after skip navigation: ${currentLoginUrl.substring(0, 100)}`);
+      }
+
+      let isOnOutlookHost = false;
       try {
-        const status = await (imapClient as any).status("INBOX", { messages: true });
-        const total: number = status?.messages ?? 0;
-        log(`Inbox has ${total} messages — scanning last 20 for Replit email...`);
+        const parsedUrl = new URL(currentLoginUrl);
+        isOnOutlookHost = parsedUrl.hostname.includes("outlook.live.com") || parsedUrl.hostname.includes("outlook.office") || parsedUrl.hostname === "outlook.com";
+      } catch {}
 
-        if (total > 0) {
-          const start = Math.max(1, total - 19);
-          for await (const msg of (imapClient as any).fetch(`${start}:${total}`, { envelope: true, bodyStructure: true, source: true })) {
-            const from = msg.envelope?.from?.[0]?.address || "";
-            const subject = msg.envelope?.subject || "";
-            if (from.toLowerCase().includes("replit") || subject.toLowerCase().includes("replit") || subject.toLowerCase().includes("verify") || subject.toLowerCase().includes("confirm")) {
-              log(`Found Replit email: FROM=${from} SUBJECT=${subject}`);
-              const rawSource = msg.source?.toString() || "";
+      if (!isOnOutlookHost) {
+        log(`Not on Outlook yet (host: ${currentLoginUrl.substring(0, 50)}) — navigating directly to inbox`);
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(5000);
+        currentLoginUrl = owaPage.url();
+        try { const p2 = new URL(currentLoginUrl); isOnOutlookHost = p2.hostname.includes("outlook.live.com"); } catch {}
+        log(`URL after direct nav: ${currentLoginUrl.substring(0, 80)}`);
+      }
 
-              const linkMatch = rawSource.match(/https:\/\/replit\.com\/[^\s"'<>]+/);
-              if (linkMatch) {
-                verificationLink = linkMatch[0].replace(/=\r?\n/g, "").replace(/=3D/g, "=");
-                log(`Extracted verification link: ${verificationLink.substring(0, 80)}...`);
-              }
+      if (isOnOutlookHost) {
+        log("✅ Logged into Outlook Web — searching inbox for Replit email...");
+        await owaPage.waitForTimeout(3000);
 
-              const codeMatch = rawSource.match(/\b([0-9]{6})\b/);
-              if (!verificationLink && codeMatch) {
-                verificationCode = codeMatch[1];
-                log(`Extracted verification code: ${verificationCode}`);
-              }
-              break;
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(4000);
+
+        const emailItems = await owaPage.$$('[data-convid], [role="row"]');
+        log(`Found ${emailItems.length} email items in inbox`);
+        let foundReplitEmail = false;
+        for (const item of emailItems.slice(0, 20)) {
+          const itemText = await item.innerText().catch(() => "");
+          if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
+            log(`Found Replit-related email: ${itemText.substring(0, 100)}`);
+            await item.click();
+            await owaPage.waitForTimeout(2000);
+            foundReplitEmail = true;
+
+            const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+            const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
+            if (linkMatch) {
+              verificationLink = linkMatch[0].trim();
+              log(`Extracted verification link from OWA: ${verificationLink.substring(0, 100)}...`);
             }
+            const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+            if (!verificationLink && codeMatch) {
+              verificationCode = codeMatch[1];
+              log(`Extracted verification code from OWA: ${verificationCode}`);
+            }
+            break;
           }
         }
-      } finally {
-        lock.release();
+        if (!foundReplitEmail) {
+          log("No Replit verification email found in inbox yet — account creation may complete after manual verification");
+        }
+      } else {
+        log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
       }
-      try { await (imapClient as any).logout(); } catch {}
-    } catch (imapErr: any) {
-      log(`⚠️ IMAP error: ${(imapErr.message || String(imapErr)).substring(0, 150)}`);
+    } catch (owaErr: any) {
+      log(`⚠️ Outlook web email check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
+    } finally {
+      if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
 
     if (verificationLink) {
