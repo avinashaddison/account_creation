@@ -9843,10 +9843,10 @@ export async function createGmailAccount(
         let phoneNumber: string | undefined;
 
         // SMSPool service ID 395 = Google/Gmail
-        // Country 1 = United States, 22 = US Virtual
-        // Combos: [country, serviceId, pool]
+        // Country 1=US, 22=US Virtual, 2=UK, 3=Netherlands, 6=Sweden, 5=Latvia
         const googleCombos: Array<[number, string, string]> = [
-          [1, "395", "1"], [22, "395", "1"], [1, "395", "3"], [22, "395", "3"],
+          [1, "395", "1"], [2, "395", "1"], [3, "395", "1"],
+          [6, "395", "1"], [5, "395", "1"],
         ];
 
         for (let attempt = 1; attempt <= 3; attempt++) {
