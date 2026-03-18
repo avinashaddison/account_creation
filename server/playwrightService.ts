@@ -11121,7 +11121,9 @@ export async function registerLovableAccount(
       afterText.toLowerCase().includes("confirmation link") ||
       afterText.toLowerCase().includes("sent") ||
       afterContent.toLowerCase().includes("check your email") ||
-      afterContent.toLowerCase().includes("magic link");
+      afterContent.toLowerCase().includes("magic link") ||
+      afterUrl.includes("lovable.dev/login") ||
+      afterUrl.includes("lovable.dev/auth");
 
     if (magicLinkSent) {
       log("✅ Lovable signup submitted — magic link / verification email expected");
@@ -11131,8 +11133,12 @@ export async function registerLovableAccount(
       log(`Page text snippet after submit: ${afterText.substring(0, 200).replace(/\s+/g, " ")}`);
     }
 
-    log("Waiting 20s before checking Outlook inbox for Lovable verification email...");
-    await page.waitForTimeout(20000);
+    if (!magicLinkSent && !afterUrl.includes("lovable.dev")) {
+      return { success: false, error: `Lovable signup did not proceed — ended up at unexpected URL: ${afterUrl.substring(0, 100)}` };
+    }
+
+    log("Waiting 25s before checking Outlook inbox for Lovable verification email...");
+    await page.waitForTimeout(25000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
@@ -11215,48 +11221,73 @@ export async function registerLovableAccount(
 
         const emailItems = await owaPage.$$('[data-convid], [role="row"]');
         log(`Found ${emailItems.length} email items in inbox`);
+
+        async function extractLinkFromCurrentEmail(): Promise<boolean> {
+          const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+          const emailHtml = await owaPage.evaluate(() => document.body?.innerHTML || "");
+
+          const linkPatterns = [
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]+/,
+            /https?:\/\/[a-z0-9.-]*supabase[^\s"'<>\r\n)]+/,
+            /https?:\/\/[^\s"'<>\r\n)]*magic[^\s"'<>\r\n)]*/i,
+            /https?:\/\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
+            /https?:\/\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
+            /https?:\/\/[^\s"'<>\r\n)]*token[^\s"'<>\r\n)]*/i,
+            /https?:\/\/[^\s"'<>\r\n)]*login[^\s"'<>\r\n)]*[?&][^\s"'<>\r\n)]*/i,
+          ];
+
+          for (const pattern of linkPatterns) {
+            const linkMatch = emailBody.match(pattern) || emailHtml.match(pattern);
+            if (linkMatch) {
+              verificationLink = linkMatch[0].replace(/["'<>)]/g, "").trim();
+              log(`Extracted verification link: ${verificationLink.substring(0, 120)}...`);
+              return true;
+            }
+          }
+
+          const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+          if (codeMatch) {
+            verificationCode = codeMatch[1];
+            log(`Extracted verification code: ${verificationCode}`);
+            return true;
+          }
+          return false;
+        }
+
         let foundLovableEmail = false;
-        for (const item of emailItems.slice(0, 20)) {
+
+        for (const item of emailItems.slice(0, 15)) {
           const itemText = await item.innerText().catch(() => "");
-          if (itemText.toLowerCase().includes("lovable") || itemText.toLowerCase().includes("magic link") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("sign in")) {
-            log(`Found Lovable-related email: ${itemText.substring(0, 100)}`);
+          if (itemText.toLowerCase().includes("lovable") || itemText.toLowerCase().includes("magic link") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("sign in") || itemText.toLowerCase().includes("login link") || itemText.toLowerCase().includes("noreply")) {
+            log(`Found Lovable-related email (keyword match): ${itemText.substring(0, 100)}`);
             await item.click();
-            await owaPage.waitForTimeout(2000);
+            await owaPage.waitForTimeout(2500);
             foundLovableEmail = true;
-
-            const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-            const emailHtml = await owaPage.evaluate(() => document.body?.innerHTML || "");
-
-            const linkPatterns = [
-              /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]+/,
-              /https?:\/\/[a-z0-9.-]*supabase[^\s"'<>\r\n)]+/,
-              /https?:\/\/[^\s"'<>\r\n)]*magic[^\s"'<>\r\n)]*/i,
-              /https?:\/\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
-              /https?:\/\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
-              /https?:\/\/[^\s"'<>\r\n)]*token[^\s"'<>\r\n)]*/i,
-            ];
-
-            for (const pattern of linkPatterns) {
-              const linkMatch = emailBody.match(pattern) || emailHtml.match(pattern);
-              if (linkMatch) {
-                verificationLink = linkMatch[0].replace(/["'<>)]/g, "").trim();
-                log(`Extracted verification link: ${verificationLink.substring(0, 100)}...`);
-                break;
-              }
-            }
-
-            if (!verificationLink) {
-              const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-              if (codeMatch) {
-                verificationCode = codeMatch[1];
-                log(`Extracted verification code: ${verificationCode}`);
-              }
-            }
+            await extractLinkFromCurrentEmail();
             break;
           }
         }
+
+        if (!foundLovableEmail && emailItems.length > 0) {
+          log("No keyword match — opening most recent email as fallback...");
+          const candidates = emailItems.slice(0, 5);
+          for (const item of candidates) {
+            const itemText = await item.innerText().catch(() => "");
+            if (itemText.trim().length < 5) continue;
+            log(`Opening recent email: ${itemText.substring(0, 80)}`);
+            await item.click();
+            await owaPage.waitForTimeout(2500);
+            const found = await extractLinkFromCurrentEmail();
+            if (found) {
+              foundLovableEmail = true;
+              break;
+            }
+            log("No link found in this email — trying next...");
+          }
+        }
+
         if (!foundLovableEmail) {
-          log("No Lovable verification email found in inbox yet — may be delayed");
+          log("No Lovable verification email found in inbox — may be delayed");
         }
       } else {
         log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
