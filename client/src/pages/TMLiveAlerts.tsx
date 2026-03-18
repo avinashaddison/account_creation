@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Bell, Zap, TrendingDown, AlertCircle, Clock, RefreshCw } from "lucide-react";
+import { Loader2, Bell, Zap, TrendingDown, AlertCircle, RefreshCw, Send } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 
 type TmAlert = {
@@ -16,32 +15,38 @@ type TmAlert = {
   createdAt: string;
 };
 
-function alertIcon(type: string) {
-  switch (type) {
-    case "new_event": return <Zap className="w-3.5 h-3.5 text-emerald-400" />;
-    case "price_change": return <TrendingDown className="w-3.5 h-3.5 text-yellow-400" />;
-    case "sold_out": return <AlertCircle className="w-3.5 h-3.5 text-red-400" />;
-    default: return <Bell className="w-3.5 h-3.5 text-zinc-400" />;
-  }
-}
-
-function alertBadgeStyle(type: string) {
-  switch (type) {
-    case "new_event": return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-    case "price_change": return "bg-yellow-500/10 text-yellow-400 border-yellow-500/20";
-    case "sold_out": return "bg-red-500/10 text-red-400 border-red-500/20";
-    default: return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
-  }
-}
-
-function alertLabel(type: string) {
-  switch (type) {
-    case "new_event": return "New Event";
-    case "price_change": return "Price Change";
-    case "sold_out": return "Unavailable";
-    default: return type;
-  }
-}
+const ALERT_CONFIG = {
+  new_event: {
+    label: "New Event",
+    icon: Zap,
+    iconColor: "text-blue-400",
+    badgeBg: "rgba(59,130,246,0.15)",
+    badgeBorder: "rgba(59,130,246,0.3)",
+    badgeText: "text-blue-300",
+    leftBorder: "#3b82f6",
+    cardBg: "rgba(59,130,246,0.04)",
+  },
+  price_change: {
+    label: "Price Drop",
+    icon: TrendingDown,
+    iconColor: "text-amber-400",
+    badgeBg: "rgba(245,158,11,0.15)",
+    badgeBorder: "rgba(245,158,11,0.3)",
+    badgeText: "text-amber-300",
+    leftBorder: "#f59e0b",
+    cardBg: "rgba(245,158,11,0.04)",
+  },
+  sold_out: {
+    label: "Unavailable",
+    icon: AlertCircle,
+    iconColor: "text-red-400",
+    badgeBg: "rgba(239,68,68,0.15)",
+    badgeBorder: "rgba(239,68,68,0.3)",
+    badgeText: "text-red-300",
+    leftBorder: "#ef4444",
+    cardBg: "rgba(239,68,68,0.04)",
+  },
+};
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -54,7 +59,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function TMLiveAlerts() {
-  const { data: alerts = [], isLoading, dataUpdatedAt, refetch, isFetching } = useQuery<TmAlert[]>({
+  const { data: alerts = [], isLoading, refetch, isFetching } = useQuery<TmAlert[]>({
     queryKey: ["/api/tm-discovery/alerts"],
     queryFn: async () => {
       const res = await fetch("/api/tm-discovery/alerts?limit=100", { credentials: "include" });
@@ -70,98 +75,128 @@ export default function TMLiveAlerts() {
   const unavailable = alerts.filter((a) => a.alertType === "sold_out").length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2.5 mb-1">
-            <div className="relative">
-              <div className="absolute inset-0 rounded-lg bg-emerald-400/10 blur-md" />
-              <div className="relative w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(0,255,65,0.1) 0%, rgba(255,176,0,0.08) 100%)', border: '1px solid rgba(0,255,65,0.15)' }}>
-                <Bell className="w-4 h-4 text-emerald-400" />
-              </div>
-            </div>
-            <h1 className="text-lg font-bold font-mono text-white">Live Alerts</h1>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)', boxShadow: '0 0 20px rgba(245,158,11,0.4)' }}>
+            <Bell className="w-5 h-5 text-white" />
           </div>
-          <p className="text-xs text-zinc-500 font-mono">Real-time notifications — auto-refreshes every 30s</p>
+          <div>
+            <h1 className="text-xl font-bold text-white tracking-tight">Live Alerts</h1>
+            <p className="text-xs text-zinc-400">Real-time event notifications · Auto-refresh 30s</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {dataUpdatedAt > 0 && (
-            <span className="text-[10px] font-mono text-zinc-700 flex items-center gap-1">
-              <Clock className="w-2.5 h-2.5" />
-              {timeAgo(new Date(dataUpdatedAt).toISOString())}
-            </span>
-          )}
-          <button onClick={() => refetch()} className="p-1.5 rounded hover:bg-emerald-500/5 transition-colors" data-testid="button-refresh-alerts">
-            <RefreshCw className={`w-3.5 h-3.5 text-zinc-600 ${isFetching ? "animate-spin text-emerald-400" : ""}`} />
-          </button>
+        <button
+          onClick={() => refetch()}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all hover:bg-white/5"
+          style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+          data-testid="button-refresh-alerts"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin text-amber-400" : "text-zinc-500"}`} />
+          <span className="text-xs text-zinc-500">Refresh</span>
+        </button>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.15), rgba(99,102,241,0.08))', border: '1px solid rgba(59,130,246,0.25)' }} data-testid="stat-new-events">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(59,130,246,0.2)' }}>
+              <Zap className="w-4.5 h-4.5 text-blue-400" />
+            </div>
+            <span className="text-xs font-semibold text-blue-400/70 uppercase tracking-wider">New</span>
+          </div>
+          <p className="text-3xl font-bold text-blue-300">{newEvents}</p>
+          <p className="text-xs text-zinc-500 mt-1">New Events Detected</p>
+        </div>
+        <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(251,191,36,0.06))', border: '1px solid rgba(245,158,11,0.25)' }} data-testid="stat-price-changes">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.2)' }}>
+              <TrendingDown className="w-4.5 h-4.5 text-amber-400" />
+            </div>
+            <span className="text-xs font-semibold text-amber-400/70 uppercase tracking-wider">Price</span>
+          </div>
+          <p className="text-3xl font-bold text-amber-300">{priceChanges}</p>
+          <p className="text-xs text-zinc-500 mt-1">Price Changes</p>
+        </div>
+        <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(239,68,68,0.15), rgba(248,113,113,0.06))', border: '1px solid rgba(239,68,68,0.25)' }} data-testid="stat-unavailable">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.2)' }}>
+              <AlertCircle className="w-4.5 h-4.5 text-red-400" />
+            </div>
+            <span className="text-xs font-semibold text-red-400/70 uppercase tracking-wider">Gone</span>
+          </div>
+          <p className="text-3xl font-bold text-red-300">{unavailable}</p>
+          <p className="text-xs text-zinc-500 mt-1">Unavailable</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "New Events", value: newEvents, icon: Zap, color: "emerald" },
-          { label: "Price Changes", value: priceChanges, icon: TrendingDown, color: "yellow" },
-          { label: "Unavailable", value: unavailable, icon: AlertCircle, color: "red" },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="rounded-xl p-4 border" style={{ background: 'linear-gradient(135deg, rgba(0,255,65,0.02) 0%, rgba(0,0,0,0.4) 100%)', borderColor: 'rgba(0,255,65,0.06)' }} data-testid={`stat-${label.toLowerCase().replace(" ", "-")}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <Icon className={`w-3.5 h-3.5 text-${color}-400/60`} />
-              <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">{label}</span>
-            </div>
-            <p className={`text-2xl font-bold font-mono text-${color}-400`}>{value}</p>
+      {/* Alert Feed */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="px-5 py-3.5 flex items-center justify-between" style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 text-zinc-400" />
+            <span className="text-sm font-semibold text-zinc-200">Alert History</span>
           </div>
-        ))}
-      </div>
-
-      <div className="rounded-xl border border-emerald-500/[0.08]" style={{ background: 'linear-gradient(135deg, rgba(0,255,65,0.02) 0%, rgba(0,0,0,0.4) 100%)' }}>
-        <div className="px-4 py-3 border-b border-emerald-500/[0.08] flex items-center gap-2">
-          <Bell className="w-3 h-3 text-emerald-400/40" />
-          <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">Alert History ({alerts.length})</span>
+          <span className="text-xs text-zinc-600 px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }}>{alerts.length} total</span>
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-5 h-5 animate-spin text-emerald-400/50" />
+          <div className="flex flex-col items-center justify-center py-20 gap-4">
+            <Loader2 className="w-6 h-6 animate-spin text-amber-400/60" />
+            <p className="text-sm text-zinc-600">Loading alerts...</p>
           </div>
         ) : alerts.length === 0 ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="text-center">
-              <Bell className="w-8 h-8 text-zinc-800 mx-auto mb-2" />
-              <p className="text-sm font-mono text-zinc-600">No alerts yet</p>
-              <p className="text-[10px] font-mono text-zinc-700 mt-1">Set a keyword in Settings to start monitoring</p>
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)' }}>
+              <Bell className="w-8 h-8 text-amber-400/40" />
             </div>
+            <p className="text-base font-medium text-zinc-400">No alerts yet</p>
+            <p className="text-sm text-zinc-600">Set a keyword in Settings to start monitoring</p>
           </div>
         ) : (
-          <div className="divide-y divide-emerald-500/[0.04]">
-            {alerts.map((alert) => (
-              <div key={alert.id} className="px-4 py-3 flex items-start gap-3 hover:bg-emerald-500/[0.02] transition-colors" data-testid={`alert-${alert.id}`}>
-                <div className="mt-0.5 p-1.5 rounded-lg bg-black/30 border border-emerald-500/[0.06] shrink-0">
-                  {alertIcon(alert.alertType)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <p className="text-sm font-mono text-zinc-200 truncate">{alert.eventName}</p>
-                    <Badge className={`text-[9px] font-mono border uppercase shrink-0 ${alertBadgeStyle(alert.alertType)}`}>
-                      {alertLabel(alert.alertType)}
-                    </Badge>
+          <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+            {alerts.map((alert) => {
+              const cfg = ALERT_CONFIG[alert.alertType as keyof typeof ALERT_CONFIG] ?? ALERT_CONFIG.new_event;
+              const Icon = cfg.icon;
+              return (
+                <div
+                  key={alert.id}
+                  className="flex items-start gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02]"
+                  style={{ borderLeft: `3px solid ${cfg.leftBorder}`, background: cfg.cardBg }}
+                  data-testid={`alert-${alert.id}`}
+                >
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5" style={{ background: cfg.badgeBg, border: `1px solid ${cfg.badgeBorder}` }}>
+                    <Icon className={`w-4 h-4 ${cfg.iconColor}`} />
                   </div>
-                  {alert.alertType === "price_change" && alert.oldPrice && alert.newPrice && (
-                    <p className="text-[10px] font-mono text-yellow-400/70 mb-0.5">
-                      ${alert.oldPrice} → ${alert.newPrice}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-mono text-zinc-700">{timeAgo(alert.createdAt)}</span>
-                    {alert.sentViaTelegram && (
-                      <span className="text-[9px] font-mono text-emerald-400/40 flex items-center gap-1">
-                        <span className="w-1 h-1 rounded-full bg-emerald-400/40" />
-                        Telegram sent
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <p className="text-sm font-semibold text-white truncate">{alert.eventName}</p>
+                      <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide" style={{ background: cfg.badgeBg, border: `1px solid ${cfg.badgeBorder}`, color: cfg.badgeText.replace("text-", "") }}>
+                        <span className={cfg.badgeText}>{cfg.label}</span>
                       </span>
+                    </div>
+                    {alert.alertType === "price_change" && alert.oldPrice && alert.newPrice && (
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm text-zinc-500 line-through">${alert.oldPrice}</span>
+                        <span className="text-sm font-bold text-amber-300">→ ${alert.newPrice}</span>
+                        <span className="text-xs text-amber-400/60">price changed</span>
+                      </div>
                     )}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-zinc-600">{timeAgo(alert.createdAt)}</span>
+                      {alert.sentViaTelegram && (
+                        <span className="flex items-center gap-1 text-xs text-blue-400/60">
+                          <Send className="w-2.5 h-2.5" />
+                          Sent to Telegram
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
