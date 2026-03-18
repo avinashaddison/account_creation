@@ -6103,25 +6103,34 @@ export async function createOutlookAccount(
       await page.setDefaultTimeout(30000);
       log("Retrying navigation via SOAX residential proxy...");
 
-      // Try alternate Microsoft signup URL first (may avoid PerimeterX on some IPs)
-      let outlookSignupUrl = "https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1";
+      // Try alternate Microsoft signup URL first — only keep it if PerimeterX is absent
+      const standardSignupUrl = "https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1";
+      let outlookSignupUrl = standardSignupUrl;
       try {
-        await page.goto("https://account.live.com/registration?uiflavor=web&mkt=EN-US&lc=1033&id=292841", {
+        await page.goto("https://account.live.com/signup?lic=1&uiflavor=web&mkt=EN-US&lc=1033", {
           waitUntil: "domcontentloaded",
           timeout: 20000,
         });
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(2000);
+        const altHasPX = await page.evaluate(() => {
+          const pxFrame = document.querySelector('iframe[src*="hsprotect"]');
+          const pxCanvas = document.querySelector('#px-captcha, canvas');
+          return !!(pxFrame || pxCanvas);
+        }).catch(() => false);
         const altPreview = (await page.textContent("body").catch(() => "")).replace(/\s+/g, " ").substring(0, 150);
-        log("Alt signup URL preview: " + altPreview);
-        if (altPreview.includes("email") || altPreview.includes("account") || altPreview.includes("signup") || altPreview.includes("Microsoft")) {
-          log("Alt URL appears valid, using it");
-          outlookSignupUrl = "https://account.live.com/registration?uiflavor=web&mkt=EN-US&lc=1033&id=292841";
+        log("Alt signup URL preview: " + altPreview.substring(0, 100) + " | hasPX=" + altHasPX);
+        const altIsUsable = !altHasPX &&
+          (altPreview.toLowerCase().includes("email") || altPreview.toLowerCase().includes("microsoft") || altPreview.toLowerCase().includes("account"));
+        if (altIsUsable) {
+          log("Alt URL usable (no PerimeterX detected), proceeding");
+          outlookSignupUrl = "https://account.live.com/signup?lic=1&uiflavor=web&mkt=EN-US&lc=1033";
         } else {
-          throw new Error("alt URL not suitable");
+          log("Alt URL has PX or is invalid — switching to standard URL");
+          await page.goto(standardSignupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
         }
       } catch {
-        log("Alt signup URL not suitable, using standard URL");
-        await page.goto(outlookSignupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        log("Alt signup URL failed, using standard URL");
+        await page.goto(standardSignupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       }
       await page.waitForTimeout(3000);
       const retryPreview = (await page.textContent("body").catch(() => "")).replace(/\s+/g, " ").substring(0, 200);
