@@ -9,6 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
+import * as ProxyChain from "proxy-chain";
 
 const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
@@ -9603,6 +9604,7 @@ export async function createGmailAccount(
 ): Promise<GmailCreateResult> {
   let browser: any = null;
   let smsOrderId: string | undefined;
+  let anonymizedProxyUrl: string | null = null;
 
   try {
     await ensureBrowserInstalled();
@@ -9632,8 +9634,30 @@ export async function createGmailAccount(
       "--no-zygote",
     ];
 
+    const launchOptions: any = { headless: true, args: launchArgs };
+    if (residentialProxy) {
+      log("Using residential proxy...");
+      const rawProxy = residentialProxy.startsWith("http") ? residentialProxy : `http://${residentialProxy}`;
+      try {
+        const u = new URL(rawProxy);
+        // Strip SOAX web-bypass suffix (-opt-wb) — not needed for standard tunneling
+        const cleanUsername = (u.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        // Rebuild clean proxy URL with credentials for proxy-chain
+        const cleanProxyUrl = `http://${encodeURIComponent(cleanUsername)}:${encodeURIComponent(u.password || "")}@${u.hostname}:${u.port}`;
+        // anonymizeProxy wraps SOAX (auth required) behind a local no-auth proxy
+        // Chromium can't do SOCKS5 auth and has issues with HTTP proxy auth — local wrap solves both
+        anonymizedProxyUrl = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+        log(`Local proxy: ${anonymizedProxyUrl} → SOAX ${u.hostname}:${u.port}`);
+        launchOptions.proxy = { server: anonymizedProxyUrl };
+      } catch (e) {
+        log(`Proxy setup error: ${e} — continuing without proxy`);
+      }
+    } else {
+      log("No proxy configured — using direct connection");
+    }
+
     log("Launching browser...");
-    browser = await chromium.launch({ headless: true, args: launchArgs });
+    browser = await chromium.launch(launchOptions);
 
     const contextOptions: any = {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -9641,23 +9665,10 @@ export async function createGmailAccount(
       locale: "en-US",
     };
 
-    if (residentialProxy) {
-      log("Using residential proxy...");
-      const rawProxy = residentialProxy.startsWith("http") ? residentialProxy : `http://${residentialProxy}`;
-      try {
-        const u = new URL(rawProxy);
-        contextOptions.proxy = { server: `${u.protocol}//${u.hostname}:${u.port}`, username: u.username || undefined, password: u.password || undefined };
-      } catch {
-        contextOptions.proxy = { server: rawProxy };
-      }
-    } else {
-      log("No proxy configured — using direct connection");
-    }
-
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
-    page.setDefaultNavigationTimeout(60000);
-    page.setDefaultTimeout(20000);
+    page.setDefaultNavigationTimeout(90000);
+    page.setDefaultTimeout(30000);
 
     // Hide automation signals — overrides navigator.webdriver and Chrome runtime indicators
     await context.addInitScript(() => {
@@ -9671,7 +9682,7 @@ export async function createGmailAccount(
     log("Opening Google signup page...");
     await page.goto(
       "https://accounts.google.com/signup/v2/createaccount?flowName=GlifWebSignIn&flowEntry=SignUp&hl=en",
-      { waitUntil: "domcontentloaded", timeout: 60000 }
+      { waitUntil: "domcontentloaded" }
     );
     await page.waitForTimeout(2000 + Math.random() * 1000);
     log("Signup page loaded: " + page.url().substring(0, 80));
@@ -9843,23 +9854,45 @@ export async function createGmailAccount(
         let phoneNumber: string | undefined;
 
         // SMSPool service ID 395 = Google/Gmail
-        // Country 1=US, 22=US Virtual, 2=UK, 3=Netherlands, 6=Sweden, 5=Latvia
+        // Pool names: Alpha=1, Bravo=2, Charlie=3, Delta=4, Echo=5, Foxtrot=6
+        // Country 1=US, 2=UK, 3=Netherlands, 4=Canada, 6=Sweden
+        // Confirmed working combos (from SMSPool error hints):
+        //   UK (2) → Charlie (3)
+        //   Sweden (6) → Bravo (2)
+        //   Netherlands (3) → Foxtrot (6)
+        //   Canada (4) → Charlie (3)
+        //   US (1) → Alpha (1) or Charlie (3)
         const googleCombos: Array<[number, string, string]> = [
-          [1, "395", "1"], [2, "395", "1"], [3, "395", "1"],
-          [6, "395", "1"], [5, "395", "1"],
+          [1, "395", "1"],  // US Alpha (try first — cheapest)
+          [1, "395", "3"],  // US Charlie (US suggested pool)
+          [2, "395", "3"],  // UK Charlie (confirmed ordering works)
+          [2, "395", "3"],  // UK Charlie retry #2
+          [2, "395", "3"],  // UK Charlie retry #3
+          [6, "395", "2"],  // Sweden Bravo (recommended by SMSPool)
+          [6, "395", "2"],  // Sweden Bravo retry #2
+          [4, "395", "3"],  // Canada Charlie (recommended by SMSPool)
+          [4, "395", "3"],  // Canada Charlie retry #2
+          [3, "395", "6"],  // Netherlands Foxtrot (recommended by SMSPool)
+          [3, "395", "6"],  // Netherlands Foxtrot retry #2
         ];
 
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          const [country, serviceName, pool] = googleCombos[(attempt - 1) % googleCombos.length];
-          log(`SMS attempt ${attempt}/3 (service: ${serviceName}, country: ${country}, pool: ${pool})...`);
+        let smsSucceeded = false;
+        for (let attempt = 1; attempt <= googleCombos.length; attempt++) {
+          const [country, serviceName, pool] = googleCombos[attempt - 1];
+          log(`SMS attempt ${attempt}/${googleCombos.length} (service: ${serviceName}, country: ${country}, pool: ${pool})...`);
           const order = await (await import("./smspoolService")).orderSMSNumber(country, serviceName, pool);
           if (!order.success || !order.number || !order.orderId) {
             log(`⚠️ SMS order failed (attempt ${attempt}): ${order.error}`);
             continue;
           }
+          smsSucceeded = true;
           smsOrderId = order.orderId;
-          phoneNumber = order.number;
-          log(`Phone number ordered: ${phoneNumber}`);
+          // Build full international number so Google sends SMS to correct country
+          // Strip leading zeros from local number (UK numbers like 07719282383 → 7719282383)
+          const localNumber = (order.number || "").replace(/^0+/, "");
+          const cc = order.cc || "1";
+          phoneNumber = cc !== "1" ? `+${cc}${localNumber}` : order.number || "";
+          log(`Phone number ordered: ${phoneNumber} (cc: +${cc})`);
 
           await page.fill('input[type="tel"], input[id="phoneNumberId"]', phoneNumber);
           await page.waitForTimeout(500);
@@ -9887,7 +9920,7 @@ export async function createGmailAccount(
 
           if (!rejected) {
             log(`Polling for OTP code (order ${order.orderId})...`);
-            otpCode = await (await import("./smspoolService")).pollForSMSCode(order.orderId, 40, 3000);
+            otpCode = await (await import("./smspoolService")).pollForSMSCode(order.orderId, 60, 3000);
             if (otpCode) {
               log(`✅ OTP received: ${otpCode}`);
               break;
@@ -9900,7 +9933,7 @@ export async function createGmailAccount(
         }
 
         if (!otpCode) {
-          return { success: false, error: "Phone verification failed — no OTP received after 3 attempts" };
+          return { success: false, error: "Phone verification failed — no OTP received after all SMS attempts" };
         }
 
         // Enter OTP
@@ -9992,6 +10025,9 @@ export async function createGmailAccount(
       try { await (await import("./smspoolService")).cancelSMSOrder(smsOrderId); } catch {}
     }
     if (browser) { try { await browser.close(); } catch {} }
+    if (anonymizedProxyUrl) {
+      try { await ProxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true); } catch {}
+    }
   }
 }
 

@@ -4,6 +4,7 @@ const SMSPOOL_BASE_URL = "https://api.smspool.net";
 interface OrderSMSResponse {
   success: boolean;
   number?: string;
+  cc?: string;
   orderId?: string;
   expiresIn?: number;
   error?: string;
@@ -68,6 +69,7 @@ export async function orderSMSNumber(
       return {
         success: true,
         number: String(data.phonenumber || data.number),
+        cc: data.cc ? String(data.cc) : undefined,
         orderId: data.order_id || data.orderid,
         expiresIn: data.expires_in,
       };
