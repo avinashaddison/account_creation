@@ -9647,37 +9647,62 @@ export async function loginGoogleAccount(
 
     // ── Step 2: Enter email ──────────────────────────────────────────────
     log("Looking for email input...");
-    let emailInput: any;
     try {
-      emailInput = await page.waitForSelector('input[type="email"]', { timeout: 15000 });
+      await page.waitForSelector('input[type="email"]', { timeout: 15000 });
     } catch {
       const title = await page.title();
       log("⚠️ Email input not found. Page title: " + title);
       return { success: false, error: "Email input not found — Google may have changed the page layout" };
     }
 
-    await emailInput.click();
-    await page.waitForTimeout(400 + Math.random() * 300);
-    log("Entering email: " + email);
-    for (const ch of email) {
-      await page.keyboard.type(ch, { delay: 0 });
-      await page.waitForTimeout(20 + Math.random() * 40);
-    }
-    await page.waitForTimeout(400 + Math.random() * 200);
+    // Use fill() — more reliable than char-by-char keyboard typing
+    await page.fill('input[type="email"]', email);
+    await page.waitForTimeout(600 + Math.random() * 400);
+    log("Email entered: " + email);
 
-    log("Clicking Next (email step)...");
-    const nextEmail = await page.$("#identifierNext button, #identifierNext");
-    if (nextEmail) {
-      await (nextEmail as any).click();
-    } else {
+    // Submit email — try v3 jsname button first, then any Next button, then Enter
+    log("Submitting email (clicking Next)...");
+    const urlBeforeEmail = page.url();
+    let emailSubmitted = false;
+    for (const sel of [
+      'button[jsname="LgbsSe"]',
+      '#identifierNext button',
+      '#identifierNext',
+      'button:has-text("Next")',
+      '[data-primary-action-label] button',
+    ]) {
+      try {
+        await page.click(sel, { timeout: 2000 });
+        emailSubmitted = true;
+        log("Next button clicked via selector: " + sel);
+        break;
+      } catch {}
+    }
+    if (!emailSubmitted) {
+      await page.focus('input[type="email"]');
       await page.keyboard.press("Enter");
+      log("Submitted email via Enter key");
     }
-    await page.waitForTimeout(3500 + Math.random() * 1500);
-    log("After email submit: " + page.url().substring(0, 80));
 
-    // Check email-stage errors
+    // Wait for the page to navigate away from the identifier step
     try {
-      const errEl = await page.$('.o6cuMc, [aria-live="assertive"], [data-error-code]');
+      await page.waitForFunction(
+        (prev: string) => window.location.href !== prev,
+        urlBeforeEmail,
+        { timeout: 10000 }
+      );
+    } catch {
+      log("⚠️ Page did not navigate after email submit — retrying with Enter...");
+      await page.focus('input[type="email"]');
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(4000);
+    }
+    await page.waitForTimeout(1500);
+    log("After email submit: " + page.url().substring(0, 100));
+
+    // Check for email-stage errors (e.g. "Couldn't find your Google Account")
+    try {
+      const errEl = await page.$('[data-error-code], .o6cuMc, [aria-live="assertive"]');
       if (errEl) {
         const errText = ((await errEl.textContent()) || "").trim();
         if (errText.length > 0) {
@@ -9688,41 +9713,71 @@ export async function loginGoogleAccount(
     } catch {}
 
     // ── Step 3: Enter password ───────────────────────────────────────────
-    log("Looking for password input...");
+    log("Waiting for password input...");
     let passwordInput: any;
     try {
-      passwordInput = await page.waitForSelector('input[type="password"]', { timeout: 12000 });
+      passwordInput = await page.waitForSelector('input[type="password"]', { timeout: 15000 });
     } catch {
-      const bodyText = ((await page.textContent("body")) || "").substring(0, 400).toLowerCase();
+      const bodyText = ((await page.textContent("body")) || "").substring(0, 500).toLowerCase();
+      const curUrl = page.url();
       const title = await page.title();
-      log("No password field. Title: " + title);
-      if (bodyText.includes("couldn't find") || bodyText.includes("account not found")) {
+      log("No password field. URL: " + curUrl.substring(0, 100));
+      log("Page title: " + title);
+      if (bodyText.includes("couldn't find") || bodyText.includes("account not found") || bodyText.includes("no account found")) {
         return { success: false, error: "Google account not found — email may not exist" };
       }
-      if (bodyText.includes("captcha") || bodyText.includes("verify") || bodyText.includes("suspicious")) {
-        log("⚠️ CAPTCHA or unusual activity check detected");
-        return { success: false, error: "Google blocked the login — CAPTCHA or suspicious activity detected" };
+      if (bodyText.includes("phone") && bodyText.includes("verify")) {
+        log("⚠️ Google asking for phone verification before password");
+        return { success: false, error: "Google requires phone verification — cannot continue", note: "2fa_phone_required" };
       }
-      return { success: false, error: "Password field not found — Google may have blocked this login attempt" };
+      if (bodyText.includes("captcha") || bodyText.includes("unusual activity") || bodyText.includes("suspicious")) {
+        log("⚠️ CAPTCHA or suspicious activity block detected");
+        return { success: false, error: "Google blocked login — CAPTCHA or suspicious activity. Try with a residential proxy." };
+      }
+      // Log the body snippet for debugging
+      log("Page body snippet: " + bodyText.substring(0, 200));
+      return { success: false, error: "Password field not found after email submit. URL: " + curUrl.substring(0, 80) };
     }
 
     await passwordInput.click();
-    await page.waitForTimeout(400 + Math.random() * 300);
+    await page.waitForTimeout(500 + Math.random() * 300);
     log("Entering password...");
-    for (const ch of password) {
-      await page.keyboard.type(ch, { delay: 0 });
-      await page.waitForTimeout(20 + Math.random() * 40);
-    }
-    await page.waitForTimeout(400 + Math.random() * 200);
+    await page.fill('input[type="password"]', password);
+    await page.waitForTimeout(500 + Math.random() * 200);
 
-    log("Clicking Next (password step)...");
-    const nextPwd = await page.$("#passwordNext button, #passwordNext");
-    if (nextPwd) {
-      await (nextPwd as any).click();
-    } else {
-      await page.keyboard.press("Enter");
+    log("Submitting password (clicking Next)...");
+    const urlBeforePwd = page.url();
+    let pwdSubmitted = false;
+    for (const sel of [
+      'button[jsname="LgbsSe"]',
+      '#passwordNext button',
+      '#passwordNext',
+      'button:has-text("Next")',
+    ]) {
+      try {
+        await page.click(sel, { timeout: 2000 });
+        pwdSubmitted = true;
+        log("Password Next clicked via: " + sel);
+        break;
+      } catch {}
     }
-    await page.waitForTimeout(5000 + Math.random() * 2000);
+    if (!pwdSubmitted) {
+      await page.focus('input[type="password"]');
+      await page.keyboard.press("Enter");
+      log("Submitted password via Enter key");
+    }
+
+    // Wait for navigation after password
+    try {
+      await page.waitForFunction(
+        (prev: string) => window.location.href !== prev,
+        urlBeforePwd,
+        { timeout: 12000 }
+      );
+    } catch {
+      log("⚠️ Page did not navigate after password submit");
+    }
+    await page.waitForTimeout(2000);
 
     const urlFinal = page.url();
     log("Final URL: " + urlFinal.substring(0, 100));
