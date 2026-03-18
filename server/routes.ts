@@ -2570,7 +2570,7 @@ export async function registerRoutes(
   });
 
   // ── POST /api/private/gmail/create ───────────────────────────────────────
-  app.post("/api/private/gmail/create", async (req, res) => {
+  app.post("/api/private/gmail/create", requireAuth, async (req, res) => {
     try {
       if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
 

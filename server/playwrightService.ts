@@ -9659,6 +9659,14 @@ export async function createGmailAccount(
     page.setDefaultNavigationTimeout(60000);
     page.setDefaultTimeout(20000);
 
+    // Hide automation signals — overrides navigator.webdriver and Chrome runtime indicators
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { runtime: {} };
+    });
+
     // ── Step 1: Navigate to Gmail signup ─────────────────────────────────
     log("Opening Google signup page...");
     await page.goto(
@@ -9904,23 +9912,39 @@ export async function createGmailAccount(
       await page.waitForTimeout(2000);
     }
 
-    // ── Step 8: Verify we landed in Gmail/My Account ──────────────────────
+    // ── Step 8: Verify we left the signup flow successfully ──────────────
     log("Checking final URL...");
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(2500);
     const finalUrl = page.url();
     log("Final URL: " + finalUrl.substring(0, 100));
 
-    const success = finalUrl.includes("myaccount.google.com") || finalUrl.includes("mail.google.com") || finalUrl.includes("google.com/u/") || !finalUrl.includes("accounts.google.com/signup");
-    if (success) {
+    // Explicit success states: landed in Google account dashboard / Gmail / user-specific page
+    const isExplicitSuccess =
+      finalUrl.includes("myaccount.google.com") ||
+      finalUrl.includes("mail.google.com") ||
+      finalUrl.includes("google.com/u/") ||
+      finalUrl.includes("accounts.google.com/ManageAccount");
+
+    // Explicit failure states: still on signup or known challenge pages
+    const isExplicitFailure =
+      finalUrl.includes("accounts.google.com/signup") ||
+      finalUrl.includes("accounts.google.com/v2/signup") ||
+      finalUrl.includes("accounts.google.com/b/") ||
+      finalUrl.includes("accounts.google.com/ServiceLogin") ||
+      finalUrl.includes("accounts.google.com/AccountChooser");
+
+    if (isExplicitSuccess) {
       log(`✅ Gmail account created successfully: ${finalEmail}`);
       return { success: true, email: finalEmail, password };
-    } else if (finalUrl.includes("accounts.google.com")) {
+    } else if (isExplicitFailure) {
       const pageTitle = await page.title();
-      log(`⚠️ Still on accounts.google.com — title: ${pageTitle}`);
-      // Could still be success if we passed all steps
-      return { success: true, email: finalEmail, password };
+      log(`❌ Still on Google signup/auth page — title: ${pageTitle}`);
+      return { success: false, error: `Account creation did not complete — still on Google signup page (${pageTitle})` };
     } else {
-      return { success: false, error: `Unexpected final URL: ${finalUrl.substring(0, 100)}` };
+      // Unknown final state — treat as failure to avoid persisting unverified accounts
+      const pageTitle = await page.title();
+      log(`⚠️ Unexpected final URL — title: ${pageTitle}`);
+      return { success: false, error: `Unexpected final URL after signup: ${finalUrl.substring(0, 100)}` };
     }
   } catch (err: any) {
     log(`❌ Error during Gmail creation: ${err.message}`);
