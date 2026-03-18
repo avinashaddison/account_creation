@@ -2952,5 +2952,36 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/card-generate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { bin, quantity = 10, expmon, expyear, cvv } = req.body;
+      if (!bin || !/^\d{6,8}$/.test(String(bin).trim())) {
+        return res.status(400).json({ error: "BIN must be 6–8 digits" });
+      }
+      const body: Record<string, any> = {
+        bin: String(bin).trim(),
+        quantity: Math.min(Math.max(1, parseInt(String(quantity)) || 10), 2000),
+      };
+      if (expmon && expmon !== "random") body.expiry = { mm: String(expmon).padStart(2, "0"), yyyy: expyear && expyear !== "random" ? String(expyear) : String(new Date().getFullYear() + 1 + Math.floor(Math.random() * 4)) };
+      if (cvv) body.cvv = String(cvv);
+
+      const response = await fetch("https://namso-gen.com/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        return res.status(502).json({ error: `namso-gen returned ${response.status}`, detail: text.slice(0, 200) });
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return httpServer;
 }
