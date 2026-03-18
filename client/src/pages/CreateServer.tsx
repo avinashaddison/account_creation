@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Globe, Shield, Zap, Server, Ticket, Lock, Mail, Code2, ArrowUpRight, Radio } from "lucide-react";
+import { Globe, Shield, Zap, Server, Ticket, Lock, Mail, ArrowUpRight, Radio } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
 import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
 import uefaLogo from "@assets/UEFA_Champions_League.svg_1772418059822.png";
+import replitLogo from "@assets/Replit_Logo_1773851974177.jpg";
 
 type Platform = {
   id: string;
@@ -102,7 +103,7 @@ const platforms: Platform[] = [
   },
   {
     id: "replit",
-    name: "Create Account",
+    name: "Create Replit Account",
     description: "Auto-create Replit accounts via Outlook OWA verification & onboarding",
     href: "/admin/replit-create",
     accentColor: "#a78bfa",
@@ -153,8 +154,8 @@ function PlatformIcon({ id }: { id: string }) {
     </div>
   );
   if (id === "replit") return (
-    <div className={`${base} bg-gradient-to-br from-violet-500 to-purple-700`} style={{ boxShadow: "0 0 16px rgba(167,139,250,0.3)" }}>
-      <Code2 className="w-6 h-6 text-white" />
+    <div className={`${base} bg-white p-1`} style={{ boxShadow: "0 0 16px rgba(167,139,250,0.3)" }}>
+      <img src={replitLogo} alt="Replit" className="w-full h-full object-contain" />
     </div>
   );
   return null;
