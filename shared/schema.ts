@@ -184,6 +184,7 @@ export type InsertReplitAccount = z.infer<typeof insertReplitAccountSchema>;
 export const lovableAccounts = pgTable("lovable_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull(),
+  password: text("password"),
   outlookEmail: text("outlook_email"),
   status: text("status").notNull().default("created"),
   error: text("error"),

@@ -14,6 +14,7 @@ type OutlookAccount = {
 type LovableAccount = {
   id: string;
   email: string;
+  password: string | null;
   outlookEmail: string | null;
   status: string;
   error: string | null;
@@ -190,11 +191,11 @@ export default function LovableCreate() {
               <input
                 type="range"
                 min={1}
-                max={Math.min(20, availableOutlookAccounts.length || 1)}
+                max={Math.min(10, availableOutlookAccounts.length || 1)}
                 value={count}
                 onChange={(e) => setCount(parseInt(e.target.value))}
                 className="flex-1 h-1.5 rounded-full cursor-pointer accent-pink-500"
-                style={{ background: `linear-gradient(to right, rgba(236,72,153,0.6) ${((count - 1) / (Math.max(1, Math.min(20, availableOutlookAccounts.length || 1)) - 1)) * 100}%, rgba(255,255,255,0.08) 0%)` }}
+                style={{ background: `linear-gradient(to right, rgba(236,72,153,0.6) ${((count - 1) / (Math.max(1, Math.min(10, availableOutlookAccounts.length || 1)) - 1)) * 100}%, rgba(255,255,255,0.08) 0%)` }}
                 data-testid="input-count-slider"
               />
               <div

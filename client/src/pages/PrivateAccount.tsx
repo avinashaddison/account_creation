@@ -50,6 +50,7 @@ type ReplitAccount = {
 type LovableAccount = {
   id: string;
   email: string;
+  password: string | null;
   outlookEmail: string | null;
   status: string;
   error: string | null;
