@@ -5907,13 +5907,26 @@ export async function createOutlookAccount(
           log("SOAX residential proxy configured: " + parsed.hostname);
         } catch {}
       }
+      // Add Sec-CH-UA headers matching a real Chrome 131 on Windows 10
+      fallbackCtxOptions.extraHTTPHeaders = {
+        'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'accept-language': 'en-US,en;q=0.9',
+      };
       context = await browser.newContext(fallbackCtxOptions);
+
+      // Comprehensive PerimeterX stealth layer — spoofs all major fingerprinting signals
       await context.addInitScript(() => {
+        // --- Basic navigator properties ---
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
         Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
         Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'appVersion', { get: () => '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' });
+
+        // --- Plugins (real Chrome PDF plugins) ---
         const pluginData = [
           { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
           { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
@@ -5921,19 +5934,174 @@ export async function createOutlookAccount(
         ];
         Object.defineProperty(navigator, 'plugins', { get: () => pluginData });
         Object.defineProperty(navigator, 'mimeTypes', { get: () => [{ type: 'application/pdf', suffixes: 'pdf', description: '' }] });
-        (window as any).chrome = { runtime: { id: undefined }, loadTimes: () => ({}), csi: () => ({}) };
+
+        // --- Full chrome.runtime mock (real Chrome has all of these) ---
+        const fakeChrome: any = {
+          runtime: {
+            id: undefined,
+            getManifest: () => ({}),
+            connect: () => ({ onMessage: { addListener: () => {} }, postMessage: () => {} }),
+            sendMessage: () => {},
+            onMessage: { addListener: () => {}, removeListener: () => {}, hasListener: () => false },
+            onConnect: { addListener: () => {}, removeListener: () => {}, hasListener: () => false },
+            onInstalled: { addListener: () => {} },
+            lastError: undefined,
+          },
+          loadTimes: () => ({
+            requestTime: Date.now() / 1000 - 0.3,
+            startLoadTime: Date.now() / 1000 - 0.3,
+            commitLoadTime: Date.now() / 1000 - 0.15,
+            finishDocumentLoadTime: Date.now() / 1000 - 0.05,
+            finishLoadTime: Date.now() / 1000,
+            firstPaintTime: Date.now() / 1000 - 0.08,
+            firstPaintAfterLoadTime: 0,
+            navigationType: 'Other',
+            wasFetchedViaSpdy: false,
+            wasNpnNegotiated: true,
+            npnNegotiatedProtocol: 'h2',
+            wasAlternateProtocolAvailable: false,
+            connectionInfo: 'h2',
+          }),
+          csi: () => ({ startE: Date.now(), onloadT: Date.now() + 200, pageT: 200, tran: 15 }),
+          app: { isInstalled: false },
+        };
+        (window as any).chrome = fakeChrome;
+
+        // --- Remove Playwright/automation markers ---
         delete (window as any).__playwright;
         delete (window as any).__pw_manual;
+        delete (window as any).__pw_sio;
+        try { Object.defineProperty(window, '__playwright', { get: () => undefined }); } catch {}
+
+        // --- Fix outerHeight/outerWidth (they are 0 in headless) ---
+        try {
+          Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 120 });
+          Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
+        } catch {}
+
+        // --- Canvas fingerprint noise (tiny imperceptible pixel noise per session) ---
+        const _noise = Math.random() * 0.0001;
+        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type?: string, quality?: any) {
+          const ctx2d = this.getContext('2d');
+          if (ctx2d) {
+            const imageData = ctx2d.getImageData(0, 0, this.width || 1, this.height || 1);
+            if (imageData && imageData.data.length > 4) {
+              imageData.data[0] = Math.max(0, imageData.data[0] + (_noise > 0.00005 ? 1 : 0));
+              ctx2d.putImageData(imageData, 0, 0);
+            }
+          }
+          return origToDataURL.apply(this, [type, quality] as any);
+        };
+        const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+        CanvasRenderingContext2D.prototype.getImageData = function(sx: number, sy: number, sw: number, sh: number) {
+          const imageData = origGetImageData.apply(this, [sx, sy, sw, sh] as any);
+          if (imageData && imageData.data && imageData.data.length > 4 && _noise > 0.00005) {
+            imageData.data[0] = Math.max(0, Math.min(255, imageData.data[0] + 1));
+          }
+          return imageData;
+        };
+
+        // --- WebGL vendor/renderer spoofing (hide SwiftShader / ANGLE headless) ---
+        const spoofWebGL = (proto: any) => {
+          const origGetParam = proto.getParameter;
+          proto.getParameter = function(pname: number) {
+            if (pname === 37445) return 'Intel Open Source Technology Center'; // VENDOR
+            if (pname === 37446) return 'Mesa Intel(R) UHD Graphics 620 (KBL GT2)'; // RENDERER
+            if (pname === 7936) return 'WebGL 1.0 (OpenGL ES 2.0 Chromium)'; // VERSION
+            if (pname === 35724) return 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)'; // SHADING_LANGUAGE_VERSION
+            return origGetParam.apply(this, arguments);
+          };
+          const origGetExtension = proto.getExtension;
+          proto.getExtension = function(name: string) {
+            const result = origGetExtension.apply(this, arguments);
+            if (name === 'WEBGL_debug_renderer_info') {
+              return {
+                UNMASKED_VENDOR_WEBGL: 37445,
+                UNMASKED_RENDERER_WEBGL: 37446,
+              };
+            }
+            return result;
+          };
+        };
+        try { spoofWebGL(WebGLRenderingContext.prototype); } catch {}
+        try { spoofWebGL((window as any).WebGL2RenderingContext.prototype); } catch {}
+
+        // --- Audio context fingerprint noise ---
+        try {
+          const origGetChannelData = AudioBuffer.prototype.getChannelData;
+          AudioBuffer.prototype.getChannelData = function(channel: number) {
+            const data = origGetChannelData.call(this, channel);
+            if (data && data.length > 100) {
+              for (let i = 0; i < 3; i++) {
+                const idx = Math.floor(Math.random() * data.length);
+                data[idx] += (_noise - 0.00005) * 0.01;
+              }
+            }
+            return data;
+          };
+        } catch {}
+
+        // --- navigator.connection (NetworkInformation API) ---
+        try {
+          if (!(navigator as any).connection) {
+            Object.defineProperty(navigator, 'connection', {
+              get: () => ({
+                effectiveType: '4g',
+                downlink: 10,
+                rtt: 50,
+                saveData: false,
+                type: 'wifi',
+                addEventListener: () => {},
+                removeEventListener: () => {},
+              }),
+            });
+          }
+        } catch {}
+
+        // --- navigator.permissions.query override ---
+        try {
+          const origQuery = navigator.permissions.query.bind(navigator.permissions);
+          navigator.permissions.query = (params: any) => {
+            const name = params && params.name;
+            if (name === 'notifications') return Promise.resolve({ state: 'prompt', onchange: null } as any);
+            if (name === 'clipboard-read' || name === 'clipboard-write') return Promise.resolve({ state: 'prompt', onchange: null } as any);
+            return origQuery(params);
+          };
+        } catch {}
+
+        // --- Touch support hints (PerimeterX checks maxTouchPoints) ---
+        try {
+          Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+        } catch {}
       });
+
       page = await context.newPage();
       await optimizePageBandwidth(page, { allowStylesheets: true });
       await page.setDefaultNavigationTimeout(120000);
       await page.setDefaultTimeout(30000);
       log("Retrying navigation via SOAX residential proxy...");
-      await page.goto("https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1", {
-        waitUntil: "domcontentloaded",
-        timeout: 60000,
-      });
+
+      // Try alternate Microsoft signup URL first (may avoid PerimeterX on some IPs)
+      let outlookSignupUrl = "https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1";
+      try {
+        await page.goto("https://account.live.com/registration?uiflavor=web&mkt=EN-US&lc=1033&id=292841", {
+          waitUntil: "domcontentloaded",
+          timeout: 20000,
+        });
+        await page.waitForTimeout(1500);
+        const altPreview = (await page.textContent("body").catch(() => "")).replace(/\s+/g, " ").substring(0, 150);
+        log("Alt signup URL preview: " + altPreview);
+        if (altPreview.includes("email") || altPreview.includes("account") || altPreview.includes("signup") || altPreview.includes("Microsoft")) {
+          log("Alt URL appears valid, using it");
+          outlookSignupUrl = "https://account.live.com/registration?uiflavor=web&mkt=EN-US&lc=1033&id=292841";
+        } else {
+          throw new Error("alt URL not suitable");
+        }
+      } catch {
+        log("Alt signup URL not suitable, using standard URL");
+        await page.goto(outlookSignupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      }
       await page.waitForTimeout(3000);
       const retryPreview = (await page.textContent("body").catch(() => "")).replace(/\s+/g, " ").substring(0, 200);
       log("Retry page preview: " + retryPreview);
@@ -6446,29 +6614,10 @@ export async function createOutlookAccount(
           }
 
           if (zenrowsCaptchaSolved) {
-            await page.waitForTimeout(1500);
-            // Inject postMessage from inside the SOAX iframe to signal the parent page that PX is solved
-            // This mimics what the real iframe sends on success
-            const pxAppId = pxIframeUrl.match(/app_id=([^&]+)/)?.[1] || 'PXzC5j78di';
-            try {
-              await hsFrame.evaluate((appId: string) => {
-                const msgs = [
-                  { messageType: "PX_CHALLENGE_PASSED", appId },
-                  { type: "px-captcha-success", appId },
-                  { messageType: "PASSED", appId },
-                  { event: "px_passed", appId },
-                ];
-                for (const msg of msgs) {
-                  try { window.parent.postMessage(msg, "*"); } catch {}
-                  try { window.top!.postMessage(msg, "*"); } catch {}
-                }
-              }, pxAppId).catch(() => {});
-              log("Injected PX success postMessage from iframe to parent (appId=" + pxAppId + ")");
-            } catch {}
             await page.waitForTimeout(3000);
             const mainCheck = (await page.textContent("body").catch(() => "")) || "";
             if (!mainCheck.toLowerCase().includes("prove you're human") && !mainCheck.toLowerCase().includes("press and hold")) {
-              log("Main page passed captcha after Addison Proxy solve + postMessage inject!");
+              log("Main page passed captcha after Addison Proxy iframe solve!");
               captchaSolved = true;
               break;
             }
