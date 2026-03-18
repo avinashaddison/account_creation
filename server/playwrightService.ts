@@ -9577,6 +9577,7 @@ export async function closeBrowser(): Promise<void> {
 export interface GmailCheckResult {
   success: boolean;
   error?: string;
+  note?: string;
 }
 
 export async function checkGmailAccount(
@@ -9584,173 +9585,72 @@ export async function checkGmailAccount(
   password: string,
   log: (msg: string) => void
 ): Promise<GmailCheckResult> {
-  let browser: any = null;
+  const { ImapFlow } = await import("imapflow");
 
   try {
-    log("Connecting to Addison Proxy browser...");
-    let zenrowsUrl = "";
+    log(`Checking ${email} via IMAP (imap.gmail.com:993)...`);
+
+    const client = new ImapFlow({
+      host: "imap.gmail.com",
+      port: 993,
+      secure: true,
+      auth: { user: email, pass: password },
+      logger: false,
+      tls: { rejectUnauthorized: false },
+    } as any);
+
     try {
-      const zrRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
-      if (zrRow.rows.length > 0 && zrRow.rows[0].value) {
-        zenrowsUrl = zrRow.rows[0].value as string;
+      await client.connect();
+      log("✅ IMAP connection successful — credentials verified!");
+      await client.logout();
+      return { success: true };
+    } catch (imapErr: any) {
+      const rawMsg = imapErr?.responseText || imapErr?.response || imapErr?.message || String(imapErr);
+      const errMsg: string = rawMsg.toLowerCase();
+      log("IMAP error: " + rawMsg.substring(0, 150));
+
+      if (
+        errMsg.includes("invalid credentials") ||
+        errMsg.includes("username and password not accepted") ||
+        errMsg.includes("authentication failed") ||
+        errMsg.includes("incorrect password") ||
+        errMsg.includes("bad credentials") ||
+        errMsg.includes("[authenticationfailed]") ||
+        errMsg.includes("invalid login")
+      ) {
+        log("❌ Login failed — wrong credentials");
+        return { success: false, error: "Invalid credentials — wrong email or password" };
       }
-    } catch {}
 
-    if (!zenrowsUrl) {
-      return { success: false, error: "Addison Proxy Browser URL not configured. Set it in Settings." };
+      if (
+        errMsg.includes("application-specific password") ||
+        errMsg.includes("app password") ||
+        errMsg.includes("2-step") ||
+        errMsg.includes("2fa") ||
+        errMsg.includes("two-factor") ||
+        errMsg.includes("please log in via your web browser") ||
+        errMsg.includes("web login required")
+      ) {
+        log("⚠️ Account requires app password or 2FA — credentials appear valid");
+        return { success: true, note: "Requires app password or 2FA (credentials likely valid)" };
+      }
+
+      if (
+        errMsg.includes("account disabled") ||
+        errMsg.includes("account suspended") ||
+        errMsg.includes("your account has been disabled") ||
+        errMsg.includes("suspended")
+      ) {
+        log("❌ Account is disabled or suspended");
+        return { success: false, error: "Account disabled or suspended" };
+      }
+
+      log("❌ IMAP check failed — " + (imapErr?.message || String(imapErr)).substring(0, 100));
+      return { success: false, error: "IMAP check failed: " + (imapErr?.message || String(imapErr)).substring(0, 80) };
     }
-
-    zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-    const resProxy = await getResidentialProxyUrl();
-    zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxy);
-
-    browser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
-    log("Proxy browser connected");
-
-    const context = browser.contexts()[0] || await browser.newContext();
-    const page = await context.newPage();
-    await page.setDefaultNavigationTimeout(90000);
-    await page.setDefaultTimeout(30000);
-
-    log("Navigating to Gmail sign-in page...");
-    await page.goto("https://accounts.google.com/signin/v2/identifier?service=mail", {
-      waitUntil: "domcontentloaded",
-      timeout: 120000,
-    });
-    await page.waitForTimeout(2000 + Math.random() * 1500);
-
-    const currentUrl = page.url();
-    log("Page loaded: " + currentUrl.substring(0, 80));
-
-    log("Looking for email input field...");
-    const emailInput = await page.waitForSelector('input[type="email"]', { timeout: 15000 });
-    if (!emailInput) {
-      return { success: false, error: "Could not find email input field on Google sign-in page" };
-    }
-
-    await page.waitForTimeout(500 + Math.random() * 500);
-    await emailInput.click();
-    await page.waitForTimeout(300 + Math.random() * 300);
-
-    log(`Typing email address: ${email}`);
-    for (const char of email) {
-      await page.keyboard.type(char, { delay: 0 });
-      await page.waitForTimeout(30 + Math.random() * 60);
-    }
-
-    await page.waitForTimeout(600 + Math.random() * 400);
-
-    log("Clicking Next...");
-    const nextBtn = await page.$('#identifierNext, [data-action="next"], button:has-text("Next")');
-    if (nextBtn) {
-      await nextBtn.click();
-    } else {
-      await page.keyboard.press("Enter");
-    }
-
-    await page.waitForTimeout(3000 + Math.random() * 2000);
-
-    const urlAfterEmail = page.url();
-    log("After email step: " + urlAfterEmail.substring(0, 80));
-
-    if (urlAfterEmail.includes("deactivated") || urlAfterEmail.includes("disabled") || urlAfterEmail.includes("lookup")) {
-      return { success: false, error: "Account not found or does not exist" };
-    }
-
-    log("Looking for password input field...");
-    let passwordInput: any = null;
-    try {
-      passwordInput = await page.waitForSelector('input[type="password"]', { timeout: 15000 });
-    } catch {
-      const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || "");
-      log("Page content after email: " + bodyText.substring(0, 150));
-      return { success: false, error: "Password field did not appear — account may not exist on Gmail" };
-    }
-
-    if (!passwordInput) {
-      return { success: false, error: "Could not find password input field" };
-    }
-
-    await page.waitForTimeout(500 + Math.random() * 500);
-    await passwordInput.click();
-    await page.waitForTimeout(300 + Math.random() * 300);
-
-    log("Typing password...");
-    for (const char of password) {
-      await page.keyboard.type(char, { delay: 0 });
-      await page.waitForTimeout(30 + Math.random() * 60);
-    }
-
-    await page.waitForTimeout(600 + Math.random() * 400);
-
-    log("Clicking Sign In...");
-    const signInBtn = await page.$('#passwordNext, [data-action="next"], button:has-text("Next")');
-    if (signInBtn) {
-      await signInBtn.click();
-    } else {
-      await page.keyboard.press("Enter");
-    }
-
-    await page.waitForTimeout(5000 + Math.random() * 3000);
-
-    const finalUrl = page.url();
-    log("Final URL: " + finalUrl.substring(0, 100));
-
-    if (
-      finalUrl.includes("mail.google.com") ||
-      finalUrl.includes("myaccount.google.com") ||
-      (finalUrl.includes("google.com") && !finalUrl.includes("accounts.google.com") && !finalUrl.includes("signin"))
-    ) {
-      log("✅ Login successful — reached Gmail inbox!");
-      await page.close().catch(() => {});
-      return { success: true };
-    }
-
-    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "");
-    log("Page text after sign-in: " + pageText.substring(0, 200));
-
-    if (
-      pageText.toLowerCase().includes("wrong password") ||
-      pageText.toLowerCase().includes("incorrect password") ||
-      pageText.toLowerCase().includes("try again") ||
-      finalUrl.includes("WrongPassword") ||
-      finalUrl.includes("IncorrectPassword")
-    ) {
-      await page.close().catch(() => {});
-      return { success: false, error: "Wrong password" };
-    }
-
-    if (
-      pageText.toLowerCase().includes("couldn't find your google account") ||
-      pageText.toLowerCase().includes("no account found")
-    ) {
-      await page.close().catch(() => {});
-      return { success: false, error: "Google account does not exist" };
-    }
-
-    if (
-      finalUrl.includes("challenge") ||
-      pageText.toLowerCase().includes("verify it's you") ||
-      pageText.toLowerCase().includes("2-step verification") ||
-      pageText.toLowerCase().includes("verify your identity") ||
-      pageText.toLowerCase().includes("phone number") ||
-      pageText.toLowerCase().includes("recovery")
-    ) {
-      log("✅ Login reached verification/2FA step — credentials are VALID");
-      await page.close().catch(() => {});
-      return { success: true };
-    }
-
-    await page.close().catch(() => {});
-    return { success: false, error: `Login did not reach inbox. Final URL: ${finalUrl.substring(0, 100)}` };
-
   } catch (err: any) {
     log("Error: " + (err.message || "").substring(0, 200));
     return { success: false, error: err.message || "Unknown error" };
-  } finally {
-    if (browser) {
-      try { await browser.close(); } catch {}
-    }
   }
 }
 
