@@ -6324,6 +6324,109 @@ export async function createOutlookAccount(
         if (hsFrame) {
           log("Found PerimeterX iframe: " + hsFrame.url().substring(0, 80));
 
+          // --- ZenRows captcha solver (primary approach) ---
+          const pxIframeUrl = hsFrame.url();
+          let zrCaptchaBrowser2: any = null;
+          let zenrowsCaptchaSolved = false;
+          try {
+            const zrSettings2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+            const zrUrlRaw2 = zrSettings2.rows[0]?.value as string;
+            if (zrUrlRaw2) {
+              const cleanZrUrl2 = zrUrlRaw2.replace(/[&?]proxy_country=[^&]*/g, '').replace(/[&?]proxy=[^&]*/g, '').replace(/\?$/, '');
+              log("Connecting Addison Proxy for captcha iframe solving...");
+              zrCaptchaBrowser2 = await chromium.connectOverCDP(cleanZrUrl2, { timeout: 30000 });
+              const zrCtx2 = zrCaptchaBrowser2.contexts()[0] || await zrCaptchaBrowser2.newContext();
+              const zrPg2 = await zrCtx2.newPage();
+              await zrPg2.setDefaultTimeout(30000);
+              log("Addison Proxy navigating to PerimeterX iframe: " + pxIframeUrl.substring(0, 80));
+              await zrPg2.goto(pxIframeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+              await zrPg2.waitForTimeout(2500 + Math.random() * 1000);
+
+              const zrPxEl2 = await zrPg2.$('#px-captcha').catch(() => null);
+              if (zrPxEl2) {
+                const zrBox2 = await zrPxEl2.boundingBox().catch(() => null);
+                log("Addison Proxy px-captcha box: " + JSON.stringify(zrBox2));
+
+                let zcx2: number, zcy2: number;
+                if (zrBox2 && zrBox2.width > 10 && zrBox2.x >= 0) {
+                  zcx2 = zrBox2.x + zrBox2.width * (0.3 + Math.random() * 0.4);
+                  zcy2 = zrBox2.y + zrBox2.height * (0.3 + Math.random() * 0.4);
+                } else {
+                  const pgSize2 = zrPg2.viewportSize() || { width: 1280, height: 720 };
+                  zcx2 = pgSize2.width / 2 + (Math.random() - 0.5) * 100;
+                  zcy2 = pgSize2.height / 2 + (Math.random() - 0.5) * 50;
+                  log("Addison Proxy using viewport center: (" + Math.round(zcx2) + "," + Math.round(zcy2) + ")");
+                }
+
+                // Approach mouse naturally
+                await zrPg2.mouse.move(zcx2 - 150 - Math.random() * 100, zcy2 - 80 - Math.random() * 60, { steps: 8 });
+                await zrPg2.waitForTimeout(300 + Math.random() * 300);
+                await zrPg2.mouse.move(zcx2, zcy2, { steps: 10 + Math.floor(Math.random() * 6) });
+                await zrPg2.waitForTimeout(80 + Math.random() * 150);
+
+                await zrPg2.mouse.down();
+                log("Addison Proxy mouse down, holding...");
+                const zrHold2 = 3500 + Math.random() * 1800;
+                const zrSteps2 = 14 + Math.floor(Math.random() * 8);
+                log("Addison Proxy hold: " + Math.round(zrHold2) + "ms in " + zrSteps2 + " steps");
+                for (let s2 = 0; s2 < zrSteps2; s2++) {
+                  await zrPg2.waitForTimeout(zrHold2 / zrSteps2);
+                  await zrPg2.mouse.move(
+                    zcx2 + (Math.random() - 0.5) * 1.5,
+                    zcy2 + (Math.random() - 0.5) * 1.5
+                  );
+                }
+                await zrPg2.mouse.up();
+                log("Addison Proxy mouse up, checking result...");
+                await zrPg2.waitForTimeout(2500 + Math.random() * 1000);
+
+                const zrBodyText2 = (await zrPg2.textContent("body").catch(() => "")) || "";
+                log("Addison Proxy iframe result: " + zrBodyText2.replace(/\s+/g, " ").substring(0, 150));
+                if (!zrBodyText2.toLowerCase().includes("press and hold") && !zrBodyText2.toLowerCase().includes("verify")) {
+                  log("Addison Proxy captcha iframe solved!");
+                  zenrowsCaptchaSolved = true;
+                } else {
+                  log("Addison Proxy iframe still shows challenge");
+                }
+              } else {
+                log("Addison Proxy: no #px-captcha element in iframe page");
+              }
+              try { await zrPg2.close(); } catch {}
+            } else {
+              log("No Addison Proxy URL configured, skipping ZR captcha solve");
+            }
+          } catch (zrCaptchaErr2: any) {
+            log("Addison Proxy captcha solver error: " + (zrCaptchaErr2.message || "").substring(0, 100));
+          } finally {
+            if (zrCaptchaBrowser2) {
+              try { await zrCaptchaBrowser2.close(); } catch {}
+              zrCaptchaBrowser2 = null;
+            }
+          }
+
+          if (zenrowsCaptchaSolved) {
+            await page.waitForTimeout(2500);
+            const mainCheck = (await page.textContent("body").catch(() => "")) || "";
+            if (!mainCheck.toLowerCase().includes("prove you're human") && !mainCheck.toLowerCase().includes("press and hold")) {
+              log("Main page passed captcha after Addison Proxy solve!");
+              captchaSolved = true;
+              break;
+            }
+            log("Addison Proxy solved iframe but main page still blocked — trying submit click...");
+            const submitBtn = await page.$('input[type="submit"], button[type="submit"], #iSignupAction, #idSIButton9').catch(() => null);
+            if (submitBtn) {
+              await submitBtn.click().catch(() => {});
+              await page.waitForTimeout(3000);
+              const afterClick = (await page.textContent("body").catch(() => "")) || "";
+              if (!afterClick.toLowerCase().includes("prove you're human") && !afterClick.toLowerCase().includes("press and hold")) {
+                log("Captcha passed after Addison Proxy solve + submit click!");
+                captchaSolved = true;
+                break;
+              }
+            }
+          }
+          // --- End ZenRows captcha solver ---
+
           const iframeEl = await page.$('iframe[src*="hsprotect"]').catch(() => null);
           let iframeBox: any = null;
           if (iframeEl) {
