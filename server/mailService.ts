@@ -1,3 +1,5 @@
+import { ImapFlow } from "imapflow";
+
 const PROVIDERS = {
   "mail.tm": "https://api.mail.tm",
   "mail.gw": "https://api.mail.gw",
@@ -7,6 +9,104 @@ type Provider = keyof typeof PROVIDERS;
 
 const MAIL_TM_DOMAINS = new Set<string>();
 const MAIL_GW_DOMAINS = new Set<string>();
+
+let _gmailAddress: string | null = null;
+let _gmailAppPassword: string | null = null;
+
+export function setGmailCredentials(email: string | null, appPassword: string | null): void {
+  _gmailAddress = email || null;
+  _gmailAppPassword = appPassword || null;
+  if (_gmailAddress && _gmailAppPassword) {
+    console.log(`[Gmail] Credentials configured for ${_gmailAddress}`);
+  }
+}
+
+export function hasGmailCredentials(): boolean {
+  return !!(
+    _gmailAddress &&
+    _gmailAddress.includes("@gmail.com") &&
+    _gmailAppPassword &&
+    _gmailAppPassword.length > 0
+  );
+}
+
+export function createGmailAddress(): string {
+  if (!_gmailAddress) throw new Error("Gmail credentials not configured");
+  const base = _gmailAddress.replace("@gmail.com", "");
+  const tag = Math.random().toString(36).substring(2, 10);
+  return `${base}+la28_${tag}@gmail.com`;
+}
+
+export async function pollGmailForVerificationCode(
+  targetAddress: string,
+  maxAttempts: number = 70,
+  intervalMs: number = 3000
+): Promise<string | null> {
+  if (!_gmailAddress || !_gmailAppPassword) {
+    console.log("[Gmail] No credentials configured");
+    return null;
+  }
+
+  const startTime = new Date(Date.now() - 5 * 60 * 1000);
+  const client = new ImapFlow({
+    host: "imap.gmail.com",
+    port: 993,
+    secure: true,
+    auth: { user: _gmailAddress, pass: _gmailAppPassword },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock("INBOX");
+
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
+        console.log(`[Gmail] Polling for code to ${targetAddress}... attempt ${i + 1}/${maxAttempts}`);
+
+        try {
+          const uids = await client.search({ to: targetAddress, since: startTime }, { uid: true });
+          console.log(`[Gmail] Found ${uids.length} matching message(s)`);
+
+          if (uids.length > 0) {
+            const range = uids.join(",");
+            for await (const msg of client.fetch(range, { source: true }, { uid: true })) {
+              const raw = msg.source.toString("utf8");
+              const codeMatch = raw.match(/\b(\d{6})\b/);
+              if (codeMatch) {
+                console.log(`[Gmail] Extracted verification code: ${codeMatch[1]}`);
+                return codeMatch[1];
+              }
+              const altMatch = raw.match(/code[:\s=]*(\d{4,6})/i);
+              if (altMatch) {
+                console.log(`[Gmail] Extracted verification code (alt): ${altMatch[1]}`);
+                return altMatch[1];
+              }
+            }
+            console.log("[Gmail] Message(s) found but no 6-digit code yet, continuing...");
+          }
+        } catch (searchErr: any) {
+          console.log(`[Gmail] Search error: ${searchErr.message}`);
+        }
+
+        if (i < maxAttempts - 1) {
+          await new Promise((r) => setTimeout(r, intervalMs));
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  } catch (err: any) {
+    console.log(`[Gmail] IMAP connection error: ${err.message}`);
+  } finally {
+    try {
+      await client.logout();
+    } catch {}
+  }
+
+  console.log("[Gmail] Timed out waiting for verification email");
+  return null;
+}
 
 export function detectProviderFromDomain(domain: string): Provider {
   if (MAIL_TM_DOMAINS.has(domain)) return "mail.tm";
@@ -43,8 +143,8 @@ export async function getAvailableDomain(preferGw = true): Promise<string> {
 
   if (allDomains.length === 0) throw new Error("No email domains available from any provider");
 
-  const gwDomains = allDomains.filter(d => d.provider === "mail.gw");
-  const tmDomains = allDomains.filter(d => d.provider === "mail.tm");
+  const gwDomains = allDomains.filter((d) => d.provider === "mail.gw");
+  const tmDomains = allDomains.filter((d) => d.provider === "mail.tm");
 
   let pool: { domain: string; provider: Provider }[];
   if (preferGw && gwDomains.length > 0) {
@@ -62,7 +162,10 @@ export async function getMailGwDomain(): Promise<string> {
   return getAvailableDomain(true);
 }
 
-export async function createTempEmail(address: string, password: string): Promise<{ id: string; address: string; provider: Provider }> {
+export async function createTempEmail(
+  address: string,
+  password: string
+): Promise<{ id: string; address: string; provider: Provider }> {
   const domain = address.split("@")[1] || "";
   const provider = detectProviderFromDomain(domain);
   const baseUrl = PROVIDERS[provider];
@@ -88,19 +191,19 @@ export async function createTempEmail(address: string, password: string): Promis
       if (res.status === 429 && attempt < maxRetries) {
         const delay = Math.min(attempt * 3000, 15000);
         console.log(`[Mail] Rate limited (429) creating ${address}, retry ${attempt}/${maxRetries} in ${delay}ms...`);
-        await new Promise(r => setTimeout(r, delay));
+        await new Promise((r) => setTimeout(r, delay));
         continue;
       }
       if (res.status >= 500 && attempt < maxRetries) {
         console.log(`[Mail] Server error (${res.status}) creating ${address}, retry ${attempt}/${maxRetries}...`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       throw new Error(`Failed to create email account: ${res.status} - ${text}`);
     } catch (err: any) {
       if (err.name === "TimeoutError" && attempt < maxRetries) {
         console.log(`[Mail] Timeout creating ${address}, retry ${attempt}/${maxRetries}...`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       if (attempt >= maxRetries) throw err;
@@ -130,7 +233,7 @@ export async function getAuthToken(address: string, password: string, provider?:
       if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
         const delay = Math.min(attempt * 2000, 10000);
         console.log(`[Mail] Token request ${res.status} for ${address}, retry ${attempt}/${maxRetries} in ${delay}ms...`);
-        await new Promise(r => setTimeout(r, delay));
+        await new Promise((r) => setTimeout(r, delay));
         continue;
       }
       const text = await res.text();
@@ -138,7 +241,7 @@ export async function getAuthToken(address: string, password: string, provider?:
     } catch (err: any) {
       if (err.name === "TimeoutError" && attempt < maxRetries) {
         console.log(`[Mail] Token timeout for ${address}, retry ${attempt}/${maxRetries}...`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       if (attempt >= maxRetries) throw err;
@@ -160,7 +263,7 @@ export async function fetchMessages(token: string, provider: Provider = "mail.tm
         return data["hydra:member"] || [];
       }
       if ((res.status === 429 || res.status >= 500) && attempt < 3) {
-        await new Promise(r => setTimeout(r, attempt * 2000));
+        await new Promise((r) => setTimeout(r, attempt * 2000));
         continue;
       }
       if (res.status === 401) {
@@ -171,7 +274,7 @@ export async function fetchMessages(token: string, provider: Provider = "mail.tm
     } catch (err: any) {
       if (err.name === "TimeoutError" && attempt < 3) {
         console.log(`[Mail] Fetch timeout on ${provider}, retry ${attempt}/3...`);
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       if (attempt >= 3) throw err;
@@ -180,7 +283,11 @@ export async function fetchMessages(token: string, provider: Provider = "mail.tm
   return [];
 }
 
-export async function fetchMessageContent(token: string, messageId: string, provider: Provider = "mail.tm"): Promise<string> {
+export async function fetchMessageContent(
+  token: string,
+  messageId: string,
+  provider: Provider = "mail.tm"
+): Promise<string> {
   const baseUrl = PROVIDERS[provider];
   const res = await fetch(`${baseUrl}/messages/${messageId}`, {
     headers: { Authorization: `Bearer ${token}` },

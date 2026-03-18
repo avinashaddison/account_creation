@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain } from "./mailService";
+import { getAvailableDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
 import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
@@ -225,8 +225,9 @@ async function processAccount(
 ) {
   try {
     let currentEmail = addisonEmail;
-    let emailProvider = detectProviderFromDomain(addisonEmail.split("@")[1] || "");
-    const MAX_EMAIL_RETRIES = 2;
+    const isGmailMode = currentEmail.endsWith("@gmail.com");
+    let emailProvider = isGmailMode ? ("mail.tm" as const) : detectProviderFromDomain(addisonEmail.split("@")[1] || "");
+    const MAX_EMAIL_RETRIES = isGmailMode ? 0 : 2;
 
     const runRegistration = async () => {
       const result = await fullRegistrationFlow(
@@ -243,7 +244,13 @@ async function processAccount(
         },
         async () => {
           broadcastLog(batchId, accountId, `Polling for verification code...`, ownerId);
-          const code = await pollForVerificationCode(currentEmail, addisonEmailPassword, emailProvider, 70, 3000);
+          let code: string | null;
+          if (currentEmail.endsWith("@gmail.com")) {
+            broadcastLog(batchId, accountId, `[Gmail] Checking IMAP inbox for ${currentEmail}...`, ownerId);
+            code = await pollGmailForVerificationCode(currentEmail, 70, 3000);
+          } else {
+            code = await pollForVerificationCode(currentEmail, addisonEmailPassword, emailProvider, 70, 3000);
+          }
           if (code) {
             await storage.updateAccount(accountId, { verificationCode: code });
             broadcastLog(batchId, accountId, `Got verification code: ${code}`, ownerId);
@@ -262,6 +269,8 @@ async function processAccount(
 
     if (preToken) {
       broadcastLog(batchId, accountId, `Email pre-created, starting registration...`, ownerId);
+    } else if (isGmailMode) {
+      broadcastLog(batchId, accountId, `[Gmail] Using Gmail inbox for ${currentEmail}, starting registration...`, ownerId);
     } else {
       broadcastLog(batchId, accountId, `Creating Addison email: ${currentEmail}`, ownerId);
       const created = await createTempEmail(currentEmail, addisonEmailPassword);
@@ -495,6 +504,14 @@ export async function registerRoutes(
       console.log("[Auth] No browser engine URL set. Please configure it in Settings.");
     }
 
+    const gmailEmail = await storage.getSetting("gmail_email");
+    const gmailAppPassword = await storage.getSetting("gmail_app_password");
+    setGmailCredentials(gmailEmail || null, gmailAppPassword || null);
+    if (gmailEmail && gmailAppPassword) {
+      console.log(`[Gmail] IMAP credentials loaded for ${gmailEmail}`);
+    } else {
+      console.log("[Gmail] No Gmail credentials configured — will use temp email fallback");
+    }
   }
   await ensureDefaultData();
 
@@ -871,6 +888,55 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/gmail-email", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const email = await storage.getSetting("gmail_email");
+      res.json({ email: email || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/gmail-email", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string" || !email.includes("@gmail.com")) {
+        return res.status(400).json({ error: "A valid @gmail.com address is required" });
+      }
+      await storage.setSetting("gmail_email", email.trim().toLowerCase());
+      const appPass = await storage.getSetting("gmail_app_password");
+      setGmailCredentials(email.trim().toLowerCase(), appPass || null);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/gmail-app-password", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const pass = await storage.getSetting("gmail_app_password");
+      res.json({ password: pass ? `${pass.substring(0, 4)}****${pass.substring(pass.length - 4)}` : "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/gmail-app-password", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { password } = req.body;
+      if (!password || typeof password !== "string" || password.replace(/\s/g, "").length < 16) {
+        return res.status(400).json({ error: "A valid Gmail App Password (16 chars) is required" });
+      }
+      const cleaned = password.replace(/\s/g, "");
+      await storage.setSetting("gmail_app_password", cleaned);
+      const gmailEmail = await storage.getSetting("gmail_email");
+      setGmailCredentials(gmailEmail || null, cleaned);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/smspool/balance", requireAuth, async (_req, res) => {
     try {
       const result = await getSMSPoolBalance();
@@ -1005,7 +1071,8 @@ export async function registerRoutes(
       }
 
       const batchId = randomUUID();
-      const domain = await getAvailableDomain();
+      const useGmail = hasGmailCredentials();
+      const batchDomain = useGmail ? null : await getAvailableDomain();
 
       const created: any[] = [];
       for (let i = 0; i < numAccounts; i++) {
@@ -1013,7 +1080,7 @@ export async function registerRoutes(
         const ln = randomFrom(LAST_NAMES);
         const pw = generatePassword();
         const username = generateRandomUsername();
-        const addisonEmail = `${username}@${domain}`;
+        const addisonEmail = useGmail ? createGmailAddress() : `${username}@${batchDomain}`;
         const addisonEmailPassword = "TempPass123!";
 
         const account = await storage.createAccount({
@@ -1042,20 +1109,25 @@ export async function registerRoutes(
 
       const CONCURRENCY = Math.min(Math.max(parseInt(reqConcurrency) || 5, 1), 10);
       (async () => {
-        broadcastLog(batchId, "system", `⚡ Pre-creating ${created.length} emails (concurrency: ${CONCURRENCY})...`, userId);
-        const EMAIL_BATCH = 5;
         const emailCreated: Set<string> = new Set();
-        for (let i = 0; i < created.length; i += EMAIL_BATCH) {
-          if (cancelledBatches.has(batchId)) break;
-          const emailChunk = created.slice(i, i + EMAIL_BATCH);
-          await Promise.all(emailChunk.map(async (acc) => {
-            try {
-              await createTempEmail(acc.email, acc.emailPassword);
-              emailCreated.add(acc.id);
-            } catch (err: any) {
-              broadcastLog(batchId, acc.id, `Email setup failed: ${err.message.substring(0, 60)}`, userId);
-            }
-          }));
+        if (useGmail) {
+          broadcastLog(batchId, "system", `📬 Gmail mode: ${created.length} Gmail+ addresses ready (no pre-creation needed)...`, userId);
+          created.forEach(acc => emailCreated.add(acc.id));
+        } else {
+          broadcastLog(batchId, "system", `⚡ Pre-creating ${created.length} emails (concurrency: ${CONCURRENCY})...`, userId);
+          const EMAIL_BATCH = 5;
+          for (let i = 0; i < created.length; i += EMAIL_BATCH) {
+            if (cancelledBatches.has(batchId)) break;
+            const emailChunk = created.slice(i, i + EMAIL_BATCH);
+            await Promise.all(emailChunk.map(async (acc) => {
+              try {
+                await createTempEmail(acc.email, acc.emailPassword);
+                emailCreated.add(acc.id);
+              } catch (err: any) {
+                broadcastLog(batchId, acc.id, `Email setup failed: ${err.message.substring(0, 60)}`, userId);
+              }
+            }));
+          }
         }
         broadcastLog(batchId, "system", `✅ ${emailCreated.size}/${created.length} emails ready. Starting registrations...`, userId);
 
@@ -1103,14 +1175,16 @@ export async function registerRoutes(
             for (const acc of failedAccounts) {
               if (cancelledBatches.has(batchId)) break;
               await storage.updateAccount(acc.id, { status: "pending" as any, errorMessage: null });
-              broadcastLog(batchId, acc.id, `🔄 Retry ${retryRound}: Re-creating email & retrying registration...`, userId);
+              broadcastLog(batchId, acc.id, `🔄 Retry ${retryRound}: Retrying registration...`, userId);
 
-              let emailReady = false;
-              try {
-                await createTempEmail(acc.email, acc.emailPassword);
-                emailReady = true;
-              } catch (emailErr: any) {
-                broadcastLog(batchId, acc.id, `Email re-setup failed: ${emailErr.message.substring(0, 60)}`, userId);
+              let emailReady = useGmail;
+              if (!useGmail) {
+                try {
+                  await createTempEmail(acc.email, acc.emailPassword);
+                  emailReady = true;
+                } catch (emailErr: any) {
+                  broadcastLog(batchId, acc.id, `Email re-setup failed: ${emailErr.message.substring(0, 60)}`, userId);
+                }
               }
 
               const baseProxy = proxies[failedAccounts.indexOf(acc) % proxies.length];

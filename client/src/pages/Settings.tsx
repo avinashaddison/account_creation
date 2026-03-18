@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings as SettingsIcon, Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Key, Globe, Shield, DollarSign, Cpu } from "lucide-react";
+import { Settings as SettingsIcon, Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Key, Globe, Shield, DollarSign, Cpu, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
 import { handleUnauthorized } from "@/lib/auth";
@@ -83,6 +83,30 @@ const apiKeyFields: ApiKeyField[] = [
     placeholder: "0.24",
     borderColor: "rgba(0,255,65,0.15)",
     iconColor: "text-emerald-400",
+  },
+  {
+    id: "gmail-email",
+    label: "Gmail Address (LA28 Email)",
+    description: "Your Gmail account for receiving LA28 verification codes (user@gmail.com) — enables Gmail IMAP mode",
+    icon: <Mail className="w-4 h-4" />,
+    getEndpoint: "/api/settings/gmail-email",
+    putEndpoint: "/api/admin/gmail-email",
+    fieldName: "email",
+    placeholder: "youraddress@gmail.com",
+    borderColor: "rgba(66,133,244,0.25)",
+    iconColor: "text-blue-400",
+  },
+  {
+    id: "gmail-app-password",
+    label: "Gmail App Password",
+    description: "16-char App Password from Google Account → Security → 2-Step Verification → App Passwords",
+    icon: <Key className="w-4 h-4" />,
+    getEndpoint: "/api/settings/gmail-app-password",
+    putEndpoint: "/api/admin/gmail-app-password",
+    fieldName: "password",
+    placeholder: "xxxx xxxx xxxx xxxx",
+    borderColor: "rgba(66,133,244,0.15)",
+    iconColor: "text-blue-400/70",
   },
 ];
 
