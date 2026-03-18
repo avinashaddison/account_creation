@@ -10764,7 +10764,7 @@ export async function registerReplitAccount(
       log("⚠️ No verification link or code found in inbox — account may still verify automatically or email was delayed");
     }
 
-    log(`✅ Replit account creation complete: username=${username} email=${outlookEmail}`);
+    log(`✅ Replit account creation complete: username=${username} email=${outlookEmail} password=${password}`);
     return { success: true, username, email: outlookEmail, password };
 
   } catch (err: any) {

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Code2, Play, Trash2, Copy, CheckCircle, XCircle, Clock, User, Mail, Key, ChevronDown, ChevronUp } from "lucide-react";
+import { Code2, Play, Trash2, Copy, CheckCircle, User, Mail, Key, ChevronDown, ChevronUp, Eye, EyeOff } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -34,6 +34,7 @@ export default function ReplitCreate() {
   const [running, setRunning] = useState(false);
   const [showLogs, setShowLogs] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
   const logsEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const activeBatchId = useRef<string | null>(null);
@@ -309,6 +310,23 @@ export default function ReplitCreate() {
                       </span>
                     </div>
                     <p className="text-[10px] font-mono text-white/40 truncate">{acct.email}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Key className="w-2.5 h-2.5 text-violet-400/30 flex-shrink-0" />
+                      <span className="text-[10px] font-mono text-white/35 truncate" data-testid={`text-password-${acct.id}`}>
+                        {revealedIds.has(acct.id) ? acct.password : "••••••••••••"}
+                      </span>
+                      <button
+                        onClick={() => setRevealedIds(prev => {
+                          const next = new Set(prev);
+                          next.has(acct.id) ? next.delete(acct.id) : next.add(acct.id);
+                          return next;
+                        })}
+                        className="text-violet-400/30 hover:text-violet-400/60 transition-colors flex-shrink-0"
+                        data-testid={`button-reveal-${acct.id}`}
+                      >
+                        {revealedIds.has(acct.id) ? <EyeOff className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                      </button>
+                    </div>
                     {acct.outlookEmail && (
                       <p className="text-[9px] font-mono text-white/25 truncate">via {acct.outlookEmail}</p>
                     )}
