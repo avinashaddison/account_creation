@@ -115,7 +115,11 @@ export default function TMEventScanner() {
       if (filters.city) params.set("city", filters.city);
       if (filters.stateCode) params.set("stateCode", filters.stateCode);
       if (filters.classificationName) params.set("classificationName", filters.classificationName);
-      if (filters.startDate) params.set("startDateTime", filters.startDate + "T00:00:00Z");
+      
+      // Always filter for future events (from today onwards) unless user specifies a start date
+      const startDate = filters.startDate || new Date().toISOString().split('T')[0];
+      params.set("startDateTime", startDate + "T00:00:00Z");
+      
       if (filters.endDate) params.set("endDateTime", filters.endDate + "T23:59:59Z");
       if (filters.postalCode && filters.radius) {
         params.set("postalCode", filters.postalCode);
@@ -167,7 +171,7 @@ export default function TMEventScanner() {
               <span className="px-2 py-0.5 rounded-md text-[9px] font-semibold tracking-widest" style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", color: "#60a5fa" }}>LIVE</span>
             </h1>
             <p className="text-white/20 mt-0.5 text-[11px] font-mono">
-              {total.toLocaleString()} events · Ticketmaster Discovery API · Auto-refresh 30s
+              {total.toLocaleString()} upcoming events · From {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} onwards · Auto-refresh 30s
             </p>
           </div>
         </div>
