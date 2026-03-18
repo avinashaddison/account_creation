@@ -5983,43 +5983,49 @@ export async function createOutlookAccount(
         const _noise = Math.random() * 0.0001;
         const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL = function(type?: string, quality?: any) {
-          const ctx2d = this.getContext('2d');
-          if (ctx2d) {
-            const imageData = ctx2d.getImageData(0, 0, this.width || 1, this.height || 1);
-            if (imageData && imageData.data.length > 4) {
-              imageData.data[0] = Math.max(0, imageData.data[0] + (_noise > 0.00005 ? 1 : 0));
-              ctx2d.putImageData(imageData, 0, 0);
+          try {
+            if (this.width > 0 && this.height > 0) {
+              const ctx2d = this.getContext('2d');
+              if (ctx2d && _noise > 0.00005) {
+                try {
+                  const imageData = origGetImageData.call(ctx2d, 0, 0, 1, 1);
+                  if (imageData && imageData.data.length >= 4) {
+                    imageData.data[0] = Math.max(0, Math.min(255, imageData.data[0] + 1));
+                    ctx2d.putImageData(imageData, 0, 0);
+                  }
+                } catch {}
+              }
             }
-          }
+          } catch {}
           return origToDataURL.apply(this, [type, quality] as any);
         };
         const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
         CanvasRenderingContext2D.prototype.getImageData = function(sx: number, sy: number, sw: number, sh: number) {
           const imageData = origGetImageData.apply(this, [sx, sy, sw, sh] as any);
-          if (imageData && imageData.data && imageData.data.length > 4 && _noise > 0.00005) {
-            imageData.data[0] = Math.max(0, Math.min(255, imageData.data[0] + 1));
-          }
+          try {
+            if (imageData && imageData.data && imageData.data.length >= 4 && _noise > 0.00005) {
+              imageData.data[0] = Math.max(0, Math.min(255, imageData.data[0] + 1));
+            }
+          } catch {}
           return imageData;
         };
 
-        // --- WebGL vendor/renderer spoofing (hide SwiftShader / ANGLE headless) ---
+        // --- WebGL vendor/renderer spoofing — Windows Chrome 131 ANGLE/Intel profile ---
         const spoofWebGL = (proto: any) => {
           const origGetParam = proto.getParameter;
           proto.getParameter = function(pname: number) {
-            if (pname === 37445) return 'Intel Open Source Technology Center'; // VENDOR
-            if (pname === 37446) return 'Mesa Intel(R) UHD Graphics 620 (KBL GT2)'; // RENDERER
-            if (pname === 7936) return 'WebGL 1.0 (OpenGL ES 2.0 Chromium)'; // VERSION
-            if (pname === 35724) return 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)'; // SHADING_LANGUAGE_VERSION
+            // UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL (via WEBGL_debug_renderer_info ext)
+            if (pname === 37445) return 'Google Inc. (Intel)';
+            if (pname === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+            if (pname === 7936) return 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
+            if (pname === 35724) return 'WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)';
             return origGetParam.apply(this, arguments);
           };
           const origGetExtension = proto.getExtension;
           proto.getExtension = function(name: string) {
             const result = origGetExtension.apply(this, arguments);
             if (name === 'WEBGL_debug_renderer_info') {
-              return {
-                UNMASKED_VENDOR_WEBGL: 37445,
-                UNMASKED_RENDERER_WEBGL: 37446,
-              };
+              return { UNMASKED_VENDOR_WEBGL: 37445, UNMASKED_RENDERER_WEBGL: 37446 };
             }
             return result;
           };
@@ -6027,18 +6033,31 @@ export async function createOutlookAccount(
         try { spoofWebGL(WebGLRenderingContext.prototype); } catch {}
         try { spoofWebGL((window as any).WebGL2RenderingContext.prototype); } catch {}
 
-        // --- Audio context fingerprint noise ---
+        // --- Audio context fingerprint noise (AudioBuffer + AnalyserNode) ---
         try {
           const origGetChannelData = AudioBuffer.prototype.getChannelData;
           AudioBuffer.prototype.getChannelData = function(channel: number) {
             const data = origGetChannelData.call(this, channel);
-            if (data && data.length > 100) {
-              for (let i = 0; i < 3; i++) {
-                const idx = Math.floor(Math.random() * data.length);
-                data[idx] += (_noise - 0.00005) * 0.01;
+            try {
+              if (data && data.length > 100) {
+                for (let i = 0; i < 3; i++) {
+                  const idx = Math.floor(Math.random() * data.length);
+                  data[idx] += (_noise - 0.00005) * 0.01;
+                }
               }
-            }
+            } catch {}
             return data;
+          };
+        } catch {}
+        try {
+          const origGetFloatFreq = (window as any).AnalyserNode.prototype.getFloatFrequencyData;
+          (window as any).AnalyserNode.prototype.getFloatFrequencyData = function(array: Float32Array) {
+            origGetFloatFreq.call(this, array);
+            try {
+              if (array && array.length > 0) {
+                array[0] += (_noise - 0.00005) * 0.1;
+              }
+            } catch {}
           };
         } catch {}
 
@@ -6059,13 +6078,15 @@ export async function createOutlookAccount(
           }
         } catch {}
 
-        // --- navigator.permissions.query override ---
+        // --- navigator.permissions.query override (match real Chrome headful behavior) ---
         try {
           const origQuery = navigator.permissions.query.bind(navigator.permissions);
           navigator.permissions.query = (params: any) => {
             const name = params && params.name;
-            if (name === 'notifications') return Promise.resolve({ state: 'prompt', onchange: null } as any);
-            if (name === 'clipboard-read' || name === 'clipboard-write') return Promise.resolve({ state: 'prompt', onchange: null } as any);
+            // Real Chrome returns 'prompt' for these on a fresh profile, not 'denied'
+            if (['notifications', 'clipboard-read', 'clipboard-write', 'camera', 'microphone', 'geolocation'].includes(name)) {
+              return Promise.resolve({ state: 'prompt', onchange: null } as any);
+            }
             return origQuery(params);
           };
         } catch {}
