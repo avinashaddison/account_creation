@@ -9574,6 +9574,243 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
+export interface GoogleLoginResult {
+  success: boolean;
+  error?: string;
+  note?: string;
+  cookies?: any[];
+}
+
+export async function loginGoogleAccount(
+  email: string,
+  password: string,
+  log: (msg: string) => void
+): Promise<GoogleLoginResult> {
+  let browser: any = null;
+
+  try {
+    await ensureBrowserInstalled();
+
+    const residentialProxy = await getResidentialProxyUrl();
+
+    const launchArgs = [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-extensions",
+      "--no-first-run",
+      "--no-zygote",
+    ];
+
+    log("Launching local browser for Google login...");
+    browser = await chromium.launch({ headless: true, args: launchArgs });
+
+    const contextOptions: any = {
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+      locale: "en-US",
+    };
+
+    if (residentialProxy) {
+      log("Using residential proxy...");
+      const rawProxy = residentialProxy.startsWith("http") ? residentialProxy : `http://${residentialProxy}`;
+      try {
+        const u = new URL(rawProxy);
+        contextOptions.proxy = {
+          server: `${u.protocol}//${u.hostname}:${u.port}`,
+          username: u.username || undefined,
+          password: u.password || undefined,
+        };
+      } catch {
+        contextOptions.proxy = { server: rawProxy };
+      }
+    } else {
+      log("No residential proxy configured — using direct connection");
+    }
+
+    const context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    page.setDefaultTimeout(20000);
+
+    // ── Step 1: Open Google sign-in ──────────────────────────────────────
+    log("Opening accounts.google.com...");
+    await page.goto(
+      "https://accounts.google.com/signin/v2/identifier?flowName=GlifWebSignIn&flowEntry=ServiceLogin",
+      { waitUntil: "domcontentloaded", timeout: 60000 }
+    );
+    await page.waitForTimeout(2000 + Math.random() * 1000);
+    log("Page loaded: " + page.url().substring(0, 80));
+
+    // ── Step 2: Enter email ──────────────────────────────────────────────
+    log("Looking for email input...");
+    let emailInput: any;
+    try {
+      emailInput = await page.waitForSelector('input[type="email"]', { timeout: 15000 });
+    } catch {
+      const title = await page.title();
+      log("⚠️ Email input not found. Page title: " + title);
+      return { success: false, error: "Email input not found — Google may have changed the page layout" };
+    }
+
+    await emailInput.click();
+    await page.waitForTimeout(400 + Math.random() * 300);
+    log("Entering email: " + email);
+    for (const ch of email) {
+      await page.keyboard.type(ch, { delay: 0 });
+      await page.waitForTimeout(20 + Math.random() * 40);
+    }
+    await page.waitForTimeout(400 + Math.random() * 200);
+
+    log("Clicking Next (email step)...");
+    const nextEmail = await page.$("#identifierNext button, #identifierNext");
+    if (nextEmail) {
+      await (nextEmail as any).click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForTimeout(3500 + Math.random() * 1500);
+    log("After email submit: " + page.url().substring(0, 80));
+
+    // Check email-stage errors
+    try {
+      const errEl = await page.$('.o6cuMc, [aria-live="assertive"], [data-error-code]');
+      if (errEl) {
+        const errText = ((await errEl.textContent()) || "").trim();
+        if (errText.length > 0) {
+          log("Google error (email stage): " + errText.substring(0, 100));
+          return { success: false, error: "Email rejected: " + errText.substring(0, 120) };
+        }
+      }
+    } catch {}
+
+    // ── Step 3: Enter password ───────────────────────────────────────────
+    log("Looking for password input...");
+    let passwordInput: any;
+    try {
+      passwordInput = await page.waitForSelector('input[type="password"]', { timeout: 12000 });
+    } catch {
+      const bodyText = ((await page.textContent("body")) || "").substring(0, 400).toLowerCase();
+      const title = await page.title();
+      log("No password field. Title: " + title);
+      if (bodyText.includes("couldn't find") || bodyText.includes("account not found")) {
+        return { success: false, error: "Google account not found — email may not exist" };
+      }
+      if (bodyText.includes("captcha") || bodyText.includes("verify") || bodyText.includes("suspicious")) {
+        log("⚠️ CAPTCHA or unusual activity check detected");
+        return { success: false, error: "Google blocked the login — CAPTCHA or suspicious activity detected" };
+      }
+      return { success: false, error: "Password field not found — Google may have blocked this login attempt" };
+    }
+
+    await passwordInput.click();
+    await page.waitForTimeout(400 + Math.random() * 300);
+    log("Entering password...");
+    for (const ch of password) {
+      await page.keyboard.type(ch, { delay: 0 });
+      await page.waitForTimeout(20 + Math.random() * 40);
+    }
+    await page.waitForTimeout(400 + Math.random() * 200);
+
+    log("Clicking Next (password step)...");
+    const nextPwd = await page.$("#passwordNext button, #passwordNext");
+    if (nextPwd) {
+      await (nextPwd as any).click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForTimeout(5000 + Math.random() * 2000);
+
+    const urlFinal = page.url();
+    log("Final URL: " + urlFinal.substring(0, 100));
+
+    const bodyFinal = ((await page.textContent("body")) || "").toLowerCase();
+    const titleFinal = await page.title();
+
+    // ── Step 4: Determine outcome ────────────────────────────────────────
+
+    // Success: landed outside the signin flow
+    const isSuccess =
+      urlFinal.includes("myaccount.google.com") ||
+      urlFinal.includes("/u/0/") ||
+      urlFinal.includes("mail.google.com") ||
+      (urlFinal.includes("google.com") && !urlFinal.includes("accounts.google.com/signin") && !urlFinal.includes("accounts.google.com/v3") && !urlFinal.includes("/challenge"));
+
+    if (isSuccess) {
+      let cookies: any[] = [];
+      try { cookies = await context.cookies(); } catch {}
+      log(`✅ Google login successful! Got ${cookies.length} session cookies`);
+      return { success: true, cookies };
+    }
+
+    // 2FA / verification challenges
+    if (
+      urlFinal.includes("/challenge") ||
+      urlFinal.includes("signin/v2/challenge") ||
+      bodyFinal.includes("2-step verification") ||
+      bodyFinal.includes("verify it's you") ||
+      bodyFinal.includes("check your phone") ||
+      bodyFinal.includes("google prompt") ||
+      bodyFinal.includes("verification code") ||
+      bodyFinal.includes("authenticator")
+    ) {
+      if (bodyFinal.includes("authenticator") || bodyFinal.includes("totp")) {
+        log("⚠️ 2FA — Authenticator app code required");
+        return { success: false, error: "2FA required: Enter the Authenticator app code", note: "2fa_authenticator" };
+      }
+      if (bodyFinal.includes("check your phone") || bodyFinal.includes("google prompt") || bodyFinal.includes("tap yes")) {
+        log("⚠️ 2FA — Google Prompt sent to phone");
+        return { success: false, error: "2FA required: Approve the Google Prompt on your phone", note: "2fa_prompt" };
+      }
+      if (bodyFinal.includes("text message") || bodyFinal.includes("sms") || bodyFinal.includes("phone number")) {
+        log("⚠️ 2FA — SMS code required");
+        return { success: false, error: "2FA required: Enter the SMS code sent to your phone", note: "2fa_sms" };
+      }
+      log("⚠️ 2FA / identity verification required");
+      return { success: false, error: "2FA or identity verification required", note: "2fa_required" };
+    }
+
+    // Wrong password
+    if (
+      bodyFinal.includes("wrong password") ||
+      bodyFinal.includes("incorrect password") ||
+      bodyFinal.includes("password is wrong") ||
+      bodyFinal.includes("wrong passwor") ||
+      bodyFinal.includes("entered an incorrect password")
+    ) {
+      log("❌ Wrong password");
+      return { success: false, error: "Wrong password — please check your credentials" };
+    }
+
+    // Account not found
+    if (bodyFinal.includes("couldn't find your google account") || bodyFinal.includes("account not found")) {
+      log("❌ Google account not found");
+      return { success: false, error: "Google account not found — email may not exist" };
+    }
+
+    // Account locked / suspended
+    if (bodyFinal.includes("account has been disabled") || bodyFinal.includes("suspended") || bodyFinal.includes("account locked")) {
+      log("❌ Account disabled or locked");
+      return { success: false, error: "Account has been disabled or locked by Google" };
+    }
+
+    // Fallback
+    log("⚠️ Unknown outcome. Title: " + titleFinal + " | URL: " + urlFinal.substring(0, 80));
+    return { success: false, error: "Unknown login result — URL: " + urlFinal.substring(0, 80) };
+
+  } catch (err: any) {
+    log("Error: " + (err.message || "").substring(0, 200));
+    return { success: false, error: err.message || "Unknown error" };
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch {}
+    }
+  }
+}
+
 export interface GmailCheckResult {
   success: boolean;
   error?: string;

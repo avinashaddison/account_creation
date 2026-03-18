@@ -59,6 +59,17 @@ type GmailCheckJob = {
   error?: string;
 };
 
+type GmailLoginJob = {
+  loginId: string;
+  batchId: string;
+  accountId: string;
+  email: string;
+  status: "running" | "success" | "failed" | "2fa";
+  logs: string[];
+  error?: string;
+  cookieCount?: number;
+};
+
 export default function PrivateAccount() {
   const [tab, setTab] = useState<TabType>("outlook");
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
@@ -82,6 +93,8 @@ export default function PrivateAccount() {
   const [registeringAccountIds, setRegisteringAccountIds] = useState<Set<string>>(new Set());
   const [gmailCheckJobs, setGmailCheckJobs] = useState<Record<string, GmailCheckJob>>({});
   const [checkingGmailIds, setCheckingGmailIds] = useState<Set<string>>(new Set());
+  const [gmailLoginJobs, setGmailLoginJobs] = useState<Record<string, GmailLoginJob>>({});
+  const [loggingInGmailIds, setLoggingInGmailIds] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -184,6 +197,59 @@ export default function PrivateAccount() {
           if (!job) return prev;
           if (job.status === "running") {
             return { ...prev, [data.batchId]: { ...job, status: "failed", error: "Check completed without result" } };
+          }
+          return prev;
+        });
+      }
+
+      if (data.type === "log" && data.batchId?.startsWith("gmail-login-")) {
+        setGmailLoginJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          const newLogs = [...job.logs, data.message].slice(-200);
+          return { ...prev, [data.batchId]: { ...job, logs: newLogs } };
+        });
+      }
+
+      if (data.type === "gmail_login_result") {
+        setGmailLoginJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          const is2fa = data.note?.startsWith("2fa") || data.credentialsValid;
+          return {
+            ...prev,
+            [data.batchId]: {
+              ...job,
+              status: data.success ? "success" : is2fa ? "2fa" : "failed",
+              error: data.error,
+              cookieCount: data.cookieCount,
+            },
+          };
+        });
+        setLoggingInGmailIds((prev) => {
+          const next = new Set(prev);
+          next.delete(data.accountId);
+          return next;
+        });
+        if (data.success) {
+          fetchGmail();
+          toast({ title: "Google Login Successful", description: `Session captured with ${data.cookieCount || 0} cookies` });
+          sounds.navigate();
+        } else if (data.credentialsValid || data.note?.startsWith("2fa")) {
+          fetchGmail();
+          toast({ title: "2FA Required", description: "Credentials are valid — 2FA step reached" });
+        } else {
+          fetchGmail();
+          toast({ title: "Google Login Failed", description: data.error || "Login failed", variant: "destructive" });
+        }
+      }
+
+      if (data.type === "batch_complete" && data.batchId?.startsWith("gmail-login-")) {
+        setGmailLoginJobs((prev) => {
+          const job = prev[data.batchId];
+          if (!job) return prev;
+          if (job.status === "running") {
+            return { ...prev, [data.batchId]: { ...job, status: "failed", error: "Login completed without result" } };
           }
           return prev;
         });
@@ -370,6 +436,39 @@ export default function PrivateAccount() {
     } catch (err: any) {
       setCheckingGmailIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
       toast({ title: "Error", description: err.message || "Failed to start check", variant: "destructive" });
+    }
+  }
+
+  async function loginGmailWeb(acc: GmailAccount) {
+    if (loggingInGmailIds.has(acc.id)) return;
+    setLoggingInGmailIds((prev) => new Set(prev).add(acc.id));
+    try {
+      const res = await fetch(`/api/private/gmail/${acc.id}/login`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        setLoggingInGmailIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
+        toast({ title: "Login Failed", description: "Could not start Google login", variant: "destructive" });
+        return;
+      }
+      const data = await res.json();
+      setGmailLoginJobs((prev) => ({
+        ...prev,
+        [data.batchId]: {
+          loginId: data.loginId,
+          batchId: data.batchId,
+          accountId: acc.id,
+          email: acc.email,
+          status: "running",
+          logs: [],
+        },
+      }));
+      toast({ title: "Google Login Started", description: `Logging into ${acc.email} via browser` });
+    } catch (err: any) {
+      setLoggingInGmailIds((prev) => { const n = new Set(prev); n.delete(acc.id); return n; });
+      toast({ title: "Error", description: err.message || "Failed to start login", variant: "destructive" });
     }
   }
 
@@ -875,11 +974,22 @@ export default function PrivateAccount() {
                               size="sm"
                               className="h-6 px-2 text-emerald-400/50 hover:text-emerald-400 hover:bg-emerald-500/10 font-mono text-[10px]"
                               onClick={() => checkGmailLogin(acc)}
-                              disabled={checkingGmailIds.has(acc.id)}
+                              disabled={checkingGmailIds.has(acc.id) || loggingInGmailIds.has(acc.id)}
                               data-testid={`button-check-gmail-${acc.id}`}
-                              title="Test Gmail login"
+                              title="IMAP credential check"
                             >
                               {checkingGmailIds.has(acc.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-blue-400/50 hover:text-blue-400 hover:bg-blue-500/10 font-mono text-[10px]"
+                              onClick={() => loginGmailWeb(acc)}
+                              disabled={loggingInGmailIds.has(acc.id) || checkingGmailIds.has(acc.id)}
+                              data-testid={`button-login-gmail-${acc.id}`}
+                              title="Google web login (Playwright)"
+                            >
+                              {loggingInGmailIds.has(acc.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
                             </Button>
                             <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteGmail(acc.id)} data-testid={`button-delete-gmail-${acc.id}`}>
                               <Trash2 className="w-3 h-3" />
@@ -971,6 +1081,63 @@ export default function PrivateAccount() {
                           })}
                         </div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {Object.values(gmailLoginJobs).length > 0 && (
+              <div className="mt-4 space-y-3">
+                {Object.values(gmailLoginJobs).map((job) => {
+                  const borderClass =
+                    job.status === "success" ? "border-emerald-500/20 bg-emerald-500/5" :
+                    job.status === "2fa" ? "border-yellow-500/20 bg-yellow-500/5" :
+                    job.status === "failed" ? "border-red-500/20 bg-red-500/5" :
+                    "border-blue-500/15 bg-blue-500/5";
+                  return (
+                    <div key={job.batchId} className={`rounded-lg border p-3 ${borderClass}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {job.status === "running" && <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />}
+                          {job.status === "success" && <Check className="w-3 h-3 text-emerald-400" />}
+                          {job.status === "2fa" && <Shield className="w-3 h-3 text-yellow-400" />}
+                          {job.status === "failed" && <X className="w-3 h-3 text-red-400" />}
+                          <Mail className="w-3 h-3 text-blue-400/60" />
+                          <span className="text-[10px] font-mono text-zinc-300">{job.email}</span>
+                          <Badge variant="outline" className={`text-[9px] font-mono ${
+                            job.status === "success" ? "border-emerald-500/20 text-emerald-400" :
+                            job.status === "2fa" ? "border-yellow-500/20 text-yellow-400" :
+                            job.status === "failed" ? "border-red-500/20 text-red-400" :
+                            "border-blue-500/20 text-blue-400"
+                          }`}>
+                            {job.status === "running" ? "LOGGING IN" : job.status === "2fa" ? "2FA REQUIRED" : job.status.toUpperCase()}
+                          </Badge>
+                          {job.cookieCount != null && job.cookieCount > 0 && (
+                            <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/20 text-emerald-400">
+                              {job.cookieCount} cookies
+                            </Badge>
+                          )}
+                        </div>
+                        <button onClick={() => setGmailLoginJobs((prev) => { const n = { ...prev }; delete n[job.batchId]; return n; })} className="text-zinc-600 hover:text-zinc-400">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {job.error && job.status !== "running" && (
+                        <p className="text-[9px] font-mono text-yellow-400/80 mb-2 px-1">{job.error}</p>
+                      )}
+                      <div className="bg-black/40 rounded p-2 max-h-40 overflow-y-auto font-mono text-[10px] text-zinc-400 space-y-0.5">
+                        {job.logs.map((line, i) => (
+                          <div key={i} className={
+                            line.startsWith("✅") ? "text-emerald-400" :
+                            line.startsWith("❌") ? "text-red-400" :
+                            line.startsWith("⚠️") ? "text-yellow-400" :
+                            line.startsWith("Opening") || line.startsWith("Launching") || line.startsWith("Page loaded") || line.startsWith("After") || line.startsWith("Final") ? "text-blue-400/70" :
+                            "text-zinc-400"
+                          }>{line}</div>
+                        ))}
+                        {job.logs.length === 0 && <div className="text-zinc-600">Waiting for logs...</div>}
+                      </div>
                     </div>
                   );
                 })}

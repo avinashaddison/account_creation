@@ -6,7 +6,7 @@ import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -2508,6 +2508,59 @@ export async function registerRoutes(
           await storage.updatePrivateGmailStatus(id, "failed");
           broadcastLog(batchId, checkId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "gmail_check_result", checkId, batchId, accountId: id, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/private/gmail/:id/login", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+
+      const { id } = req.params;
+      const accounts = await storage.getAllPrivateGmails();
+      const acc = accounts.find((a) => a.id === id);
+      if (!acc) return res.status(404).json({ error: "Gmail account not found" });
+
+      const userId = req.session.userId;
+      const loginId = randomUUID().substring(0, 8);
+      const batchId = `gmail-login-${loginId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, loginId, batchId, message: `Google web login started for ${acc.email}` });
+
+      (async () => {
+        broadcastLog(batchId, loginId, `Starting Google web login for ${acc.email}...`, userId);
+        try {
+          const result = await loginGoogleAccount(
+            acc.email,
+            acc.password,
+            (msg) => broadcastLog(batchId, loginId, msg, userId)
+          );
+
+          if (result.success) {
+            await storage.updatePrivateGmailStatus(id, "verified");
+            broadcastLog(batchId, loginId, `✅ Google login SUCCESSFUL — ${result.cookies?.length || 0} session cookies captured`, userId);
+            broadcast({ type: "gmail_login_result", loginId, batchId, accountId: id, success: true, cookieCount: result.cookies?.length || 0 }, userId);
+          } else {
+            const is2fa = result.note?.startsWith("2fa");
+            if (is2fa) {
+              await storage.updatePrivateGmailStatus(id, "verified");
+              broadcastLog(batchId, loginId, `⚠️ Login reached 2FA step — credentials are valid`, userId);
+              broadcast({ type: "gmail_login_result", loginId, batchId, accountId: id, success: false, error: result.error, note: result.note, credentialsValid: true }, userId);
+            } else {
+              await storage.updatePrivateGmailStatus(id, "failed");
+              broadcastLog(batchId, loginId, `❌ Google login FAILED: ${result.error || "Unknown error"}`, userId);
+              broadcast({ type: "gmail_login_result", loginId, batchId, accountId: id, success: false, error: result.error }, userId);
+            }
+          }
+        } catch (err: any) {
+          await storage.updatePrivateGmailStatus(id, "failed");
+          broadcastLog(batchId, loginId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "gmail_login_result", loginId, batchId, accountId: id, success: false, error: err.message }, userId);
         }
         broadcastBatchComplete(batchId, userId);
       })();
