@@ -2954,30 +2954,82 @@ export async function registerRoutes(
 
   app.post("/api/card-generate", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { bin, quantity = 10, expmon, expyear, cvv } = req.body;
-      if (!bin || !/^\d{6,8}$/.test(String(bin).trim())) {
+      const { bin, quantity = 10, expmon, expyear, cvvEnabled, cvv } = req.body;
+      const cleanBin = String(bin || "").replace(/\D/g, "");
+      if (!cleanBin || cleanBin.length < 6 || cleanBin.length > 8) {
         return res.status(400).json({ error: "BIN must be 6–8 digits" });
       }
-      const body: Record<string, any> = {
-        bin: String(bin).trim(),
-        quantity: Math.min(Math.max(1, parseInt(String(quantity)) || 10), 2000),
-      };
-      if (expmon && expmon !== "random") body.expiry = { mm: String(expmon).padStart(2, "0"), yyyy: expyear && expyear !== "random" ? String(expyear) : String(new Date().getFullYear() + 1 + Math.floor(Math.random() * 4)) };
-      if (cvv) body.cvv = String(cvv);
 
-      const response = await fetch("https://namso-gen.com/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const count = Math.min(Math.max(1, parseInt(String(quantity)) || 10), 999);
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        return res.status(502).json({ error: `namso-gen returned ${response.status}`, detail: text.slice(0, 200) });
+      function luhnComplete(partial: string): string {
+        let sum = 0;
+        let alt = true;
+        for (let i = partial.length - 1; i >= 0; i--) {
+          let d = parseInt(partial[i]);
+          if (alt) { d *= 2; if (d > 9) d -= 9; }
+          sum += d;
+          alt = !alt;
+        }
+        const check = (10 - (sum % 10)) % 10;
+        return partial + check;
       }
 
-      const data = await response.json();
-      res.json(data);
+      function randDigits(n: number): string {
+        let s = "";
+        for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10);
+        return s;
+      }
+
+      // Detect network from BIN to pick card length
+      function cardLength(b: string): number {
+        if (b.startsWith("34") || b.startsWith("37")) return 15; // Amex
+        if (b.startsWith("6011") || b.startsWith("65") || b.startsWith("64") || b.startsWith("622")) return 16; // Discover
+        return 16; // Visa/MC default
+      }
+
+      const length = cardLength(cleanBin);
+      const now = new Date();
+
+      const cards: string[] = [];
+      for (let i = 0; i < count; i++) {
+        // Fill digits up to length-1, then luhn
+        const fill = randDigits(length - 1 - cleanBin.length);
+        const number = luhnComplete(cleanBin + fill);
+
+        // Expiry month
+        let mm: string;
+        if (expmon && expmon !== "Random" && expmon !== "random") {
+          mm = String(expmon).padStart(2, "0");
+        } else {
+          mm = String(Math.floor(Math.random() * 12) + 1).padStart(2, "0");
+        }
+
+        // Expiry year
+        let yyyy: string;
+        if (expyear && expyear !== "Random" && expyear !== "random") {
+          yyyy = String(expyear);
+        } else {
+          yyyy = String(now.getFullYear() + 1 + Math.floor(Math.random() * 5));
+        }
+
+        // CVV
+        let cvvVal: string;
+        if (cvvEnabled === false) {
+          cvvVal = "";
+        } else if (cvv && String(cvv).trim()) {
+          cvvVal = String(cvv).trim();
+        } else {
+          const isAmex = cleanBin.startsWith("34") || cleanBin.startsWith("37");
+          cvvVal = randDigits(isAmex ? 4 : 3);
+        }
+
+        const parts = [number, mm, yyyy];
+        if (cvvEnabled !== false) parts.push(cvvVal);
+        cards.push(parts.join("|"));
+      }
+
+      res.json({ cards });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

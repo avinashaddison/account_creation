@@ -54,9 +54,10 @@ export default function CardGenerator() {
         body: JSON.stringify({
           bin: form.bin.trim(),
           quantity: parseInt(form.quantity) || 10,
-          expmon: form.dateEnabled ? form.expmon : undefined,
-          expyear: form.dateEnabled ? form.expyear : undefined,
-          cvv: form.cvvEnabled && form.cvv ? form.cvv : undefined,
+          expmon: form.dateEnabled ? form.expmon : "random",
+          expyear: form.dateEnabled ? form.expyear : "random",
+          cvvEnabled: form.cvvEnabled,
+          cvv: form.cvv || "",
         }),
       });
       const data = await res.json();
