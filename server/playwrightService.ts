@@ -10960,7 +10960,7 @@ export async function registerLovableAccount(
   outlookEmail: string,
   outlookPassword: string,
   log: (msg: string) => void
-): Promise<{ success: boolean; email?: string; error?: string }> {
+): Promise<{ success: boolean; email?: string; password?: string; error?: string }> {
   let browser: any = null;
   let page: any = null;
 
@@ -10973,14 +10973,17 @@ export async function registerLovableAccount(
       log("⚠️ No ZenRows API key — using stealth headless browser");
     }
 
-    log("Launching browser...");
-    const { chromium } = await import("playwright");
+    // Use playwright-extra with stealth plugin for Castle.io/bot detection bypass
+    const { chromium: stealthChromium } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    stealthChromium.use(StealthPlugin());
 
     let context: any;
     if (zenrowsApiKey) {
       try {
         const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
-        browser = await chromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
+        const { chromium: vanillaChromium } = await import("playwright");
+        browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
         context = browser.contexts()[0] || await browser.newContext();
         log("Connected via ZenRows anti-bot browser");
       } catch (zrErr: any) {
@@ -10990,7 +10993,7 @@ export async function registerLovableAccount(
       }
     }
     if (!zenrowsApiKey) {
-      browser = await chromium.launch({
+      browser = await stealthChromium.launch({
         headless: true,
         args: [
           "--no-sandbox",
@@ -11016,21 +11019,174 @@ export async function registerLovableAccount(
         extraHTTPHeaders: {
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "gzip, deflate, br",
-          "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+          "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand)";v="24", "Google Chrome";v="122"',
           "Sec-Ch-Ua-Mobile": "?0",
           "Sec-Ch-Ua-Platform": '"Windows"',
         },
       });
-      await context.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-        Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3] });
-        Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-        (window as any).chrome = { runtime: {} };
-      });
-      log("Using stealth headless browser");
+      log("Using stealth headless browser (playwright-extra + StealthPlugin)");
     }
     page = await context.newPage();
     page.setDefaultTimeout(30000);
+
+    let lovableTurnstileSitekey: string | null = null;
+    page.on("request", (req: any) => {
+      const url = req.url() || "";
+      if (url.includes("challenges.cloudflare.com") || url.includes("turnstile")) {
+        const m = url.match(/[?&](?:sitekey|k)=([^&]+)/);
+        if (m && m[1] && !lovableTurnstileSitekey) {
+          lovableTurnstileSitekey = m[1];
+        }
+        const m2 = url.match(/\/([0-9A-Za-z_-]{20,})\//);
+        if (m2 && !lovableTurnstileSitekey) {
+          lovableTurnstileSitekey = m2[1];
+        }
+      }
+    });
+
+    page.on("response", async (resp: any) => {
+      const rUrl = resp.url() || "";
+      const status = resp.status();
+      if (rUrl.includes("supabase.co") || rUrl.includes("supabase.io")) {
+        try {
+          const body = await resp.text();
+          log(`[Supabase] ${rUrl.substring(0, 120)} → status=${status} body=${body.substring(0, 400)}`);
+        } catch {}
+      } else if (rUrl.includes("identitytoolkit.googleapis.com") || rUrl.includes("googleapis.com/identitytoolkit")) {
+        try {
+          const body = await resp.text();
+          log(`[Firebase] ${rUrl.substring(0, 120)} → status=${status} body=${body.substring(0, 500)}`);
+        } catch {}
+      } else if (rUrl.includes("api.lovable.dev") || rUrl.includes("lovable.dev/api")) {
+        try {
+          const body = await resp.text();
+          log(`[Lovable API RESP] ${rUrl.substring(0, 120)} → status=${status} body=${body.substring(0, 400)}`);
+        } catch {}
+      } else if (status >= 400 && !rUrl.includes("challenges.cloudflare") && !rUrl.includes("capsolver")) {
+        try {
+          const body = await resp.text();
+          log(`[HTTP ${status}] ${rUrl.substring(0, 120)} body=${body.substring(0, 300)}`);
+        } catch {
+          log(`[HTTP ${status}] ${rUrl.substring(0, 120)}`);
+        }
+      }
+    });
+
+    await page.route("https://identitytoolkit.googleapis.com/**", async (route: any) => {
+      const request = route.request();
+      try {
+        const postData = request.postData() || "";
+        const headers = request.headers();
+        const allHeaderKeys = Object.keys(headers).join(", ");
+        const appCheckHeader = headers["x-firebase-appcheck"] || headers["X-Firebase-AppCheck"] || "(none)";
+        const gmpid = headers["x-firebase-gmpid"] || "(none)";
+        const clientVersion = headers["x-client-version"] || "(none)";
+        log(`[Firebase REQ] ${request.url().substring(0, 100)}`);
+        log(`[Firebase REQ HEADERS] ${allHeaderKeys}`);
+        log(`[Firebase REQ APPCHECK] ${appCheckHeader.substring(0, 60)}`);
+        log(`[Firebase REQ GMPID] ${gmpid}`);
+        log(`[Firebase REQ CLIENT_VER] ${clientVersion}`);
+        log(`[Firebase REQ BODY] ${postData.substring(0, 600)}`);
+      } catch {}
+      await route.continue();
+    });
+
+    // Match all lovable.dev and supabase calls (including api.lovable.dev subdomains)
+    for (const pattern of ["**lovable.dev/**", "**supabase.co/**", "**supabase.io/**"]) {
+      await page.route(pattern, async (route: any) => {
+        const request = route.request();
+        try {
+          const method = request.method();
+          const url = request.url();
+          const postData = request.postData() || "";
+          const headers = request.headers();
+          const interestingHeaders = Object.entries(headers).filter(([k]) => !["accept", "accept-encoding", "accept-language", "user-agent", "referer", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-ch-ua", "content-length", "cache-control"].includes(k.toLowerCase())).map(([k, v]) => `${k}: ${String(v).substring(0, 60)}`).join(", ");
+          log(`[Lovable/Supa REQ] ${method} ${url.substring(0, 200)} body=${postData.substring(0, 300)} headers={${interestingHeaders}}`);
+        } catch {}
+        await route.continue();
+      });
+    }
+
+    page.on("request", (req: any) => {
+      const url = req.url() || "";
+      const method = req.method() || "";
+      const skipPatterns = ["cdn.", "fonts.", "favicon", ".png", ".jpg", ".svg", ".ico", ".woff", ".css", "analytics", "segment.io", "intercom", "hotjar", "sentry", "logrocket", "posthog", "amplitude"];
+      const skip = skipPatterns.some(p => url.includes(p));
+      if (!skip && (method === "POST" || url.includes("api") || url.includes("auth") || url.includes("googleapis") || url.includes("lovable") || url.includes("supabase") || url.includes("challenge"))) {
+        const postData = req.postData() || "";
+        log(`[NET REQ] ${method} ${url.substring(0, 180)} ${postData ? 'body=' + postData.substring(0, 150) : ''}`);
+      }
+    });
+
+    page.on("console", (msg: any) => {
+      if (msg.type() === "error") {
+        log(`[PAGE ERROR] ${(msg.text() || "").substring(0, 200)}`);
+      }
+    });
+
+    await page.addInitScript(() => {
+      (window as any).__lovableTurnstileCallbacks = [];
+      (window as any).__lovableTurnstileToken = null;
+      (window as any).__allFetchCalls = [];
+      let __lovableTurnstileReal: any = null;
+
+      // Intercept ALL fetch calls to see what APIs Lovable calls
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async function(url: any, options: any) {
+        const urlStr = typeof url === 'string' ? url : (url instanceof URL ? url.href : String(url));
+        const body = options?.body || '';
+        const method = options?.method || 'GET';
+        if (!urlStr.includes('challenges.cloudflare') && !urlStr.includes('capsolver')) {
+          (window as any).__allFetchCalls.push({ method, url: urlStr, body: typeof body === 'string' ? body.substring(0, 200) : '[blob]' });
+        }
+
+        // If this is the Firebase signUp call and we have a Turnstile token, try injecting it
+        if (urlStr.includes('identitytoolkit.googleapis.com') && urlStr.includes('signUp') && body && typeof body === 'string') {
+          try {
+            const parsed = JSON.parse(body);
+            const token = (window as any).__lovableTurnstileToken;
+            if (token && !parsed.captchaResponse) {
+              // Try multiple field names the blocking function might check
+              parsed.captchaResponse = token;
+              const newOptions = { ...options, body: JSON.stringify(parsed) };
+              return origFetch(url, newOptions);
+            }
+          } catch {}
+        }
+        return origFetch(url, options);
+      };
+
+      Object.defineProperty(window, 'turnstile', {
+        configurable: true,
+        enumerable: true,
+        get() { return __lovableTurnstileReal; },
+        set(api: any) {
+          if (api && typeof api.render === 'function' && !api.__patched) {
+            const origRender = api.render.bind(api);
+            const origGetResponse = api.getResponse ? api.getResponse.bind(api) : () => null;
+            api.render = function(container: any, params: any) {
+              if (params && typeof params.callback === 'function') {
+                (window as any).__lovableTurnstileCallbacks.push(params.callback);
+              }
+              if (params && params.sitekey) {
+                (window as any).__lovableTurnstileSitekey = params.sitekey;
+              }
+              return origRender(container, params);
+            };
+            api.getResponse = function(widgetId?: string) {
+              const injected = (window as any).__lovableTurnstileToken;
+              if (injected) return injected;
+              return origGetResponse(widgetId);
+            };
+            api.isExpired = function() {
+              return !(window as any).__lovableTurnstileToken;
+            };
+            api.__patched = true;
+          }
+          __lovableTurnstileReal = api;
+        }
+      });
+    });
 
     log("Navigating to https://lovable.dev/signup ...");
     await page.goto("https://lovable.dev/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -11107,38 +11263,254 @@ export async function registerLovableAccount(
       await page.keyboard.press("Enter");
     }
 
-    log("Waiting for response after submit (8s)...");
-    await page.waitForTimeout(8000);
+    log("Waiting for response after Continue click (6s)...");
+    await page.waitForTimeout(6000);
 
     const afterUrl = page.url();
-    const afterContent = await page.content();
     const afterText = await page.evaluate(() => document.body?.innerText || "");
+    const afterContent = await page.content();
 
     log(`URL after submit: ${afterUrl}`);
+    log(`Page text snippet after submit: ${afterText.substring(0, 250).replace(/\s+/g, " ")}`);
 
-    const magicLinkSent = afterText.toLowerCase().includes("check your email") ||
-      afterText.toLowerCase().includes("magic link") ||
-      afterText.toLowerCase().includes("confirmation link") ||
-      afterText.toLowerCase().includes("sent") ||
-      afterContent.toLowerCase().includes("check your email") ||
-      afterContent.toLowerCase().includes("magic link") ||
-      afterUrl.includes("lovable.dev/login") ||
-      afterUrl.includes("lovable.dev/auth");
+    const hasPasswordField = afterContent.includes('type="password"') || afterContent.includes("type='password'") || afterText.toLowerCase().includes("password must contain") || afterText.toLowerCase().includes("at least 8 characters");
 
-    if (magicLinkSent) {
-      log("✅ Lovable signup submitted — magic link / verification email expected");
-    } else if (afterText.toLowerCase().includes("error") || afterText.toLowerCase().includes("invalid")) {
-      log(`⚠️ Possible error text: ${afterText.substring(0, 200)}`);
+    let generatedPassword: string | null = null;
+    let accountCreatedDirectly = false;
+
+    if (hasPasswordField && afterUrl.includes("lovable.dev/signup")) {
+      log("✅ Password field detected — Lovable uses password-based signup. Filling password...");
+      const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#";
+      generatedPassword = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("") + "7!";
+
+      try {
+        const pwField = await page.$('input[type="password"]');
+        if (pwField) {
+          await pwField.click({ clickCount: 3 });
+          await pwField.type(generatedPassword, { delay: 60 });
+          log(`Filled password field: ${generatedPassword}`);
+        } else {
+          log("⚠️ Could not find password input — trying by placeholder/name");
+          await page.fill('input[placeholder*="assword"], input[name*="assword"]', generatedPassword);
+        }
+      } catch (e: any) {
+        log(`⚠️ Password fill error: ${e.message}`);
+      }
+
+      log("Waiting for Turnstile render() to fire (up to 6s)...");
+      await page.waitForFunction(
+        () => ((window as any).__lovableTurnstileCallbacks || []).length > 0 || (window as any).__lovableTurnstileSitekey,
+        { timeout: 6000 }
+      ).catch(() => log("⚠️ Turnstile render() did not fire within 6s"));
+      await page.waitForTimeout(500);
+
+      log("Checking for Turnstile CAPTCHA on Lovable signup page...");
+      log(`Network-captured Turnstile sitekey: ${lovableTurnstileSitekey || 'none'}`);
+      const domCaptcha = await page.evaluate(() => {
+        const result: any = { turnstile: null, scriptSrc: null, winKeys: [] };
+        const cfEl = document.querySelector('[data-sitekey].cf-turnstile, .cf-turnstile[data-sitekey]');
+        if (cfEl) result.turnstile = (cfEl as any).getAttribute('data-sitekey') || null;
+        const cfIframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+        if (cfIframe && !result.turnstile) {
+          const m = (cfIframe as HTMLIFrameElement).src?.match(/[?&]k=([^&]+)/);
+          if (m) result.turnstile = m[1];
+        }
+        const tsScript = document.querySelector('script[src*="turnstile"]') as HTMLScriptElement | null;
+        if (tsScript) {
+          result.scriptSrc = tsScript.src?.substring(0, 100);
+          const m = tsScript.src?.match(/[?&](?:sitekey|k)=([^&]+)/);
+          if (m && !result.turnstile) result.turnstile = m[1];
+        }
+        result.winKeys = Object.keys(window as any).filter((k: string) => k.toLowerCase().includes('turnstile') || k.toLowerCase().includes('lovable'));
+        result.initSitekey = (window as any).__lovableTurnstileSitekey || null;
+        result.callbackCount = ((window as any).__lovableTurnstileCallbacks || []).length;
+        return result;
+      });
+      const LOVABLE_HARDCODED_SITEKEY = "0x4AAAAAAChnKAZBY0iFpFHC";
+      const resolvedSitekey = lovableTurnstileSitekey || domCaptcha.initSitekey || domCaptcha.turnstile || LOVABLE_HARDCODED_SITEKEY;
+      log(`DOM sitekey: ${domCaptcha.turnstile || 'none'} | init sitekey: ${domCaptcha.initSitekey || 'none'} | callbacks: ${domCaptcha.callbackCount} | script: ${domCaptcha.scriptSrc || 'none'} | winKeys: ${domCaptcha.winKeys.join(",")}`);;
+
+      if (resolvedSitekey) {
+        log(`Solving Turnstile CAPTCHA via CapSolver (sitekey: ${resolvedSitekey})...`);
+        const tsResult = await solveAntiTurnstile("https://lovable.dev/signup", resolvedSitekey);
+        if (tsResult.success && tsResult.token) {
+          log("✅ Turnstile solved! Injecting token...");
+          const cbCount = await page.evaluate((token: string) => {
+            (window as any).__lovableTurnstileToken = token;
+            const callbacks: any[] = (window as any).__lovableTurnstileCallbacks || [];
+            let called = 0;
+            callbacks.forEach((cb: any) => { try { cb(token); called++; } catch {} });
+            const inputs = document.querySelectorAll('textarea[name="cf-turnstile-response"], input[name="cf-turnstile-response"]');
+            inputs.forEach((el: any) => { el.value = token; });
+            if ((window as any).turnstile) {
+              try { (window as any).turnstile.getResponse = () => token; } catch {}
+              try { (window as any).turnstile.isExpired = () => false; } catch {}
+            }
+            const allBtns = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+            const createBtn = allBtns.find(b => (b.textContent || '').toLowerCase().includes('create') && !(b.textContent || '').toLowerCase().includes('google') && !(b.textContent || '').toLowerCase().includes('github'));
+            if (createBtn) { createBtn.disabled = false; createBtn.removeAttribute('disabled'); }
+            return called;
+          }, tsResult.token);
+          log(`Triggered ${cbCount} Turnstile callback(s) with solved token, __lovableTurnstileToken set`);
+          await page.waitForTimeout(1500);
+        } else {
+          log(`⚠️ Turnstile solve failed: ${tsResult.error || "unknown"} — proceeding anyway`);
+        }
+      } else {
+        log("No Turnstile sitekey found — proceeding with force-enable only");
+      }
+
+      log("Force-enabling submit button if disabled...");
+      await page.evaluate(() => {
+        const allBtns = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+        const createBtn = allBtns.find(b => (b.textContent || '').toLowerCase().includes('create') && !(b.textContent || '').toLowerCase().includes('google') && !(b.textContent || '').toLowerCase().includes('github'));
+        if (createBtn && createBtn.disabled) {
+          createBtn.disabled = false;
+          createBtn.removeAttribute('disabled');
+          createBtn.removeAttribute('aria-disabled');
+          console.log('Force-enabled create button');
+        }
+      });
+
+      const pwPageDiag = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll("button")).map(b => `"${(b.textContent||'').trim().substring(0,40)}" disabled=${(b as HTMLButtonElement).disabled}`);
+        const forms = Array.from(document.querySelectorAll("form")).map((f, i) => `form${i}: action=${f.action || 'none'} method=${f.method || 'none'}`);
+        const cfEls = Array.from(document.querySelectorAll('[class*="turnstile"], [id*="turnstile"], [data-sitekey]')).map(e => `${e.tagName} class=${(e as any).className?.substring(0,60)} sitekey=${(e as any).getAttribute('data-sitekey')}`);
+        return { btns, forms, cfEls };
+      });
+      log(`Buttons on page: ${pwPageDiag.btns.join(" | ")}`);
+      log(`Forms: ${pwPageDiag.forms.join(" | ")}`);
+      if (pwPageDiag.cfEls.length) log(`CF/Turnstile elements: ${pwPageDiag.cfEls.join(" | ")}`);
+
+      log("Submitting signup form with password...");
+      let finalSubmit = false;
+      const submitSelectors = [
+        'button:has-text("Create your account")',
+        'button:has-text("Create account")',
+        'button:has-text("Sign up")',
+        'button:has-text("Get started")',
+        'button[type="submit"]',
+        'button:has-text("Continue")',
+      ];
+      for (const sel of submitSelectors) {
+        try {
+          const btns = await page.$$(sel);
+          for (const btn of btns) {
+            const txt = await btn.innerText().catch(() => "");
+            if (txt.toLowerCase().includes("google") || txt.toLowerCase().includes("github")) continue;
+            await btn.click();
+            log(`Clicked final submit: "${txt.substring(0, 40)}" (${sel})`);
+            finalSubmit = true;
+            break;
+          }
+          if (finalSubmit) break;
+        } catch {}
+      }
+      if (!finalSubmit) {
+        log("Button not found via selectors — trying JS click on submit button...");
+        const jsClicked = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll("button"));
+          const submitBtn = btns.find(b => {
+            const t = (b.textContent || "").toLowerCase();
+            return (t.includes("create") || t.includes("sign up") || t.includes("get started")) && !t.includes("google") && !t.includes("github");
+          });
+          if (submitBtn) { (submitBtn as HTMLButtonElement).click(); return true; }
+          const subInput = document.querySelector('input[type="submit"]');
+          if (subInput) { (subInput as HTMLInputElement).click(); return true; }
+          return false;
+        });
+        if (jsClicked) {
+          log("JS click on submit button succeeded");
+          finalSubmit = true;
+        } else {
+          log("Pressing Enter on password field...");
+          try {
+            const pwf = await page.$('input[type="password"]');
+            if (pwf) { await pwf.press("Enter"); log("Pressed Enter on password field"); }
+            else await page.keyboard.press("Enter");
+          } catch { await page.keyboard.press("Enter"); }
+          finalSubmit = true;
+        }
+      }
+
+      log("Waiting 15s after password submit...");
+      await page.waitForTimeout(15000);
+
+      // Dump ALL fetch calls that happened
+      const allFetchCalls = await page.evaluate(() => (window as any).__allFetchCalls || []);
+      if (allFetchCalls.length > 0) {
+        log(`[ALL FETCH CALLS - ${allFetchCalls.length} total]`);
+        allFetchCalls.slice(-20).forEach((c: any) => {
+          log(`  ${c.method} ${String(c.url).substring(0, 180)} ${c.body ? 'body=' + String(c.body).substring(0, 100) : ''}`);
+        });
+      } else {
+        log("[ALL FETCH CALLS] None captured");
+      }
+
+      const postPwUrl = page.url();
+      const postPwText = await page.evaluate(() => document.body?.innerText || "");
+      log(`URL after password submit: ${postPwUrl}`);
+      log(`Page text after password: ${postPwText.substring(0, 200).replace(/\s+/g, " ")}`);
+
+      const onDashboard = postPwUrl.includes("/builder") || postPwUrl.includes("/dashboard") || postPwUrl.includes("/projects") || postPwText.toLowerCase().includes("new project") || postPwText.toLowerCase().includes("start building") || postPwText.toLowerCase().includes("what are you building");
+      if (onDashboard) {
+        log("✅ Account created and logged in directly — no email verification needed!");
+        accountCreatedDirectly = true;
+      } else if (postPwText.toLowerCase().includes("verify") || postPwText.toLowerCase().includes("check your email") || postPwText.toLowerCase().includes("confirm") || postPwText.toLowerCase().includes("sent you") || postPwText.toLowerCase().includes("email sent") || postPwText.toLowerCase().includes("we emailed")) {
+        log("✅ Signup accepted — email verification step needed");
+      } else if (postPwText.toLowerCase().includes("email already in use") || postPwText.toLowerCase().includes("email is already") || postPwText.toLowerCase().includes("account already exists") || postPwText.toLowerCase().includes("already registered")) {
+        return { success: false, error: `Lovable account already exists for this email` };
+      } else if (postPwUrl.includes("lovable.dev/signup") && !postPwUrl.includes("cf-turnstile-response") && (postPwText.toLowerCase().includes("password meets") || postPwText.toLowerCase().includes("password must"))) {
+        log("⚠️ Form still on signup page but password valid — form may not have submitted. Trying JS click...");
+        const retryClicked = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll("button"));
+          const b = btns.find(b => { const t = (b.textContent || "").toLowerCase(); return t.includes("create") && !t.includes("google") && !t.includes("github"); });
+          if (b) { (b as HTMLButtonElement).click(); return true; }
+          return false;
+        });
+        log(retryClicked ? "Retry JS click succeeded — waiting 10s" : "Retry JS click failed");
+        if (retryClicked) {
+          await page.waitForTimeout(10000);
+          const retryUrl = page.url();
+          const retryText = await page.evaluate(() => document.body?.innerText || "");
+          log(`After retry URL: ${retryUrl}`);
+          log(`After retry text: ${retryText.substring(0, 150).replace(/\s+/g, " ")}`);
+          if (retryUrl.includes("/builder") || retryUrl.includes("/dashboard") || retryUrl.includes("/projects")) {
+            accountCreatedDirectly = true;
+            log("✅ Account created after retry click!");
+          } else if (retryText.toLowerCase().includes("verify") || retryText.toLowerCase().includes("check your email")) {
+            log("✅ Email verification step needed after retry");
+          } else {
+            log(`Retry state: ${retryUrl} — may need email verification`);
+          }
+        }
+      } else {
+        log(`Post-password state: ${postPwUrl} — ${postPwText.substring(0, 100).replace(/\s+/g, " ")} — continuing to email check`);
+      }
     } else {
-      log(`Page text snippet after submit: ${afterText.substring(0, 200).replace(/\s+/g, " ")}`);
+      const magicLinkSent = afterText.toLowerCase().includes("check your email") ||
+        afterText.toLowerCase().includes("magic link") ||
+        afterText.toLowerCase().includes("sent") ||
+        afterContent.toLowerCase().includes("check your email") ||
+        afterUrl.includes("lovable.dev/login") ||
+        afterUrl.includes("lovable.dev/auth");
+
+      if (magicLinkSent) {
+        log("✅ Lovable signup submitted — magic link / verification email expected");
+      } else {
+        log(`⚠️ Unexpected state — URL: ${afterUrl}`);
+        if (!afterUrl.includes("lovable.dev")) {
+          return { success: false, error: `Unexpected URL after signup: ${afterUrl.substring(0, 100)}` };
+        }
+      }
     }
 
-    if (!magicLinkSent && !afterUrl.includes("lovable.dev")) {
-      return { success: false, error: `Lovable signup did not proceed — ended up at unexpected URL: ${afterUrl.substring(0, 100)}` };
+    if (accountCreatedDirectly) {
+      return { success: true, email: outlookEmail, password: generatedPassword || undefined };
     }
 
-    log("Waiting 40s before checking Outlook inbox for Lovable verification email...");
-    await page.waitForTimeout(40000);
+    log("Waiting 90s before checking Outlook inbox for Lovable verification email...");
+    await page.waitForTimeout(90000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
@@ -11298,7 +11670,44 @@ export async function registerLovableAccount(
         }
 
         if (!foundLovableEmail) {
-          log("No Lovable verification email found in inbox or junk — may be delayed");
+          log("Checking Other/Clutter folder...");
+          for (const folderPath of ["clutter", "other"]) {
+            try {
+              await owaPage.goto(`https://outlook.live.com/mail/0/${folderPath}`, { waitUntil: "domcontentloaded", timeout: 15000 });
+              await owaPage.waitForTimeout(4000);
+              const otherItems = await owaPage.$$('[data-convid]');
+              const otherItemsAlt = otherItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
+              const allOtherItems = otherItems.length > 0 ? otherItems : otherItemsAlt;
+              if (allOtherItems.length > 0) {
+                log(`Found ${allOtherItems.length} emails in ${folderPath} folder`);
+                foundLovableEmail = await scanEmailList(allOtherItems, folderPath);
+                if (foundLovableEmail) break;
+              }
+            } catch {}
+          }
+        }
+
+        if (!foundLovableEmail) {
+          log("No Lovable email yet — waiting 60s more then re-checking inbox...");
+          await owaPage.waitForTimeout(60000);
+          await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await owaPage.waitForTimeout(7000);
+          const freshItems = await owaPage.$$('[data-convid]');
+          const freshItemsAlt = freshItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
+          const allFreshItems = freshItems.length > 0 ? freshItems : freshItemsAlt;
+          log(`Second-pass inbox: found ${allFreshItems.length} email items`);
+          foundLovableEmail = await scanEmailList(allFreshItems, "inbox-retry");
+          if (!foundLovableEmail) {
+            await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 15000 });
+            await owaPage.waitForTimeout(4000);
+            const junkItems2 = await owaPage.$$('[data-convid]');
+            const junkItemsAlt2 = junkItems2.length === 0 ? await owaPage.$$('[role="option"]') : [];
+            foundLovableEmail = await scanEmailList(junkItems2.length > 0 ? junkItems2 : junkItemsAlt2, "junk-retry");
+          }
+        }
+
+        if (!foundLovableEmail) {
+          log("No Lovable verification email found in any folder");
         }
       } else {
         log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);

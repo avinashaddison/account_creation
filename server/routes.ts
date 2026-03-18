@@ -3012,6 +3012,7 @@ export async function registerRoutes(
               try {
                 await storage.createLovableAccount({
                   email: result.email!,
+                  password: result.password || null,
                   outlookEmail: acc.email,
                   status: "created",
                   createdBy: userId,
@@ -3077,6 +3078,7 @@ export async function registerRoutes(
             try {
               await storage.createLovableAccount({
                 email: result.email!,
+                password: result.password || null,
                 outlookEmail,
                 status: "created",
                 createdBy: userId,
@@ -3085,7 +3087,7 @@ export async function registerRoutes(
             } catch (dbErr: any) {
               broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
             }
-            broadcast({ type: "lovable_create_result", createId, batchId, success: true, email: result.email }, userId);
+            broadcast({ type: "lovable_create_result", createId, batchId, success: true, email: result.email, password: result.password }, userId);
           } else {
             broadcastLog(batchId, createId, `❌ Lovable creation failed: ${result.error || "Unknown error"}`, userId);
             broadcast({ type: "lovable_create_result", createId, batchId, success: false, error: result.error }, userId);
