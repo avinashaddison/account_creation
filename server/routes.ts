@@ -2795,6 +2795,80 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const { count = 1 } = req.body;
+      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 20);
+      const userId = req.session.userId;
+
+      const allOutlook = await storage.getAllPrivateOutlooks();
+      const replitAccts = await storage.getAllReplitAccounts();
+      const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+
+      if (available.length === 0) {
+        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
+      }
+
+      const shuffled = [...available].sort(() => Math.random() - 0.5);
+      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
+
+      const bulkId = randomUUID().substring(0, 8);
+      const batchId = `replit-bulk-${bulkId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
+
+      (async () => {
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) queued`, userId);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < toUse.length; i++) {
+          const acc = toUse[i];
+          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
+          try {
+            const result = await registerReplitAccount(
+              acc.email,
+              acc.password,
+              (msg) => broadcastLog(batchId, bulkId, msg, userId)
+            );
+            if (result.success) {
+              try {
+                await storage.createReplitAccount({
+                  username: result.username!,
+                  email: result.email!,
+                  password: result.password!,
+                  outlookEmail: acc.email,
+                  status: "created",
+                  createdBy: userId,
+                });
+                successCount++;
+                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — @${result.username}`, userId);
+              } catch (dbErr: any) {
+                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+              }
+              broadcast({ type: "replit_create_result", bulkId, batchId, success: true, username: result.username, email: result.email, password: result.password, index: i + 1, total: toUse.length }, userId);
+            } else {
+              failCount++;
+              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
+              broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: toUse.length }, userId);
+            }
+          } catch (err: any) {
+            failCount++;
+            broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Error: ${(err.message || "").substring(0, 100)}`, userId);
+            broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: toUse.length }, userId);
+          }
+        }
+
+        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
       const { outlookEmail, outlookPassword } = req.body;
