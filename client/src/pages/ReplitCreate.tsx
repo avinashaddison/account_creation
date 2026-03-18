@@ -225,7 +225,7 @@ export default function ReplitCreate() {
             <p className="text-[10px] font-mono text-white/40">1. Opens Replit signup with anti-bot browser</p>
             <p className="text-[10px] font-mono text-white/40">2. Auto-generates username + secure password</p>
             <p className="text-[10px] font-mono text-white/40">3. Fills & submits the signup form</p>
-            <p className="text-[10px] font-mono text-white/40">4. Reads verification email via Outlook IMAP</p>
+            <p className="text-[10px] font-mono text-white/40">4. Logs into OWA browser to read verification email</p>
             <p className="text-[10px] font-mono text-white/40">5. Clicks verification link automatically</p>
             <p className="text-[10px] font-mono text-white/40">6. Saves credentials to database</p>
           </div>
