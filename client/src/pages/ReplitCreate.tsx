@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Code2, Play, Trash2, Copy, CheckCircle, User, Mail, Key, Eye, EyeOff, Hash, Layers, Terminal } from "lucide-react";
+import { Code2, Play, User, Mail, Key, Hash, Layers, Terminal } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -47,8 +47,6 @@ export default function ReplitCreate() {
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
   const logsEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const activeBatchId = useRef<string | null>(null);
@@ -57,7 +55,7 @@ export default function ReplitCreate() {
     queryKey: ["/api/private/outlook"],
   });
 
-  const { data: replitAccounts = [], isLoading: accountsLoading } = useQuery<ReplitAccount[]>({
+  const { data: replitAccounts = [] } = useQuery<ReplitAccount[]>({
     queryKey: ["/api/replit-accounts"],
     refetchInterval: running ? 4000 : false,
   });
@@ -152,22 +150,6 @@ export default function ReplitCreate() {
         setRunning(false);
       }
     }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await apiRequest("DELETE", `/api/replit-accounts/${id}`);
-      qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
-      toast({ title: "Deleted", description: "Account removed" });
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    }
-  };
-
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const isBulk = count > 1;
@@ -368,103 +350,6 @@ export default function ReplitCreate() {
         </div>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Code2 className="w-3.5 h-3.5 text-violet-400/40" />
-            <span className="text-[11px] font-mono text-violet-400/40 uppercase tracking-wider">
-              Created Accounts ({replitAccounts.length})
-            </span>
-          </div>
-        </div>
-
-        {accountsLoading ? (
-          <div className="rounded-xl p-8 text-center" style={{ border: "1px solid rgba(124,58,237,0.1)" }}>
-            <p className="text-[11px] font-mono text-white/30">Loading...</p>
-          </div>
-        ) : replitAccounts.length === 0 ? (
-          <div className="rounded-xl p-8 text-center" style={{ border: "1px solid rgba(124,58,237,0.08)" }}>
-            <Code2 className="w-8 h-8 text-violet-400/20 mx-auto mb-2" />
-            <p className="text-[11px] font-mono text-white/20">No Replit accounts created yet</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {replitAccounts.map((acct) => (
-              <div
-                key={acct.id}
-                className="rounded-xl px-4 py-3 flex items-center justify-between gap-4"
-                style={{ background: "rgba(124,58,237,0.05)", border: "1px solid rgba(124,58,237,0.12)" }}
-                data-testid={`row-replit-${acct.id}`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(124,58,237,0.15)" }}>
-                    <Code2 className="w-3.5 h-3.5 text-violet-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-white font-bold truncate" data-testid={`text-username-${acct.id}`}>
-                        @{acct.username}
-                      </span>
-                      <span
-                        className="text-[9px] font-mono px-1.5 py-0.5 rounded-sm flex-shrink-0"
-                        style={{
-                          background: acct.status === "created" ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.1)",
-                          color: acct.status === "created" ? "rgb(52,211,153)" : "rgb(239,68,68)",
-                          border: `1px solid ${acct.status === "created" ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.2)"}`,
-                        }}
-                      >
-                        {acct.status.toUpperCase()}
-                      </span>
-                    </div>
-                    <p className="text-[10px] font-mono text-white/40 truncate">{acct.email}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <Key className="w-2.5 h-2.5 text-violet-400/30 flex-shrink-0" />
-                      <span className="text-[10px] font-mono text-white/35 truncate" data-testid={`text-password-${acct.id}`}>
-                        {revealedIds.has(acct.id) ? acct.password : "••••••••••••"}
-                      </span>
-                      <button
-                        onClick={() => setRevealedIds((prev) => {
-                          const next = new Set(prev);
-                          next.has(acct.id) ? next.delete(acct.id) : next.add(acct.id);
-                          return next;
-                        })}
-                        className="text-violet-400/30 hover:text-violet-400/60 transition-colors flex-shrink-0"
-                        data-testid={`button-reveal-${acct.id}`}
-                      >
-                        {revealedIds.has(acct.id) ? <EyeOff className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
-                      </button>
-                    </div>
-                    {acct.outlookEmail && (
-                      <p className="text-[9px] font-mono text-white/25 truncate">via {acct.outlookEmail}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button
-                    onClick={() => copyToClipboard(`Username: ${acct.username}\nEmail: ${acct.email}\nPassword: ${acct.password}`, acct.id)}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-violet-400/10"
-                    style={{ border: "1px solid rgba(124,58,237,0.15)" }}
-                    title="Copy credentials"
-                    data-testid={`button-copy-${acct.id}`}
-                  >
-                    {copiedId === acct.id ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-violet-400/60" />}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(acct.id)}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-400/10"
-                    style={{ border: "1px solid rgba(239,68,68,0.15)" }}
-                    title="Delete account"
-                    data-testid={`button-delete-${acct.id}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-red-400/60" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
