@@ -9608,7 +9608,37 @@ export async function checkGmailAccount(
     try {
       await client.connect();
       log("✅ IMAP connection successful — credentials verified!");
-      try { await client.logout(); } catch {}
+
+      try {
+        log("📬 Scanning inbox for recent emails...");
+        const status = await (client as any).status("INBOX", { messages: true });
+        const total: number = status?.messages ?? 0;
+        if (total === 0) {
+          log("📭 Inbox is empty — no emails found");
+        } else {
+          const start = Math.max(1, total - 19);
+          const range = `${start}:${total}`;
+          let emailCount = 0;
+          for await (const msg of (client as any).fetch(range, { envelope: true, internalDate: true })) {
+            const from = msg.envelope?.from?.[0];
+            const fromStr = from
+              ? (from.name ? `${from.name} <${from.address}>` : (from.address || "?"))
+              : "Unknown";
+            const subject = (msg.envelope?.subject || "(no subject)").substring(0, 80);
+            const date = msg.internalDate || msg.envelope?.date;
+            const dateStr = date
+              ? new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+              : "?";
+            log(`📧 FROM:${fromStr}||SUBJECT:${subject}||DATE:${dateStr}`);
+            emailCount++;
+          }
+          log(`📬 Found ${emailCount} email${emailCount !== 1 ? "s" : ""} in inbox`);
+        }
+      } catch (scanErr: any) {
+        log("⚠️ Email scan skipped: " + (scanErr?.message || String(scanErr)).substring(0, 80));
+      }
+
+      try { await (client as any).logout(); } catch {}
       return { success: true };
     } catch (imapErr: any) {
       const rawMsg = imapErr?.responseText || imapErr?.response || imapErr?.message || String(imapErr);

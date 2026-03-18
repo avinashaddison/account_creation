@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download } from "lucide-react";
+import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
@@ -145,7 +145,7 @@ export default function PrivateAccount() {
         setGmailCheckJobs((prev) => {
           const job = prev[data.batchId];
           if (!job) return prev;
-          const newLogs = [...job.logs, data.message].slice(-60);
+          const newLogs = [...job.logs, data.message].slice(-200);
           return { ...prev, [data.batchId]: { ...job, logs: newLogs } };
         });
       }
@@ -895,30 +895,85 @@ export default function PrivateAccount() {
 
             {Object.values(gmailCheckJobs).length > 0 && (
               <div className="mt-4 space-y-3">
-                {Object.values(gmailCheckJobs).map((job) => (
-                  <div key={job.batchId} className={`rounded-lg border p-3 ${job.status === "success" ? "border-emerald-500/20 bg-emerald-500/5" : job.status === "failed" ? "border-red-500/20 bg-red-500/5" : "border-yellow-500/15 bg-yellow-500/5"}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {job.status === "running" && <Loader2 className="w-3 h-3 text-yellow-400 animate-spin" />}
-                        {job.status === "success" && <Check className="w-3 h-3 text-emerald-400" />}
-                        {job.status === "failed" && <X className="w-3 h-3 text-red-400" />}
-                        <span className="text-[10px] font-mono text-zinc-300">{job.email}</span>
-                        <Badge variant="outline" className={`text-[9px] font-mono ${job.status === "success" ? "border-emerald-500/20 text-emerald-400" : job.status === "failed" ? "border-red-500/20 text-red-400" : "border-yellow-500/20 text-yellow-400"}`}>
-                          {job.status === "running" ? "CHECKING" : job.status.toUpperCase()}
-                        </Badge>
+                {Object.values(gmailCheckJobs).map((job) => {
+                  const emailLines = job.logs.filter(l => l.startsWith("📧 FROM:"));
+                  const otherLines = job.logs.filter(l => !l.startsWith("📧 FROM:"));
+                  const parseEmail = (line: string) => {
+                    const fromMatch = line.match(/FROM:(.+?)\|\|SUBJECT:(.+?)\|\|DATE:(.+)/);
+                    if (!fromMatch) return null;
+                    return { from: fromMatch[1].trim(), subject: fromMatch[2].trim(), date: fromMatch[3].trim() };
+                  };
+                  return (
+                    <div key={job.batchId} className={`rounded-lg border p-3 ${job.status === "success" ? "border-emerald-500/20 bg-emerald-500/5" : job.status === "failed" ? "border-red-500/20 bg-red-500/5" : "border-yellow-500/15 bg-yellow-500/5"}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {job.status === "running" && <Loader2 className="w-3 h-3 text-yellow-400 animate-spin" />}
+                          {job.status === "success" && <Check className="w-3 h-3 text-emerald-400" />}
+                          {job.status === "failed" && <X className="w-3 h-3 text-red-400" />}
+                          <span className="text-[10px] font-mono text-zinc-300">{job.email}</span>
+                          <Badge variant="outline" className={`text-[9px] font-mono ${job.status === "success" ? "border-emerald-500/20 text-emerald-400" : job.status === "failed" ? "border-red-500/20 text-red-400" : "border-yellow-500/20 text-yellow-400"}`}>
+                            {job.status === "running" ? "CHECKING" : job.status.toUpperCase()}
+                          </Badge>
+                          {emailLines.length > 0 && (
+                            <Badge variant="outline" className="text-[9px] font-mono border-blue-500/20 text-blue-400">
+                              <Inbox className="w-2.5 h-2.5 mr-1" />{emailLines.length} email{emailLines.length !== 1 ? "s" : ""}
+                            </Badge>
+                          )}
+                        </div>
+                        <button onClick={() => setGmailCheckJobs((prev) => { const n = { ...prev }; delete n[job.batchId]; return n; })} className="text-zinc-600 hover:text-zinc-400">
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
-                      <button onClick={() => setGmailCheckJobs((prev) => { const n = { ...prev }; delete n[job.batchId]; return n; })} className="text-zinc-600 hover:text-zinc-400">
-                        <X className="w-3 h-3" />
-                      </button>
+
+                      <div className="bg-black/40 rounded p-2 max-h-28 overflow-y-auto font-mono text-[10px] text-zinc-400 space-y-0.5 mb-2">
+                        {otherLines.map((line, i) => (
+                          <div key={i} className={
+                            line.startsWith("✅") ? "text-emerald-400" :
+                            line.startsWith("❌") ? "text-red-400" :
+                            line.startsWith("⚠️") ? "text-yellow-400" :
+                            line.startsWith("📬") || line.startsWith("📭") ? "text-blue-400" :
+                            "text-zinc-400"
+                          }>{line}</div>
+                        ))}
+                        {otherLines.length === 0 && job.logs.length === 0 && <div className="text-zinc-600">Waiting for logs...</div>}
+                      </div>
+
+                      {emailLines.length > 0 && (
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                          <p className="text-[9px] font-mono text-blue-400/60 uppercase tracking-wider flex items-center gap-1 mb-1">
+                            <Inbox className="w-3 h-3" /> Inbox — Real-time
+                          </p>
+                          {emailLines.map((line, i) => {
+                            const parsed = parseEmail(line);
+                            if (!parsed) return null;
+                            return (
+                              <div key={i} className="flex items-start gap-2 rounded-md border border-blue-500/10 bg-blue-500/5 px-2.5 py-2" data-testid={`email-card-${job.batchId}-${i}`}>
+                                <div className="mt-0.5 shrink-0">
+                                  <div className="w-5 h-5 rounded-full bg-blue-500/15 flex items-center justify-center">
+                                    <Mail className="w-2.5 h-2.5 text-blue-400" />
+                                  </div>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[10px] font-semibold text-zinc-200 truncate max-w-[200px]">{parsed.subject}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 mt-0.5">
+                                    <span className="flex items-center gap-1 text-[9px] text-zinc-400 truncate max-w-[180px]">
+                                      <User className="w-2.5 h-2.5 shrink-0 text-zinc-500" />{parsed.from}
+                                    </span>
+                                    <span className="flex items-center gap-1 text-[9px] text-zinc-500 shrink-0">
+                                      <Calendar className="w-2.5 h-2.5" />{parsed.date}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <div className="bg-black/40 rounded p-2 max-h-32 overflow-y-auto font-mono text-[10px] text-zinc-400 space-y-0.5">
-                      {job.logs.map((line, i) => (
-                        <div key={i} className={line.startsWith("✅") ? "text-emerald-400" : line.startsWith("❌") ? "text-red-400" : "text-zinc-400"}>{line}</div>
-                      ))}
-                      {job.logs.length === 0 && <div className="text-zinc-600">Waiting for logs...</div>}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
