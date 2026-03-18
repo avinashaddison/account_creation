@@ -99,7 +99,8 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
       location === "/admin/la28-create" || location === "/admin/tm-create" ||
       location === "/admin/uefa-create" || location === "/admin/brunomars-create" ||
       location === "/admin/outlook-login" || location === "/admin/outlook-create" ||
-      location === "/admin/zenrows-register" || location === "/admin/replit-create"
+      location === "/admin/zenrows-register" || location === "/admin/replit-create" ||
+      location === "/admin/card-generator"
     ));
     const tag = TAG_STYLES[item.tag] || TAG_STYLES.SYS;
 

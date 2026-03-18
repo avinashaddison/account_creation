@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Globe, Shield, Zap, Server, Ticket, Lock, Mail, ArrowUpRight, Radio } from "lucide-react";
+import { Globe, Shield, Zap, Server, Ticket, Lock, Mail, ArrowUpRight, Radio, CreditCard } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
 import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
@@ -114,6 +114,19 @@ const platforms: Platform[] = [
     badgeActive: true,
     stats: [{ label: "Auto Create", icon: Shield }, { label: "OWA Verify", icon: Mail }, { label: "Onboarding", icon: Zap }],
   },
+  {
+    id: "card-generator",
+    name: "Card Generator",
+    description: "Generate test card numbers with BIN lookup, network selection & bulk export",
+    href: "/admin/card-generator",
+    accentColor: "#fbbf24",
+    accentGlow: "rgba(251,191,36,0.22)",
+    gradientFrom: "rgba(245,158,11,0.15)",
+    gradientTo: "rgba(120,53,15,0.08)",
+    badge: "ACTIVE",
+    badgeActive: true,
+    stats: [{ label: "BIN Lookup", icon: Shield }, { label: "Bulk Export", icon: Zap }, { label: "Multi-Network", icon: CreditCard }],
+  },
 ];
 
 function PlatformIcon({ id }: { id: string }) {
@@ -156,6 +169,11 @@ function PlatformIcon({ id }: { id: string }) {
   if (id === "replit") return (
     <div className={`${base} bg-white p-1`} style={{ boxShadow: "0 0 16px rgba(167,139,250,0.3)" }}>
       <img src={replitLogo} alt="Replit" className="w-full h-full object-contain" />
+    </div>
+  );
+  if (id === "card-generator") return (
+    <div className={`${base} bg-gradient-to-br from-amber-400 to-orange-600`} style={{ boxShadow: "0 0 16px rgba(251,191,36,0.35)" }}>
+      <CreditCard className="w-6 h-6 text-white" />
     </div>
   );
   return null;

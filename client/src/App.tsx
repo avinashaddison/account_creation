@@ -24,6 +24,7 @@ import OutlookLogin from "@/pages/OutlookLogin";
 import OutlookCreate from "@/pages/OutlookCreate";
 import ZenRowsRegister from "@/pages/ZenRowsRegister";
 import ReplitCreate from "@/pages/ReplitCreate";
+import CardGenerator from "@/pages/CardGenerator";
 import PrivateAccount from "@/pages/PrivateAccount";
 import TMEventScanner from "@/pages/TMEventScanner";
 import TMLiveAlerts from "@/pages/TMLiveAlerts";
@@ -60,6 +61,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/outlook-create" component={OutlookCreate} />
         <Route path="/admin/zenrows-register" component={ZenRowsRegister} />
         <Route path="/admin/replit-create" component={ReplitCreate} />
+        <Route path="/admin/card-generator" component={CardGenerator} />
         <Route path="/admin/tm-event-scanner" component={TMEventScanner} />
         <Route path="/admin/tm-live-alerts" component={TMLiveAlerts} />
         <Route path="/admin/tm-tracked-events" component={TMTrackedEvents} />
