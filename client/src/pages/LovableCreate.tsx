@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Heart, Play, Mail, Key, Hash, Layers, Terminal } from "lucide-react";
+import { sounds } from "@/lib/sounds";
+import { Heart, Play, Mail, Key, Hash, Layers, ChevronRight, Radio } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -23,16 +24,25 @@ type LovableAccount = {
 
 type LogLine = { text: string; ts: number; time: string };
 
+const P = "#ec4899";
+const PA = (a: number) => `rgba(236,72,153,${a})`;
+
 function getLogStyle(text: string): { color: string; prefix: string } {
-  if (text.startsWith("━━━")) return { color: "text-pink-400/60", prefix: "" };
-  if (text.startsWith("🚀") || text.startsWith("🏁")) return { color: "text-pink-300", prefix: "" };
-  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("created") || text.toLowerCase().includes("complete")) return { color: "text-emerald-400", prefix: "▸" };
-  if (text.includes("❌") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("error")) return { color: "text-red-400", prefix: "▸" };
-  if (text.includes("⚠️") || text.toLowerCase().includes("warn")) return { color: "text-amber-400", prefix: "▸" };
-  if (text.toLowerCase().includes("navigat") || text.toLowerCase().includes("launch") || text.toLowerCase().includes("browser")) return { color: "text-sky-400/80", prefix: "›" };
-  if (text.toLowerCase().includes("magic") || text.toLowerCase().includes("link") || text.toLowerCase().includes("verification") || text.toLowerCase().includes("confirm")) return { color: "text-pink-300/90", prefix: "›" };
-  if (text.toLowerCase().includes("email") || text.toLowerCase().includes("inbox") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("owa")) return { color: "text-blue-300/80", prefix: "›" };
-  return { color: "text-cyan-300/60", prefix: "·" };
+  if (text.startsWith("━━━") || text.startsWith("---")) return { color: PA(0.25), prefix: "" };
+  if (text.startsWith("🚀") || text.startsWith("🏁")) return { color: P, prefix: ">" };
+  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("created") || text.toLowerCase().includes("complete"))
+    return { color: "#4ade80", prefix: "+" };
+  if (text.includes("❌") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("error"))
+    return { color: "#f87171", prefix: "!" };
+  if (text.includes("⚠️") || text.toLowerCase().includes("warn"))
+    return { color: "#fbbf24", prefix: "~" };
+  if (text.toLowerCase().includes("magic") || text.toLowerCase().includes("link") || text.toLowerCase().includes("verification") || text.toLowerCase().includes("confirm"))
+    return { color: PA(0.85), prefix: "›" };
+  if (text.toLowerCase().includes("navigat") || text.toLowerCase().includes("launch") || text.toLowerCase().includes("browser"))
+    return { color: PA(0.6), prefix: ">" };
+  if (text.toLowerCase().includes("email") || text.toLowerCase().includes("inbox") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("owa"))
+    return { color: "rgba(147,197,253,0.75)", prefix: "·" };
+  return { color: PA(0.4), prefix: "·" };
 }
 
 export default function LovableCreate() {
@@ -46,6 +56,7 @@ export default function LovableCreate() {
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [tick, setTick] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const activeBatchId = useRef<string | null>(null);
@@ -65,6 +76,11 @@ export default function LovableCreate() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((p) => !p), 600);
+    return () => clearInterval(t);
+  }, []);
 
   function nowTime() {
     return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -87,13 +103,16 @@ export default function LovableCreate() {
             addLog(data.message);
           } else if (data.type === "batch_complete") {
             setRunning(false);
+            sounds.complete();
             qc.invalidateQueries({ queryKey: ["/api/lovable-accounts"] });
             qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
           } else if (data.type === "lovable_create_result") {
             if (data.success) {
               setCompletedCount((p) => p + 1);
+              sounds.success();
               toast({ title: "✅ Account Created", description: data.email });
             } else {
+              sounds.error();
               toast({ title: "❌ Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
             }
           }
@@ -105,6 +124,7 @@ export default function LovableCreate() {
   }, []);
 
   const handleOutlookSelect = (id: string) => {
+    sounds.click();
     setSelectedOutlookId(id);
     const acct = availableOutlookAccounts.find((a) => a.id === id);
     if (acct) {
@@ -114,6 +134,7 @@ export default function LovableCreate() {
   };
 
   const handleCreate = async () => {
+    sounds.start();
     setLogs([]);
     setRunning(true);
     setCompletedCount(0);
@@ -128,11 +149,13 @@ export default function LovableCreate() {
         setTotalCount(data.count);
         addLog(`🚀 Bulk job started — ${data.count} account(s) queued [${data.batchId}]`);
       } catch (err: any) {
+        sounds.error();
         toast({ title: "Error", description: err.message, variant: "destructive" });
         setRunning(false);
       }
     } else {
       if (!outlookEmail || !outlookPassword) {
+        sounds.error();
         toast({ title: "Missing fields", description: "Select or enter an Outlook account", variant: "destructive" });
         setRunning(false);
         return;
@@ -145,6 +168,7 @@ export default function LovableCreate() {
         activeBatchId.current = data.batchId;
         addLog(`Job started: ${data.batchId}`);
       } catch (err: any) {
+        sounds.error();
         toast({ title: "Error", description: err.message, variant: "destructive" });
         setRunning(false);
       }
@@ -153,62 +177,88 @@ export default function LovableCreate() {
 
   const isBulk = count > 1;
   const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
-
-  const accentColor = "rgba(236,72,153,0.";
-  const accentSolid = "rgb(236,72,153)";
-  const accentMuted = "rgba(236,72,153,";
+  const maxCount = Math.min(10, availableOutlookAccounts.length || 1);
+  const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
 
   return (
     <div className="space-y-6 animate-float-up">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <Heart className="w-5 h-5 text-pink-400/60" />
-          <h1 className="text-xl font-bold tracking-tight text-white font-mono">
-            Lovable<span className="text-pink-400">_</span>Create
-          </h1>
+
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <Heart className="w-5 h-5" style={{ color: P, filter: `drop-shadow(0 0 8px ${PA(0.5)})` }} />
+            <h1 className="text-lg font-mono font-bold tracking-tight" style={{ color: P, textShadow: `0 0 24px ${PA(0.4)}` }}>
+              Lovable<span style={{ color: P }}>{tick ? "_" : "\u00a0"}</span>Create
+            </h1>
+          </div>
+          <p className="text-[11px] font-mono mt-0.5 pl-8" style={{ color: PA(0.28) }}>
+            Automate Lovable.dev account creation using stored Outlook emails
+          </p>
         </div>
-        <p className="text-pink-400/30 mt-1 text-[11px] font-mono pl-7.5">Automate Lovable.dev account creation using stored Outlook emails</p>
+        <div className="flex items-center gap-2.5 text-[10px] font-mono">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: PA(0.05), border: `1px solid ${PA(0.15)}` }}>
+            <Heart className="w-3 h-3" style={{ color: PA(0.5) }} />
+            <span style={{ color: P, textShadow: `0 0 8px ${PA(0.5)}` }}>{availableOutlookAccounts.length}</span>
+            <span style={{ color: PA(0.3) }}>avail</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <span style={{ color: "rgba(255,255,255,0.3)" }}>{usedEmails.size}</span>
+            <span style={{ color: "rgba(255,255,255,0.14)" }}>used</span>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="min-w-0 rounded-xl p-5 space-y-4" style={{ background: "rgba(236,72,153,0.06)", border: "1px solid rgba(236,72,153,0.15)" }}>
+      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+
+        {/* Config panel */}
+        <div
+          className="rounded-xl p-5 space-y-5 relative overflow-hidden"
+          style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${PA(0.14)}`, boxShadow: `0 0 40px ${PA(0.04)} inset` }}
+        >
+          {/* scanline overlay */}
+          <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 2px, ${PA(0.012)} 2px, ${PA(0.012)} 4px)`, borderRadius: "inherit" }} />
+
+          {/* section label */}
           <div className="flex items-center gap-2">
-            <Heart className="w-3.5 h-3.5 text-pink-400/60" />
-            <span className="text-[11px] font-mono text-pink-400/60 uppercase tracking-wider">Configuration</span>
-            <div className="ml-auto flex items-center gap-1.5">
-              <span className="text-[10px] font-mono text-white/25">{availableOutlookAccounts.length} available</span>
-              <span className="text-[10px] font-mono text-white/15">·</span>
-              <span className="text-[10px] font-mono text-white/25">{usedEmails.size} used</span>
-            </div>
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: P }} />
+            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: PA(0.5) }}>Configuration</span>
+            <div className="flex-1 h-px" style={{ background: PA(0.1) }} />
           </div>
 
+          {/* Count slider */}
           <div>
-            <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">
-              <Hash className="w-2.5 h-2.5 inline mr-1" />
+            <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: PA(0.4) }}>
+              <Hash className="w-3 h-3" />
               Accounts to Create
             </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={1}
-                max={Math.min(10, availableOutlookAccounts.length || 1)}
-                value={count}
-                onChange={(e) => setCount(parseInt(e.target.value))}
-                className="flex-1 h-1.5 rounded-full cursor-pointer accent-pink-500"
-                style={{ background: `linear-gradient(to right, rgba(236,72,153,0.6) ${((count - 1) / (Math.max(1, Math.min(10, availableOutlookAccounts.length || 1)) - 1)) * 100}%, rgba(255,255,255,0.08) 0%)` }}
-                data-testid="input-count-slider"
-              />
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <input
+                  type="range"
+                  min={1}
+                  max={maxCount}
+                  value={count}
+                  onChange={(e) => { sounds.toggle(); setCount(parseInt(e.target.value)); }}
+                  className="w-full h-1.5 rounded-full cursor-pointer appearance-none"
+                  style={{
+                    background: `linear-gradient(to right, ${PA(0.65)} ${pct}%, rgba(255,255,255,0.07) ${pct}%)`,
+                    accentColor: P,
+                  }}
+                  data-testid="input-count-slider"
+                />
+              </div>
               <div
-                className="w-10 h-7 rounded-lg flex items-center justify-center text-sm font-mono font-bold flex-shrink-0"
-                style={{ background: "rgba(236,72,153,0.2)", border: "1px solid rgba(236,72,153,0.3)", color: "rgb(244,114,182)" }}
+                className="w-11 h-8 rounded-lg flex items-center justify-center text-base font-mono font-bold flex-shrink-0"
+                style={{ background: PA(0.1), border: `1px solid ${PA(0.35)}`, color: P, textShadow: `0 0 10px ${P}`, boxShadow: `0 0 12px ${PA(0.1)} inset` }}
               >
                 {count}
               </div>
             </div>
             {isBulk && (
-              <p className="text-[10px] font-mono text-pink-400/40 mt-1.5">
-                <Layers className="w-2.5 h-2.5 inline mr-1" />
-                Bulk mode — randomly picks {count} from {availableOutlookAccounts.length} available accounts
+              <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: PA(0.32) }}>
+                <Layers className="w-3 h-3" />
+                bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
               </p>
             )}
           </div>
@@ -217,49 +267,65 @@ export default function LovableCreate() {
             <>
               {availableOutlookAccounts.length > 0 && (
                 <div>
-                  <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">Stored Outlook Account</label>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.4) }}>
+                    Stored Outlook Account
+                  </label>
                   <select
                     value={selectedOutlookId}
                     onChange={(e) => handleOutlookSelect(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none"
-                    style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(236,72,153,0.2)" }}
+                    className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${PA(0.18)}`, color: "rgba(255,255,255,0.75)" }}
                     data-testid="select-outlook-account"
                   >
                     <option value="">— Select account —</option>
                     {availableOutlookAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.email}
-                      </option>
+                      <option key={a.id} value={a.id}>{a.email}</option>
                     ))}
                   </select>
                 </div>
               )}
 
               <div>
-                <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">Outlook Email</label>
-                <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(236,72,153,0.2)" }}>
-                  <Mail className="w-3 h-3 text-pink-400/40 flex-shrink-0" />
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.4) }}>
+                  <Mail className="w-2.5 h-2.5 inline mr-1" />
+                  Outlook Email
+                </label>
+                <div
+                  className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${PA(0.14)}` }}
+                >
+                  <Mail className="w-3.5 h-3.5 flex-shrink-0" style={{ color: PA(0.38) }} />
                   <input
                     type="email"
                     value={outlookEmail}
                     onChange={(e) => setOutlookEmail(e.target.value)}
+                    onKeyDown={() => sounds.keypress()}
                     placeholder="yourname@outlook.com"
-                    className="bg-transparent flex-1 text-xs font-mono text-white placeholder:text-white/20 focus:outline-none"
+                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.8)", caretColor: P }}
                     data-testid="input-outlook-email"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">Outlook Password</label>
-                <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(236,72,153,0.2)" }}>
-                  <Key className="w-3 h-3 text-pink-400/40 flex-shrink-0" />
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.4) }}>
+                  <Key className="w-2.5 h-2.5 inline mr-1" />
+                  Outlook Password
+                </label>
+                <div
+                  className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${PA(0.14)}` }}
+                >
+                  <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: PA(0.38) }} />
                   <input
                     type="password"
                     value={outlookPassword}
                     onChange={(e) => setOutlookPassword(e.target.value)}
+                    onKeyDown={() => sounds.keypress()}
                     placeholder="••••••••"
-                    className="bg-transparent flex-1 text-xs font-mono text-white placeholder:text-white/20 focus:outline-none"
+                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.8)", caretColor: P }}
                     data-testid="input-outlook-password"
                   />
                 </div>
@@ -267,82 +333,115 @@ export default function LovableCreate() {
             </>
           )}
 
+          {/* Create button */}
           <button
             onClick={handleCreate}
             disabled={running || !canCreate}
-            className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-mono font-bold tracking-wider transition-all duration-200"
+            className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
             style={{
-              background: running || !canCreate ? "rgba(236,72,153,0.07)" : isBulk ? "rgba(236,72,153,0.3)" : "rgba(236,72,153,0.2)",
-              border: `1px solid ${running || !canCreate ? "rgba(236,72,153,0.15)" : "rgba(236,72,153,0.5)"}`,
-              color: running || !canCreate ? "rgba(244,114,182,0.3)" : "rgb(244,114,182)",
+              background: running || !canCreate
+                ? PA(0.04)
+                : `linear-gradient(135deg, ${PA(0.25)}, ${PA(0.1)})`,
+              border: `1px solid ${running || !canCreate ? PA(0.08) : PA(0.5)}`,
+              color: running || !canCreate ? PA(0.25) : P,
+              textShadow: running || !canCreate ? "none" : `0 0 14px ${P}`,
+              boxShadow: running || !canCreate ? "none" : `0 0 25px ${PA(0.1)}, inset 0 1px 0 ${PA(0.12)}`,
               cursor: running || !canCreate ? "not-allowed" : "pointer",
             }}
             data-testid="button-create-lovable"
           >
-            <Play className={`w-3.5 h-3.5 ${running ? "animate-pulse" : ""}`} />
-            {running
-              ? totalCount > 1
-                ? `CREATING ${completedCount}/${totalCount}...`
-                : "CREATING ACCOUNT..."
-              : isBulk
-              ? `BULK CREATE ${count} ACCOUNT${count > 1 ? "S" : ""}`
-              : "CREATE LOVABLE ACCOUNT"}
+            {!(running || !canCreate) && (
+              <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 2px, ${PA(0.025)} 2px, ${PA(0.025)} 4px)` }} />
+            )}
+            <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+            <span className="relative z-10">
+              {running
+                ? totalCount > 1
+                  ? `creating ${completedCount}/${totalCount}...`
+                  : "creating account..."
+                : isBulk
+                ? `bulk_create ${count} account${count > 1 ? "s" : ""}`
+                : "create_lovable_account"}
+            </span>
           </button>
 
+          {/* Progress bar */}
           {running && totalCount > 1 && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] font-mono text-white/30">
-                <span>Progress</span>
-                <span>{completedCount}/{totalCount}</span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono" style={{ color: PA(0.38) }}>
+                <span>progress</span>
+                <span style={{ color: P, textShadow: `0 0 8px ${PA(0.5)}` }}>{completedCount}/{totalCount}</span>
               </div>
-              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
                 <div
                   className="h-full rounded-full transition-all duration-500"
-                  style={{ width: `${(completedCount / totalCount) * 100}%`, background: "rgba(236,72,153,0.7)" }}
+                  style={{
+                    width: `${(completedCount / totalCount) * 100}%`,
+                    background: `linear-gradient(90deg, ${P}, rgba(244,114,182,0.7))`,
+                    boxShadow: `0 0 10px ${PA(0.7)}`,
+                  }}
                 />
               </div>
             </div>
           )}
         </div>
 
-        <div className="min-w-0 sticky top-4">
-          <div className="rounded-xl overflow-hidden flex flex-col min-w-0" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(236,72,153,0.12)" }}>
-            <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid rgba(236,72,153,0.08)", background: "rgba(236,72,153,0.04)" }}>
-              <div className="flex items-center gap-2">
-                <Terminal className="w-3 h-3 text-pink-400/50" />
-                <span className="text-[10px] font-mono text-pink-400/50 uppercase tracking-wider">Live Output</span>
+        {/* Terminal panel */}
+        <div className="min-w-0">
+          <div
+            className="rounded-xl overflow-hidden flex flex-col"
+            style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${PA(0.12)}`, boxShadow: `0 0 40px ${PA(0.03)}` }}
+          >
+            {/* Terminal title bar */}
+            <div
+              className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
+              style={{ background: PA(0.03), borderBottom: `1px solid ${PA(0.08)}` }}
+            >
+              <div className="flex items-center gap-2.5">
+                <Radio className="w-3 h-3" style={{ color: running ? P : PA(0.28), filter: running ? `drop-shadow(0 0 5px ${P})` : "none" }} />
+                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: PA(0.45) }}>live_output</span>
                 {running && (
-                  <span className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
-                    <span className="text-[9px] font-mono text-pink-400/70">RUNNING</span>
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: P, boxShadow: `0 0 6px ${P}` }} />
+                    <span className="text-[9px] font-mono font-bold" style={{ color: PA(0.65) }}>RUNNING</span>
+                  </div>
                 )}
               </div>
-              <div className="flex gap-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500/40" />
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/40" />
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/40" />
+              <div className="flex gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,59,48,0.55)" }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,149,0,0.55)" }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: PA(0.55) }} />
               </div>
             </div>
 
-            <div className="flex-1 h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono" style={{ wordBreak: "break-all", overflowWrap: "anywhere" }} data-testid="container-logs">
+            {/* Log body */}
+            <div
+              className="overflow-y-auto overflow-x-hidden p-4 space-y-0.5 font-mono"
+              style={{ height: "420px", wordBreak: "break-all", overflowWrap: "anywhere" }}
+              data-testid="container-logs"
+            >
               {logs.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center gap-2">
-                  <Terminal className="w-6 h-6 text-white/10" />
-                  <p className="text-[10px] font-mono text-white/15">waiting for output...</p>
+                <div className="h-full flex flex-col items-center justify-center gap-3">
+                  <div className="text-center space-y-1.5">
+                    <p className="text-[11px] font-mono" style={{ color: PA(0.22) }}>{">"}_</p>
+                    <p className="text-[10px] font-mono" style={{ color: PA(0.16) }}>waiting for output...</p>
+                  </div>
                 </div>
               ) : (
                 logs.map((line, i) => {
                   const { color, prefix } = getLogStyle(line.text);
-                  const isSeparator = line.text.startsWith("━━━");
+                  const isSeparator = line.text.startsWith("━━━") || line.text.startsWith("---");
                   return (
                     <div
                       key={i}
-                      className={`flex items-start gap-2 py-px min-w-0 ${isSeparator ? "mt-2 mb-1" : ""}`}
+                      className={`flex items-start gap-2 min-w-0 ${isSeparator ? "mt-2 mb-1 opacity-30" : "py-px"}`}
                     >
-                      <span className="text-[9px] text-white/15 flex-shrink-0 mt-px tabular-nums">{line.time}</span>
-                      {prefix && <span className={`text-[9px] flex-shrink-0 mt-px ${color}`}>{prefix}</span>}
-                      <span className={`text-[10px] leading-relaxed break-words min-w-0 overflow-hidden ${color} ${isSeparator ? "font-semibold tracking-wide" : ""}`}>
+                      <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: PA(0.22) }}>{line.time}</span>
+                      <span className="text-[10px] flex-shrink-0 mt-0.5 w-3 text-center font-bold" style={{ color }}>{prefix}</span>
+                      <span
+                        className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden"
+                        style={{ color, textShadow: color === P ? `0 0 8px ${PA(0.4)}` : "none" }}
+                      >
                         {line.text}
                       </span>
                     </div>
@@ -350,6 +449,24 @@ export default function LovableCreate() {
                 })
               )}
               <div ref={logsEndRef} />
+            </div>
+
+            {/* Terminal footer */}
+            <div
+              className="px-4 py-2 flex items-center gap-2"
+              style={{ background: PA(0.02), borderTop: `1px solid ${PA(0.07)}` }}
+            >
+              <span className="text-[9px] font-mono" style={{ color: PA(0.25) }}>addison@panel:~$</span>
+              <span className="text-[9px] font-mono" style={{ color: PA(0.4) }}>
+                {running ? "executing lovable_create..." : "ready"}
+              </span>
+              <span
+                className="w-1.5 h-3 ml-px"
+                style={{
+                  background: tick && !running ? P : "transparent",
+                  boxShadow: tick && !running ? `0 0 6px ${P}` : "none",
+                }}
+              />
             </div>
           </div>
         </div>
