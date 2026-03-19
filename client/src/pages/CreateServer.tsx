@@ -105,7 +105,7 @@ const platforms: Platform[] = [
   },
   {
     id: "replit",
-    name: "Create Replit",
+    name: "Create Replit Account",
     description: "Auto-create Replit accounts via Outlook OWA verification & onboarding",
     href: "/admin/replit-create",
     accentColor: "#a78bfa",
