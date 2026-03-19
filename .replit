@@ -10,10 +10,6 @@ packages = ["glib", "nss", "nspr", "atk", "cups", "dbus", "at-spi2-atk", "at-spi
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 24678
-externalPort = 3000
-
 [env]
 PORT = "5000"
 
@@ -38,13 +34,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "NODE_ENV=development npx tsx server/index.ts"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx playwright install chromium --quiet 2>/dev/null; NODE_ENV=development npx tsx server/index.ts"
+waitForPort = 5000
 
 [agent]
 stack = "MOCKUP_JS"
