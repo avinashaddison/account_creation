@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal, Zap, Activity, Radio } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal, Zap, Activity, Radio, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -29,6 +29,7 @@ const TAG_STYLES: Record<string, { bg: string; text: string; dot: string; glow: 
   ADM: { bg: "rgba(251,146,60,0.12)", text: "rgba(251,146,60,0.75)", dot: "#fb923c", glow: "rgba(251,146,60,0.25)" },
   CFG: { bg: "rgba(148,163,184,0.12)", text: "rgba(148,163,184,0.75)", dot: "#94a3b8", glow: "rgba(148,163,184,0.25)" },
   TKT: { bg: "rgba(0,255,65,0.10)", text: "rgba(0,255,65,0.7)", dot: "#00ff41", glow: "rgba(0,255,65,0.3)" },
+  CRD: { bg: "rgba(96,165,250,0.12)", text: "rgba(96,165,250,0.75)", dot: "#60a5fa", glow: "rgba(96,165,250,0.25)" },
 };
 
 function TagBadge({ tag }: { tag: string }) {
@@ -167,6 +168,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin/email-workspace", label: "Email Workspace", icon: Mail, tag: "NET" },
     { href: "/admin/billing", label: "Billing", icon: Receipt, tag: "FIN" },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet, tag: "FIN" },
+    { href: "/admin/my-cards", label: "My Cards", icon: CreditCard, tag: "CRD" },
     ...(user.role === "superadmin" ? [
       { href: "/admin/private-account", label: "Private Account", icon: Shield, tag: "PVT" },
       { href: "/admin/earnings", label: "Earnings", icon: TrendingUp, tag: "ADM" },

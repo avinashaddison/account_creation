@@ -26,6 +26,7 @@ import ZenRowsRegister from "@/pages/ZenRowsRegister";
 import ReplitCreate from "@/pages/ReplitCreate";
 import LovableCreate from "@/pages/LovableCreate";
 import CardGenerator from "@/pages/CardGenerator";
+import MyCards from "@/pages/MyCards";
 import PrivateAccount from "@/pages/PrivateAccount";
 import TMEventScanner from "@/pages/TMEventScanner";
 import TMLiveAlerts from "@/pages/TMLiveAlerts";
@@ -64,6 +65,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/replit-create" component={ReplitCreate} />
         <Route path="/admin/lovable-create" component={LovableCreate} />
         <Route path="/admin/card-generator" component={CardGenerator} />
+        <Route path="/admin/my-cards" component={MyCards} />
         <Route path="/admin/tm-event-scanner" component={TMEventScanner} />
         <Route path="/admin/tm-live-alerts" component={TMLiveAlerts} />
         <Route path="/admin/tm-tracked-events" component={TMTrackedEvents} />

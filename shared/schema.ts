@@ -231,3 +231,22 @@ export type TmTrackedEvent = typeof tmTrackedEvents.$inferSelect;
 export type InsertTmTrackedEvent = z.infer<typeof insertTmTrackedEventSchema>;
 export type TmAlert = typeof tmAlerts.$inferSelect;
 export type InsertTmAlert = z.infer<typeof insertTmAlertSchema>;
+
+export const savedCards = pgTable("saved_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ownerId: varchar("owner_id").notNull(),
+  label: text("label").notNull(),
+  cardholderName: text("cardholder_name").notNull(),
+  cardNumber: text("card_number").notNull(),
+  expiryMonth: text("expiry_month").notNull(),
+  expiryYear: text("expiry_year").notNull(),
+  cvv: text("cvv").notNull(),
+  cardType: text("card_type").notNull().default("visa"),
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSavedCardSchema = createInsertSchema(savedCards).omit({ id: true, createdAt: true });
+export type SavedCard = typeof savedCards.$inferSelect;
+export type InsertSavedCard = z.infer<typeof insertSavedCardSchema>;

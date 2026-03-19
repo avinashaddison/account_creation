@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, savedCards } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, SavedCard, InsertSavedCard } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -69,6 +69,11 @@ export interface IStorage {
   getAllLovableAccounts(): Promise<LovableAccount[]>;
   getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]>;
   deleteLovableAccount(id: string): Promise<void>;
+  createSavedCard(data: InsertSavedCard): Promise<SavedCard>;
+  getSavedCardsByOwner(ownerId: string): Promise<SavedCard[]>;
+  getSavedCard(id: string): Promise<SavedCard | undefined>;
+  updateSavedCard(id: string, data: Partial<InsertSavedCard>): Promise<SavedCard>;
+  deleteSavedCard(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -443,6 +448,29 @@ export class DatabaseStorage implements IStorage {
 
   async deleteLovableAccount(id: string): Promise<void> {
     await db.delete(lovableAccounts).where(eq(lovableAccounts.id, id));
+  }
+
+  async createSavedCard(data: InsertSavedCard): Promise<SavedCard> {
+    const [row] = await db.insert(savedCards).values(data).returning();
+    return row;
+  }
+
+  async getSavedCardsByOwner(ownerId: string): Promise<SavedCard[]> {
+    return db.select().from(savedCards).where(eq(savedCards.ownerId, ownerId)).orderBy(desc(savedCards.createdAt));
+  }
+
+  async getSavedCard(id: string): Promise<SavedCard | undefined> {
+    const [row] = await db.select().from(savedCards).where(eq(savedCards.id, id));
+    return row;
+  }
+
+  async updateSavedCard(id: string, data: Partial<InsertSavedCard>): Promise<SavedCard> {
+    const [row] = await db.update(savedCards).set(data).where(eq(savedCards.id, id)).returning();
+    return row;
+  }
+
+  async deleteSavedCard(id: string): Promise<void> {
+    await db.delete(savedCards).where(eq(savedCards.id, id));
   }
 }
 
