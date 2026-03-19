@@ -11968,6 +11968,496 @@ process.on("SIGTERM", async () => {
   await closeBrowser();
 });
 
+export async function registerAdobeAccount(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; email?: string; password?: string; firstName?: string; lastName?: string; error?: string }> {
+  const FIRST_NAMES = ["James", "Emma", "Oliver", "Sophia", "Liam", "Ava", "Noah", "Mia", "William", "Isabella", "Benjamin", "Charlotte", "Lucas", "Amelia", "Henry", "Harper", "Alexander", "Evelyn", "Mason", "Abigail", "Ethan", "Emily", "Daniel", "Elizabeth", "Michael", "Sofia", "Jacob", "Madison", "Logan", "Scarlett"];
+  const LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin", "Lee", "Thompson", "White", "Harris", "Sanchez", "Clark", "Lewis", "Robinson", "Walker", "Young"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  function randItem<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+  function randPass(): string {
+    const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#";
+    return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("") + "Aa1!";
+  }
+  async function waitMs(ms: number) { await new Promise(r => setTimeout(r, ms)); }
+
+  const firstName = randItem(FIRST_NAMES);
+  const lastName = randItem(LAST_NAMES);
+  const password = randPass();
+  const dobMonth = randItem(MONTHS);
+  const dobYear = String(1985 + Math.floor(Math.random() * 15));
+
+  log(`Generated name: ${firstName} ${lastName}`);
+  log(`Generated password: ${password}`);
+  log(`DOB: ${dobMonth} ${dobYear}`);
+
+  let browser: any = null;
+  let page: any = null;
+
+  try {
+    let zenrowsApiKey = "";
+    try {
+      zenrowsApiKey = await getZenRowsApiKey();
+      log("ZenRows browser mode enabled");
+    } catch {
+      log("⚠️ No ZenRows API key — using stealth headless browser");
+    }
+
+    const { chromium: stealthChromium } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    stealthChromium.use(StealthPlugin());
+
+    let context: any;
+    if (zenrowsApiKey) {
+      try {
+        const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
+        const { chromium: vanillaChromium } = await import("playwright");
+        browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
+        context = browser.contexts()[0] || await browser.newContext();
+        log("✅ Connected via ZenRows anti-bot browser");
+      } catch (zrErr: any) {
+        log(`⚠️ ZenRows failed (${(zrErr.message || "").substring(0, 60)}) — falling back to stealth`);
+        browser = null;
+        zenrowsApiKey = "";
+      }
+    }
+
+    if (!zenrowsApiKey) {
+      browser = await stealthChromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-web-security", "--allow-running-insecure-content"],
+      });
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      context = await browser.newContext({
+        userAgent: ua,
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+        timezoneId: "America/New_York",
+        extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+      });
+      log("Using stealth headless browser");
+    }
+
+    page = await context.newPage();
+    page.setDefaultTimeout(35000);
+
+    // ── STEP 1: Navigate to Adobe sign-in, click Create an account ────────────
+    log("Navigating to Adobe sign-in page...");
+    await page.goto("https://auth.services.adobe.com/en_US/index.html", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(3000);
+
+    log(`Page title: ${await page.title().catch(() => "?")}`);
+    log(`Page URL: ${page.url()}`);
+
+    // Click "Create an account"
+    const createLinkSelectors = [
+      'a:has-text("Create an account")',
+      '[data-id="sign-up-link"]',
+      'a[href*="signup"]',
+      'a[href*="create"]',
+      'button:has-text("Create an account")',
+    ];
+    let clickedCreate = false;
+    for (const sel of createLinkSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el) continue;
+        if (!await el.isVisible().catch(() => false)) continue;
+        await el.click();
+        log(`Clicked create account link via: ${sel}`);
+        clickedCreate = true;
+        break;
+      } catch {}
+    }
+    if (!clickedCreate) {
+      log("Trying to find any Create/Sign up link by text...");
+      const allLinks = await page.$$("a, button");
+      for (const el of allLinks) {
+        const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase();
+        if (txt.includes("create an account") || txt.includes("sign up")) {
+          await el.click().catch(() => {});
+          log(`Clicked element with text: ${txt.substring(0, 40)}`);
+          clickedCreate = true;
+          break;
+        }
+      }
+    }
+
+    await waitMs(3000);
+    log(`After click URL: ${page.url()}`);
+
+    // ── STEP 2: Fill Step 1 of 2 — email + password ──────────────────────────
+    log("Waiting for signup form (email + password)...");
+    try {
+      await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 15000, state: "visible" });
+      log("Email field found");
+    } catch {
+      log("⚠️ Email field not detected within 15s — attempting anyway");
+    }
+
+    // Email field
+    const emailSelectors = ['input[name="email"]', 'input[type="email"]', 'input[placeholder*="email" i]', '#EmailPage-EmailField'];
+    for (const sel of emailSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(150);
+        await el.type(outlookEmail, { delay: 55 });
+        log(`Filled email via ${sel}`);
+        break;
+      } catch {}
+    }
+
+    await waitMs(500);
+
+    // Password field
+    const passSelectors = ['input[name="password"]', 'input[type="password"]', 'input[placeholder*="password" i]', '#EmailPage-PasswordField'];
+    for (const sel of passSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(150);
+        await el.type(password, { delay: 55 });
+        log(`Filled password via ${sel}`);
+        break;
+      } catch {}
+    }
+
+    await waitMs(500);
+
+    // Click Continue button (Step 1)
+    log("Clicking Continue (Step 1 of 2)...");
+    const continueSelectors = ['button:has-text("Continue")', 'button[type="submit"]', 'input[type="submit"]', '[data-id="submit-button"]'];
+    let submitted1 = false;
+    for (const sel of continueSelectors) {
+      try {
+        const btns = await page.$$(sel);
+        for (const btn of btns) {
+          const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+          if (txt.includes("google") || txt.includes("facebook") || txt.includes("apple") || txt.includes("microsoft")) continue;
+          if (!await btn.isVisible().catch(() => false)) continue;
+          await btn.click();
+          log(`Clicked Continue: "${txt.substring(0, 30)}"`);
+          submitted1 = true;
+          break;
+        }
+        if (submitted1) break;
+      } catch {}
+    }
+    if (!submitted1) {
+      log("Pressing Enter to continue...");
+      await page.keyboard.press("Enter");
+    }
+
+    await waitMs(4000);
+    log(`After Step 1 URL: ${page.url()}`);
+
+    // ── STEP 3: Fill Step 2 of 2 — name + DOB ────────────────────────────────
+    log("Waiting for Step 2 (first name, last name, DOB)...");
+    try {
+      await page.waitForSelector('input[name="firstName"], input[placeholder*="first" i], #ProfilePage-firstNameField', { timeout: 15000, state: "visible" });
+      log("Step 2 form detected");
+    } catch {
+      log("⚠️ Step 2 form not detected within 15s — attempting to fill anyway");
+    }
+
+    // First name
+    const firstNameSelectors = ['input[name="firstName"]', 'input[placeholder*="first" i]', '#ProfilePage-firstNameField', 'input[id*="first" i]'];
+    for (const sel of firstNameSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(100);
+        await el.type(firstName, { delay: 50 });
+        log(`Filled first name via ${sel}`);
+        break;
+      } catch {}
+    }
+
+    await waitMs(300);
+
+    // Last name
+    const lastNameSelectors = ['input[name="lastName"]', 'input[placeholder*="last" i]', '#ProfilePage-lastNameField', 'input[id*="last" i]'];
+    for (const sel of lastNameSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(100);
+        await el.type(lastName, { delay: 50 });
+        log(`Filled last name via ${sel}`);
+        break;
+      } catch {}
+    }
+
+    await waitMs(300);
+
+    // DOB Month (dropdown)
+    const monthSelectors = ['select[name="month"]', 'select[id*="month" i]', '#ProfilePage-BirthMonth', 'select[aria-label*="month" i]'];
+    for (const sel of monthSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.selectOption({ label: dobMonth });
+        log(`Selected DOB month: ${dobMonth} via ${sel}`);
+        break;
+      } catch {}
+    }
+
+    await waitMs(300);
+
+    // DOB Year
+    const yearSelectors = ['input[name="year"]', 'input[id*="year" i]', '#ProfilePage-BirthYear', 'input[placeholder*="year" i]'];
+    for (const sel of yearSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(100);
+        await el.type(dobYear, { delay: 50 });
+        log(`Filled DOB year: ${dobYear} via ${sel}`);
+        break;
+      } catch {}
+    }
+
+    await waitMs(500);
+
+    // Click "Create account" button (Step 2)
+    log("Clicking Create account (Step 2 of 2)...");
+    const createBtnSelectors = [
+      'button:has-text("Create account")',
+      'button:has-text("Create Account")',
+      'button[type="submit"]',
+      'input[type="submit"]',
+      '[data-id="submit-button"]',
+    ];
+    let submitted2 = false;
+    for (const sel of createBtnSelectors) {
+      try {
+        const btns = await page.$$(sel);
+        for (const btn of btns) {
+          const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+          if (txt.includes("google") || txt.includes("facebook") || txt.includes("apple") || txt.includes("sign in")) continue;
+          if (!await btn.isVisible().catch(() => false)) continue;
+          await btn.click();
+          log(`Clicked Create account: "${txt.substring(0, 40)}"`);
+          submitted2 = true;
+          break;
+        }
+        if (submitted2) break;
+      } catch {}
+    }
+    if (!submitted2) {
+      log("Pressing Enter to submit Step 2...");
+      await page.keyboard.press("Enter");
+    }
+
+    await waitMs(5000);
+    log(`After Step 2 URL: ${page.url()}`);
+
+    const afterStep2Content = await page.content();
+    if (afterStep2Content.toLowerCase().includes("verify") || afterStep2Content.toLowerCase().includes("email-verification") || page.url().includes("email-verification") || page.url().includes("challenge")) {
+      log("✅ Verification page detected — reading Outlook for 6-digit code...");
+    } else {
+      log(`Page state after Step 2: ${(await page.evaluate(() => document.body?.innerText || "")).substring(0, 200).replace(/\s+/g, " ")}`);
+    }
+
+    // ── STEP 4: Read 6-digit code from Outlook OWA ───────────────────────────
+    log("Waiting 25s for Adobe verification email to arrive...");
+    await waitMs(25000);
+
+    let verificationCode: string | null = null;
+    let owaBrowser: any = null;
+    try {
+      const { chromium: chrm } = await import("playwright");
+      owaBrowser = await chrm.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+      });
+      const owaContext = await owaBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+      });
+      await owaContext.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        (window as any).chrome = { runtime: {} };
+      });
+      const owaPage = await owaContext.newPage();
+      owaPage.setDefaultTimeout(30000);
+
+      log("Navigating to Outlook Web login for Adobe verification code...");
+      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await waitMs(2000);
+
+      const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+      if (emailInput) {
+        await emailInput.fill(outlookEmail);
+        const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (nextBtn) { await nextBtn.click(); await waitMs(2500); }
+      }
+      const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
+      if (passInput) {
+        await passInput.fill(outlookPassword);
+        const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (signInBtn) { await signInBtn.click(); await waitMs(4000); }
+      }
+
+      let currentLoginUrl = owaPage.url();
+      log(`After OWA login URL: ${currentLoginUrl.substring(0, 80)}`);
+
+      if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
+        log("Microsoft security confirmation — skipping...");
+        let destUrl = "https://outlook.live.com/mail/0/inbox";
+        try {
+          const parsedUrl = new URL(currentLoginUrl);
+          const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
+          if (posturl) destUrl = decodeURIComponent(posturl);
+        } catch {}
+        await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await waitMs(3000);
+        currentLoginUrl = owaPage.url();
+      }
+
+      let isOnOutlookHost = false;
+      try {
+        const p = new URL(currentLoginUrl);
+        isOnOutlookHost = p.hostname.includes("outlook.live.com") || p.hostname.includes("outlook.office") || p.hostname === "outlook.com";
+      } catch {}
+
+      if (!isOnOutlookHost) {
+        log("Not on Outlook yet — navigating directly to inbox...");
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await waitMs(5000);
+        currentLoginUrl = owaPage.url();
+        try { const p2 = new URL(currentLoginUrl); isOnOutlookHost = p2.hostname.includes("outlook.live.com"); } catch {}
+      }
+
+      if (isOnOutlookHost) {
+        log("✅ Logged into Outlook — searching for Adobe verification email...");
+        await waitMs(3000);
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await waitMs(4000);
+
+        // Also check junk folder (Adobe emails may land in junk)
+        for (const folder of ["inbox", "junkemail"]) {
+          if (verificationCode) break;
+          if (folder === "junkemail") {
+            log("Checking junk/spam folder for Adobe email...");
+            await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitMs(3000);
+          }
+          const emailItems = await owaPage.$$('[data-convid], [role="row"]');
+          log(`Found ${emailItems.length} items in ${folder}`);
+          for (const item of emailItems.slice(0, 25)) {
+            const itemText = await item.innerText().catch(() => "");
+            if (itemText.toLowerCase().includes("adobe") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("code")) {
+              log(`Found Adobe-related email: ${itemText.substring(0, 80)}`);
+              await item.click();
+              await waitMs(2500);
+              const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+              // Adobe sends a 6-digit numeric code
+              const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+              if (codeMatch) {
+                verificationCode = codeMatch[1];
+                log(`✅ Extracted Adobe 6-digit code: ${verificationCode}`);
+              }
+              break;
+            }
+          }
+        }
+        if (!verificationCode) {
+          log("⚠️ No Adobe verification email found — account may still be usable without verification");
+        }
+      } else {
+        log(`⚠️ OWA login failed — URL: ${currentLoginUrl.substring(0, 80)}`);
+      }
+    } catch (owaErr: any) {
+      log(`⚠️ OWA email check error: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
+    } finally {
+      if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
+    }
+
+    // ── STEP 5: Enter the 6-digit code ───────────────────────────────────────
+    if (verificationCode) {
+      log(`Entering 6-digit verification code: ${verificationCode}`);
+      await waitMs(1000);
+
+      // Adobe has 6 individual single-char input boxes
+      const singleBoxSelectors = [
+        'input[maxlength="1"]',
+        '[class*="digit"] input',
+        '[class*="code"] input',
+        'input[data-id*="digit"]',
+        'input[name*="digit"]',
+      ];
+
+      let enteredViaBoxes = false;
+      for (const sel of singleBoxSelectors) {
+        try {
+          const boxes = await page.$$(sel);
+          if (boxes.length === 6) {
+            log(`Filling ${boxes.length} individual code boxes (${sel})`);
+            for (let i = 0; i < 6; i++) {
+              await boxes[i].click();
+              await waitMs(80);
+              await boxes[i].type(verificationCode[i], { delay: 60 });
+            }
+            enteredViaBoxes = true;
+            log("✅ Code entered in individual boxes");
+            break;
+          }
+        } catch {}
+      }
+
+      if (!enteredViaBoxes) {
+        // Try a single input field as fallback
+        const singleInputSelectors = ['input[name="code"]', 'input[placeholder*="code" i]', 'input[type="number"]', 'input[maxlength="6"]'];
+        for (const sel of singleInputSelectors) {
+          try {
+            const el = await page.$(sel);
+            if (el && await el.isVisible().catch(() => false)) {
+              await el.type(verificationCode, { delay: 60 });
+              log(`Entered code into single field via ${sel}`);
+              break;
+            }
+          } catch {}
+        }
+        // Try pressing Enter to submit
+        await waitMs(500);
+        await page.keyboard.press("Enter");
+      }
+
+      await waitMs(5000);
+      const finalUrl = page.url();
+      const finalContent = await page.content();
+      if (finalContent.toLowerCase().includes("verified") || finalContent.toLowerCase().includes("welcome") || finalContent.toLowerCase().includes("success") || !finalContent.toLowerCase().includes("verify")) {
+        log(`✅ Verification successful! URL: ${finalUrl.substring(0, 100)}`);
+      } else {
+        log(`Verification submitted — URL: ${finalUrl.substring(0, 100)}`);
+      }
+    } else {
+      log("⚠️ No code found — account created but email not yet verified");
+    }
+
+    log(`✅ Adobe account creation complete: email=${outlookEmail} password=${password} name=${firstName} ${lastName}`);
+    return { success: true, email: outlookEmail, password, firstName, lastName };
+
+  } catch (err: any) {
+    log(`❌ Error: ${(err.message || String(err)).substring(0, 200)}`);
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

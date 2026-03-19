@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, savedCards } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, SavedCard, InsertSavedCard } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, savedCards, adobeAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -74,6 +74,10 @@ export interface IStorage {
   getSavedCard(id: string): Promise<SavedCard | undefined>;
   updateSavedCard(id: string, data: Partial<InsertSavedCard>): Promise<SavedCard>;
   deleteSavedCard(id: string): Promise<void>;
+  createAdobeAccount(data: InsertAdobeAccount): Promise<AdobeAccount>;
+  getAllAdobeAccounts(): Promise<AdobeAccount[]>;
+  getAdobeAccountsByOwner(ownerId: string): Promise<AdobeAccount[]>;
+  deleteAdobeAccount(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -471,6 +475,23 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSavedCard(id: string): Promise<void> {
     await db.delete(savedCards).where(eq(savedCards.id, id));
+  }
+
+  async createAdobeAccount(data: InsertAdobeAccount): Promise<AdobeAccount> {
+    const [row] = await db.insert(adobeAccounts).values(data).returning();
+    return row;
+  }
+
+  async getAllAdobeAccounts(): Promise<AdobeAccount[]> {
+    return db.select().from(adobeAccounts).orderBy(desc(adobeAccounts.createdAt));
+  }
+
+  async getAdobeAccountsByOwner(ownerId: string): Promise<AdobeAccount[]> {
+    return db.select().from(adobeAccounts).where(eq(adobeAccounts.createdBy, ownerId)).orderBy(desc(adobeAccounts.createdAt));
+  }
+
+  async deleteAdobeAccount(id: string): Promise<void> {
+    await db.delete(adobeAccounts).where(eq(adobeAccounts.id, id));
   }
 }
 

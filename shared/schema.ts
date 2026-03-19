@@ -196,6 +196,23 @@ export const insertLovableAccountSchema = createInsertSchema(lovableAccounts).om
 export type LovableAccount = typeof lovableAccounts.$inferSelect;
 export type InsertLovableAccount = z.infer<typeof insertLovableAccountSchema>;
 
+export const adobeAccounts = pgTable("adobe_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  password: text("password"),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  outlookEmail: text("outlook_email"),
+  status: text("status").notNull().default("created"),
+  error: text("error"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAdobeAccountSchema = createInsertSchema(adobeAccounts).omit({ id: true, createdAt: true });
+export type AdobeAccount = typeof adobeAccounts.$inferSelect;
+export type InsertAdobeAccount = z.infer<typeof insertAdobeAccountSchema>;
+
 export const tmTrackedEvents = pgTable("tm_tracked_events", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   eventId: text("event_id").notNull(),

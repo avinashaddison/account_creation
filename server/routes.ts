@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, registerLovableAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, registerLovableAccount, registerAdobeAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3233,6 +3233,118 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Check failed" });
     }
+  });
+
+  // ── Adobe Account Routes ──────────────────────────────────────────────────
+
+  app.post("/api/adobe-create/bulk", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { count = 1 } = req.body;
+      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 10);
+      const userId = req.session.userId;
+
+      const allOutlook = await storage.getAllPrivateOutlooks();
+      const adobeAccts = await storage.getAllAdobeAccounts();
+      const usedEmails = new Set(adobeAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+
+      if (available.length === 0) {
+        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Adobe" });
+      }
+
+      const toUse = [...available].sort(() => Math.random() - 0.5).slice(0, Math.min(actualCount, available.length));
+      const bulkId = randomUUID().substring(0, 8);
+      const batchId = `adobe-bulk-${bulkId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} Adobe account(s)` });
+
+      (async () => {
+        broadcastLog(batchId, bulkId, `🚀 Adobe bulk create — ${toUse.length} account(s) queued`, userId);
+        let successCount = 0, failCount = 0;
+        for (let i = 0; i < toUse.length; i++) {
+          const acc = toUse[i];
+          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
+          try {
+            const result = await registerAdobeAccount(acc.email, acc.password, (msg) => broadcastLog(batchId, bulkId, msg, userId));
+            if (result.success) {
+              try {
+                await storage.createAdobeAccount({ email: result.email!, password: result.password!, firstName: result.firstName!, lastName: result.lastName!, outlookEmail: acc.email, status: "created", createdBy: userId });
+                successCount++;
+                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — ${result.email}`, userId);
+              } catch (dbErr: any) { broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId); }
+              broadcast({ type: "adobe_create_result", bulkId, batchId, success: true, email: result.email, index: i + 1, total: toUse.length }, userId);
+            } else {
+              failCount++;
+              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
+              broadcast({ type: "adobe_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: toUse.length }, userId);
+            }
+          } catch (err: any) {
+            failCount++;
+            broadcastLog(batchId, bulkId, `❌ Error: ${(err.message || "").substring(0, 100)}`, userId);
+            broadcast({ type: "adobe_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: toUse.length }, userId);
+          }
+        }
+        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/adobe-create", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { outlookEmail, outlookPassword } = req.body;
+      if (!outlookEmail || !outlookPassword) return res.status(400).json({ error: "Outlook email and password are required" });
+
+      const adobeAccts = await storage.getAllAdobeAccounts();
+      if (adobeAccts.some((a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase())) {
+        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used for Adobe` });
+      }
+
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `adobe-create-${createId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "Adobe account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, `Starting Adobe account creation for ${outlookEmail}...`, userId);
+        try {
+          const result = await registerAdobeAccount(outlookEmail, outlookPassword, (msg) => broadcastLog(batchId, createId, msg, userId));
+          if (result.success) {
+            try {
+              await storage.createAdobeAccount({ email: result.email!, password: result.password!, firstName: result.firstName!, lastName: result.lastName!, outlookEmail, status: "created", createdBy: userId });
+              broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
+            } catch (dbErr: any) { broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId); }
+            broadcast({ type: "adobe_create_result", createId, batchId, success: true, email: result.email, firstName: result.firstName, lastName: result.lastName }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ Adobe creation failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "adobe_create_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "adobe_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/adobe-accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin" ? await storage.getAllAdobeAccounts() : await storage.getAdobeAccountsByOwner(userId);
+      res.json(accounts);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete("/api/adobe-accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteAdobeAccount(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
   app.get("/api/my-cards", requireAuth, async (req: Request, res: Response) => {

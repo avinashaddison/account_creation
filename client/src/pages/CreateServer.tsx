@@ -130,6 +130,19 @@ const platforms: Platform[] = [
     stats: [{ label: "Auto Create", icon: Shield }, { label: "Magic Link", icon: Mail }, { label: "OWA Verify", icon: Zap }],
   },
   {
+    id: "adobe",
+    name: "Create Adobe Account",
+    description: "Auto-create Adobe accounts with email verification via Outlook OWA",
+    href: "/admin/adobe-create",
+    accentColor: "#ff4500",
+    accentGlow: "rgba(255,69,0,0.28)",
+    gradientFrom: "rgba(255,69,0,0.18)",
+    gradientTo: "rgba(139,27,0,0.06)",
+    badge: "ACTIVE",
+    badgeActive: true,
+    stats: [{ label: "Auto Create", icon: Shield }, { label: "OWA Verify", icon: Mail }, { label: "6-Digit Code", icon: Zap }],
+  },
+  {
     id: "card-generator",
     name: "Card Generator",
     description: "Generate test card numbers with BIN lookup, network selection & bulk export",
@@ -184,6 +197,11 @@ function PlatformIcon({ id, accentColor }: { id: string; accentColor: string }) 
   if (id === "lovable") return (
     <div className={`${base} bg-black overflow-hidden`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
       <img src={lovableLogo} alt="Lovable" className="w-full h-full object-cover object-center scale-110" />
+    </div>
+  );
+  if (id === "adobe") return (
+    <div className={`${base} bg-gradient-to-br from-red-600 to-orange-700`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
+      <svg viewBox="0 0 24 24" fill="white" width="20" height="20"><path d="M13.966 22.624l-1.69-4.281H8.122l4.294-8.835 4.808 13.116zM3 6.834l3.682 10.093H1.212zm17.786 0L18 16.927h5.47z"/></svg>
     </div>
   );
   if (id === "card-generator") return (
