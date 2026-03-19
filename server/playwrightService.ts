@@ -12042,97 +12042,115 @@ export async function registerAdobeAccount(
     }
 
     page = await context.newPage();
-    page.setDefaultTimeout(35000);
+    page.setDefaultTimeout(40000);
 
-    // ── STEP 1: Navigate to Adobe sign-in, click Create an account ────────────
-    log("Navigating to Adobe sign-in page...");
-    await page.goto("https://auth.services.adobe.com/en_US/index.html", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await waitMs(3000);
+    // Extra stealth via script injection
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+    });
 
-    log(`Page title: ${await page.title().catch(() => "?")}`);
-    log(`Page URL: ${page.url()}`);
+    // ── STEP 1: Navigate to Adobe's account creation page ────────────────────
+    // account.adobe.com/profile/create redirects to the IMS auth page with the
+    // proper client_id (SunbreakWebUI1) which renders the "Create an account" link
+    log("Navigating to Adobe account creation page...");
+    await page.goto("https://account.adobe.com/profile/create", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(5000);
+    log(`Page URL: ${page.url().substring(0, 100)}`);
 
-    // Click "Create an account"
-    const createLinkSelectors = [
-      'a:has-text("Create an account")',
-      '[data-id="sign-up-link"]',
-      'a[href*="signup"]',
-      'a[href*="create"]',
-      'button:has-text("Create an account")',
-    ];
-    let clickedCreate = false;
-    for (const sel of createLinkSelectors) {
-      try {
-        const el = await page.$(sel);
-        if (!el) continue;
-        if (!await el.isVisible().catch(() => false)) continue;
-        await el.click();
-        log(`Clicked create account link via: ${sel}`);
-        clickedCreate = true;
-        break;
-      } catch {}
-    }
-    if (!clickedCreate) {
-      log("Trying to find any Create/Sign up link by text...");
-      const allLinks = await page.$$("a, button");
-      for (const el of allLinks) {
-        const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase();
-        if (txt.includes("create an account") || txt.includes("sign up")) {
+    const initText = await page.evaluate(() => document.body?.innerText || "");
+    log(`Initial page: ${initText.replace(/\s+/g, " ").substring(0, 250)}`);
+
+    // ── STEP 1b: Click "Create an account" link ───────────────────────────────
+    const createTexts = ["create an account", "create account", "sign up", "new user"];
+    let foundCreateLink = false;
+    // Search in all elements including spans, divs (Adobe may use custom components)
+    const allEls = await page.$$("a, button, [role='button'], span, div, p");
+    for (const el of allEls) {
+      const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase().trim();
+      if (createTexts.some(t => txt === t || txt === t.replace("an ", ""))) {
+        const visible = await el.isVisible().catch(() => false);
+        if (visible) {
+          log(`Clicking create link: "${txt}"`);
           await el.click().catch(() => {});
-          log(`Clicked element with text: ${txt.substring(0, 40)}`);
-          clickedCreate = true;
+          foundCreateLink = true;
+          await waitMs(3000);
           break;
         }
       }
     }
-
-    await waitMs(3000);
-    log(`After click URL: ${page.url()}`);
-
-    // ── STEP 2: Fill Step 1 of 2 — email + password ──────────────────────────
-    log("Waiting for signup form (email + password)...");
-    try {
-      await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 15000, state: "visible" });
-      log("Email field found");
-    } catch {
-      log("⚠️ Email field not detected within 15s — attempting anyway");
+    if (!foundCreateLink) {
+      // Try partial text match for shorter elements
+      for (const el of allEls) {
+        const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase().trim();
+        if ((txt.includes("create an account") || txt.includes("create account") || txt.includes("sign up")) && txt.length < 50) {
+          const visible = await el.isVisible().catch(() => false);
+          if (visible) {
+            log(`Clicking (partial): "${txt.substring(0, 40)}"`);
+            await el.click().catch(() => {});
+            foundCreateLink = true;
+            await waitMs(3000);
+            break;
+          }
+        }
+      }
     }
 
-    // Email field
-    const emailSelectors = ['input[name="email"]', 'input[type="email"]', 'input[placeholder*="email" i]', '#EmailPage-EmailField'];
+    if (!foundCreateLink) {
+      log("⚠️ Create an account link not found — will try email flow");
+    } else {
+      const afterCreate = await page.evaluate(() => document.body?.innerText || "");
+      log(`After create click: ${afterCreate.replace(/\s+/g, " ").substring(0, 200)}`);
+    }
+
+    // ── STEP 2: Fill email field ──────────────────────────────────────────────
+    log("Waiting for email field...");
+    try {
+      await page.waitForSelector('#EmailPage-EmailField, input[type="email"], input[name="email"]', { timeout: 12000, state: "visible" });
+      log("Email field visible");
+    } catch {
+      log("⚠️ Email field timeout");
+      const pg = await page.evaluate(() => document.body?.innerText || "");
+      log(`Page: ${pg.replace(/\s+/g, " ").substring(0, 200)}`);
+    }
+
+    const emailSelectors = ['#EmailPage-EmailField', 'input[name="email"]', 'input[type="email"]', 'input[placeholder*="email" i]'];
     for (const sel of emailSelectors) {
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
         await el.click({ clickCount: 3 });
-        await waitMs(150);
-        await el.type(outlookEmail, { delay: 55 });
+        await waitMs(200);
+        await el.type(outlookEmail, { delay: 65 });
         log(`Filled email via ${sel}`);
         break;
       } catch {}
     }
+    await waitMs(600);
 
-    await waitMs(500);
-
-    // Password field
-    const passSelectors = ['input[name="password"]', 'input[type="password"]', 'input[placeholder*="password" i]', '#EmailPage-PasswordField'];
+    // Password field (may be visible now if we clicked Create an account first)
+    const passSelectors = ['#EmailPage-PasswordField', 'input[name="password"]', 'input[type="password"]', 'input[placeholder*="password" i]'];
+    let passFilled = false;
     for (const sel of passSelectors) {
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
         await el.click({ clickCount: 3 });
-        await waitMs(150);
-        await el.type(password, { delay: 55 });
+        await waitMs(200);
+        await el.type(password, { delay: 65 });
         log(`Filled password via ${sel}`);
+        passFilled = true;
         break;
       } catch {}
     }
+    if (!passFilled) { log("Password field not yet visible — will check after Continue"); }
+    await waitMs(600);
 
-    await waitMs(500);
-
-    // Click Continue button (Step 1)
-    log("Clicking Continue (Step 1 of 2)...");
-    const continueSelectors = ['button:has-text("Continue")', 'button[type="submit"]', 'input[type="submit"]', '[data-id="submit-button"]'];
+    // Click Continue
+    log("Clicking Continue (email step)...");
+    const continueSelectors = ['[data-id="submit-button"]', 'button[type="submit"]', 'button:has-text("Continue")', 'button:has-text("Create account")', 'input[type="submit"]'];
     let submitted1 = false;
     for (const sel of continueSelectors) {
       try {
@@ -12142,28 +12160,54 @@ export async function registerAdobeAccount(
           if (txt.includes("google") || txt.includes("facebook") || txt.includes("apple") || txt.includes("microsoft")) continue;
           if (!await btn.isVisible().catch(() => false)) continue;
           await btn.click();
-          log(`Clicked Continue: "${txt.substring(0, 30)}"`);
+          log(`Clicked: "${txt.substring(0, 30)}"`);
           submitted1 = true;
           break;
         }
         if (submitted1) break;
       } catch {}
     }
-    if (!submitted1) {
-      log("Pressing Enter to continue...");
-      await page.keyboard.press("Enter");
+    if (!submitted1) { await page.keyboard.press("Enter"); log("Pressed Enter"); }
+
+    await waitMs(5000);
+    log(`After Continue URL: ${page.url().substring(0, 100)}`);
+    const afterStep1 = await page.evaluate(() => document.body?.innerText || "");
+    log(`Page state: ${afterStep1.replace(/\s+/g, " ").substring(0, 300)}`);
+
+    // Handle 2-step flow: after email → password may appear
+    if (!passFilled) {
+      const passField = await page.$('input[type="password"]');
+      if (passField && await passField.isVisible().catch(() => false)) {
+        log("Password field appeared on step 2 — filling it");
+        await passField.click({ clickCount: 3 });
+        await waitMs(200);
+        await passField.type(password, { delay: 65 });
+        await waitMs(500);
+        for (const sel of continueSelectors) {
+          try {
+            const btns = await page.$$(sel);
+            for (const btn of btns) {
+              const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+              if (!await btn.isVisible().catch(() => false)) continue;
+              await btn.click();
+              log(`Clicked continue (pass): "${txt.substring(0, 30)}"`);
+              break;
+            }
+          } catch {}
+        }
+        await waitMs(4000);
+      }
     }
 
-    await waitMs(4000);
-    log(`After Step 1 URL: ${page.url()}`);
-
-    // ── STEP 3: Fill Step 2 of 2 — name + DOB ────────────────────────────────
-    log("Waiting for Step 2 (first name, last name, DOB)...");
+    // ── STEP 3: Fill name + DOB ───────────────────────────────────────────────
+    log("Waiting for profile form (first/last name, DOB)...");
     try {
-      await page.waitForSelector('input[name="firstName"], input[placeholder*="first" i], #ProfilePage-firstNameField', { timeout: 15000, state: "visible" });
-      log("Step 2 form detected");
+      await page.waitForSelector('input[name="firstName"], input[placeholder*="first" i], #ProfilePage-firstNameField, input[id*="first" i]', { timeout: 20000, state: "visible" });
+      log("Profile form detected");
     } catch {
-      log("⚠️ Step 2 form not detected within 15s — attempting to fill anyway");
+      log("⚠️ Profile form not detected within 20s");
+      const pg = await page.evaluate(() => document.body?.innerText || "");
+      log(`Current page: ${pg.replace(/\s+/g, " ").substring(0, 300)}`);
     }
 
     // First name
@@ -12212,19 +12256,47 @@ export async function registerAdobeAccount(
 
     await waitMs(300);
 
-    // DOB Year
-    const yearSelectors = ['input[name="year"]', 'input[id*="year" i]', '#ProfilePage-BirthYear', 'input[placeholder*="year" i]'];
-    for (const sel of yearSelectors) {
+    // DOB Year — Adobe A/B tests between text input and dropdown
+    let yearFilled = false;
+    // Try select/dropdown first (Adobe A/B test: dob-year-dropdown variant)
+    const yearSelectSelectors = ['select[name="year"]', 'select[id*="year" i]', 'select[aria-label*="year" i]', '#ProfilePage-BirthYear'];
+    for (const sel of yearSelectSelectors) {
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
-        await el.click({ clickCount: 3 });
-        await waitMs(100);
-        await el.type(dobYear, { delay: 50 });
-        log(`Filled DOB year: ${dobYear} via ${sel}`);
+        await el.selectOption({ value: dobYear }).catch(() => {});
+        // Fallback: select by label (the year as text)
+        const opts = await page.$$(`${sel} option`);
+        for (const opt of opts) {
+          const v = await opt.getAttribute("value") || "";
+          const t = await opt.innerText().catch(() => "");
+          if (v === dobYear || t.trim() === dobYear) {
+            await el.selectOption({ value: v || dobYear });
+            break;
+          }
+        }
+        log(`Selected DOB year: ${dobYear} via ${sel} (dropdown)`);
+        yearFilled = true;
         break;
       } catch {}
     }
+    // Fallback: text input
+    if (!yearFilled) {
+      const yearInputSelectors = ['input[name="year"]', 'input[id*="year" i]', 'input[placeholder*="year" i]'];
+      for (const sel of yearInputSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (!el || !await el.isVisible().catch(() => false)) continue;
+          await el.click({ clickCount: 3 });
+          await waitMs(100);
+          await el.type(dobYear, { delay: 50 });
+          log(`Filled DOB year: ${dobYear} via ${sel} (text input)`);
+          yearFilled = true;
+          break;
+        } catch {}
+      }
+    }
+    if (!yearFilled) { log("⚠️ Could not fill DOB year field"); }
 
     await waitMs(500);
 
@@ -12269,8 +12341,8 @@ export async function registerAdobeAccount(
     }
 
     // ── STEP 4: Read 6-digit code from Outlook OWA ───────────────────────────
-    log("Waiting 25s for Adobe verification email to arrive...");
-    await waitMs(25000);
+    log("Waiting 30s for Adobe verification email to arrive...");
+    await waitMs(30000);
 
     let verificationCode: string | null = null;
     let owaBrowser: any = null;
@@ -12293,7 +12365,7 @@ export async function registerAdobeAccount(
       owaPage.setDefaultTimeout(30000);
 
       log("Navigating to Outlook Web login for Adobe verification code...");
-      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F%3Fnlp%3D1&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
       await waitMs(2000);
 
       const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
@@ -12309,18 +12381,18 @@ export async function registerAdobeAccount(
         if (signInBtn) { await signInBtn.click(); await waitMs(4000); }
       }
 
+      // Handle "Stay signed in?" prompt
+      try {
+        const staySignedIn = await owaPage.$('#idBtn_Back, input[value="No"], button:has-text("No")');
+        if (staySignedIn) { await staySignedIn.click(); await waitMs(2000); log("Dismissed 'Stay signed in?' prompt"); }
+      } catch {}
+
       let currentLoginUrl = owaPage.url();
       log(`After OWA login URL: ${currentLoginUrl.substring(0, 80)}`);
 
       if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
         log("Microsoft security confirmation — skipping...");
-        let destUrl = "https://outlook.live.com/mail/0/inbox";
-        try {
-          const parsedUrl = new URL(currentLoginUrl);
-          const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
-          if (posturl) destUrl = decodeURIComponent(posturl);
-        } catch {}
-        await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
         await waitMs(3000);
         currentLoginUrl = owaPage.url();
       }
@@ -12341,39 +12413,70 @@ export async function registerAdobeAccount(
 
       if (isOnOutlookHost) {
         log("✅ Logged into Outlook — searching for Adobe verification email...");
-        await waitMs(3000);
-        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await waitMs(4000);
 
-        // Also check junk folder (Adobe emails may land in junk)
-        for (const folder of ["inbox", "junkemail"]) {
-          if (verificationCode) break;
-          if (folder === "junkemail") {
-            log("Checking junk/spam folder for Adobe email...");
-            await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await waitMs(3000);
+        // Check up to 2 times with 15s waits between attempts
+        for (let attempt = 1; attempt <= 2 && !verificationCode; attempt++) {
+          if (attempt > 1) {
+            log(`Email not found yet — waiting 15s more (attempt ${attempt}/2)...`);
+            await waitMs(15000);
           }
-          const emailItems = await owaPage.$$('[data-convid], [role="row"]');
-          log(`Found ${emailItems.length} items in ${folder}`);
-          for (const item of emailItems.slice(0, 25)) {
-            const itemText = await item.innerText().catch(() => "");
-            if (itemText.toLowerCase().includes("adobe") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("code")) {
-              log(`Found Adobe-related email: ${itemText.substring(0, 80)}`);
-              await item.click();
-              await waitMs(2500);
-              const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-              // Adobe sends a 6-digit numeric code
-              const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-              if (codeMatch) {
-                verificationCode = codeMatch[1];
-                log(`✅ Extracted Adobe 6-digit code: ${verificationCode}`);
+          // Check inbox and junk folder
+          for (const folder of ["inbox", "junkemail"]) {
+            if (verificationCode) break;
+            log(`Checking ${folder} (attempt ${attempt})...`);
+            await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitMs(4000);
+            const emailItems = await owaPage.$$('[data-convid], [role="row"]');
+            log(`Found ${emailItems.length} items in ${folder}`);
+            // Log all email subjects for debugging
+            for (const item of emailItems.slice(0, 5)) {
+              const t = await item.innerText().catch(() => "");
+              if (t.trim()) log(`  Email subject: ${t.substring(0, 80).replace(/\s+/g, " ")}`);
+            }
+            // First pass: look for Adobe-specific emails
+            const adobeKeywords = ["adobe", "verify", "confirm", "activation", "welcome", "account", "code"];
+            for (const item of emailItems.slice(0, 30)) {
+              const itemText = await item.innerText().catch(() => "");
+              const lower = itemText.toLowerCase();
+              if (adobeKeywords.some(k => lower.includes(k))) {
+                log(`Found potential Adobe email: ${itemText.substring(0, 80).replace(/\s+/g, " ")}`);
+                await item.click();
+                await waitMs(2500);
+                const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+                const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+                if (codeMatch) {
+                  verificationCode = codeMatch[1];
+                  log(`✅ Extracted Adobe 6-digit code: ${verificationCode}`);
+                  break;
+                }
+                log(`No 6-digit code in this email — checking next`);
+                // Go back to folder list
+                await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+                await waitMs(2000);
               }
-              break;
+            }
+            // Fallback: check ALL recent emails for a 6-digit code
+            if (!verificationCode) {
+              for (const item of emailItems.slice(0, 10)) {
+                const itemText = await item.innerText().catch(() => "");
+                if (!itemText.trim()) continue;
+                await item.click().catch(() => {});
+                await waitMs(2000);
+                const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+                const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+                if (codeMatch) {
+                  verificationCode = codeMatch[1];
+                  log(`✅ Found 6-digit code in email (fallback): ${verificationCode}`);
+                  break;
+                }
+                await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+                await waitMs(2000);
+              }
             }
           }
         }
         if (!verificationCode) {
-          log("⚠️ No Adobe verification email found — account may still be usable without verification");
+          log("⚠️ No Adobe verification email found after 3 attempts — account may still be usable");
         }
       } else {
         log(`⚠️ OWA login failed — URL: ${currentLoginUrl.substring(0, 80)}`);
