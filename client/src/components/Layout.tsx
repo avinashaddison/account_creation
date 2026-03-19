@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Activity, Cpu, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal, Zap } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal, Zap, Activity, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -19,28 +19,104 @@ const TM_SUBNAV = [
   { href: "/admin/tm-settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
-const TAG_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
-  SYS: { bg: "rgba(255,255,255,0.06)", text: "rgba(255,255,255,0.35)", dot: "#ffffff" },
-  OPS: { bg: "rgba(167,139,250,0.12)", text: "rgba(167,139,250,0.7)", dot: "#a78bfa" },
-  DB:  { bg: "rgba(251,191,36,0.10)", text: "rgba(251,191,36,0.65)", dot: "#fbbf24" },
-  NET: { bg: "rgba(56,189,248,0.10)", text: "rgba(56,189,248,0.65)", dot: "#38bdf8" },
-  FIN: { bg: "rgba(52,211,153,0.10)", text: "rgba(52,211,153,0.65)", dot: "#34d399" },
-  PVT: { bg: "rgba(248,113,113,0.10)", text: "rgba(248,113,113,0.65)", dot: "#f87171" },
-  ADM: { bg: "rgba(251,146,60,0.10)", text: "rgba(251,146,60,0.65)", dot: "#fb923c" },
-  CFG: { bg: "rgba(148,163,184,0.10)", text: "rgba(148,163,184,0.65)", dot: "#94a3b8" },
-  TKT: { bg: "rgba(0,255,65,0.08)", text: "rgba(0,255,65,0.5)", dot: "#00ff41" },
+const TAG_STYLES: Record<string, { bg: string; text: string; dot: string; glow: string }> = {
+  SYS: { bg: "rgba(255,255,255,0.06)", text: "rgba(255,255,255,0.4)", dot: "#e2e8f0", glow: "rgba(255,255,255,0.15)" },
+  OPS: { bg: "rgba(167,139,250,0.14)", text: "rgba(167,139,250,0.8)", dot: "#a78bfa", glow: "rgba(167,139,250,0.25)" },
+  DB:  { bg: "rgba(251,191,36,0.12)", text: "rgba(251,191,36,0.75)", dot: "#fbbf24", glow: "rgba(251,191,36,0.25)" },
+  NET: { bg: "rgba(56,189,248,0.12)", text: "rgba(56,189,248,0.75)", dot: "#38bdf8", glow: "rgba(56,189,248,0.25)" },
+  FIN: { bg: "rgba(52,211,153,0.12)", text: "rgba(52,211,153,0.75)", dot: "#34d399", glow: "rgba(52,211,153,0.25)" },
+  PVT: { bg: "rgba(248,113,113,0.12)", text: "rgba(248,113,113,0.75)", dot: "#f87171", glow: "rgba(248,113,113,0.25)" },
+  ADM: { bg: "rgba(251,146,60,0.12)", text: "rgba(251,146,60,0.75)", dot: "#fb923c", glow: "rgba(251,146,60,0.25)" },
+  CFG: { bg: "rgba(148,163,184,0.12)", text: "rgba(148,163,184,0.75)", dot: "#94a3b8", glow: "rgba(148,163,184,0.25)" },
+  TKT: { bg: "rgba(0,255,65,0.10)", text: "rgba(0,255,65,0.7)", dot: "#00ff41", glow: "rgba(0,255,65,0.3)" },
 };
 
 function TagBadge({ tag }: { tag: string }) {
   const s = TAG_STYLES[tag] || TAG_STYLES.SYS;
   return (
     <span
-      className="text-[8px] font-mono tracking-wider px-1.5 py-0.5 rounded-sm flex items-center gap-1"
-      style={{ background: s.bg, color: s.text }}
+      className="text-[8px] font-mono tracking-wider px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0"
+      style={{ background: s.bg, color: s.text, border: `1px solid ${s.dot}22` }}
     >
-      <span className="w-1 h-1 rounded-full inline-block" style={{ background: s.dot, boxShadow: `0 0 4px ${s.dot}` }} />
+      <span
+        className="w-1 h-1 rounded-full inline-block"
+        style={{ background: s.dot, boxShadow: `0 0 5px ${s.dot}, 0 0 10px ${s.glow}` }}
+      />
       {tag}
     </span>
+  );
+}
+
+function SectionDivider({ label, color }: { label: string; color: string }) {
+  return (
+    <div className="flex items-center gap-2 px-1 pt-3 pb-1.5">
+      <div className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${color}, transparent)` }} />
+      <span className="text-[7.5px] font-mono uppercase tracking-[0.25em]" style={{ color }}>
+        {label}
+      </span>
+      <div className="h-px flex-1" style={{ background: `linear-gradient(270deg, ${color}, transparent)` }} />
+    </div>
+  );
+}
+
+function NavItem({ item, location }: { item: { href: string; label: string; icon: any; tag: string }; location: string }) {
+  const isActive = location === item.href || (item.href === "/admin/create-server" && (
+    location === "/admin/la28-create" || location === "/admin/tm-create" ||
+    location === "/admin/uefa-create" || location === "/admin/brunomars-create" ||
+    location === "/admin/outlook-login" || location === "/admin/outlook-create" ||
+    location === "/admin/zenrows-register" || location === "/admin/replit-create" ||
+    location === "/admin/lovable-create" || location === "/admin/card-generator"
+  ));
+  const tag = TAG_STYLES[item.tag] || TAG_STYLES.SYS;
+
+  return (
+    <Link href={item.href}>
+      <div
+        onClick={() => sounds.navigate()}
+        onMouseEnter={() => sounds.hover()}
+        className="group/item relative flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200"
+        style={isActive ? {
+          background: `linear-gradient(135deg, ${tag.dot}14 0%, ${tag.dot}06 100%)`,
+          border: `1px solid ${tag.dot}30`,
+          boxShadow: `inset 0 0 24px ${tag.dot}08, 0 2px 12px ${tag.dot}10`,
+        } : {
+          border: "1px solid transparent",
+          background: "transparent",
+        }}
+        data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
+      >
+        {isActive && (
+          <>
+            <div
+              className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full"
+              style={{ height: "55%", background: `linear-gradient(180deg, ${tag.dot}, ${tag.dot}80)`, boxShadow: `0 0 10px ${tag.dot}, 0 0 20px ${tag.glow}` }}
+            />
+            <div className="absolute inset-0 rounded-lg opacity-30" style={{ background: `radial-gradient(ellipse at left center, ${tag.dot}20, transparent 70%)` }} />
+          </>
+        )}
+
+        <div
+          className="relative shrink-0 w-[26px] h-[26px] rounded-lg flex items-center justify-center transition-all duration-200"
+          style={isActive
+            ? { background: `linear-gradient(135deg, ${tag.dot}20, ${tag.dot}08)`, border: `1px solid ${tag.dot}40`, boxShadow: `0 0 12px ${tag.glow}` }
+            : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }
+          }
+        >
+          <item.icon
+            className="w-[12px] h-[12px] shrink-0 transition-all duration-200"
+            style={{ color: isActive ? tag.dot : "rgba(255,255,255,0.25)" }}
+          />
+        </div>
+
+        <span
+          className="flex-1 font-mono text-[11.5px] font-medium transition-colors duration-200"
+          style={{ color: isActive ? "#f1f5f9" : "rgba(255,255,255,0.3)" }}
+        >
+          {item.label}
+        </span>
+        <TagBadge tag={item.tag} />
+      </div>
+    </Link>
   );
 }
 
@@ -51,11 +127,16 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
   const [saving, setSaving] = useState(false);
   const [time, setTime] = useState(new Date());
   const [tmExpanded, setTmExpanded] = useState(() => location.startsWith("/admin/tm-"));
+  const [uptime, setUptime] = useState(0);
+  const startTime = useRef(Date.now());
 
   const panelName = user.panelName || "Addison Panel";
 
   useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000);
+    const t = setInterval(() => {
+      setTime(new Date());
+      setUptime(Math.floor((Date.now() - startTime.current) / 1000));
+    }, 1000);
     return () => clearInterval(t);
   }, []);
 
@@ -94,66 +175,32 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     ] : []),
   ];
 
-  function NavItem({ item, small = false }: { item: { href: string; label: string; icon: any; tag: string }; small?: boolean }) {
-    const isActive = location === item.href || (item.href === "/admin/create-server" && (
-      location === "/admin/la28-create" || location === "/admin/tm-create" ||
-      location === "/admin/uefa-create" || location === "/admin/brunomars-create" ||
-      location === "/admin/outlook-login" || location === "/admin/outlook-create" ||
-      location === "/admin/zenrows-register" || location === "/admin/replit-create" ||
-      location === "/admin/lovable-create" || location === "/admin/card-generator"
-    ));
-    const tag = TAG_STYLES[item.tag] || TAG_STYLES.SYS;
-
-    return (
-      <Link href={item.href}>
-        <div
-          onClick={() => sounds.navigate()}
-          onMouseEnter={() => sounds.hover()}
-          className={`group/item relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${
-            isActive ? "text-white" : "text-zinc-500 hover:text-zinc-300"
-          }`}
-          style={isActive ? {
-            background: `linear-gradient(135deg, ${tag.bg.replace("0.10", "0.18").replace("0.12", "0.18").replace("0.06", "0.12").replace("0.08", "0.12")}, rgba(0,0,0,0.3))`,
-            border: `1px solid ${tag.dot}22`,
-            boxShadow: `inset 0 0 20px ${tag.dot}08`
-          } : { border: "1px solid transparent" }}
-          data-testid={`nav-${item.label.toLowerCase().replace(/ /g, "-")}`}
-        >
-          {isActive && (
-            <div
-              className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] rounded-r-full"
-              style={{ height: "60%", background: tag.dot, boxShadow: `0 0 8px ${tag.dot}, 0 0 16px ${tag.dot}80` }}
-            />
-          )}
-          <div
-            className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-all duration-150`}
-            style={isActive ? { background: `${tag.dot}15`, border: `1px solid ${tag.dot}30` } : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)" }}
-          >
-            <item.icon
-              className={`w-[13px] h-[13px] shrink-0 transition-all`}
-              style={{ color: isActive ? tag.dot : undefined }}
-            />
-          </div>
-          <span className={`flex-1 font-mono text-[11.5px] font-medium`}>{item.label}</span>
-          <TagBadge tag={item.tag} />
-        </div>
-      </Link>
-    );
-  }
+  const formatUptime = (s: number) => {
+    const h = Math.floor(s / 3600).toString().padStart(2, "0");
+    const m = Math.floor((s % 3600) / 60).toString().padStart(2, "0");
+    const sec = (s % 60).toString().padStart(2, "0");
+    return `${h}:${m}:${sec}`;
+  };
 
   return (
-    <div className="min-h-screen flex" style={{ background: '#0a0a0a' }}>
+    <div className="min-h-screen flex" style={{ background: '#080808' }}>
       <aside
-        className="w-[258px] flex flex-col shrink-0 h-screen sticky top-0"
+        className="w-[262px] flex flex-col shrink-0 h-screen sticky top-0 overflow-hidden"
         style={{
-          background: 'linear-gradient(180deg, #0b0f0b 0%, #090909 100%)',
-          borderRight: '1px solid rgba(0,255,65,0.08)',
-          boxShadow: '4px 0 24px rgba(0,0,0,0.4)'
+          background: 'linear-gradient(180deg, #0c100c 0%, #080c08 60%, #060906 100%)',
+          borderRight: '1px solid rgba(0,255,65,0.10)',
+          boxShadow: '6px 0 40px rgba(0,0,0,0.6), inset -1px 0 0 rgba(0,255,65,0.04)',
         }}
         data-testid="sidebar"
       >
+        {/* Top edge highlight */}
+        <div className="absolute top-0 left-0 right-0 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(0,255,65,0.4), transparent)" }} />
+
+        {/* Ambient glow top-left */}
+        <div className="absolute top-0 left-0 w-40 h-40 pointer-events-none" style={{ background: "radial-gradient(ellipse at top left, rgba(0,255,65,0.06), transparent 70%)" }} />
+
         {/* Header */}
-        <div className="px-4 pt-4 pb-3">
+        <div className="px-4 pt-5 pb-3">
           {isEditing ? (
             <div className="space-y-2">
               <Input
@@ -161,7 +208,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                 onChange={(e) => setEditName(e.target.value)}
                 maxLength={50}
                 autoFocus
-                className="h-8 text-sm bg-black/30 border-emerald-500/15 text-emerald-50 font-mono rounded-lg"
+                className="h-8 text-sm bg-black/40 border-emerald-500/20 text-emerald-50 font-mono rounded-lg"
                 onKeyDown={(e) => { if (e.key === "Enter") savePanelName(); if (e.key === "Escape") { setIsEditing(false); setEditName(panelName); } }}
                 data-testid="input-panel-name"
               />
@@ -176,22 +223,31 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
             </div>
           ) : (
             <div className="group flex items-center gap-3">
+              {/* Logo mark */}
               <div className="relative shrink-0">
-                <div className="absolute inset-0 rounded-xl bg-emerald-400/20 blur-lg" />
+                <div className="absolute inset-[-4px] rounded-2xl animate-glow" style={{ background: "radial-gradient(ellipse, rgba(0,255,65,0.18), transparent 70%)" }} />
                 <div
-                  className="relative w-10 h-10 rounded-xl flex items-center justify-center"
+                  className="relative w-11 h-11 rounded-xl flex items-center justify-center"
                   style={{
-                    background: 'linear-gradient(135deg, rgba(0,255,65,0.15) 0%, rgba(0,255,65,0.05) 100%)',
-                    border: '1px solid rgba(0,255,65,0.25)',
-                    boxShadow: '0 0 12px rgba(0,255,65,0.1), inset 0 1px 0 rgba(0,255,65,0.1)'
+                    background: 'linear-gradient(135deg, rgba(0,255,65,0.18) 0%, rgba(0,255,65,0.06) 100%)',
+                    border: '1px solid rgba(0,255,65,0.30)',
+                    boxShadow: '0 0 20px rgba(0,255,65,0.12), inset 0 1px 0 rgba(0,255,65,0.15), inset 0 0 12px rgba(0,255,65,0.04)'
                   }}
                 >
-                  <Terminal className="w-4.5 h-4.5 text-emerald-400" />
+                  <Terminal className="w-5 h-5 text-emerald-400" style={{ filter: "drop-shadow(0 0 6px rgba(0,255,65,0.6))" }} />
                 </div>
+                {/* Corner brackets */}
+                <div className="absolute -top-1 -left-1 w-2 h-2 border-t border-l border-emerald-400/40" />
+                <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b border-r border-emerald-400/40" />
               </div>
+
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <h2 className="text-[13px] font-bold text-white tracking-tight truncate font-mono" data-testid="text-brand">
+                  <h2
+                    className="text-[13.5px] font-bold text-white tracking-tight truncate font-mono"
+                    style={{ textShadow: "0 0 20px rgba(0,255,65,0.2)" }}
+                    data-testid="text-brand"
+                  >
                     {panelName}
                   </h2>
                   <button
@@ -203,70 +259,91 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                   </button>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <Zap className="w-2.5 h-2.5 text-emerald-400/40" />
-                  <p className="text-[9px] text-emerald-400/40 font-mono tracking-[0.12em] uppercase">Command Center</p>
+                  <Zap className="w-2.5 h-2.5" style={{ color: "rgba(0,255,65,0.45)", filter: "drop-shadow(0 0 3px rgba(0,255,65,0.4))" }} />
+                  <p className="text-[8.5px] font-mono tracking-[0.15em] uppercase" style={{ color: "rgba(0,255,65,0.35)" }}>Command Center</p>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Clock + status bar */}
-        <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg flex items-center gap-2" style={{ background: "rgba(0,255,65,0.03)", border: "1px solid rgba(0,255,65,0.06)" }}>
-          <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: "0 0 6px rgba(0,255,65,0.6)" }} />
-            <span className="text-[9px] font-mono text-emerald-400/60 uppercase tracking-wider">Online</span>
-          </div>
-          <div className="flex-1" />
-          <span className="text-[9px] font-mono text-zinc-600 tabular-nums">{time.toLocaleTimeString('en-US', { hour12: false })}</span>
-        </div>
-
-        {/* Section label — core */}
-        <div className="px-4 pb-1 flex items-center gap-2">
-          <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(0,255,65,0.15), transparent)" }} />
-          <span className="text-[8px] font-mono text-emerald-400/30 uppercase tracking-[0.2em]">Core</span>
-          <div className="h-px flex-1" style={{ background: "linear-gradient(270deg, rgba(0,255,65,0.15), transparent)" }} />
-        </div>
-
-        <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto pb-2">
-          {/* Dashboard (always first) */}
-          <NavItem item={nav[0]} />
-
-          {/* Ticket Master section */}
-          <div className="pt-1.5">
-            <div className="px-1 pb-1 flex items-center gap-2">
-              <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(0,255,65,0.1), transparent)" }} />
-              <span className="text-[8px] font-mono text-emerald-400/25 uppercase tracking-[0.2em]">Ticket Master</span>
-              <div className="h-px flex-1" style={{ background: "linear-gradient(270deg, rgba(0,255,65,0.1), transparent)" }} />
+        {/* Status panel */}
+        <div className="mx-3 mb-1">
+          <div
+            className="px-3 py-2 rounded-lg"
+            style={{
+              background: "linear-gradient(135deg, rgba(0,255,65,0.04), rgba(0,0,0,0.3))",
+              border: "1px solid rgba(0,255,65,0.08)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <div className="relative flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ boxShadow: "0 0 8px rgba(0,255,65,0.8)" }} />
+                  <div className="absolute w-3 h-3 rounded-full border border-emerald-400/30 animate-ping" style={{ animationDuration: "2s" }} />
+                </div>
+                <span className="text-[9px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(0,255,65,0.7)" }}>Online</span>
+              </div>
+              <span className="text-[9px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.25)" }}>
+                {time.toLocaleTimeString("en-US", { hour12: false })}
+              </span>
             </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Activity className="w-2.5 h-2.5" style={{ color: "rgba(0,255,65,0.3)" }} />
+                <span className="text-[8px] font-mono" style={{ color: "rgba(255,255,255,0.2)" }}>UP {formatUptime(uptime)}</span>
+              </div>
+              <div className="flex items-center gap-0.5">
+                {[1,2,3,4].map(i => (
+                  <div key={i} className="w-0.5 rounded-full" style={{ height: `${4 + i * 2}px`, background: i <= 3 ? "rgba(0,255,65,0.5)" : "rgba(255,255,255,0.08)" }} />
+                ))}
+                <Radio className="w-2.5 h-2.5 ml-1" style={{ color: "rgba(0,255,65,0.35)" }} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 px-3 overflow-y-auto pb-2 space-y-0.5">
+          <SectionDivider label="Core" color="rgba(0,255,65,0.2)" />
+          <NavItem item={nav[0]} location={location} />
+
+          {/* Ticket Master */}
+          <SectionDivider label="Ticket Master" color="rgba(0,255,65,0.15)" />
+          <div>
             <div
               onClick={() => { setTmExpanded((v) => !v); sounds.navigate(); }}
               onMouseEnter={() => sounds.hover()}
-              className={`group/item relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${
-                location.startsWith("/admin/tm-") ? "text-white" : "text-zinc-500 hover:text-zinc-300"
-              }`}
+              className="relative flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200"
               style={location.startsWith("/admin/tm-") ? {
-                background: "linear-gradient(135deg, rgba(0,255,65,0.12), rgba(0,0,0,0.3))",
-                border: "1px solid rgba(0,255,65,0.15)",
-                boxShadow: "inset 0 0 20px rgba(0,255,65,0.04)"
+                background: "linear-gradient(135deg, rgba(0,255,65,0.14) 0%, rgba(0,255,65,0.05) 100%)",
+                border: "1px solid rgba(0,255,65,0.28)",
+                boxShadow: "inset 0 0 24px rgba(0,255,65,0.06), 0 2px 12px rgba(0,255,65,0.08)",
               } : { border: "1px solid transparent" }}
               data-testid="nav-ticket-master"
             >
               {location.startsWith("/admin/tm-") && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] rounded-r-full" style={{ height: "60%", background: "#00ff41", boxShadow: "0 0 8px #00ff41, 0 0 16px #00ff4180" }} />
+                <>
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full" style={{ height: "55%", background: "linear-gradient(180deg, #00ff41, #00ff4180)", boxShadow: "0 0 10px #00ff41, 0 0 20px rgba(0,255,65,0.3)" }} />
+                  <div className="absolute inset-0 rounded-lg opacity-30" style={{ background: "radial-gradient(ellipse at left center, rgba(0,255,65,0.2), transparent 70%)" }} />
+                </>
               )}
               <div
-                className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center"
-                style={location.startsWith("/admin/tm-") ? { background: "rgba(0,255,65,0.15)", border: "1px solid rgba(0,255,65,0.3)" } : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)" }}
+                className="shrink-0 w-[26px] h-[26px] rounded-lg flex items-center justify-center"
+                style={location.startsWith("/admin/tm-")
+                  ? { background: "rgba(0,255,65,0.18)", border: "1px solid rgba(0,255,65,0.35)", boxShadow: "0 0 10px rgba(0,255,65,0.2)" }
+                  : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }
+                }
               >
-                <Ticket className={`w-[13px] h-[13px] ${location.startsWith("/admin/tm-") ? "text-emerald-400" : "text-zinc-600"}`} />
+                <Ticket className="w-[12px] h-[12px]" style={{ color: location.startsWith("/admin/tm-") ? "#00ff41" : "rgba(255,255,255,0.25)" }} />
               </div>
-              <span className="flex-1 font-mono text-[11.5px] font-medium">Ticket Master</span>
+              <span className="flex-1 font-mono text-[11.5px] font-medium" style={{ color: location.startsWith("/admin/tm-") ? "#f1f5f9" : "rgba(255,255,255,0.3)" }}>Ticket Master</span>
               <TagBadge tag="TKT" />
-              <ChevronRight className={`w-3 h-3 transition-transform duration-200 ${tmExpanded ? "rotate-90 text-emerald-400/50" : "text-zinc-700"}`} />
+              <ChevronRight className="w-3 h-3 transition-transform duration-250 ml-0.5" style={{ transform: tmExpanded ? "rotate(90deg)" : "rotate(0deg)", color: tmExpanded ? "rgba(0,255,65,0.5)" : "rgba(255,255,255,0.15)" }} />
             </div>
+
             {tmExpanded && (
-              <div className="ml-3 mt-0.5 pl-3 border-l border-emerald-500/[0.08] space-y-0.5">
+              <div className="ml-4 mt-1 pl-3 space-y-0.5" style={{ borderLeft: "1px solid rgba(0,255,65,0.10)" }}>
                 {TM_SUBNAV.map((item) => {
                   const isActive = location === item.href;
                   return (
@@ -274,14 +351,17 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                       <div
                         onClick={() => sounds.navigate()}
                         onMouseEnter={() => sounds.hover()}
-                        className={`group/sub relative flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150 ${
-                          isActive ? "text-emerald-300" : "text-zinc-600 hover:text-zinc-300"
-                        }`}
-                        style={isActive ? { background: "rgba(0,255,65,0.06)", border: "1px solid rgba(0,255,65,0.1)" } : { border: "1px solid transparent" }}
+                        className="relative flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150"
+                        style={isActive
+                          ? { background: "rgba(0,255,65,0.07)", border: "1px solid rgba(0,255,65,0.14)", color: "#86efac" }
+                          : { border: "1px solid transparent", color: "rgba(255,255,255,0.25)" }
+                        }
                         data-testid={`nav-tm-${item.label.toLowerCase().replace(/ /g, "-")}`}
                       >
-                        {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3 rounded-r-full bg-emerald-400" style={{ boxShadow: "0 0 5px rgba(0,255,65,0.5)" }} />}
-                        <item.icon className={`w-[11px] h-[11px] shrink-0 ${isActive ? "text-emerald-400" : "text-zinc-700"}`} />
+                        {isActive && (
+                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3 rounded-r-full" style={{ background: "#00ff41", boxShadow: "0 0 6px rgba(0,255,65,0.6)" }} />
+                        )}
+                        <item.icon className="w-[11px] h-[11px] shrink-0" style={{ color: isActive ? "#4ade80" : "rgba(255,255,255,0.18)" }} />
                         <span className="font-mono">{item.label}</span>
                       </div>
                     </Link>
@@ -291,78 +371,86 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
             )}
           </div>
 
-          {/* Section label — ops */}
-          <div className="pt-1.5 pb-1 flex items-center gap-2 px-1">
-            <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(167,139,250,0.15), transparent)" }} />
-            <span className="text-[8px] font-mono text-violet-400/30 uppercase tracking-[0.2em]">Operations</span>
-            <div className="h-px flex-1" style={{ background: "linear-gradient(270deg, rgba(167,139,250,0.15), transparent)" }} />
-          </div>
+          <SectionDivider label="Operations" color="rgba(167,139,250,0.2)" />
+          <NavItem item={nav[1]} location={location} />
 
-          {/* nav[1] = Create Server */}
-          <NavItem item={nav[1]} />
+          <SectionDivider label="Data" color="rgba(251,191,36,0.18)" />
+          {nav.slice(2, 6).map((item) => <NavItem key={item.href} item={item} location={location} />)}
 
-          {/* Section label — data */}
-          <div className="pt-1.5 pb-1 flex items-center gap-2 px-1">
-            <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(251,191,36,0.12), transparent)" }} />
-            <span className="text-[8px] font-mono text-amber-400/25 uppercase tracking-[0.2em]">Data</span>
-            <div className="h-px flex-1" style={{ background: "linear-gradient(270deg, rgba(251,191,36,0.12), transparent)" }} />
-          </div>
-
-          {/* nav[2..5] = Account Stock, Email Workspace, Billing, Wallet */}
-          {nav.slice(2, 6).map((item) => <NavItem key={item.href} item={item} />)}
-
-          {/* Superadmin section */}
           {user.role === "superadmin" && (
             <>
-              <div className="pt-1.5 pb-1 flex items-center gap-2 px-1">
-                <div className="h-px flex-1" style={{ background: "linear-gradient(90deg, rgba(248,113,113,0.12), transparent)" }} />
-                <span className="text-[8px] font-mono text-red-400/30 uppercase tracking-[0.2em]">Admin</span>
-                <div className="h-px flex-1" style={{ background: "linear-gradient(270deg, rgba(248,113,113,0.12), transparent)" }} />
-              </div>
-              {nav.slice(6).map((item) => <NavItem key={item.href} item={item} />)}
+              <SectionDivider label="Admin" color="rgba(248,113,113,0.2)" />
+              {nav.slice(6).map((item) => <NavItem key={item.href} item={item} location={location} />)}
             </>
           )}
         </nav>
 
+        {/* Bottom glow */}
+        <div className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none" style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.8), transparent)" }} />
+
         {/* User card */}
-        <div
-          className="mx-3 mb-3 p-3 rounded-xl"
-          style={{
-            background: "linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.3) 100%)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            boxShadow: "0 -4px 24px rgba(0,0,0,0.3)"
-          }}
-        >
-          <div className="flex items-center gap-2.5 mb-2.5">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: "rgba(0,255,65,0.06)", border: "1px solid rgba(0,255,65,0.12)" }}
-            >
-              <User className="w-3.5 h-3.5 text-emerald-400/60" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[11px] font-mono text-zinc-300 truncate" data-testid="text-user-email">{user.email}</p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ boxShadow: "0 0 5px rgba(0,255,65,0.6)" }} />
-                <p className="text-[9px] text-emerald-400/50 capitalize font-mono" data-testid="text-user-role">{user.role}</p>
+        <div className="relative mx-3 mb-3 mt-1">
+          <div
+            className="p-3 rounded-xl"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.4) 100%)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              boxShadow: "0 -8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
+          >
+            <div className="flex items-center gap-2.5 mb-2.5">
+              <div className="relative shrink-0">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(0,255,65,0.12), rgba(0,255,65,0.04))",
+                    border: "1px solid rgba(0,255,65,0.18)",
+                    boxShadow: "0 0 14px rgba(0,255,65,0.08)",
+                  }}
+                >
+                  <User className="w-4 h-4" style={{ color: "rgba(0,255,65,0.6)" }} />
+                </div>
+                <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-black" style={{ boxShadow: "0 0 6px rgba(0,255,65,0.8)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10.5px] font-mono truncate" style={{ color: "rgba(255,255,255,0.65)" }} data-testid="text-user-email">
+                  {user.email}
+                </p>
+                <p className="text-[8.5px] font-mono capitalize mt-0.5" style={{ color: "rgba(0,255,65,0.45)" }} data-testid="text-user-role">
+                  ◆ {user.role}
+                </p>
               </div>
             </div>
+
+            <button
+              className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-[10.5px] font-mono transition-all duration-150 group/logout"
+              style={{ border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)", background: "transparent" }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(239,68,68,0.08)";
+                e.currentTarget.style.borderColor = "rgba(239,68,68,0.2)";
+                e.currentTarget.style.color = "rgba(248,113,113,0.9)";
+                e.currentTarget.style.boxShadow = "0 0 12px rgba(239,68,68,0.08)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)";
+                e.currentTarget.style.color = "rgba(255,255,255,0.25)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+              onClick={() => { sounds.logout(); onLogout(); }}
+              data-testid="button-logout"
+            >
+              <LogOut className="w-3 h-3" />
+              Disconnect
+            </button>
           </div>
-          <button
-            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-mono text-zinc-600 hover:text-red-400 transition-all duration-150"
-            style={{ border: "1px solid rgba(255,255,255,0.04)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.06)", e.currentTarget.style.borderColor = "rgba(239,68,68,0.12)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent", e.currentTarget.style.borderColor = "rgba(255,255,255,0.04)")}
-            onClick={() => { sounds.logout(); onLogout(); }}
-            data-testid="button-logout"
-          >
-            <LogOut className="w-3 h-3" />
-            Disconnect
-          </button>
         </div>
+
+        {/* Bottom edge line */}
+        <div className="absolute bottom-0 left-0 right-0 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(0,255,65,0.15), transparent)" }} />
       </aside>
 
-      <main className="flex-1 overflow-auto cyber-grid scan-line crt-overlay animate-flicker" style={{ background: 'linear-gradient(135deg, #0a0a0a 0%, #0d120d 50%, #0a0a0a 100%)' }}>
+      <main className="flex-1 overflow-auto cyber-grid scan-line crt-overlay animate-flicker" style={{ background: 'linear-gradient(135deg, #080808 0%, #0b0e0b 50%, #080808 100%)' }}>
         <div className="p-6 max-w-[1400px] mx-auto">{children}</div>
       </main>
     </div>
