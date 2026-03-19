@@ -7,7 +7,7 @@ import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_17724120892
 import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
 import uefaLogo from "@assets/UEFA_Champions_League.svg_1772418059822.png";
 import replitLogo from "@assets/Replit_Logo_1773851974177.jpg";
-import lovableLogo from "@assets/{430CDF6D-B837-464E-BE6E-FA315A9BE06F}_1773931794583.png";
+import lovableLogo from "@assets/lovable-749_1773932176443.jpg";
 
 type Platform = {
   id: string;
@@ -182,8 +182,8 @@ function PlatformIcon({ id, accentColor }: { id: string; accentColor: string }) 
     </div>
   );
   if (id === "lovable") return (
-    <div className={`${base}`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
-      <img src={lovableLogo} alt="Lovable" className="w-full h-full object-cover rounded-xl" />
+    <div className={`${base} bg-black`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
+      <img src={lovableLogo} alt="Lovable" className="w-full h-full object-cover object-left rounded-xl" />
     </div>
   );
   if (id === "card-generator") return (
