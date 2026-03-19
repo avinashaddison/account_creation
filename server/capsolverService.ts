@@ -166,6 +166,63 @@ export async function solveHCaptcha(
   }
 }
 
+export interface FunCaptchaClassifyResult {
+  success: boolean;
+  answer?: number[];
+  error?: string;
+}
+
+export async function classifyFunCaptchaImages(
+  images: string[],
+  question: string
+): Promise<FunCaptchaClassifyResult> {
+  try {
+    const apiKey = await getApiKey();
+    console.log(`[CapSolver] FunCaptchaClassification: ${images.length} images, question="${question.substring(0, 60)}"`);
+    const createResp = await axios.post(`${CAPSOLVER_API_URL}/createTask`, {
+      clientKey: apiKey,
+      task: {
+        type: "FunCaptchaClassification",
+        images,
+        question,
+      },
+    }, { timeout: 30000 });
+
+    if (createResp.data.errorId !== 0) {
+      console.log(`[CapSolver] FunCaptchaClassification error: ${createResp.data.errorDescription}`);
+      return { success: false, error: createResp.data.errorDescription };
+    }
+
+    const taskId = createResp.data.taskId;
+    const solution = createResp.data.solution;
+    if (solution) {
+      const answer = solution.objects || solution.answer || [];
+      console.log(`[CapSolver] FunCaptchaClassification instant result: ${JSON.stringify(answer)}`);
+      return { success: true, answer };
+    }
+
+    // Poll for result
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const resultResp = await axios.post(`${CAPSOLVER_API_URL}/getTaskResult`, {
+        clientKey: apiKey,
+        taskId,
+      }, { timeout: 15000 });
+      if (resultResp.data.status === "ready") {
+        const sol = resultResp.data.solution;
+        const answer = sol?.objects || sol?.answer || [];
+        console.log(`[CapSolver] FunCaptchaClassification result: ${JSON.stringify(answer)}`);
+        return { success: true, answer };
+      }
+    }
+    return { success: false, error: "Classification timeout" };
+  } catch (e: any) {
+    const body = e.response?.data ? JSON.stringify(e.response.data).substring(0, 300) : '';
+    console.log(`[CapSolver] FunCaptchaClassification error: ${e.message} | body: ${body}`);
+    return { success: false, error: `${e.message} ${body}` };
+  }
+}
+
 export async function solveFunCaptcha(
   websiteURL: string,
   websitePublicKey: string,

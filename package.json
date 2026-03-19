@@ -58,6 +58,7 @@
     "https-proxy-agent": "^7.0.6",
     "imapflow": "^1.2.15",
     "input-otp": "^1.4.2",
+    "jimp": "^1.6.0",
     "lucide-react": "^0.545.0",
     "memorystore": "^1.6.7",
     "next-themes": "^0.4.6",

@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import * as ProxyChain from "proxy-chain";
 
@@ -12050,6 +12050,59 @@ export async function registerAdobeAccount(
       Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
       Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
       (window as any).chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+
+      // Intercept ArkoseLabs enforcement callback registration
+      // This captures the callback Adobe registers so we can call it with our CapSolver token
+      const interceptArkose = () => {
+        const w = window as any;
+        let _intercepted = false;
+        const captureConfig = (val: any) => {
+          if (val && typeof val.setConfig === 'function') {
+            const origSetConfig = val.setConfig.bind(val);
+            val.setConfig = function(config: any) {
+              if (config && typeof config.callback === 'function') {
+                w.__adobeArkoseCallback = config.callback;
+                _intercepted = true;
+              }
+              return origSetConfig(config);
+            };
+          }
+          return val;
+        };
+        // Intercept property assignment
+        try {
+          Object.defineProperty(w, 'ArkoseEnforcement', {
+            get() { return this._ArkoseEnforcement; },
+            set(val) {
+              this._ArkoseEnforcement = captureConfig(val);
+            },
+            configurable: true,
+          });
+        } catch {}
+      };
+      interceptArkose();
+    });
+
+    // ── Intercept network requests to capture Adobe IMS API calls ────────────
+    let capturedImsRequest: { url: string; postData: string; headers: Record<string,string> } | null = null;
+    page.on('request', req => {
+      const url = req.url();
+      if (url.includes('ims-na1.adobelogin.com') && req.method() === 'POST') {
+        const postData = req.postData() || '';
+        log(`[IMS-REQ] ${req.method()} ${url.substring(0, 120)}`);
+        if (postData) log(`[IMS-REQ] body: ${postData.substring(0, 200)}`);
+        capturedImsRequest = { url, postData, headers: req.headers() };
+      }
+    });
+    page.on('response', async res => {
+      const url = res.url();
+      if (url.includes('ims-na1.adobelogin.com')) {
+        const status = res.status();
+        let body = '';
+        try { body = await res.text(); } catch {}
+        log(`[IMS-RES] ${status} ${url.substring(0, 120)}`);
+        if (body) log(`[IMS-RES] body: ${body.substring(0, 300)}`);
+      }
     });
 
     // ── STEP 1: Navigate to Adobe's account creation page ────────────────────
@@ -12200,6 +12253,32 @@ export async function registerAdobeAccount(
     }
 
     // ── STEP 3: Fill name + DOB ───────────────────────────────────────────────
+    // Helper: fill a text input using natural keystrokes (passes ArkoseLabs behavioral analysis)
+    const fillReactInput = async (el: any, value: string): Promise<void> => {
+      await el.click({ clickCount: 3 });
+      await waitMs(100);
+      await el.type(value, { delay: 40 });
+      await page.keyboard.press("Tab");
+      await waitMs(200);
+    };
+
+    // Helper: select a <select> option (try by label then value)
+    const selectReactOption = async (el: any, value: string, label: string): Promise<boolean> => {
+      try {
+        // Try by label first (more reliable for named months/countries)
+        await el.selectOption({ label }).catch(() => {});
+        let v = await el.evaluate((s: any) => s.value).catch(() => '');
+        if (!v || v === '') {
+          // Try by value
+          await el.selectOption({ value }).catch(() => {});
+          v = await el.evaluate((s: any) => s.value).catch(() => '');
+        }
+        if (!v || v === '') return false;
+        await waitMs(150);
+        return true;
+      } catch { return false; }
+    };
+
     log("Waiting for profile form (first/last name, DOB)...");
     try {
       await page.waitForSelector('input[name="firstName"], input[placeholder*="first" i], #ProfilePage-firstNameField, input[id*="first" i]', { timeout: 20000, state: "visible" });
@@ -12210,21 +12289,19 @@ export async function registerAdobeAccount(
       log(`Current page: ${pg.replace(/\s+/g, " ").substring(0, 300)}`);
     }
 
+    // Order: first name → last name → month → country → year (LAST, so re-renders don't reset it)
+
     // First name
     const firstNameSelectors = ['input[name="firstName"]', 'input[placeholder*="first" i]', '#ProfilePage-firstNameField', 'input[id*="first" i]'];
     for (const sel of firstNameSelectors) {
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
-        await el.click({ clickCount: 3 });
-        await waitMs(100);
-        await el.type(firstName, { delay: 50 });
+        await fillReactInput(el, firstName);
         log(`Filled first name via ${sel}`);
         break;
       } catch {}
     }
-
-    await waitMs(300);
 
     // Last name
     const lastNameSelectors = ['input[name="lastName"]', 'input[placeholder*="last" i]', '#ProfilePage-lastNameField', 'input[id*="last" i]'];
@@ -12232,67 +12309,93 @@ export async function registerAdobeAccount(
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
-        await el.click({ clickCount: 3 });
-        await waitMs(100);
-        await el.type(lastName, { delay: 50 });
+        await fillReactInput(el, lastName);
         log(`Filled last name via ${sel}`);
         break;
       } catch {}
     }
 
-    await waitMs(300);
-
-    // DOB Month (dropdown)
+    // DOB Month (dropdown) — comes before country to keep order logical
     const monthSelectors = ['select[name="month"]', 'select[id*="month" i]', '#ProfilePage-BirthMonth', 'select[aria-label*="month" i]'];
     for (const sel of monthSelectors) {
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
-        await el.selectOption({ label: dobMonth });
-        log(`Selected DOB month: ${dobMonth} via ${sel}`);
-        break;
+        const ok = await selectReactOption(el, dobMonth, dobMonth);
+        if (ok) { log(`Selected DOB month: ${dobMonth} via ${sel}`); break; }
       } catch {}
     }
 
     await waitMs(300);
 
-    // DOB Year — Adobe A/B tests between text input and dropdown
-    let yearFilled = false;
-    // Try select/dropdown first (Adobe A/B test: dob-year-dropdown variant)
-    const yearSelectSelectors = ['select[name="year"]', 'select[id*="year" i]', 'select[aria-label*="year" i]', '#ProfilePage-BirthYear'];
-    for (const sel of yearSelectSelectors) {
+    // Country/Region — Adobe requires this; fill BEFORE year to avoid resetting year on re-render
+    const countrySelectors = [
+      'select[name="country"]',
+      'select[id*="country" i]',
+      'select[name="countryCode"]',
+      'select[aria-label*="country" i]',
+      'select[aria-label*="region" i]',
+      '#ProfilePage-country',
+    ];
+    let countryFilled = false;
+    for (const sel of countrySelectors) {
       try {
         const el = await page.$(sel);
         if (!el || !await el.isVisible().catch(() => false)) continue;
-        await el.selectOption({ value: dobYear }).catch(() => {});
-        // Fallback: select by label (the year as text)
-        const opts = await page.$$(`${sel} option`);
-        for (const opt of opts) {
-          const v = await opt.getAttribute("value") || "";
-          const t = await opt.innerText().catch(() => "");
-          if (v === dobYear || t.trim() === dobYear) {
-            await el.selectOption({ value: v || dobYear });
-            break;
-          }
+        const ok = await selectReactOption(el, "US", "United States");
+        if (ok) {
+          log(`Selected country: United States via ${sel}`);
+          countryFilled = true;
+          break;
         }
-        log(`Selected DOB year: ${dobYear} via ${sel} (dropdown)`);
-        yearFilled = true;
-        break;
       } catch {}
     }
-    // Fallback: text input
+    if (!countryFilled) { log("Country/Region field not found or already defaulted"); }
+
+    await waitMs(400);
+
+    // DOB Year — fill LAST so country re-render doesn't reset it
+    // Strategy 1: scan all visible selects for year options
+    let yearFilled = false;
+    try {
+      const allSelects = await page.$$('select');
+      for (const selEl of allSelects) {
+        if (!await selEl.isVisible().catch(() => false)) continue;
+        const opts = await selEl.$$('option');
+        const optValues = await Promise.all(opts.map(o => o.getAttribute('value').catch(() => '')));
+        const optTexts = await Promise.all(opts.map(o => o.innerText().catch(() => '')));
+        const hasYearOpts = optValues.some(v => v && /^(19|20)\d{2}$/.test(v.trim())) ||
+          optTexts.some(t => /^(19|20)\d{2}$/.test(t.trim()));
+        if (!hasYearOpts) continue;
+        const ok = await selectReactOption(selEl, dobYear, dobYear);
+        if (ok) {
+          const finalVal = await selEl.evaluate((s: any) => s.value).catch(() => '');
+          log(`Selected DOB year: ${dobYear} via auto-detected year select (value=${finalVal})`);
+          yearFilled = true;
+          break;
+        }
+      }
+    } catch {}
+    // Strategy 2: named year input or select
     if (!yearFilled) {
-      const yearInputSelectors = ['input[name="year"]', 'input[id*="year" i]', 'input[placeholder*="year" i]'];
-      for (const sel of yearInputSelectors) {
+      const yearSelectors = [
+        'select[name="year"]', 'select[id*="year" i]', 'select[aria-label*="year" i]', '#ProfilePage-BirthYear',
+        'input[name="year"]', 'input[id*="year" i]', 'input[placeholder*="year" i]', 'input[placeholder="YYYY"]',
+      ];
+      for (const sel of yearSelectors) {
         try {
           const el = await page.$(sel);
           if (!el || !await el.isVisible().catch(() => false)) continue;
-          await el.click({ clickCount: 3 });
-          await waitMs(100);
-          await el.type(dobYear, { delay: 50 });
-          log(`Filled DOB year: ${dobYear} via ${sel} (text input)`);
-          yearFilled = true;
-          break;
+          const tag = await el.evaluate((e: any) => e.tagName.toLowerCase()).catch(() => '');
+          if (tag === 'select') {
+            const ok = await selectReactOption(el, dobYear, dobYear);
+            if (ok) { log(`Selected DOB year: ${dobYear} via ${sel}`); yearFilled = true; break; }
+          } else {
+            await fillReactInput(el, dobYear);
+            log(`Filled DOB year: ${dobYear} via ${sel} (text input)`);
+            yearFilled = true;
+            break;
+          }
         } catch {}
       }
     }
@@ -12300,49 +12403,541 @@ export async function registerAdobeAccount(
 
     await waitMs(500);
 
-    // Click "Create account" button (Step 2)
-    log("Clicking Create account (Step 2 of 2)...");
-    const createBtnSelectors = [
-      'button:has-text("Create account")',
-      'button:has-text("Create Account")',
-      'button[type="submit"]',
-      'input[type="submit"]',
-      '[data-id="submit-button"]',
-    ];
-    let submitted2 = false;
-    for (const sel of createBtnSelectors) {
-      try {
-        const btns = await page.$$(sel);
-        for (const btn of btns) {
-          const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
-          if (txt.includes("google") || txt.includes("facebook") || txt.includes("apple") || txt.includes("sign in")) continue;
-          if (!await btn.isVisible().catch(() => false)) continue;
-          await btn.click();
-          log(`Clicked Create account: "${txt.substring(0, 40)}"`);
-          submitted2 = true;
-          break;
-        }
-        if (submitted2) break;
-      } catch {}
-    }
-    if (!submitted2) {
-      log("Pressing Enter to submit Step 2...");
+    // Debug: log all form field values before submit
+    const formState = await page.evaluate(() => {
+      const inputs = Array.from(document.querySelectorAll('input, select')).map((el: any) => ({
+        tag: el.tagName, name: el.name || '', id: el.id || '', value: el.value || '', type: el.type || ''
+      }));
+      return inputs.filter(i => i.name || i.id).slice(0, 15);
+    }).catch(() => []);
+    log(`Form state before submit: ${JSON.stringify(formState)}`);
+
+    // Helper: inject Arkose token into page via multiple strategies
+    const injectArkoseToken = async (token: string) => {
+      await page.evaluate((t: string) => {
+        const w = window as any;
+        w.__arkoseToken = t;
+        w.arkoseToken = t;
+        w._arkoseToken = t;
+        document.dispatchEvent(new CustomEvent("arkose:completed", { detail: { token: t } }));
+        document.dispatchEvent(new CustomEvent("FunCaptchaCompleted", { detail: { token: t } }));
+        // Strategy: postMessage to ALL iframes (arks-client.adobe.com or arkoselabs)
+        try {
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          for (const iframe of iframes) {
+            try {
+              (iframe as any).contentWindow?.postMessage?.(
+                JSON.stringify({ eventId: "challenge-complete", payload: { sessionToken: t } }), "*"
+              );
+              (iframe as any).contentWindow?.postMessage?.(
+                JSON.stringify({ type: "ArkoseCompleted", token: t }), "*"
+              );
+            } catch {}
+          }
+        } catch {}
+        // Strategy: Call the captured Adobe ArkoseEnforcement callback (from initScript)
+        try {
+          const cb = w.__adobeArkoseCallback;
+          if (typeof cb === 'function') {
+            cb({ getResponse: () => t, isShowing: () => false, run: () => {}, reset: () => {}, sessionToken: t });
+          }
+        } catch {}
+        // Strategy: Adobe IMS internal token
+        try { if (w.adobeIMS) w.adobeIMS._arkoseToken = t; } catch {}
+        try { if (w.fc_config?.callback) w.fc_config.callback({ sessionToken: t }); } catch {}
+      }, token);
+      await waitMs(1500);
+    };
+
+    // Helper: click the "Create account" submit button
+    const clickSubmit = async (): Promise<boolean> => {
+      const selectors = [
+        'button:has-text("Create account")',
+        'button:has-text("Create Account")',
+        'button[type="submit"]',
+        'input[type="submit"]',
+        '[data-id="submit-button"]',
+      ];
+      for (const sel of selectors) {
+        try {
+          const btns = await page.$$(sel);
+          for (const btn of btns) {
+            const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+            if (txt.includes("google") || txt.includes("facebook") || txt.includes("apple") || txt.includes("sign in")) continue;
+            if (!await btn.isVisible().catch(() => false)) continue;
+            await btn.click();
+            log(`Clicked submit: "${txt.substring(0, 40)}"`);
+            return true;
+          }
+        } catch {}
+      }
       await page.keyboard.press("Enter");
+      return false;
+    };
+
+    // ── STEP 4: Intercept Arkose network calls, then click submit to trigger challenge ──
+    const ARKOSE_PUBLIC_KEY = "436DD567-5435-4B14-89A6-2F1188E11334";
+    let arkoseToken: string | null = null;
+
+    // Set up network interception BEFORE clicking submit to capture Arkose API calls
+    let arkoseChallengeData: {
+      challengeImgUrls: string[];
+      exampleKeyUrl: string;
+      exampleAnswerUrl: string;
+      gameVariant: string;
+      sessionToken: string;
+      gameToken: string;
+      challengeID: string;
+      waves: number;
+      keyWidth: number;
+      keyHeight: number;
+      answerWidth: number;
+      answerHeight: number;
+    } | null = null;
+
+    // Collect all /rtig/image requests (game loads them progressively per round)
+    const allRtigImages: Map<number, Buffer> = new Map(); // round index → image buffer
+
+    const arkoseResponsePromise = new Promise<void>((resolve) => {
+      const onResponse = async (response: any) => {
+        try {
+          const url = response.url();
+          // Capture /fc/gfct/ which contains _challenge_imgs and full game config
+          if (url.includes('/fc/gfct/') || url.includes('/fc/get_challenge')) {
+            log(`[Arkose] Captured /fc/gfct/ API`);
+            const body = await response.text().catch(() => '');
+            log(`[Arkose] /fc/gfct/ response (3000): ${body.substring(0, 3000)}`);
+            try {
+              const data = JSON.parse(body);
+              const gameData = data.game_data || data.data || data;
+              const customGUI = gameData.customGUI || {};
+              const sessionToken = data.session_token || data.token || '';
+              const challengeID = data.challengeID || '';
+              const gameVariant = gameData.instruction_string || gameData.game_variant || gameData.type || '';
+              const exampleKeyUrl = customGUI.example_images?.key || '';
+              const exampleAnswerUrl = customGUI.example_images?.answer || '';
+              const challengeImgUrls: string[] = (customGUI._challenge_imgs || []).map((u: any) => typeof u === 'string' ? u : '').filter(Boolean);
+              const gameToken = data.game_token || '';
+              const waves = gameData.waves || 5;
+              const keyWidth = gameData.key_width || 125;
+              const keyHeight = gameData.key_height || 200;
+              const answerWidth = gameData.answer_width || 200;
+              const answerHeight = gameData.answer_height || 200;
+              log(`[Arkose] session="${sessionToken.substring(0,25)}", waves=${waves}, variant="${gameVariant}", keyW=${keyWidth}, ansW=${answerWidth}, imgs=${challengeImgUrls.length}`);
+              if (sessionToken && challengeImgUrls.length > 0) {
+                arkoseChallengeData = { challengeImgUrls, exampleKeyUrl, exampleAnswerUrl, gameVariant, sessionToken, gameToken, challengeID, waves, keyWidth, keyHeight, answerWidth, answerHeight };
+                resolve();
+              }
+            } catch (e: any) {
+              log(`[Arkose] /fc/gfct/ JSON parse error: ${e.message}`);
+            }
+          }
+          // Capture /rtig/image requests (the game loads challenge images per round)
+          if (url.includes('/rtig/image')) {
+            const m = url.match(/challenge=(\d+)/);
+            const roundIdx = m ? parseInt(m[1]) : -1;
+            log(`[Arkose] /rtig/image challenge=${roundIdx}: ${url.substring(0, 100)}`);
+            if (roundIdx >= 0) {
+              const imgBuf = await response.body().catch(() => null);
+              if (imgBuf) {
+                allRtigImages.set(roundIdx, imgBuf);
+                log(`[Arkose] Cached /rtig/image challenge=${roundIdx} (${Math.round(imgBuf.length / 1024)}KB)`);
+              }
+            }
+          }
+        } catch {}
+      };
+      page.on('response', onResponse);
+      // Clean up after 90 seconds
+      setTimeout(() => {
+        page.off('response', onResponse);
+        resolve();
+      }, 90000);
+    });
+
+    log("Clicking Create account (Step 2 of 2) to trigger Arkose challenge...");
+    await clickSubmit();
+
+    // Wait for Arkose challenge to appear (and for our network interceptor to fire)
+    await waitMs(5000);
+    const arkoseVisible = await page.evaluate(() => {
+      const wrapper = document.querySelector('[class*="arkose"]');
+      if (!wrapper) return false;
+      const style = window.getComputedStyle(wrapper);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }).catch(() => false);
+    log(`Arkose challenge visible: ${arkoseVisible}`);
+
+    if (arkoseVisible) {
+      // Wait for Arkose frames to fully load and our interceptor to fire
+      await waitMs(5000);
+      const frames = page.frames();
+      log(`Total frames: ${frames.length}`);
+
+      // Find the Arkose game frame
+      let gameFrameUrl = '';
+      let enforcementFrameUrl = '';
+      let gameFrame: any = null;
+      for (const frame of frames) {
+        const fUrl = frame.url();
+        log(`Frame: ${fUrl.substring(0, 150)}`);
+        if (fUrl.includes('arks-client.adobe.com/fc/assets') || fUrl.includes('/game-core/')) {
+          gameFrameUrl = fUrl;
+          gameFrame = frame;
+        }
+        if (fUrl.includes('arks-client.adobe.com/v2') || fUrl.includes('enforcement')) {
+          enforcementFrameUrl = fUrl;
+        }
+      }
+
+      // Extract session token from game frame URL
+      let arkoseSessionToken = '';
+      if (gameFrameUrl) {
+        const sessionMatch = gameFrameUrl.match(/[?&]session=([^&]+)/);
+        if (sessionMatch) {
+          arkoseSessionToken = sessionMatch[1];
+          log(`Arkose session token: ${arkoseSessionToken.substring(0, 40)}...`);
+        }
+      }
+
+      // ── Strategy A: Image Similarity Solver using /rtig/image challenge strips ──
+      // The /fc/gfct/ response gives us the FIRST round's image + game dimensions.
+      // Each challenge image contains: [key_width px key] + [answer_width px × N answers]
+      // We use pixel similarity (MSE on grayscale) to find which answer matches the key.
+      if (arkoseChallengeData && arkoseChallengeData.challengeImgUrls.length > 0) {
+        log(`Starting Arkose image-similarity solver (waves=${arkoseChallengeData.waves}, variant="${arkoseChallengeData.gameVariant}")...`);
+        
+        const { createRequire } = await import('module');
+        const requirePkg = createRequire(import.meta.url);
+        const jpeg = requirePkg('jpeg-js');
+        const axiosLib = (await import('axios')).default;
+        
+        const downloadImageBuffer = async (imgUrl: string): Promise<Buffer | null> => {
+          try {
+            const resp = await axiosLib.get(imgUrl, {
+              responseType: 'arraybuffer',
+              timeout: 15000,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://arks-client.adobe.com/',
+              },
+            });
+            return Buffer.from(resp.data);
+          } catch (e: any) {
+            log(`⚠️ Image download failed: ${e.message}`);
+            return null;
+          }
+        };
+        
+        // Nearest-neighbour downscale of grayscale data to dstW×dstH
+        const downscaleGray = (gray: Float32Array, srcW: number, srcH: number, dstW: number, dstH: number): Float32Array => {
+          const out = new Float32Array(dstW * dstH);
+          for (let dy = 0; dy < dstH; dy++) {
+            for (let dx = 0; dx < dstW; dx++) {
+              const sx = Math.min(Math.floor(dx * srcW / dstW), srcW - 1);
+              const sy = Math.min(Math.floor(dy * srcH / dstH), srcH - 1);
+              out[dy * dstW + dx] = gray[sy * srcW + sx];
+            }
+          }
+          return out;
+        };
+        
+        // Extract a region from a decoded JPEG as grayscale Float32Array, downscaled to 64×64
+        const extractGrayRegion64 = (decoded: any, left: number, top: number, width: number, height: number): Float32Array => {
+          const { data, width: imgW } = decoded;
+          const raw = new Float32Array(width * height);
+          for (let row = 0; row < height; row++) {
+            for (let col = 0; col < width; col++) {
+              const srcPx = ((top + row) * imgW + (left + col)) * 4;
+              const r = data[srcPx], g = data[srcPx + 1], b = data[srcPx + 2];
+              raw[row * width + col] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            }
+          }
+          return downscaleGray(raw, width, height, 64, 64);
+        };
+        
+        // Compute MSE between two float arrays of same length
+        const computeMSE = (a: Float32Array, b: Float32Array): number => {
+          let sum = 0;
+          const len = Math.min(a.length, b.length);
+          for (let i = 0; i < len; i++) { const d = a[i] - b[i]; sum += d * d; }
+          return sum / len;
+        };
+        
+        // Solve a single round: return the 0-based answer index (best match to key)
+        const solveRound = (stripBuf: Buffer, keyW: number, ansW: number): number => {
+          let decoded: any;
+          try {
+            decoded = jpeg.decode(stripBuf, { useTArray: true });
+          } catch (e: any) {
+            log(`⚠️ jpeg-js decode error: ${e.message}`);
+            return 0;
+          }
+          const totalW = decoded.width;
+          const actualH = decoded.height;
+          const numAnswers = Math.floor((totalW - keyW) / ansW);
+          log(`Round image: ${totalW}×${actualH}, key=${keyW}px, answers=${numAnswers}×${ansW}px`);
+          
+          const keyPixels = extractGrayRegion64(decoded, 0, 0, keyW, actualH);
+          let bestIdx = 0;
+          let bestMSE = Infinity;
+          for (let i = 0; i < numAnswers; i++) {
+            const left = keyW + i * ansW;
+            const ansPixels = extractGrayRegion64(decoded, left, 0, ansW, actualH);
+            const mse = computeMSE(keyPixels, ansPixels);
+            log(`  Answer ${i}: MSE=${mse.toFixed(4)}`);
+            if (mse < bestMSE) { bestMSE = mse; bestIdx = i; }
+          }
+          log(`  → Best answer: ${bestIdx} (MSE=${bestMSE.toFixed(4)})`);
+          return bestIdx;
+        };
+        
+        // Helper: click answer at index in the game frame
+        const clickAnswerInGameFrame = async (answerIdx: number, wave: number): Promise<boolean> => {
+          try {
+            // Try clicking answer elements in game frame DOM
+            const clickSelectors = [
+              `[data-index="${answerIdx}"]`,
+              `.answer-item:nth-child(${answerIdx + 1})`,
+              `[class*="answer"]:nth-child(${answerIdx + 1})`,
+              `[class*="choice"]:nth-child(${answerIdx + 1})`,
+              `[class*="option"]:nth-child(${answerIdx + 1})`,
+            ];
+            for (const sel of clickSelectors) {
+              const el = await gameFrame.$(sel).catch(() => null);
+              if (el) {
+                await el.click({ force: true }).catch(() => {});
+                log(`  Clicked answer ${answerIdx} via selector "${sel}"`);
+                return true;
+              }
+            }
+            // Try by querySelectorAll of all images/buttons and pick the right index
+            const containerSelectors = [
+              '[class*="answer"]', '[class*="choice"]', '[class*="option"]',
+              'img[src*="rtig"]', 'img[src*="challenge"]', 'canvas', 'button[type="button"]',
+            ];
+            for (const sel of containerSelectors) {
+              const items = await gameFrame.$$(sel).catch(() => []);
+              if (items.length > answerIdx) {
+                log(`  Clicking answer ${answerIdx} of ${items.length} "${sel}" elements`);
+                await items[answerIdx].click({ force: true }).catch(() => {});
+                return true;
+              }
+            }
+            // Last resort: click by coordinate in enforcement iframe
+            const frameEl = await page.$('iframe[src*="arks-client.adobe.com/v2"]').catch(() => null);
+            if (frameEl) {
+              const bb = await frameEl.boundingBox().catch(() => null);
+              if (bb) {
+                const numOptions = 3;
+                const col = answerIdx % numOptions;
+                const cellW = (bb.width - (arkoseChallengeData!.keyWidth / (1366 / bb.width))) / numOptions;
+                const clickX = bb.x + bb.width * 0.4 + cellW * col + cellW / 2;
+                const clickY = bb.y + bb.height * 0.6;
+                log(`  Clicking by coordinate (${Math.round(clickX)}, ${Math.round(clickY)}) for answer ${answerIdx}`);
+                await page.mouse.click(clickX, clickY);
+                return true;
+              }
+            }
+          } catch (e: any) {
+            log(`⚠️ clickAnswer error: ${e.message}`);
+          }
+          return false;
+        };
+        
+        // Wait for Arkose to fire the verified token callback (via postMessage or hidden field)
+        let arkoseSolvedToken: string | null = null;
+        page.on('request', async (req: any) => {
+          if (req.url().includes('/fc/ca/')) {
+            log(`[Arkose] /fc/ca/ answer submitted: ${req.url().substring(0, 120)}`);
+          }
+        });
+        page.on('response', async (resp: any) => {
+          if (resp.url().includes('/fc/ca/')) {
+            const body = await resp.text().catch(() => '');
+            log(`[Arkose] /fc/ca/ response: ${body.substring(0, 200)}`);
+            if (body.includes('solved') || body.includes('token')) {
+              try {
+                const d = JSON.parse(body);
+                if (d.solved_token || d.token) {
+                  arkoseSolvedToken = d.solved_token || d.token;
+                  log(`[Arkose] Got solved token: ${arkoseSolvedToken!.substring(0, 40)}`);
+                }
+              } catch {}
+            }
+          }
+        });
+        
+        // Wait longer for the game to actually render challenge (not just the "home" loading screen)
+        log(`Waiting for game challenge to render in game frame...`);
+        await waitMs(6000);
+        
+        // Log game frame DOM to understand structure
+        const gameFrameHtml = await gameFrame.evaluate(() => document.body?.innerHTML?.substring(0, 3000) || '').catch(() => '') as string;
+        log(`[Game DOM]: ${gameFrameHtml.substring(0, 2000)}`);
+        
+        // Now solve each wave
+        const { challengeImgUrls, keyWidth, keyHeight, answerWidth, answerHeight, waves } = arkoseChallengeData;
+        
+        for (let wave = 0; wave < waves; wave++) {
+          log(`\n═══ ARKOSE WAVE ${wave + 1}/${waves} ═══`);
+          
+          // Get the challenge image for this wave (from intercepted /rtig/image OR download from gfct URL)
+          let stripBuf: Buffer | null = null;
+          
+          // Check if we already have it from the intercepted /rtig/image response
+          if (allRtigImages.has(wave)) {
+            stripBuf = allRtigImages.get(wave)!;
+            log(`Using pre-cached /rtig/image for wave ${wave} (${Math.round(stripBuf.length / 1024)}KB)`);
+          } else if (wave === 0 && challengeImgUrls[0]) {
+            // For wave 0, use the URL from /fc/gfct/
+            log(`Downloading wave 0 from /fc/gfct/ URL...`);
+            stripBuf = await downloadImageBuffer(challengeImgUrls[0]);
+            if (stripBuf) {
+              log(`Downloaded wave 0 image: ${Math.round(stripBuf.length / 1024)}KB`);
+              allRtigImages.set(0, stripBuf);
+            }
+          } else {
+            // Wait for the /rtig/image to be intercepted (game frame loads it)
+            log(`Waiting for /rtig/image?challenge=${wave} to be intercepted...`);
+            for (let wait = 0; wait < 20; wait++) {
+              await waitMs(500);
+              if (allRtigImages.has(wave)) {
+                stripBuf = allRtigImages.get(wave)!;
+                log(`Got wave ${wave} image after ${wait * 0.5}s`);
+                break;
+              }
+            }
+          }
+          
+          if (!stripBuf) {
+            log(`⚠️ No image for wave ${wave}, skipping...`);
+            continue;
+          }
+          
+          // Save image to disk for debugging
+          try {
+            const fs = await import('fs');
+            const debugPath = `/tmp/arkose_wave${wave}_${Date.now()}.jpg`;
+            fs.writeFileSync(debugPath, stripBuf);
+            log(`[DEBUG] Saved wave ${wave} image (${Math.round(stripBuf.length/1024)}KB) → ${debugPath}`);
+          } catch {}
+          
+          // Solve the round using image similarity
+          const answerIdx = solveRound(stripBuf, keyWidth, answerWidth);
+          log(`Wave ${wave}: computed answer = ${answerIdx}`);
+          
+          // Click the answer in game frame
+          const clicked = await clickAnswerInGameFrame(answerIdx, wave);
+          if (!clicked) {
+            log(`⚠️ Could not click answer for wave ${wave}`);
+          }
+          
+          // Wait for game to advance to next round
+          await waitMs(3000);
+          
+          // Check game state
+          const gameText = await gameFrame.evaluate(() => document.body?.innerText?.substring(0, 300) || '').catch(() => '') as string;
+          log(`Game text after wave ${wave}: "${gameText.substring(0, 150)}"`);
+          
+          if (gameText.includes('Verification Complete') || gameText.includes('proven you')) {
+            log(`✅ Arkose challenge SOLVED after wave ${wave + 1}!`);
+            break;
+          }
+        }
+        
+        // Wait for Arkose to fire the verification callback
+        log(`Waiting for Arkose verification callback (solved token)...`);
+        await waitMs(5000);
+        
+        // Check page text for verification complete
+        const finalText = await gameFrame.evaluate(() => document.body?.innerText?.substring(0, 300) || '').catch(() => '') as string;
+        log(`Final game frame text: "${finalText.substring(0, 200)}"`);
+        
+      } else if (gameFrame) {
+        log(`No _challenge_imgs available from /fc/gfct/, logging game frame HTML for analysis...`);
+        try {
+          await waitMs(5000);
+          const gameFrameHtml = await gameFrame.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || '').catch(() => '') as string;
+          log(`Game frame HTML: ${gameFrameHtml}`);
+        } catch (e: any) {
+          log(`⚠️ Game frame read error: ${e.message}`);
+        }
+      }
+
+      // ── Strategy B: postMessage the session token back as "solved" (last resort) ──
+      if (!arkoseToken && arkoseSessionToken) {
+        log(`Trying postMessage session token fallback...`);
+        await page.evaluate((sessionTok: string) => {
+          const iframes = Array.from(document.querySelectorAll('iframe'));
+          for (const iframe of iframes) {
+            try {
+              (iframe as any).contentWindow?.postMessage?.(
+                JSON.stringify({ eventId: "challenge-complete", payload: { sessionToken: sessionTok } }), "*"
+              );
+            } catch {}
+          }
+          window.dispatchEvent(new MessageEvent('message', {
+            data: JSON.stringify({ eventId: "challenge-complete", payload: { sessionToken: sessionTok } }),
+            origin: 'https://arks-client.adobe.com',
+          }));
+        }, arkoseSessionToken);
+        await waitMs(3000);
+      }
+    } else {
+      log("No Arkose challenge visible — page may have already advanced");
     }
 
-    await waitMs(5000);
+    await waitMs(2000);
     log(`After Step 2 URL: ${page.url()}`);
 
-    const afterStep2Content = await page.content();
-    if (afterStep2Content.toLowerCase().includes("verify") || afterStep2Content.toLowerCase().includes("email-verification") || page.url().includes("email-verification") || page.url().includes("challenge")) {
-      log("✅ Verification page detected — reading Outlook for 6-digit code...");
+    const afterStep2Text = await page.evaluate(() => document.body?.innerText || "");
+    log(`Adobe page after submit: ${afterStep2Text.replace(/\s+/g, " ").substring(0, 400)}`);
+    const afterStep2Url = page.url();
+    log(`Captured IMS requests: ${capturedImsRequest ? 'YES - ' + capturedImsRequest.url.substring(0, 100) : 'none'}`);
+
+    // Log hidden elements and any CAPTCHA / error containers
+    const hiddenDetails = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('[class*="captcha" i], [class*="recaptcha" i], [class*="arkose" i], [class*="error" i], [class*="invalid" i], [aria-invalid="true"], [aria-required="true"], input[required], select[required]'));
+      return all.map((e: any) => ({
+        tag: e.tagName, id: e.id, class: e.className?.toString().substring(0, 60), ariaInvalid: e.getAttribute('aria-invalid'), name: e.name, required: e.required, value: e.value?.substring(0, 30)
+      }));
+    }).catch(() => []);
+    log(`Hidden/error elements: ${JSON.stringify(hiddenDetails)}`);
+    // Also log full HTML of the form area
+    const formHtml = await page.evaluate(() => {
+      const form = document.querySelector('form') || document.querySelector('[data-id="signup-form"]') || document.querySelector('[class*="signup" i]');
+      return form?.outerHTML?.substring(0, 2000) || document.body?.innerHTML?.substring(0, 2000);
+    }).catch(() => '');
+    log(`Form HTML: ${formHtml.replace(/\s+/g, ' ').substring(0, 800)}`);
+    const isVerifyPage = afterStep2Text.toLowerCase().includes("check your email") ||
+      afterStep2Text.toLowerCase().includes("confirmation code") ||
+      afterStep2Text.toLowerCase().includes("we sent") ||
+      afterStep2Text.toLowerCase().includes("sent a code") ||
+      afterStep2Text.toLowerCase().includes("enter the code") ||
+      afterStep2Text.toLowerCase().includes("verification code") ||
+      afterStep2Url.includes("#/email-verification") ||
+      afterStep2Url.includes("#/signup/3");
+    const isStillOnForm = afterStep2Text.toLowerCase().includes("first name") &&
+      afterStep2Text.toLowerCase().includes("last name") &&
+      afterStep2Text.toLowerCase().includes("date of birth");
+    if (isVerifyPage) {
+      log("✅ Email verification screen detected — checking Outlook for 6-digit code...");
+    } else if (isStillOnForm) {
+      // Log any visible error messages on the form
+      const errorText = await page.evaluate(() => {
+        const errors = Array.from(document.querySelectorAll('[class*="error" i], [class*="alert" i], [role="alert"], [aria-invalid="true"]'));
+        return errors.map((e: any) => e.innerText || e.textContent || "").join(" | ").trim();
+      });
+      log(`⚠️ Form still visible (validation failed?) — errors: ${errorText || "none detected"}`);
+      log("Continuing to check email anyway (Adobe may have still sent one)...");
     } else {
-      log(`Page state after Step 2: ${(await page.evaluate(() => document.body?.innerText || "")).substring(0, 200).replace(/\s+/g, " ")}`);
+      log("Page state unclear — continuing to check email anyway...");
     }
 
     // ── STEP 4: Read 6-digit code from Outlook OWA ───────────────────────────
-    log("Waiting 30s for Adobe verification email to arrive...");
-    await waitMs(30000);
+    log("Waiting 90s for Adobe verification email to arrive...");
+    await waitMs(90000);
 
     let verificationCode: string | null = null;
     let owaBrowser: any = null;
@@ -12414,69 +13009,101 @@ export async function registerAdobeAccount(
       if (isOnOutlookHost) {
         log("✅ Logged into Outlook — searching for Adobe verification email...");
 
-        // Check up to 2 times with 15s waits between attempts
-        for (let attempt = 1; attempt <= 2 && !verificationCode; attempt++) {
-          if (attempt > 1) {
-            log(`Email not found yet — waiting 15s more (attempt ${attempt}/2)...`);
-            await waitMs(15000);
+        // Helper: scan a folder page for 6-digit code, returning the code or null
+        const scanFolderForCode = async (folder: string): Promise<string | null> => {
+          await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+          await waitMs(3000);
+          const rows = await owaPage.$$('[data-convid], [role="row"]');
+          log(`${folder}: found ${rows.length} items`);
+          // Log first 5 subjects
+          for (const r of rows.slice(0, 5)) {
+            const t = (await r.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+            if (t) log(`  [${folder}] ${t.substring(0, 90)}`);
           }
-          // Check inbox and junk folder
-          for (const folder of ["inbox", "junkemail"]) {
+          // Check preview text for 6-digit code first (no click needed)
+          for (const r of rows.slice(0, 20)) {
+            const t = await r.innerText().catch(() => "");
+            const previewMatch = t.match(/\b([0-9]{6})\b/);
+            if (previewMatch) {
+              log(`✅ Found 6-digit code in preview: ${previewMatch[1]}`);
+              return previewMatch[1];
+            }
+          }
+          // Find Adobe-related rows and click into them
+          const adobeKeywords = ["adobe", "verify", "confirm", "activation", "welcome"];
+          const convIds: string[] = [];
+          for (const r of rows.slice(0, 20)) {
+            const cid = await r.getAttribute("data-convid").catch(() => null);
+            const t = (await r.innerText().catch(() => "")).toLowerCase();
+            if (cid && adobeKeywords.some(k => t.includes(k))) convIds.push(cid);
+          }
+          // Also try first 5 items even if not Adobe keywords
+          for (const r of rows.slice(0, 5)) {
+            const cid = await r.getAttribute("data-convid").catch(() => null);
+            if (cid && !convIds.includes(cid)) convIds.push(cid);
+          }
+          for (const convId of convIds) {
+            try {
+              // Navigate to the conversation directly using OWA's conv URL
+              await owaPage.goto(`https://outlook.live.com/mail/0/${folder}/id/${convId}`, { waitUntil: "domcontentloaded", timeout: 15000 });
+              await waitMs(2500);
+              const body = await owaPage.evaluate(() => document.body?.innerText || "");
+              const codeMatch = body.match(/\b([0-9]{6})\b/);
+              if (codeMatch) {
+                log(`✅ Found 6-digit code in email body: ${codeMatch[1]}`);
+                return codeMatch[1];
+              }
+            } catch {}
+          }
+          return null;
+        };
+
+        // Try OWA search for "Adobe" first
+        const searchForCode = async (): Promise<string | null> => {
+          try {
+            await owaPage.goto("https://outlook.live.com/mail/0/", { waitUntil: "domcontentloaded", timeout: 20000 });
+            await waitMs(2000);
+            const searchBox = await owaPage.$('input[aria-label*="search" i], input[placeholder*="search" i], input[type="search"]');
+            if (searchBox) {
+              await searchBox.click();
+              await waitMs(300);
+              await searchBox.type("Adobe", { delay: 80 });
+              await waitMs(500);
+              await owaPage.keyboard.press("Enter");
+              await waitMs(4000);
+              const rows = await owaPage.$$('[data-convid], [role="row"]');
+              log(`Search results: ${rows.length} items`);
+              for (const r of rows.slice(0, 10)) {
+                const t = await r.innerText().catch(() => "");
+                const previewMatch = t.match(/\b([0-9]{6})\b/);
+                if (previewMatch) {
+                  log(`✅ Code in search preview: ${previewMatch[1]}`);
+                  return previewMatch[1];
+                }
+                log(`  [search] ${t.replace(/\s+/g, " ").substring(0, 80)}`);
+              }
+            }
+          } catch {}
+          return null;
+        };
+
+        // Main scan loop: up to 4 attempts with 30s waits
+        for (let attempt = 1; attempt <= 4 && !verificationCode; attempt++) {
+          if (attempt > 1) {
+            log(`Email not yet found — waiting 30s (attempt ${attempt}/4)...`);
+            await waitMs(30000);
+          }
+          // First try search
+          verificationCode = await searchForCode();
+          if (verificationCode) break;
+          // Then scan folders
+          for (const folder of ["inbox", "other", "junkemail"]) {
             if (verificationCode) break;
-            log(`Checking ${folder} (attempt ${attempt})...`);
-            await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 30000 });
-            await waitMs(4000);
-            const emailItems = await owaPage.$$('[data-convid], [role="row"]');
-            log(`Found ${emailItems.length} items in ${folder}`);
-            // Log all email subjects for debugging
-            for (const item of emailItems.slice(0, 5)) {
-              const t = await item.innerText().catch(() => "");
-              if (t.trim()) log(`  Email subject: ${t.substring(0, 80).replace(/\s+/g, " ")}`);
-            }
-            // First pass: look for Adobe-specific emails
-            const adobeKeywords = ["adobe", "verify", "confirm", "activation", "welcome", "account", "code"];
-            for (const item of emailItems.slice(0, 30)) {
-              const itemText = await item.innerText().catch(() => "");
-              const lower = itemText.toLowerCase();
-              if (adobeKeywords.some(k => lower.includes(k))) {
-                log(`Found potential Adobe email: ${itemText.substring(0, 80).replace(/\s+/g, " ")}`);
-                await item.click();
-                await waitMs(2500);
-                const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-                const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-                if (codeMatch) {
-                  verificationCode = codeMatch[1];
-                  log(`✅ Extracted Adobe 6-digit code: ${verificationCode}`);
-                  break;
-                }
-                log(`No 6-digit code in this email — checking next`);
-                // Go back to folder list
-                await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-                await waitMs(2000);
-              }
-            }
-            // Fallback: check ALL recent emails for a 6-digit code
-            if (!verificationCode) {
-              for (const item of emailItems.slice(0, 10)) {
-                const itemText = await item.innerText().catch(() => "");
-                if (!itemText.trim()) continue;
-                await item.click().catch(() => {});
-                await waitMs(2000);
-                const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-                const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-                if (codeMatch) {
-                  verificationCode = codeMatch[1];
-                  log(`✅ Found 6-digit code in email (fallback): ${verificationCode}`);
-                  break;
-                }
-                await owaPage.goto(`https://outlook.live.com/mail/0/${folder}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-                await waitMs(2000);
-              }
-            }
+            verificationCode = await scanFolderForCode(folder);
           }
         }
         if (!verificationCode) {
-          log("⚠️ No Adobe verification email found after 3 attempts — account may still be usable");
+          log("⚠️ No Adobe verification email found after all attempts — account created but unverified");
         }
       } else {
         log(`⚠️ OWA login failed — URL: ${currentLoginUrl.substring(0, 80)}`);
