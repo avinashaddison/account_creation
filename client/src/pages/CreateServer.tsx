@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Globe, Shield, Zap, Server, Ticket, Lock, Mail, ArrowUpRight, Radio, CreditCard, Heart } from "lucide-react";
+import { Globe, Shield, Zap, Server, Ticket, Lock, Mail, ArrowUpRight, Radio, CreditCard } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
 import la28Logo from "@assets/{D0DAE68E-FBCF-411B-8803-46B146A5A0FC}_1772412089243.png";
 import ticketmasterLogo from "@assets/{9D4CF467-7C69-4EAC-A803-17352A19FCD5}_1772418022222.png";
 import uefaLogo from "@assets/UEFA_Champions_League.svg_1772418059822.png";
 import replitLogo from "@assets/Replit_Logo_1773851974177.jpg";
+import lovableLogo from "@assets/{430CDF6D-B837-464E-BE6E-FA315A9BE06F}_1773931794583.png";
 
 type Platform = {
   id: string;
@@ -117,7 +118,7 @@ const platforms: Platform[] = [
   },
   {
     id: "lovable",
-    name: "Create Lovable",
+    name: "Create Lovable Account",
     description: "Auto-create Lovable.dev accounts via magic-link email verification",
     href: "/admin/lovable-create",
     accentColor: "#ec4899",
@@ -181,8 +182,8 @@ function PlatformIcon({ id, accentColor }: { id: string; accentColor: string }) 
     </div>
   );
   if (id === "lovable") return (
-    <div className={`${base} bg-gradient-to-br from-pink-500 to-rose-600`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
-      <Heart className="w-5 h-5 text-white" />
+    <div className={`${base}`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
+      <img src={lovableLogo} alt="Lovable" className="w-full h-full object-cover rounded-xl" />
     </div>
   );
   if (id === "card-generator") return (
