@@ -42,8 +42,22 @@ async function runMonitorCycle(): Promise<void> {
       const tracked = trackedMap.get(event.id);
 
       if (!tracked) {
+        // Add to tracked events first so future cycles see it as known
+        const newTracked = await storage.createTmTrackedEvent({
+          eventId: event.id,
+          name: event.name,
+          date: event.date ?? null,
+          venue: event.venue ?? null,
+          city: event.city ?? null,
+          priceMin: event.priceMin != null ? String(event.priceMin) : null,
+          priceMax: event.priceMax != null ? String(event.priceMax) : null,
+          currency: event.currency ?? "USD",
+          url: event.url ?? null,
+          status: "active",
+        });
+
         const message = `🎟 <b>New Event Detected</b>\n<b>${event.name}</b>\n📅 ${event.date ?? "TBD"}\n📍 ${event.venue ?? "Unknown"}, ${event.city ?? ""}\n💰 ${event.priceMin ? `$${event.priceMin} - $${event.priceMax}` : "Price TBD"}\n🔗 ${event.url}`;
-        const alert = await storage.createTmAlert({
+        await storage.createTmAlert({
           eventId: event.id,
           eventName: event.name,
           alertType: "new_event",
@@ -53,11 +67,13 @@ async function runMonitorCycle(): Promise<void> {
 
         if (telegram) {
           const sent = await sendTelegramMessage(telegram.botToken, telegram.chatId, message);
-          if (sent) await storage.updateTmTrackedEvent(alert.id, { status: "active" });
+          if (sent) {
+            await storage.updateTmTrackedEvent(newTracked.id, { status: "active" });
+          }
         }
       } else {
         const oldMin = tracked.priceMin;
-        const newMin = event.priceMin;
+        const newMin = event.priceMin != null ? String(event.priceMin) : null;
         if (oldMin !== null && newMin !== null && oldMin !== newMin) {
           const message = `💸 <b>Price Change Alert</b>\n<b>${event.name}</b>\n📅 ${event.date ?? "TBD"}\nOld price: $${oldMin}\nNew price: $${newMin}\n🔗 ${event.url}`;
           await storage.createTmAlert({
@@ -75,8 +91,8 @@ async function runMonitorCycle(): Promise<void> {
           }
 
           await storage.updateTmTrackedEvent(tracked.id, {
-            priceMin: event.priceMin,
-            priceMax: event.priceMax,
+            priceMin: newMin,
+            priceMax: event.priceMax != null ? String(event.priceMax) : null,
           });
         }
       }
@@ -101,8 +117,8 @@ async function runMonitorCycle(): Promise<void> {
           }
         } else {
           await storage.updateTmTrackedEvent(tracked.id, {
-            priceMin: liveEvent.priceMin,
-            priceMax: liveEvent.priceMax,
+            priceMin: liveEvent.priceMin != null ? String(liveEvent.priceMin) : null,
+            priceMax: liveEvent.priceMax != null ? String(liveEvent.priceMax) : null,
             status: liveEvent.status,
           });
         }
