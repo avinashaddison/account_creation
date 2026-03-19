@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Code2, Play, User, Mail, Key, Hash, Layers, Terminal } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -24,16 +24,25 @@ type ReplitAccount = {
 
 type LogLine = { text: string; ts: number; time: string };
 
+const G = "#00ff41";
+const GA = (a: number) => `rgba(0,255,65,${a})`;
+
 function getLogStyle(text: string): { color: string; prefix: string } {
-  if (text.startsWith("━━━")) return { color: "text-violet-400/60", prefix: "" };
-  if (text.startsWith("🚀") || text.startsWith("🏁")) return { color: "text-violet-300", prefix: "" };
-  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("created")) return { color: "text-emerald-400", prefix: "▸" };
-  if (text.includes("❌") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("error")) return { color: "text-red-400", prefix: "▸" };
-  if (text.includes("⚠️") || text.toLowerCase().includes("warn")) return { color: "text-amber-400", prefix: "▸" };
-  if (text.toLowerCase().includes("navigat") || text.toLowerCase().includes("launch") || text.toLowerCase().includes("browser")) return { color: "text-sky-400/80", prefix: "›" };
-  if (text.toLowerCase().includes("username") || text.toLowerCase().includes("password") || text.toLowerCase().includes("generated")) return { color: "text-violet-300/90", prefix: "›" };
-  if (text.toLowerCase().includes("email") || text.toLowerCase().includes("inbox") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("owa")) return { color: "text-blue-300/80", prefix: "›" };
-  return { color: "text-cyan-300/60", prefix: "·" };
+  if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
+  if (text.startsWith("🚀") || text.startsWith("🏁")) return { color: G, prefix: ">" };
+  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("created"))
+    return { color: G, prefix: "+" };
+  if (text.includes("❌") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("error"))
+    return { color: "#ff4141", prefix: "!" };
+  if (text.includes("⚠️") || text.toLowerCase().includes("warn"))
+    return { color: "#ffaa00", prefix: "~" };
+  if (text.toLowerCase().includes("navigat") || text.toLowerCase().includes("launch") || text.toLowerCase().includes("browser"))
+    return { color: GA(0.7), prefix: ">" };
+  if (text.toLowerCase().includes("username") || text.toLowerCase().includes("password") || text.toLowerCase().includes("generated"))
+    return { color: GA(0.9), prefix: "»" };
+  if (text.toLowerCase().includes("email") || text.toLowerCase().includes("inbox") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("owa"))
+    return { color: "rgba(0,200,255,0.7)", prefix: "·" };
+  return { color: GA(0.45), prefix: "·" };
 }
 
 export default function ReplitCreate() {
@@ -47,6 +56,7 @@ export default function ReplitCreate() {
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [tick, setTick] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const activeBatchId = useRef<string | null>(null);
@@ -66,6 +76,11 @@ export default function ReplitCreate() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((p) => !p), 600);
+    return () => clearInterval(t);
+  }, []);
 
   function nowTime() {
     return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -154,58 +169,88 @@ export default function ReplitCreate() {
 
   const isBulk = count > 1;
   const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
+  const maxCount = Math.min(20, availableOutlookAccounts.length || 1);
+  const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
 
   return (
-    <div className="space-y-6 animate-float-up">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <Code2 className="w-5 h-5 text-violet-400/60" />
-          <h1 className="text-xl font-bold tracking-tight text-white font-mono">
-            Replit<span className="text-violet-400">_</span>Create
-          </h1>
+    <div className="space-y-5 animate-float-up">
+
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Code2 className="w-4 h-4" style={{ color: G, filter: `drop-shadow(0 0 6px ${G})` }} />
+            <h1 className="text-base font-mono font-bold tracking-tight" style={{ color: G, textShadow: `0 0 20px ${GA(0.5)}` }}>
+              replit_create<span className="animate-pulse" style={{ color: G }}>{tick ? "_" : "\u00a0"}</span>
+            </h1>
+          </div>
+          <p className="text-[10px] font-mono mt-0.5 pl-6" style={{ color: GA(0.3) }}>
+            automate account creation via stored outlook credentials
+          </p>
         </div>
-        <p className="text-violet-400/30 mt-1 text-[11px] font-mono pl-7.5">Automate Replit account creation using stored Outlook emails</p>
+        <div className="flex items-center gap-3 text-[9px] font-mono">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded" style={{ background: GA(0.05), border: `1px solid ${GA(0.15)}` }}>
+            <Cpu className="w-2.5 h-2.5" style={{ color: GA(0.5) }} />
+            <span style={{ color: GA(0.5) }}>{availableOutlookAccounts.length}</span>
+            <span style={{ color: GA(0.25) }}>avail</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <span style={{ color: "rgba(255,255,255,0.25)" }}>{usedEmails.size}</span>
+            <span style={{ color: "rgba(255,255,255,0.12)" }}>used</span>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="min-w-0 rounded-xl p-5 space-y-4" style={{ background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.15)" }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+
+        {/* Config panel */}
+        <div
+          className="rounded-xl p-4 space-y-4 relative overflow-hidden"
+          style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.12)}`, boxShadow: `0 0 30px ${GA(0.04)} inset` }}
+        >
+          {/* scanline overlay */}
+          <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.012) 2px, rgba(0,255,65,0.012) 4px)", borderRadius: "inherit" }} />
+
+          {/* section label */}
           <div className="flex items-center gap-2">
-            <User className="w-3.5 h-3.5 text-violet-400/60" />
-            <span className="text-[11px] font-mono text-violet-400/60 uppercase tracking-wider">Configuration</span>
-            <div className="ml-auto flex items-center gap-1.5">
-              <span className="text-[10px] font-mono text-white/25">{availableOutlookAccounts.length} available</span>
-              <span className="text-[10px] font-mono text-white/15">·</span>
-              <span className="text-[10px] font-mono text-white/25">{usedEmails.size} used</span>
-            </div>
+            <ChevronRight className="w-3 h-3" style={{ color: G }} />
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.5) }}>Configuration</span>
+            <div className="flex-1 h-px" style={{ background: GA(0.08) }} />
           </div>
 
+          {/* Count slider */}
           <div>
-            <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">
-              <Hash className="w-2.5 h-2.5 inline mr-1" />
+            <label className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.35) }}>
+              <Hash className="w-2.5 h-2.5" />
               Accounts to Create
             </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={1}
-                max={Math.min(20, availableOutlookAccounts.length || 1)}
-                value={count}
-                onChange={(e) => setCount(parseInt(e.target.value))}
-                className="flex-1 h-1.5 rounded-full cursor-pointer accent-violet-500"
-                style={{ background: `linear-gradient(to right, rgba(124,58,237,0.6) ${((count - 1) / (Math.max(1, Math.min(20, availableOutlookAccounts.length || 1)) - 1)) * 100}%, rgba(255,255,255,0.08) 0%)` }}
-                data-testid="input-count-slider"
-              />
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <input
+                  type="range"
+                  min={1}
+                  max={maxCount}
+                  value={count}
+                  onChange={(e) => setCount(parseInt(e.target.value))}
+                  className="w-full h-1 rounded-full cursor-pointer appearance-none"
+                  style={{
+                    background: `linear-gradient(to right, ${GA(0.7)} ${pct}%, rgba(255,255,255,0.06) ${pct}%)`,
+                    accentColor: G,
+                  }}
+                  data-testid="input-count-slider"
+                />
+              </div>
               <div
-                className="w-10 h-7 rounded-lg flex items-center justify-center text-sm font-mono font-bold flex-shrink-0"
-                style={{ background: "rgba(124,58,237,0.2)", border: "1px solid rgba(124,58,237,0.3)", color: "rgb(167,139,250)" }}
+                className="w-9 h-7 rounded-md flex items-center justify-center text-sm font-mono font-bold flex-shrink-0"
+                style={{ background: GA(0.08), border: `1px solid ${GA(0.3)}`, color: G, textShadow: `0 0 8px ${G}`, boxShadow: `0 0 10px ${GA(0.1)} inset` }}
               >
                 {count}
               </div>
             </div>
             {isBulk && (
-              <p className="text-[10px] font-mono text-violet-400/40 mt-1.5">
-                <Layers className="w-2.5 h-2.5 inline mr-1" />
-                Bulk mode — randomly picks {count} from {availableOutlookAccounts.length} available accounts
+              <p className="text-[9px] font-mono mt-1.5 flex items-center gap-1" style={{ color: GA(0.3) }}>
+                <Layers className="w-2.5 h-2.5" />
+                bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
               </p>
             )}
           </div>
@@ -214,49 +259,63 @@ export default function ReplitCreate() {
             <>
               {availableOutlookAccounts.length > 0 && (
                 <div>
-                  <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">Stored Outlook Account</label>
+                  <label className="block text-[9px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.35) }}>
+                    Stored Outlook Account
+                  </label>
                   <select
                     value={selectedOutlookId}
                     onChange={(e) => handleOutlookSelect(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none"
-                    style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(124,58,237,0.2)" }}
+                    className="w-full rounded-lg px-3 py-2 text-[11px] font-mono focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.15)}`, color: "rgba(255,255,255,0.7)", caretColor: G }}
                     data-testid="select-outlook-account"
                   >
                     <option value="">— Select account —</option>
                     {availableOutlookAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.email}
-                      </option>
+                      <option key={a.id} value={a.id}>{a.email}</option>
                     ))}
                   </select>
                 </div>
               )}
 
               <div>
-                <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">Outlook Email</label>
-                <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(124,58,237,0.2)" }}>
-                  <Mail className="w-3 h-3 text-violet-400/40 flex-shrink-0" />
+                <label className="block text-[9px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.35) }}>
+                  <Mail className="w-2.5 h-2.5 inline mr-1" />
+                  Outlook Email
+                </label>
+                <div
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 transition-all"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.12)}` }}
+                >
+                  <Mail className="w-3 h-3 flex-shrink-0" style={{ color: GA(0.35) }} />
                   <input
                     type="email"
                     value={outlookEmail}
                     onChange={(e) => setOutlookEmail(e.target.value)}
                     placeholder="yourname@outlook.com"
-                    className="bg-transparent flex-1 text-xs font-mono text-white placeholder:text-white/20 focus:outline-none"
+                    className="bg-transparent flex-1 text-[11px] font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.75)", caretColor: G }}
                     data-testid="input-outlook-email"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-mono text-white/40 mb-1.5 uppercase tracking-wider">Outlook Password</label>
-                <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(124,58,237,0.2)" }}>
-                  <Key className="w-3 h-3 text-violet-400/40 flex-shrink-0" />
+                <label className="block text-[9px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.35) }}>
+                  <Key className="w-2.5 h-2.5 inline mr-1" />
+                  Outlook Password
+                </label>
+                <div
+                  className="flex items-center gap-2 rounded-lg px-3 py-2"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.12)}` }}
+                >
+                  <Key className="w-3 h-3 flex-shrink-0" style={{ color: GA(0.35) }} />
                   <input
                     type="password"
                     value={outlookPassword}
                     onChange={(e) => setOutlookPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="bg-transparent flex-1 text-xs font-mono text-white placeholder:text-white/20 focus:outline-none"
+                    className="bg-transparent flex-1 text-[11px] font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.75)", caretColor: G }}
                     data-testid="input-outlook-password"
                   />
                 </div>
@@ -264,94 +323,138 @@ export default function ReplitCreate() {
             </>
           )}
 
+          {/* Create button */}
           <button
             onClick={handleCreate}
             disabled={running || !canCreate}
-            className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-mono font-bold tracking-wider transition-all duration-200"
+            className="relative w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-[11px] font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
             style={{
-              background: running || !canCreate ? "rgba(124,58,237,0.07)" : isBulk ? "rgba(124,58,237,0.3)" : "rgba(124,58,237,0.2)",
-              border: `1px solid ${running || !canCreate ? "rgba(124,58,237,0.15)" : "rgba(124,58,237,0.5)"}`,
-              color: running || !canCreate ? "rgba(167,139,250,0.3)" : "rgb(167,139,250)",
+              background: running || !canCreate
+                ? GA(0.04)
+                : `linear-gradient(135deg, ${GA(0.18)}, ${GA(0.08)})`,
+              border: `1px solid ${running || !canCreate ? GA(0.08) : GA(0.45)}`,
+              color: running || !canCreate ? GA(0.25) : G,
+              textShadow: running || !canCreate ? "none" : `0 0 12px ${G}`,
+              boxShadow: running || !canCreate ? "none" : `0 0 20px ${GA(0.08)}, inset 0 1px 0 ${GA(0.1)}`,
               cursor: running || !canCreate ? "not-allowed" : "pointer",
             }}
             data-testid="button-create-replit"
           >
-            <Play className={`w-3.5 h-3.5 ${running ? "animate-pulse" : ""}`} />
-            {running
-              ? totalCount > 1
-                ? `CREATING ${completedCount}/${totalCount}...`
-                : "CREATING ACCOUNT..."
-              : isBulk
-              ? `BULK CREATE ${count} ACCOUNT${count > 1 ? "S" : ""}`
-              : "CREATE REPLIT ACCOUNT"}
+            {!(running || !canCreate) && (
+              <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.02) 2px, rgba(0,255,65,0.02) 4px)" }} />
+            )}
+            <Play className={`w-3.5 h-3.5 relative z-10 ${running ? "animate-pulse" : ""}`} />
+            <span className="relative z-10">
+              {running
+                ? totalCount > 1
+                  ? `creating ${completedCount}/${totalCount}...`
+                  : "creating account..."
+                : isBulk
+                ? `bulk_create ${count} account${count > 1 ? "s" : ""}`
+                : "create_replit_account"}
+            </span>
           </button>
 
+          {/* Progress bar */}
           {running && totalCount > 1 && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] font-mono text-white/30">
-                <span>Progress</span>
-                <span>{completedCount}/{totalCount}</span>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[9px] font-mono" style={{ color: GA(0.35) }}>
+                <span>progress</span>
+                <span style={{ color: G }}>{completedCount}/{totalCount}</span>
               </div>
-              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div className="h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
                 <div
                   className="h-full rounded-full transition-all duration-500"
-                  style={{ width: `${(completedCount / totalCount) * 100}%`, background: "rgba(124,58,237,0.7)" }}
+                  style={{
+                    width: `${(completedCount / totalCount) * 100}%`,
+                    background: `linear-gradient(90deg, ${G}, rgba(0,200,50,0.7))`,
+                    boxShadow: `0 0 8px ${GA(0.6)}`,
+                  }}
                 />
               </div>
             </div>
           )}
         </div>
 
-        <div className="min-w-0 sticky top-4">
-        <div className="rounded-xl overflow-hidden flex flex-col min-w-0" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(124,58,237,0.12)" }}>
-          <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid rgba(124,58,237,0.08)", background: "rgba(124,58,237,0.04)" }}>
-            <div className="flex items-center gap-2">
-              <Terminal className="w-3 h-3 text-violet-400/50" />
-              <span className="text-[10px] font-mono text-violet-400/50 uppercase tracking-wider">Live Output</span>
-              {running && (
-                <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-                  <span className="text-[9px] font-mono text-violet-400/70">RUNNING</span>
-                </span>
-              )}
-            </div>
-            <div className="flex gap-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500/40" />
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500/40" />
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/40" />
-            </div>
-          </div>
-
-          <div className="flex-1 h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono" style={{ wordBreak: "break-all", overflowWrap: "anywhere" }} data-testid="container-logs">
-            {logs.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center gap-2">
-                <Terminal className="w-6 h-6 text-white/10" />
-                <p className="text-[10px] font-mono text-white/15">waiting for output...</p>
-              </div>
-            ) : (
-              logs.map((line, i) => {
-                const { color, prefix } = getLogStyle(line.text);
-                const isSeparator = line.text.startsWith("━━━");
-                return (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2 py-px min-w-0 ${isSeparator ? "mt-2 mb-1" : ""}`}
-                  >
-                    <span className="text-[9px] text-white/15 flex-shrink-0 mt-px tabular-nums">{line.time}</span>
-                    {prefix && <span className={`text-[9px] flex-shrink-0 mt-px ${color}`}>{prefix}</span>}
-                    <span className={`text-[10px] leading-relaxed break-words min-w-0 overflow-hidden ${color} ${isSeparator ? "font-semibold tracking-wide" : ""}`}>
-                      {line.text}
-                    </span>
+        {/* Terminal panel */}
+        <div className="min-w-0">
+          <div
+            className="rounded-xl overflow-hidden flex flex-col"
+            style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${GA(0.1)}`, boxShadow: `0 0 40px ${GA(0.03)}` }}
+          >
+            {/* Terminal title bar */}
+            <div
+              className="flex items-center justify-between px-3.5 py-2 flex-shrink-0"
+              style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.08)}` }}
+            >
+              <div className="flex items-center gap-2">
+                <Radio className="w-2.5 h-2.5" style={{ color: running ? G : GA(0.25), filter: running ? `drop-shadow(0 0 4px ${G})` : "none" }} />
+                <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: GA(0.4) }}>live_output</span>
+                {running && (
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
+                    <span className="text-[8px] font-mono" style={{ color: GA(0.6) }}>RUNNING</span>
                   </div>
-                );
-              })
-            )}
-            <div ref={logsEndRef} />
+                )}
+              </div>
+              <div className="flex gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ background: "rgba(255,59,48,0.5)" }} />
+                <span className="w-2 h-2 rounded-full" style={{ background: "rgba(255,149,0,0.5)" }} />
+                <span className="w-2 h-2 rounded-full" style={{ background: `${GA(0.5)}` }} />
+              </div>
+            </div>
+
+            {/* Log body */}
+            <div
+              className="h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono"
+              style={{ wordBreak: "break-all", overflowWrap: "anywhere" }}
+              data-testid="container-logs"
+            >
+              {logs.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center gap-3">
+                  <div className="text-center space-y-1">
+                    <p className="text-[10px] font-mono" style={{ color: GA(0.2) }}>{">"}_</p>
+                    <p className="text-[9px] font-mono" style={{ color: GA(0.15) }}>waiting for output...</p>
+                  </div>
+                </div>
+              ) : (
+                logs.map((line, i) => {
+                  const { color, prefix } = getLogStyle(line.text);
+                  const isSeparator = line.text.startsWith("━━━") || line.text.startsWith("---");
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-1.5 py-px min-w-0 ${isSeparator ? "mt-1.5 mb-0.5 opacity-30" : ""}`}
+                    >
+                      <span className="text-[8.5px] flex-shrink-0 mt-px tabular-nums" style={{ color: GA(0.2) }}>{line.time}</span>
+                      <span className="text-[9px] flex-shrink-0 mt-px w-2.5 text-center font-bold" style={{ color }}>{prefix}</span>
+                      <span
+                        className="text-[10px] leading-relaxed break-words min-w-0 overflow-hidden"
+                        style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}
+                      >
+                        {line.text}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={logsEndRef} />
+            </div>
+
+            {/* Terminal footer */}
+            <div
+              className="px-3.5 py-1.5 flex items-center gap-2"
+              style={{ background: GA(0.02), borderTop: `1px solid ${GA(0.06)}` }}
+            >
+              <span className="text-[8px] font-mono" style={{ color: GA(0.2) }}>addison@panel:~$</span>
+              <span className="text-[8px] font-mono" style={{ color: GA(0.35) }}>
+                {running ? "executing replit_create..." : "ready"}
+              </span>
+              <span className="w-1.5 h-2.5 ml-px" style={{ background: tick && !running ? G : "transparent", boxShadow: tick && !running ? `0 0 6px ${G}` : "none" }} />
+            </div>
           </div>
-        </div>
         </div>
       </div>
-
     </div>
   );
 }
