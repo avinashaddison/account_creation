@@ -11214,6 +11214,7 @@ export async function registerLovableAccount(
     });
 
     // Log relevant API responses for debugging
+    let capturedFirebaseIdToken: string | null = null;
     page.on("response", async (resp: any) => {
       const rUrl = resp.url() || "";
       const status = resp.status();
@@ -11223,6 +11224,16 @@ export async function registerLovableAccount(
         try {
           const body = await resp.text();
           log(`[API ${status}] ${rUrl.substring(0, 120)} → ${body.substring(0, 400)}`);
+          // Capture Firebase ID token from signUp response for potential email resend
+          if (rUrl.includes("identitytoolkit.googleapis.com") && status === 200 && body.includes("idToken")) {
+            try {
+              const parsed = JSON.parse(body);
+              if (parsed.idToken) {
+                capturedFirebaseIdToken = parsed.idToken;
+                log(`✅ Firebase idToken captured (length: ${parsed.idToken.length})`);
+              }
+            } catch {}
+          }
         } catch {}
       } else if (status >= 400 && !rUrl.includes("challenges.cloudflare") && !rUrl.includes("capsolver")) {
         log(`[HTTP ${status}] ${rUrl.substring(0, 100)}`);
@@ -11453,8 +11464,23 @@ export async function registerLovableAccount(
     }
 
     // ── STEP 5: Check Outlook inbox for verification email ─────────────────
-    log("Waiting 75s for Lovable to send verification email...");
-    await waitMs(75000);
+    // Wait 35s, then click Resend on Lovable page to ensure email is sent,
+    // then wait another 50s before opening Outlook
+    log("Waiting 35s before clicking Lovable Resend...");
+    await waitMs(35000);
+    try {
+      const resendBtn = await page.$('button:has-text("Resend"), a:has-text("Resend"), button:has-text("resend"), span:has-text("Resend")');
+      if (resendBtn) {
+        await resendBtn.click({ timeout: 5000 });
+        log("✅ Clicked Lovable Resend button — second email delivery triggered");
+      } else {
+        log("ℹ️ No Resend button found on Lovable page — continuing with original email");
+      }
+    } catch (rErr: any) {
+      log(`⚠️ Resend click failed: ${(rErr.message || "").substring(0, 60)}`);
+    }
+    log("Waiting 50s more for verification email to arrive...");
+    await waitMs(50000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
@@ -11575,8 +11601,14 @@ export async function registerLovableAccount(
               }
             }
           }
-          const code = body.match(/\b([0-9]{6})\b/);
-          if (code) { verificationCode = code[1]; log(`Extracted 6-digit code: ${verificationCode}`); return true; }
+          // Only extract a 6-digit code if the email is clearly Lovable-related
+          const isLovableEmail = body.toLowerCase().includes("lovable") ||
+            body.toLowerCase().includes("gpt-engineer") ||
+            body.toLowerCase().includes("noreply@lovable");
+          if (isLovableEmail) {
+            const code = body.match(/\b([0-9]{6})\b/);
+            if (code) { verificationCode = code[1]; log(`Extracted 6-digit code: ${verificationCode}`); return true; }
+          }
           return false;
         }
 
@@ -11602,16 +11634,29 @@ export async function registerLovableAccount(
                 if (await extractLink(p)) return true;
               }
             }
-            // Fallback: open recent emails and check for any lovable link
+            // Fallback: open recent emails and log what links are found for debugging
             for (const item of all.slice(0, 5)) {
               const txt = ((await item.innerText().catch(() => "")) as string).trim();
               if (txt.length < 5) continue;
+              log(`Fallback opening email: "${txt.replace(/\s+/g, " ").substring(0, 80)}"`);
               try {
                 await item.click({ timeout: 8000 });
               } catch {
                 try { await p.evaluate((el: any) => el.click(), item); } catch {}
               }
               await waitMs(2500);
+              // Log all external links found in this email for debugging
+              try {
+                const links = await p.$$eval('a[href]', (as: any[]) =>
+                  as.map((a: any) => a.href).filter((h: string) => h && h.startsWith('http') && !h.includes('outlook') && !h.includes('microsoft') && !h.includes('aka.ms'))
+                );
+                if (links.length > 0) {
+                  log(`Links in email: ${JSON.stringify(links.slice(0, 5))}`);
+                } else {
+                  const bodySnip = await p.evaluate(() => (document.body?.innerText || "").substring(0, 200).replace(/\s+/g, " "));
+                  log(`No external links found. Body: ${bodySnip}`);
+                }
+              } catch {}
               if (await extractLink(p)) return true;
             }
           } catch (e: any) {
@@ -11666,6 +11711,37 @@ export async function registerLovableAccount(
           if (!found) {
             for (const f of ["clutter", "other"]) {
               found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, `${f}-retry`);
+              if (found) break;
+            }
+          }
+        }
+        // If email still not found after 2 scans, try resending via Firebase API
+        if (!found && capturedFirebaseIdToken) {
+          try {
+            log("📤 Resending Lovable verification email via Firebase API...");
+            const resendResp = await fetch(
+              `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }),
+              }
+            );
+            const resendBody = await resendResp.json();
+            log(`Firebase resend response: ${JSON.stringify(resendBody).substring(0, 200)}`);
+          } catch (resendErr: any) {
+            log(`⚠️ Firebase resend failed: ${resendErr.message || "unknown"}`);
+          }
+        }
+        // Third retry — wait another 90s (total ~4.5 min from signup)
+        if (!found) {
+          log("Email still not found — waiting 90s more then final scan...");
+          await waitMs(90000);
+          found = await scanInboxBothTabs(owaPage);
+          if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk-final");
+          if (!found) {
+            for (const f of ["clutter", "other", "archive"]) {
+              found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, `${f}-final`);
               if (found) break;
             }
           }
