@@ -11529,7 +11529,7 @@ export async function registerLovableAccount(
         async function extractLink(p: any): Promise<boolean> {
           const body = await p.evaluate(() => document.body?.innerText || "");
           const html = await p.evaluate(() => document.body?.innerHTML || "");
-          // Priority 1: direct lovable.dev verification links
+          // Priority 1: direct lovable.dev verification/auth links
           const lovablePatterns = [
             /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/,
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
@@ -11547,32 +11547,30 @@ export async function registerLovableAccount(
               }
             }
           }
-          // Priority 2: Firebase auth action links (Lovable uses Firebase project gpt-engineer-390607)
+          // Priority 2: ONLY Lovable's specific Firebase project (gpt-engineer-390607) — NOT any other Firebase project
           const firebasePatterns = [
             /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/,
-            /https?:\/\/[^\s"'<>\r\n]*firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/,
-            /https?:\/\/[^\s"'<>\r\n]*oobCode=[^\s"'<>\r\n)]*/,
           ];
           for (const pat of firebasePatterns) {
             const m = body.match(pat) || html.match(pat);
             if (m) {
               const candidate = m[0].replace(/["'<>)]/g, "").trim();
-              if (candidate.includes("oobCode") || candidate.includes("firebaseapp")) {
+              if (candidate.includes("gpt-engineer-390607")) {
                 verificationLink = candidate;
-                log(`Extracted Firebase auth link: ${verificationLink.substring(0, 120)}`);
+                log(`Extracted Lovable Firebase link: ${verificationLink.substring(0, 120)}`);
                 return true;
               }
             }
           }
-          // Priority 3: scan all <a> hrefs from HTML for any auth/verify/confirm link
-          const hrefMatches = html.match(/href="(https?:\/\/[^"]*(?:verify|confirm|auth\/action|oobCode)[^"]*)"/gi) || [];
+          // Priority 3: scan hrefs ONLY from lovable.dev or gpt-engineer-390607 domains
+          const hrefMatches = html.match(/href="(https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^"]*)"/gi) || [];
           for (const hm of hrefMatches) {
             const urlMatch = hm.match(/href="(https?:\/\/[^"]+)"/i);
             if (urlMatch) {
               const url = urlMatch[1].trim();
-              if (!url.includes("outlook.live.com") && !url.includes("microsoft.com") && !url.includes("aka.ms")) {
+              if (url.includes("lovable.dev") || url.includes("gpt-engineer-390607")) {
                 verificationLink = url;
-                log(`Extracted auth link from href: ${verificationLink.substring(0, 120)}`);
+                log(`Extracted Lovable href link: ${verificationLink.substring(0, 120)}`);
                 return true;
               }
             }
