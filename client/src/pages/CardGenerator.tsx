@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { CreditCard, Copy, RefreshCw, Download, Zap, Check } from "lucide-react";
+import { useState, useRef } from "react";
+import { CreditCard, Copy, RefreshCw, Download, Zap, Check, Shield, Terminal, Activity, Wifi, WifiOff, Loader, AlertTriangle, ChevronRight, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const MONTHS = ["Random", "01","02","03","04","05","06","07","08","09","10","11","12"];
@@ -7,18 +7,23 @@ const currentYear = new Date().getFullYear();
 const YEARS = ["Random", ...Array.from({ length: 10 }, (_, i) => String(currentYear + i))];
 const QUANTITIES = ["1","5","10","20","50","100","200","500","999"];
 
-function detectNetwork(bin: string): { name: string; color1: string; color2: string; accent: string } {
-  if (bin.startsWith("34") || bin.startsWith("37")) return { name: "AMEX",       color1: "#0f4c81", color2: "#1a6bb5", accent: "#60b4ff" };
-  if (bin.startsWith("4"))                           return { name: "VISA",       color1: "#1a237e", color2: "#283593", accent: "#7c8fff" };
-  if (bin.startsWith("51") || bin.startsWith("52") || bin.startsWith("53") || bin.startsWith("54") || bin.startsWith("55") || (parseInt(bin) >= 222100 && parseInt(bin) <= 272099))
-                                                     return { name: "MASTERCARD", color1: "#7b1113", color2: "#b71c1c", accent: "#ff6b6b" };
-  if (bin.startsWith("6011") || bin.startsWith("65"))return { name: "DISCOVER",  color1: "#e65100", color2: "#bf360c", accent: "#ffb74d" };
-  return                                                    { name: "CARD",       color1: "#1b1b2f", color2: "#2a2a4a", accent: "#a78bfa" };
-}
+type CheckResult = {
+  status: "live" | "dead" | "unknown" | "checking" | "idle";
+  code?: number;
+  message?: string;
+  bank?: string;
+  type?: string;
+  category?: string;
+  country?: string;
+};
 
-function formatCardNumber(n: string): string {
-  if (n.length === 15) return `${n.slice(0,4)} ${n.slice(4,10)} ${n.slice(10)}`;
-  return n.replace(/(.{4})/g, "$1 ").trim();
+function detectNetwork(bin: string) {
+  if (bin.startsWith("34") || bin.startsWith("37")) return { name: "AMEX",       color: "#60b4ff", bg: "#0f4c81" };
+  if (bin.startsWith("4"))                           return { name: "VISA",       color: "#7c8fff", bg: "#1a237e" };
+  if (bin.startsWith("51") || bin.startsWith("52") || bin.startsWith("53") || bin.startsWith("54") || bin.startsWith("55") || (parseInt(bin) >= 222100 && parseInt(bin) <= 272099))
+                                                     return { name: "MC",         color: "#ff6b6b", bg: "#7b1113" };
+  if (bin.startsWith("6011") || bin.startsWith("65"))return { name: "DISC",       color: "#ffb74d", bg: "#e65100" };
+  return                                                    { name: "CARD",       color: "#a78bfa", bg: "#1b1b2f" };
 }
 
 function parseCard(pipe: string) {
@@ -26,138 +31,60 @@ function parseCard(pipe: string) {
   return { number, mm, yyyy, cvv };
 }
 
-function CreditCardVisual({ pipe, index, network }: { pipe: string; index: number; network: ReturnType<typeof detectNetwork> }) {
-  const { toast } = useToast();
-  const { number, mm, yyyy, cvv } = parseCard(pipe);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-
-  function copy(value: string, field: string) {
-    navigator.clipboard.writeText(value);
-    setCopiedField(field);
-    toast({ title: "Copied", description: value });
-    setTimeout(() => setCopiedField(null), 1500);
-  }
-
-  const CopyBtn = ({ value, field }: { value: string; field: string }) => (
-    <button
-      onClick={e => { e.stopPropagation(); copy(value, field); }}
-      className="opacity-0 group-hover:opacity-100 transition-all ml-1.5"
-      data-testid={`copy-${field}-${index}`}
-    >
-      {copiedField === field
-        ? <Check className="w-2.5 h-2.5 text-emerald-400" />
-        : <Copy className="w-2.5 h-2.5 text-white/40 hover:text-white/80" />}
-    </button>
+function StatusBadge({ result }: { result: CheckResult }) {
+  if (result.status === "idle") return null;
+  if (result.status === "checking") return (
+    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded" style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+      <Loader className="w-2.5 h-2.5 animate-spin" style={{ color: "#fbbf24" }} />
+      <span className="text-[9px] font-mono" style={{ color: "#fbbf24" }}>CHECKING</span>
+    </div>
   );
-
+  if (result.status === "live") return (
+    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded" style={{ background: "rgba(0,255,65,0.08)", border: "1px solid rgba(0,255,65,0.3)" }}>
+      <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#00ff41", boxShadow: "0 0 6px #00ff41" }} />
+      <span className="text-[9px] font-mono font-bold" style={{ color: "#00ff41" }}>LIVE</span>
+    </div>
+  );
+  if (result.status === "dead") return (
+    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)" }}>
+      <X className="w-2.5 h-2.5" style={{ color: "#f87171" }} />
+      <span className="text-[9px] font-mono font-bold" style={{ color: "#f87171" }}>DEAD</span>
+    </div>
+  );
   return (
-    <div
-      className="group relative rounded-2xl overflow-hidden cursor-pointer select-none shrink-0"
-      style={{ width: 300, height: 180, background: `linear-gradient(135deg, ${network.color1}, ${network.color2})` }}
-      onClick={() => copy(pipe, `card-${index}`)}
-      data-testid={`card-visual-${index}`}
-    >
-      {/* Holographic shimmer overlay */}
-      <div className="absolute inset-0 opacity-20" style={{
-        background: "linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%)",
-        backgroundSize: "200% 200%",
-      }} />
-      {/* Grid pattern */}
-      <div className="absolute inset-0 opacity-5" style={{
-        backgroundImage: "repeating-linear-gradient(0deg, rgba(255,255,255,0.5) 0px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, rgba(255,255,255,0.5) 0px, transparent 1px, transparent 20px)",
-      }} />
-      {/* Glow circle top-right */}
-      <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-20" style={{ background: `radial-gradient(circle, ${network.accent}, transparent)` }} />
-
-      {/* Card content */}
-      <div className="relative h-full flex flex-col justify-between p-5">
-        {/* Top row: number badge + network */}
-        <div className="flex items-start justify-between">
-          <span className="text-[10px] font-mono text-white/40 tabular-nums">#{index + 1}</span>
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)" }}>
-            <CreditCard className="w-2.5 h-2.5" style={{ color: network.accent }} />
-            <span className="text-[9px] font-mono font-bold tracking-widest" style={{ color: network.accent }}>{network.name}</span>
-          </div>
-        </div>
-
-        {/* Card number */}
-        <div className="group/num flex items-center gap-1">
-          <span className="text-[15px] font-mono font-bold text-white tracking-widest drop-shadow-lg" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.5)" }}>
-            {formatCardNumber(number)}
-          </span>
-          <CopyBtn value={number} field={`num-${index}`} />
-        </div>
-
-        {/* Bottom row */}
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="text-[8px] font-mono text-white/30 uppercase tracking-widest mb-0.5">Expires</p>
-            <div className="group/exp flex items-center gap-1">
-              <p className="text-[13px] font-mono text-white/90 font-semibold">{mm}/{yyyy}</p>
-              <CopyBtn value={`${mm}/${yyyy}`} field={`exp-${index}`} />
-            </div>
-          </div>
-          {cvv && (
-            <div className="text-right">
-              <p className="text-[8px] font-mono text-white/30 uppercase tracking-widest mb-0.5">CVV</p>
-              <div className="group/cvv flex items-center gap-1">
-                <p className="text-[13px] font-mono text-white/90 font-semibold">{cvv}</p>
-                <CopyBtn value={cvv} field={`cvv-${index}`} />
-              </div>
-            </div>
-          )}
-          {/* Copy hint */}
-          <div className="absolute bottom-3 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-            <span className="text-[8px] font-mono text-white/30">click to copy</span>
-          </div>
-        </div>
-      </div>
+    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded" style={{ background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.2)" }}>
+      <AlertTriangle className="w-2.5 h-2.5" style={{ color: "#94a3b8" }} />
+      <span className="text-[9px] font-mono" style={{ color: "#94a3b8" }}>UNK</span>
     </div>
   );
 }
 
-function CompactRow({ pipe, index, network }: { pipe: string; index: number; network: ReturnType<typeof detectNetwork> }) {
-  const { toast } = useToast();
-  const { number, mm, yyyy, cvv } = parseCard(pipe);
-
-  function copy() {
-    navigator.clipboard.writeText(pipe);
-    toast({ title: "Copied", description: pipe });
-  }
-
-  return (
-    <div
-      className="flex items-center gap-3 px-3 py-2 rounded-lg group cursor-pointer transition-all hover:scale-[1.005]"
-      style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.05)" }}
-      onClick={copy}
-      data-testid={`card-row-${index}`}
-    >
-      <span className="text-[9px] font-mono text-white/15 w-5 shrink-0 tabular-nums">{index + 1}</span>
-      <div className="w-1.5 h-4 rounded-full shrink-0" style={{ background: network.accent, boxShadow: `0 0 6px ${network.accent}60` }} />
-      <span className="text-[11px] font-mono flex-1 tabular-nums" style={{ color: network.accent }}>{number}</span>
-      <span className="text-[10px] font-mono text-white/35">{mm}/{yyyy}</span>
-      {cvv && <span className="text-[10px] font-mono text-white/25">{cvv}</span>}
-      <Copy className="w-3 h-3 text-white/15 group-hover:text-white/50 shrink-0 transition-colors" />
-    </div>
-  );
-}
-
-type FormState = { bin: string; dateEnabled: boolean; expmon: string; expyear: string; cvvEnabled: boolean; cvv: string; quantity: string };
+type FormState = {
+  bin: string; dateEnabled: boolean; expmon: string; expyear: string;
+  cvvEnabled: boolean; cvv: string; quantity: string; liveCheck: boolean;
+};
 
 export default function CardGenerator() {
   const { toast } = useToast();
-  const [form, setForm] = useState<FormState>({ bin: "", dateEnabled: true, expmon: "Random", expyear: "Random", cvvEnabled: true, cvv: "", quantity: "10" });
+  const [form, setForm] = useState<FormState>({
+    bin: "", dateEnabled: true, expmon: "Random", expyear: "Random",
+    cvvEnabled: true, cvv: "", quantity: "10", liveCheck: false,
+  });
   const [cards, setCards] = useState<string[]>([]);
+  const [results, setResults] = useState<Record<number, CheckResult>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [viewMode, setViewMode] = useState<"card" | "list">("card");
+  const [checking, setChecking] = useState(false);
+  const [checkProgress, setCheckProgress] = useState(0);
+  const [bulkCheckIdx, setBulkCheckIdx] = useState<number | null>(null);
+  const abortRef = useRef<boolean>(false);
 
   const network = detectNetwork(form.bin);
   function set<K extends keyof FormState>(k: K, v: FormState[K]) { setForm(f => ({ ...f, [k]: v })); }
 
   async function generate() {
     if (!/^\d{6,8}$/.test(form.bin.trim())) { setError("BIN must be 6–8 digits"); return; }
-    setError(""); setLoading(true); setCards([]);
+    setError(""); setLoading(true); setCards([]); setResults({});
     try {
       const res = await fetch("/api/card-generate", {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
@@ -167,72 +94,164 @@ export default function CardGenerator() {
       if (!res.ok) { setError(data.error || "Generation failed"); return; }
       const list: string[] = Array.isArray(data.cards) ? data.cards : [];
       setCards(list);
-      if (list.length > 6) setViewMode("list"); else setViewMode("card");
+      if (form.liveCheck && list.length > 0) {
+        setTimeout(() => checkAll(list), 200);
+      }
     } catch (e: any) { setError(e.message || "Network error"); }
     finally { setLoading(false); }
   }
 
+  async function checkSingle(idx: number, pipe: string) {
+    setResults(r => ({ ...r, [idx]: { status: "checking" } }));
+    try {
+      const res = await fetch("/api/card-check", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ card: pipe }),
+      });
+      const data = await res.json();
+      const isLive = data.code === 1 || data.status === "Live" || data.status === "live";
+      const isDead = data.code === 0 || data.status === "Dead" || data.status === "dead" || data.status === "Declined";
+      setResults(r => ({
+        ...r,
+        [idx]: {
+          status: isLive ? "live" : isDead ? "dead" : "unknown",
+          code: data.code,
+          message: data.message,
+          bank: data.card?.bank,
+          type: data.card?.type,
+          category: data.card?.category,
+          country: data.card?.country?.name,
+        }
+      }));
+    } catch {
+      setResults(r => ({ ...r, [idx]: { status: "unknown", message: "Network error" } }));
+    }
+  }
+
+  async function checkAll(cardList?: string[]) {
+    const list = cardList ?? cards;
+    if (list.length === 0) return;
+    abortRef.current = false;
+    setChecking(true);
+    setCheckProgress(0);
+    setResults({});
+    for (let i = 0; i < list.length; i++) {
+      if (abortRef.current) break;
+      setBulkCheckIdx(i);
+      await checkSingle(i, list[i]);
+      setCheckProgress(Math.round(((i + 1) / list.length) * 100));
+      await new Promise(r => setTimeout(r, 400));
+    }
+    setBulkCheckIdx(null);
+    setChecking(false);
+    setCheckProgress(0);
+  }
+
+  function stopCheck() { abortRef.current = true; }
+
   function copyAll() { navigator.clipboard.writeText(cards.join("\n")); toast({ title: `${cards.length} cards copied` }); }
+  function copyLive() {
+    const live = cards.filter((_, i) => results[i]?.status === "live");
+    if (!live.length) { toast({ title: "No live cards yet" }); return; }
+    navigator.clipboard.writeText(live.join("\n"));
+    toast({ title: `${live.length} live cards copied` });
+  }
   function exportCSV() {
-    const rows = ["Number,Month,Year,CVV", ...cards.map(c => c.replace(/\|/g, ","))].join("\n");
+    const rows = ["Number,Month,Year,CVV,Status,Bank,Message", ...cards.map((c, i) => {
+      const r = results[i];
+      return `${c.replace(/\|/g, ",")},${r?.status ?? ""},${r?.bank ?? ""},${r?.message ?? ""}`;
+    })].join("\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([rows], { type: "text/csv" })); a.download = `cards_${form.bin}.csv`; a.click();
   }
 
-  const inputCls = "w-full px-3.5 py-2.5 rounded-xl text-[12px] font-mono outline-none transition-all focus:ring-1";
-  const inputStyle = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.8)", caretColor: "#fbbf24" };
-  const inputFocus = { "--tw-ring-color": "#fbbf2440" } as React.CSSProperties;
-  const labelCls = "block text-[9px] font-mono text-white/25 uppercase tracking-[0.15em] mb-1.5";
-  const selCls = "w-full px-3.5 py-2.5 rounded-xl text-[12px] font-mono outline-none cursor-pointer appearance-none";
+  const liveCount = Object.values(results).filter(r => r.status === "live").length;
+  const deadCount = Object.values(results).filter(r => r.status === "dead").length;
+  const unkCount = Object.values(results).filter(r => r.status === "unknown").length;
+  const checkedCount = liveCount + deadCount + unkCount;
 
-  function Toggle({ enabled, onToggle, label }: { enabled: boolean; onToggle: () => void; label: string }) {
+  const inputStyle: React.CSSProperties = { background: "rgba(0,255,65,0.03)", border: "1px solid rgba(0,255,65,0.12)", color: "rgba(255,255,255,0.75)", caretColor: "#00ff41", outline: "none" };
+  const labelCls = "block text-[8.5px] font-mono uppercase tracking-[0.2em] mb-1.5";
+
+  function Toggle({ enabled, onToggle, label, accent = "#00ff41" }: { enabled: boolean; onToggle: () => void; label: string; accent?: string }) {
     return (
       <button onClick={onToggle} className="flex items-center gap-2.5 group">
-        <div className="relative w-9 h-5 rounded-full transition-all duration-200 shrink-0" style={{ background: enabled ? "rgba(251,191,36,0.3)" : "rgba(255,255,255,0.06)", border: enabled ? "1px solid rgba(251,191,36,0.5)" : "1px solid rgba(255,255,255,0.1)" }}>
-          <div className="absolute top-0.5 transition-all duration-200 w-4 h-4 rounded-full shadow-lg" style={{ left: enabled ? "calc(100% - 18px)" : "2px", background: enabled ? "#fbbf24" : "rgba(255,255,255,0.2)", boxShadow: enabled ? "0 0 8px rgba(251,191,36,0.6)" : "none" }} />
+        <div className="relative w-8 h-4 rounded-full transition-all duration-200 shrink-0" style={{ background: enabled ? `${accent}22` : "rgba(255,255,255,0.05)", border: `1px solid ${enabled ? accent + "50" : "rgba(255,255,255,0.08)"}` }}>
+          <div className="absolute top-0.5 transition-all duration-200 w-3 h-3 rounded-full" style={{ left: enabled ? "calc(100% - 14px)" : "2px", background: enabled ? accent : "rgba(255,255,255,0.2)", boxShadow: enabled ? `0 0 8px ${accent}` : "none" }} />
         </div>
-        <span className="text-[11px] font-mono font-semibold tracking-wider transition-colors" style={{ color: enabled ? "#fbbf24" : "rgba(255,255,255,0.2)" }}>{label}</span>
+        <span className="text-[10px] font-mono font-bold tracking-widest" style={{ color: enabled ? accent : "rgba(255,255,255,0.2)" }}>{label}</span>
       </button>
     );
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 max-w-6xl mx-auto">
+      {/* Terminal header */}
+      <div className="rounded-xl px-5 py-3 flex items-center justify-between" style={{ background: "linear-gradient(135deg, rgba(0,0,0,0.8), rgba(0,20,0,0.6))", border: "1px solid rgba(0,255,65,0.15)", boxShadow: "0 0 40px rgba(0,255,65,0.04)" }}>
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(251,191,36,0.2), rgba(245,158,11,0.1))", border: "1px solid rgba(251,191,36,0.3)", boxShadow: "0 0 20px rgba(251,191,36,0.15)" }}>
-            <CreditCard className="w-4.5 h-4.5 text-amber-400" />
+          <div className="relative">
+            <div className="absolute inset-0 rounded-xl blur-lg" style={{ background: "rgba(0,255,65,0.15)" }} />
+            <div className="relative w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(0,255,65,0.15), rgba(0,0,0,0.5))", border: "1px solid rgba(0,255,65,0.3)" }}>
+              <CreditCard className="w-4 h-4" style={{ color: "#00ff41", filter: "drop-shadow(0 0 4px #00ff41)" }} />
+            </div>
           </div>
           <div>
-            <h1 className="text-white font-mono font-bold text-xl tracking-tight flex items-center gap-2.5">
-              Card_Generator
-              <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full font-mono tracking-widest" style={{ background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.25)", color: "#fbbf24" }}>TEST ONLY</span>
-            </h1>
-            <p className="text-white/20 mt-0.5 text-[11px] font-mono">Luhn-valid test cards · {cards.length > 0 ? `${cards.length} generated` : "Enter BIN to start"}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-[15px] font-mono font-bold tracking-tight" style={{ color: "#00ff41", textShadow: "0 0 15px rgba(0,255,65,0.4)" }}>
+                card_generator<span className="animate-pulse" style={{ color: "#00ff41" }}>_</span>
+              </h1>
+              <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(0,255,65,0.08)", border: "1px solid rgba(0,255,65,0.2)", color: "rgba(0,255,65,0.6)" }}>
+                TEST ONLY
+              </span>
+            </div>
+            <p className="text-[9px] font-mono mt-0.5" style={{ color: "rgba(255,255,255,0.2)" }}>
+              <span style={{ color: "rgba(0,255,65,0.4)" }}>{'>'}</span> Luhn-valid generator + live checker · {cards.length > 0 ? `${cards.length} generated` : "ready"}
+            </p>
           </div>
         </div>
+
         {cards.length > 0 && (
-          <div className="flex gap-2">
-            <button onClick={() => setViewMode(viewMode === "card" ? "list" : "card")} className="px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)" }}>
-              {viewMode === "card" ? "List View" : "Card View"}
+          <div className="flex items-center gap-2">
+            {/* Stats */}
+            {checkedCount > 0 && (
+              <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg mr-2" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#00ff41", boxShadow: "0 0 5px #00ff41" }} />
+                  <span className="text-[10px] font-mono font-bold" style={{ color: "#00ff41" }}>{liveCount}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                  <span className="text-[10px] font-mono text-red-400">{deadCount}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                  <span className="text-[10px] font-mono text-zinc-500">{unkCount}</span>
+                </div>
+              </div>
+            )}
+            {liveCount > 0 && (
+              <button onClick={copyLive} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-mono transition-all hover:opacity-80" style={{ background: "rgba(0,255,65,0.1)", border: "1px solid rgba(0,255,65,0.3)", color: "#00ff41" }}>
+                <Wifi className="w-3 h-3" /> LIVE ({liveCount})
+              </button>
+            )}
+            <button onClick={copyAll} data-testid="btn-copy-all" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-mono transition-all hover:opacity-80" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)" }}>
+              <Copy className="w-3 h-3" /> ALL
             </button>
-            <button onClick={copyAll} data-testid="btn-copy-all" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all hover:opacity-80" style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.25)", color: "#fbbf24" }}>
-              <Copy className="w-3 h-3" /> Copy All
-            </button>
-            <button onClick={exportCSV} data-testid="btn-export" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all hover:opacity-80" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)" }}>
+            <button onClick={exportCSV} data-testid="btn-export" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-mono transition-all hover:opacity-80" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)" }}>
               <Download className="w-3 h-3" /> CSV
             </button>
           </div>
         )}
       </div>
 
-      <div className="grid gap-5" style={{ gridTemplateColumns: "320px 1fr" }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: "300px 1fr" }}>
         {/* Config panel */}
-        <div className="rounded-2xl p-5 space-y-5 h-fit sticky top-4" style={{ background: "linear-gradient(180deg, rgba(251,191,36,0.04) 0%, rgba(0,0,0,0.3) 100%)", border: "1px solid rgba(251,191,36,0.12)", boxShadow: "0 0 40px rgba(251,191,36,0.04)" }}>
+        <div className="rounded-xl p-4 space-y-4 h-fit sticky top-4" style={{ background: "linear-gradient(180deg, rgba(0,20,0,0.6) 0%, rgba(0,0,0,0.5) 100%)", border: "1px solid rgba(0,255,65,0.10)", boxShadow: "0 0 30px rgba(0,255,65,0.03)" }}>
 
-          {/* BIN + Network badge */}
+          {/* BIN */}
           <div>
-            <label className={labelCls}>BIN Number</label>
+            <label className={labelCls} style={{ color: "rgba(0,255,65,0.4)" }}>
+              <ChevronRight className="w-2.5 h-2.5 inline mr-0.5" />BIN Number
+            </label>
             <div className="relative">
               <input
                 type="text" value={form.bin}
@@ -240,100 +259,239 @@ export default function CardGenerator() {
                 placeholder="e.g. 453590"
                 maxLength={8}
                 data-testid="input-bin"
-                className={`${inputCls} pr-20`}
-                style={{ ...inputStyle, borderColor: error ? "rgba(248,113,113,0.5)" : form.bin.length >= 6 ? `${network.accent}40` : "rgba(255,255,255,0.08)", boxShadow: form.bin.length >= 6 ? `0 0 0 1px ${network.accent}20, inset 0 0 20px ${network.accent}06` : "none" }}
+                className="w-full px-3 py-2.5 rounded-lg text-[12px] font-mono pr-16"
+                style={{ ...inputStyle, borderColor: error ? "rgba(248,113,113,0.5)" : form.bin.length >= 6 ? `${network.color}40` : "rgba(0,255,65,0.12)", boxShadow: form.bin.length >= 6 ? `0 0 0 1px ${network.color}15, inset 0 0 20px ${network.color}04` : "none" }}
               />
               {form.bin.length >= 6 && (
-                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded-md text-[9px] font-mono font-bold tracking-wider" style={{ background: `${network.color1}cc`, border: `1px solid ${network.accent}40`, color: network.accent }}>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold tracking-wider" style={{ background: `${network.bg}cc`, border: `1px solid ${network.color}40`, color: network.color }}>
                   {network.name}
                 </div>
               )}
             </div>
-            {error && <p className="text-red-400/80 text-[10px] font-mono mt-1.5">{error}</p>}
+            {error && <p className="text-red-400/80 text-[9px] font-mono mt-1">{error}</p>}
           </div>
 
-          {/* DATE toggle */}
-          <div className="space-y-3">
+          {/* EXPIRY */}
+          <div className="space-y-2.5">
             <Toggle enabled={form.dateEnabled} onToggle={() => set("dateEnabled", !form.dateEnabled)} label="EXPIRY DATE" />
             {form.dateEnabled && (
-              <div className="grid grid-cols-2 gap-2 pl-1">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className={labelCls}>Month</label>
-                  <select value={form.expmon} onChange={e => set("expmon", e.target.value)} className={selCls} style={{ ...inputStyle }} data-testid="select-expmon">
-                    {MONTHS.map(m => <option key={m} style={{ background: "#111" }}>{m}</option>)}
+                  <label className={labelCls} style={{ color: "rgba(255,255,255,0.15)" }}>Month</label>
+                  <select value={form.expmon} onChange={e => set("expmon", e.target.value)} data-testid="select-expmon"
+                    className="w-full px-2.5 py-2 rounded-lg text-[11px] font-mono outline-none cursor-pointer appearance-none"
+                    style={inputStyle}>
+                    {MONTHS.map(m => <option key={m} style={{ background: "#0a0a0a" }}>{m}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>Year</label>
-                  <select value={form.expyear} onChange={e => set("expyear", e.target.value)} className={selCls} style={{ ...inputStyle }} data-testid="select-expyear">
-                    {YEARS.map(y => <option key={y} style={{ background: "#111" }}>{y}</option>)}
+                  <label className={labelCls} style={{ color: "rgba(255,255,255,0.15)" }}>Year</label>
+                  <select value={form.expyear} onChange={e => set("expyear", e.target.value)} data-testid="select-expyear"
+                    className="w-full px-2.5 py-2 rounded-lg text-[11px] font-mono outline-none cursor-pointer appearance-none"
+                    style={inputStyle}>
+                    {YEARS.map(y => <option key={y} style={{ background: "#0a0a0a" }}>{y}</option>)}
                   </select>
                 </div>
               </div>
             )}
           </div>
 
-          {/* CVV toggle */}
-          <div className="space-y-3">
+          {/* CVV */}
+          <div className="space-y-2.5">
             <Toggle enabled={form.cvvEnabled} onToggle={() => set("cvvEnabled", !form.cvvEnabled)} label="CVV" />
             {form.cvvEnabled && (
-              <div className="pl-1">
-                <input type="text" value={form.cvv} onChange={e => set("cvv", e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Leave blank to randomize" data-testid="input-cvv" className={inputCls} style={inputStyle} />
-              </div>
+              <input type="text" value={form.cvv} onChange={e => set("cvv", e.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder="blank = random" data-testid="input-cvv"
+                className="w-full px-3 py-2 rounded-lg text-[11px] font-mono"
+                style={inputStyle} />
+            )}
+          </div>
+
+          {/* Live Check toggle */}
+          <div className="py-2 px-3 rounded-lg" style={{ background: "rgba(0,255,65,0.03)", border: "1px solid rgba(0,255,65,0.08)" }}>
+            <Toggle enabled={form.liveCheck} onToggle={() => set("liveCheck", !form.liveCheck)} label="AUTO LIVE CHECK" accent="#00ff41" />
+            {form.liveCheck && (
+              <p className="text-[8.5px] font-mono mt-2" style={{ color: "rgba(0,255,65,0.3)" }}>
+                ⚡ Checks via chkr.cc after generation
+              </p>
             )}
           </div>
 
           {/* Quantity */}
           <div>
-            <label className={labelCls}>Quantity</label>
+            <label className={labelCls} style={{ color: "rgba(0,255,65,0.4)" }}>
+              <ChevronRight className="w-2.5 h-2.5 inline mr-0.5" />Quantity
+            </label>
             <div className="flex flex-wrap gap-1.5">
               {QUANTITIES.map(q => (
                 <button key={q} onClick={() => set("quantity", q)} data-testid={`btn-qty-${q}`}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium transition-all"
+                  className="px-2 py-1 rounded text-[10px] font-mono font-medium transition-all"
                   style={form.quantity === q
-                    ? { background: "rgba(251,191,36,0.2)", border: "1px solid rgba(251,191,36,0.5)", color: "#fbbf24", boxShadow: "0 0 10px rgba(251,191,36,0.2)" }
-                    : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.3)" }}>
+                    ? { background: "rgba(0,255,65,0.12)", border: "1px solid rgba(0,255,65,0.4)", color: "#00ff41", boxShadow: "0 0 8px rgba(0,255,65,0.15)" }
+                    : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)" }}>
                   {q}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Generate button */}
+          {/* Generate */}
           <button onClick={generate} disabled={loading} data-testid="btn-generate"
-            className="w-full py-3 rounded-xl font-mono text-[13px] font-bold flex items-center justify-center gap-2.5 transition-all disabled:opacity-50 active:scale-[0.98]"
-            style={{ background: loading ? "rgba(251,191,36,0.1)" : "linear-gradient(135deg, rgba(251,191,36,0.35), rgba(245,158,11,0.2))", border: "1px solid rgba(251,191,36,0.4)", color: "#fbbf24", boxShadow: loading ? "none" : "0 0 30px rgba(251,191,36,0.15), inset 0 1px 0 rgba(255,255,255,0.1)" }}>
-            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            className="w-full py-2.5 rounded-xl font-mono text-[12px] font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 active:scale-[0.98]"
+            style={{ background: loading ? "rgba(0,255,65,0.05)" : "linear-gradient(135deg, rgba(0,255,65,0.18), rgba(0,200,50,0.08))", border: "1px solid rgba(0,255,65,0.35)", color: "#00ff41", boxShadow: loading ? "none" : "0 0 25px rgba(0,255,65,0.1), inset 0 1px 0 rgba(0,255,65,0.1)", textShadow: "0 0 10px rgba(0,255,65,0.5)" }}>
+            {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             {loading ? "GENERATING..." : "GENERATE"}
           </button>
+
+          {/* Manual check all */}
+          {cards.length > 0 && !checking && (
+            <button onClick={() => checkAll()} data-testid="btn-check-all"
+              className="w-full py-2 rounded-xl font-mono text-[11px] font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+              style={{ background: "rgba(0,255,65,0.04)", border: "1px solid rgba(0,255,65,0.15)", color: "rgba(0,255,65,0.5)" }}>
+              <Shield className="w-3.5 h-3.5" />
+              CHECK ALL ({cards.length})
+            </button>
+          )}
+          {checking && (
+            <button onClick={stopCheck}
+              className="w-full py-2 rounded-xl font-mono text-[11px] font-bold flex items-center justify-center gap-2 transition-all"
+              style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", color: "#f87171" }}>
+              <X className="w-3.5 h-3.5" /> STOP
+            </button>
+          )}
         </div>
 
         {/* Output panel */}
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-3">
+          {/* Check progress */}
+          {checking && (
+            <div className="rounded-xl px-4 py-3" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(0,255,65,0.15)" }}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-3 h-3 animate-pulse" style={{ color: "#00ff41" }} />
+                  <span className="text-[10px] font-mono" style={{ color: "rgba(0,255,65,0.7)" }}>
+                    CHECKING {bulkCheckIdx !== null ? bulkCheckIdx + 1 : "?"}/{cards.length}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono tabular-nums" style={{ color: "rgba(0,255,65,0.5)" }}>{checkProgress}%</span>
+              </div>
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${checkProgress}%`, background: "linear-gradient(90deg, #00ff41, #00cc33)", boxShadow: "0 0 8px rgba(0,255,65,0.5)" }} />
+              </div>
+              <div className="flex gap-4 mt-2">
+                <span className="text-[8.5px] font-mono" style={{ color: "#00ff41" }}>✓ {liveCount} live</span>
+                <span className="text-[8.5px] font-mono text-red-400">✗ {deadCount} dead</span>
+                <span className="text-[8.5px] font-mono text-zinc-600">? {unkCount} unknown</span>
+              </div>
+            </div>
+          )}
+
           {loading ? (
-            <div className="h-64 flex flex-col items-center justify-center gap-3 rounded-2xl" style={{ border: "1px dashed rgba(251,191,36,0.1)" }}>
-              <RefreshCw className="w-6 h-6 text-amber-400/30 animate-spin" />
-              <p className="text-[11px] font-mono text-white/15">Generating {form.quantity} cards...</p>
+            <div className="h-64 flex flex-col items-center justify-center gap-3 rounded-xl" style={{ border: "1px dashed rgba(0,255,65,0.08)", background: "rgba(0,0,0,0.3)" }}>
+              <Terminal className="w-6 h-6 animate-pulse" style={{ color: "rgba(0,255,65,0.2)" }} />
+              <p className="text-[10px] font-mono" style={{ color: "rgba(0,255,65,0.2)" }}>
+                {'>'} generating {form.quantity} cards<span className="animate-pulse">_</span>
+              </p>
             </div>
           ) : cards.length === 0 ? (
-            <div className="h-64 flex flex-col items-center justify-center gap-3 rounded-2xl" style={{ border: "1px dashed rgba(255,255,255,0.05)" }}>
-              <CreditCard className="w-8 h-8 text-white/8" />
-              <p className="text-[11px] font-mono text-white/12">Enter a BIN and click Generate</p>
-            </div>
-          ) : viewMode === "card" ? (
-            <div className="flex flex-wrap gap-4" data-testid="container-cards">
-              {cards.map((c, i) => <CreditCardVisual key={i} pipe={c} index={i} network={network} />)}
+            <div className="h-64 flex flex-col items-center justify-center gap-3 rounded-xl" style={{ border: "1px dashed rgba(255,255,255,0.04)", background: "rgba(0,0,0,0.2)" }}>
+              <CreditCard className="w-8 h-8" style={{ color: "rgba(255,255,255,0.05)" }} />
+              <p className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.1)" }}>{'>'} enter BIN and generate_</p>
             </div>
           ) : (
-            <div className="rounded-2xl overflow-hidden" style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div className="px-4 py-2.5 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", background: "rgba(251,191,36,0.03)" }}>
-                <span className="text-[10px] font-mono text-amber-400/40 uppercase tracking-wider">{cards.length} cards · {network.name}</span>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full" style={{ background: network.accent, boxShadow: `0 0 6px ${network.accent}` }} />
-                </div>
+            <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(0,255,65,0.08)" }}>
+              {/* Table header */}
+              <div className="grid px-4 py-2.5 text-[8px] font-mono uppercase tracking-[0.15em]" style={{ gridTemplateColumns: "28px 20px 1fr 100px 60px 80px 80px", borderBottom: "1px solid rgba(0,255,65,0.06)", background: "rgba(0,255,65,0.02)", color: "rgba(0,255,65,0.25)" }}>
+                <span>#</span>
+                <span></span>
+                <span>Card Number</span>
+                <span>Expiry / CVV</span>
+                <span>Status</span>
+                <span>Bank</span>
+                <span className="text-right">Action</span>
               </div>
-              <div className="p-3 space-y-1 h-[500px] overflow-y-auto overflow-x-hidden" style={{ wordBreak: "break-all" }} data-testid="container-cards-list">
-                {cards.map((c, i) => <CompactRow key={i} pipe={c} index={i} network={network} />)}
+              <div className="overflow-y-auto" style={{ maxHeight: "520px" }}>
+                {cards.map((pipe, i) => {
+                  const { number, mm, yyyy, cvv } = parseCard(pipe);
+                  const res = results[i] ?? { status: "idle" as const };
+                  const isLive = res.status === "live";
+                  const isDead = res.status === "dead";
+                  return (
+                    <div
+                      key={i}
+                      className="grid items-center px-4 py-2 transition-all group"
+                      data-testid={`card-row-${i}`}
+                      style={{
+                        gridTemplateColumns: "28px 20px 1fr 100px 60px 80px 80px",
+                        borderBottom: "1px solid rgba(255,255,255,0.02)",
+                        background: isLive ? "rgba(0,255,65,0.03)" : isDead ? "rgba(248,113,113,0.02)" : bulkCheckIdx === i ? "rgba(251,191,36,0.03)" : "transparent",
+                      }}
+                    >
+                      <span className="text-[9px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.12)" }}>{i + 1}</span>
+                      <div className="w-1 h-4 rounded-full shrink-0" style={{ background: network.color, opacity: 0.6, boxShadow: `0 0 4px ${network.color}60` }} />
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="text-[11px] font-mono tabular-nums truncate cursor-pointer"
+                          style={{ color: isLive ? "#00ff41" : isDead ? "rgba(248,113,113,0.6)" : "rgba(255,255,255,0.55)" }}
+                          onClick={() => { navigator.clipboard.writeText(pipe); toast({ title: "Copied!" }); }}
+                        >
+                          {number}
+                        </span>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(pipe); toast({ title: "Copied!" }); }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          data-testid={`copy-card-${i}`}
+                        >
+                          <Copy className="w-2.5 h-2.5" style={{ color: "rgba(255,255,255,0.2)" }} />
+                        </button>
+                      </div>
+                      <span className="text-[10px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.25)" }}>
+                        {mm}/{yyyy}{cvv ? ` · ${cvv}` : ""}
+                      </span>
+                      <div>
+                        <StatusBadge result={res} />
+                      </div>
+                      <div className="min-w-0">
+                        {res.bank && (
+                          <p className="text-[8.5px] font-mono truncate" style={{ color: "rgba(255,255,255,0.2)" }} title={res.bank}>
+                            {res.bank}
+                          </p>
+                        )}
+                        {res.message && !res.bank && (
+                          <p className="text-[8.5px] font-mono truncate" style={{ color: "rgba(255,255,255,0.15)" }}>{res.message}</p>
+                        )}
+                      </div>
+                      <div className="flex justify-end">
+                        {res.status === "idle" || res.status === "unknown" || res.status === "dead" ? (
+                          <button
+                            onClick={() => checkSingle(i, pipe)}
+                            disabled={checking}
+                            className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-0.5 rounded text-[8.5px] font-mono transition-all disabled:cursor-not-allowed"
+                            style={{ background: "rgba(0,255,65,0.06)", border: "1px solid rgba(0,255,65,0.15)", color: "rgba(0,255,65,0.5)" }}
+                            data-testid={`btn-check-${i}`}
+                          >
+                            <Shield className="w-2 h-2" /> CHK
+                          </button>
+                        ) : res.status === "live" ? (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                            <Wifi className="w-3 h-3" style={{ color: "#00ff41" }} />
+                          </div>
+                        ) : res.status === "checking" ? (
+                          <Loader className="w-3 h-3 animate-spin" style={{ color: "rgba(251,191,36,0.5)" }} />
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Footer */}
+              <div className="px-4 py-2 flex items-center justify-between" style={{ borderTop: "1px solid rgba(0,255,65,0.06)", background: "rgba(0,0,0,0.3)" }}>
+                <span className="text-[8.5px] font-mono" style={{ color: "rgba(0,255,65,0.2)" }}>
+                  {cards.length} cards · {network.name} · BIN {form.bin}
+                </span>
+                <div className="flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: network.color, boxShadow: `0 0 4px ${network.color}` }} />
+                </div>
               </div>
             </div>
           )}

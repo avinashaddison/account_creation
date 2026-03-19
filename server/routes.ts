@@ -3216,5 +3216,24 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/card-check", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { card } = req.body;
+      if (!card || typeof card !== "string") {
+        return res.status(400).json({ error: "Card string required" });
+      }
+      const response = await fetch("https://api.chkr.cc/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
+        body: JSON.stringify({ data: card }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Check failed" });
+    }
+  });
+
   return httpServer;
 }
