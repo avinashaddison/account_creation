@@ -3236,20 +3236,20 @@ export async function registerRoutes(
   });
 
   app.get("/api/my-cards", requireAuth, async (req: Request, res: Response) => {
-    const user = (req as any).user;
-    const cards = await storage.getSavedCardsByOwner(user.id);
+    const userId = req.session.userId!;
+    const cards = await storage.getSavedCardsByOwner(userId);
     res.json(cards);
   });
 
   app.post("/api/my-cards", requireAuth, async (req: Request, res: Response) => {
-    const user = (req as any).user;
+    const userId = req.session.userId!;
     const { label, cardholderName, cardNumber, expiryMonth, expiryYear, cvv, cardType, notes } = req.body;
     if (!cardholderName || !cardNumber || !expiryMonth || !expiryYear || !cvv) {
       return res.status(400).json({ error: "Missing required card fields" });
     }
     const card = await storage.createSavedCard({
-      ownerId: user.id,
-      label: label || `Card ending ${cardNumber.slice(-4)}`,
+      ownerId: userId,
+      label: label || `Card ending ${cardNumber.replace(/\s/g, "").slice(-4)}`,
       cardholderName,
       cardNumber,
       expiryMonth,
@@ -3263,17 +3263,17 @@ export async function registerRoutes(
   });
 
   app.patch("/api/my-cards/:id", requireAuth, async (req: Request, res: Response) => {
-    const user = (req as any).user;
+    const userId = req.session.userId!;
     const card = await storage.getSavedCard(req.params.id);
-    if (!card || card.ownerId !== user.id) return res.status(404).json({ error: "Not found" });
+    if (!card || card.ownerId !== userId) return res.status(404).json({ error: "Not found" });
     const updated = await storage.updateSavedCard(req.params.id, req.body);
     res.json(updated);
   });
 
   app.delete("/api/my-cards/:id", requireAuth, async (req: Request, res: Response) => {
-    const user = (req as any).user;
+    const userId = req.session.userId!;
     const card = await storage.getSavedCard(req.params.id);
-    if (!card || card.ownerId !== user.id) return res.status(404).json({ error: "Not found" });
+    if (!card || card.ownerId !== userId) return res.status(404).json({ error: "Not found" });
     await storage.deleteSavedCard(req.params.id);
     res.json({ ok: true });
   });
