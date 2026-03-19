@@ -198,7 +198,8 @@ export async function solveFunCaptcha(
 export async function solveAntiTurnstile(
   websiteURL: string,
   websiteKey: string,
-  proxy?: string
+  proxy?: string,
+  action?: string
 ): Promise<CapSolverTaskResult> {
   try {
     const taskType = proxy ? "AntiTurnstileTask" : "AntiTurnstileTaskProxyLess";
@@ -207,6 +208,7 @@ export async function solveAntiTurnstile(
       websiteURL,
       websiteKey,
     };
+    if (action) task.metadata = { action };
     if (proxy) {
       const parsed = parseProxy(proxy);
       Object.assign(task, parsed);

@@ -11127,59 +11127,106 @@ export async function registerLovableAccount(
     page = await context.newPage();
     page.setDefaultTimeout(35000);
 
-    // Capture Turnstile sitekey from network requests
-    let capturedTurnstileSitekey: string | null = null;
-    page.on("request", (req: any) => {
-      const url = req.url() || "";
-      if (url.includes("challenges.cloudflare.com") || url.includes("turnstile")) {
-        const m = url.match(/[?&](?:sitekey|k)=([^&]+)/);
-        if (m && m[1] && !capturedTurnstileSitekey) capturedTurnstileSitekey = m[1];
-        const m2 = url.match(/\/([0-9A-Za-z_-]{20,})\//);
-        if (m2 && !capturedTurnstileSitekey) capturedTurnstileSitekey = m2[1];
+    // Capture browser console logs for debugging
+    page.on("console", (msg: any) => {
+      const text = msg.text() || "";
+      if (text.includes("[TS]") || text.includes("[LV]")) log(`[browser] ${text}`);
+    });
+
+    // ── KEY STRATEGY ──────────────────────────────────────────────────────────
+    // Lovable writes the Turnstile token to Firestore at auth_turnstile_signups/{email}
+    // BEFORE calling Firebase signUp. The Firebase Blocking Function reads from
+    // Firestore to validate. Our plan:
+    //   1. Replace the real Turnstile script with a fake that fires callback immediately
+    //      → this triggers Lovable's onTokenChange → ez() writes a placeholder to Firestore
+    //   2. Intercept the Firestore PATCH and replace the placeholder token with our
+    //      real CapSolver-solved token (reusing all original auth headers)
+    //   3. Firebase Blocking Function reads our real CapSolver token → validates → PASSES
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Start CapSolver solving immediately in background (runs in parallel with navigation)
+    const LOVABLE_SITEKEY = "0x4AAAAAAChnKAZBY0iFpFHC";
+    let capsolverTokenResolve: ((token: string | null) => void) | null = null;
+    const capsolverTokenPromise: Promise<string | null> = new Promise((res) => { capsolverTokenResolve = res; });
+    (async () => {
+      log(`Solving Turnstile via CapSolver in background (sitekey: ${LOVABLE_SITEKEY}, action: signup_email_password)...`);
+      const tsResult = await solveAntiTurnstile("https://lovable.dev/signup", LOVABLE_SITEKEY, undefined, "signup_email_password");
+      if (tsResult.success && tsResult.token) {
+        log(`✅ Background CapSolver solved! Token length: ${tsResult.token.length}`);
+        capsolverTokenResolve!(tsResult.token);
+      } else {
+        log(`⚠️ Background CapSolver failed: ${tsResult.error || "unknown"}`);
+        capsolverTokenResolve!(null);
       }
+    })();
+
+    // Replace real Turnstile script with a fake that STORES the callback (doesn't fire immediately)
+    // The callback will be fired later with the REAL CapSolver token via page.evaluate()
+    await page.route("**challenges.cloudflare.com/turnstile/v0/api.js**", async (route: any) => {
+      const fakeTurnstileScript = `
+(function() {
+  window.__pendingTsCallbacks = [];
+  window.__tsCurrentToken = null;
+  function makeFakeApi() {
+    return {
+      render: function(container, params) {
+        console.log("[TS] fake turnstile.render() called, sitekey=" + (params && params.sitekey));
+        if (params && typeof params.callback === "function") {
+          // If we already have the real token, fire immediately; otherwise queue it
+          if (window.__tsCurrentToken) {
+            console.log("[TS] firing render callback immediately with real token");
+            setTimeout(function() { params.callback(window.__tsCurrentToken); }, 50);
+          } else {
+            console.log("[TS] queuing render callback — waiting for real CapSolver token");
+            window.__pendingTsCallbacks.push(params.callback);
+          }
+        }
+        return "fake-widget-id-0";
+      },
+      getResponse: function(wid) { return window.__tsCurrentToken || null; },
+      reset: function() {},
+      remove: function() {},
+      isExpired: function() { return !window.__tsCurrentToken; },
+      execute: function(wid, opts) {
+        if (opts && typeof opts.callback === "function") {
+          if (window.__tsCurrentToken) {
+            setTimeout(function() { opts.callback(window.__tsCurrentToken); }, 50);
+          } else {
+            window.__pendingTsCallbacks.push(opts.callback);
+          }
+        }
+      }
+    };
+  }
+  window.turnstile = makeFakeApi();
+  // Fire the "turnstile loaded" event that Lovable's widget listens for
+  document.dispatchEvent(new Event("turnstile-loaded"));
+  window.dispatchEvent(new Event("turnstile-loaded"));
+  console.log("[TS] fake Turnstile API installed — callbacks queued until real token arrives");
+})();
+`;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/javascript",
+        body: fakeTurnstileScript,
+      });
+      log("Fake Turnstile script served — render() callbacks queued until real CapSolver token");
     });
 
     // Log relevant API responses for debugging
     page.on("response", async (resp: any) => {
       const rUrl = resp.url() || "";
       const status = resp.status();
-      const relevant = rUrl.includes("supabase.co") || rUrl.includes("supabase.io") ||
-        rUrl.includes("api.lovable.dev") || rUrl.includes("identitytoolkit.googleapis.com");
+      const relevant = rUrl.includes("api.lovable.dev") || rUrl.includes("identitytoolkit.googleapis.com") ||
+        rUrl.includes("firestore.googleapis.com");
       if (relevant) {
         try {
           const body = await resp.text();
-          log(`[API ${status}] ${rUrl.substring(0, 100)} → ${body.substring(0, 300)}`);
+          log(`[API ${status}] ${rUrl.substring(0, 120)} → ${body.substring(0, 400)}`);
         } catch {}
       } else if (status >= 400 && !rUrl.includes("challenges.cloudflare") && !rUrl.includes("capsolver")) {
         log(`[HTTP ${status}] ${rUrl.substring(0, 100)}`);
       }
-    });
-
-    // Patch Turnstile API to intercept callbacks and sitekeys
-    await page.addInitScript(() => {
-      (window as any).__tsCallbacks = [];
-      (window as any).__tsToken = null;
-      (window as any).__tsSitekey = null;
-      let __tsReal: any = null;
-      Object.defineProperty(window, "turnstile", {
-        configurable: true,
-        enumerable: true,
-        get() { return __tsReal; },
-        set(api: any) {
-          if (api && typeof api.render === "function" && !api.__patched) {
-            const origRender = api.render.bind(api);
-            api.render = function(container: any, params: any) {
-              if (params?.callback) (window as any).__tsCallbacks.push(params.callback);
-              if (params?.sitekey) (window as any).__tsSitekey = params.sitekey;
-              return origRender(container, params);
-            };
-            api.getResponse = () => (window as any).__tsToken || null;
-            api.isExpired = () => !(window as any).__tsToken;
-            api.__patched = true;
-          }
-          __tsReal = api;
-        }
-      });
     });
 
     // ── STEP 1: Navigate to signup page ───────────────────────────────────
@@ -11192,7 +11239,7 @@ export async function registerLovableAccount(
       log("⚠️ Cloudflare challenge detected");
       if (!usingZenRows) {
         log("Attempting CapSolver Turnstile bypass...");
-        const cfSitekey = capturedTurnstileSitekey || "0x4AAAAAAChnKAZBY0iFpFHC";
+        const cfSitekey = "0x4AAAAAAChnKAZBY0iFpFHC";
         const cfResult = await solveAntiTurnstile("https://lovable.dev/signup", cfSitekey);
         if (cfResult.success && cfResult.token) {
           log("CapSolver token received — injecting to bypass Cloudflare...");
@@ -11260,7 +11307,15 @@ export async function registerLovableAccount(
       afterText.toLowerCase().includes("already registered") ||
       afterText.toLowerCase().includes("account already exists");
 
-    if (alreadyExists) return { success: false, error: "Lovable account already exists for this email" };
+    // If redirected to /login page, this email already has a Lovable account
+    const onLoginPage = afterUrl.includes("lovable.dev/login") ||
+      (afterUrl.includes("lovable.dev") && !afterUrl.includes("/signup") && hasPasswordField &&
+       (afterText.toLowerCase().includes("log in") || afterText.toLowerCase().includes("sign in")));
+
+    if (alreadyExists || onLoginPage) {
+      log(`Email ${outlookEmail} already has a Lovable account (redirected to login page)`);
+      return { success: false, error: "Lovable account already exists for this email" };
+    }
     if (onDashboardNow) { log("✅ On dashboard instantly!"); return { success: true, email: outlookEmail }; }
 
     let generatedPassword: string | null = null;
@@ -11278,43 +11333,31 @@ export async function registerLovableAccount(
       log(`Generated password: ${generatedPassword}`);
       await waitMs(1000);
 
-      // Solve Cloudflare Turnstile CAPTCHA via CapSolver
-      const LOVABLE_SITEKEY = "0x4AAAAAAChnKAZBY0iFpFHC";
-      await page.waitForFunction(
-        () => (window as any).__tsSitekey || ((window as any).__tsCallbacks || []).length > 0,
-        { timeout: 5000 }
-      ).catch(() => {});
+      // Wait for the real CapSolver token, then inject it into the queued Turnstile callbacks
+      // This triggers Lovable's onTokenChange → ez() → Firestore write with the REAL token
+      log("Awaiting real CapSolver token to fire queued Turnstile callbacks...");
+      const realCsToken = await Promise.race([
+        capsolverTokenPromise,
+        new Promise<null>((res) => setTimeout(() => res(null), 50000)),
+      ]);
 
-      const domSitekey: string | null = await page.evaluate(() => {
-        const el = document.querySelector('.cf-turnstile[data-sitekey], [data-sitekey].cf-turnstile');
-        const ifr = document.querySelector('iframe[src*="challenges.cloudflare"]') as HTMLIFrameElement | null;
-        const ifrKey = ifr?.src?.match(/[?&]k=([^&]+)/)?.[1] || null;
-        return (el as HTMLElement | null)?.getAttribute("data-sitekey") || (window as any).__tsSitekey || ifrKey || null;
-      });
-
-      const resolvedSitekey = capturedTurnstileSitekey || domSitekey || LOVABLE_SITEKEY;
-      log(`Solving Turnstile via CapSolver (sitekey: ${resolvedSitekey})...`);
-      const tsResult = await solveAntiTurnstile("https://lovable.dev/signup", resolvedSitekey);
-
-      if (tsResult.success && tsResult.token) {
-        log(`✅ Turnstile solved! Token length: ${tsResult.token.length}`);
-        const cbCount = await page.evaluate((token: string) => {
-          (window as any).__tsToken = token;
-          const cbs: any[] = (window as any).__tsCallbacks || [];
+      if (realCsToken) {
+        log(`✅ Got real CapSolver token (${realCsToken.length} chars) — firing queued Turnstile callbacks`);
+        const cbFired = await page.evaluate((token: string) => {
+          (window as any).__tsCurrentToken = token;
+          const cbs: any[] = (window as any).__pendingTsCallbacks || [];
           let n = 0;
           cbs.forEach((cb: any) => { try { cb(token); n++; } catch {} });
-          document.querySelectorAll('input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]')
-            .forEach((el: any) => { el.value = token; });
-          if ((window as any).turnstile) {
-            try { (window as any).turnstile.getResponse = () => token; } catch {}
-            try { (window as any).turnstile.isExpired = () => false; } catch {}
-          }
+          (window as any).__pendingTsCallbacks = [];
           return n;
-        }, tsResult.token);
-        log(`Fired ${cbCount} Turnstile callback(s)`);
-        await waitMs(1500);
+        }, realCsToken);
+        log(`Fired ${cbFired} queued Turnstile callback(s) with real token`);
+        // Wait for Lovable to complete: onTokenChange → ez() → Firestore write
+        log("Waiting 5s for Lovable to write token to Firestore...");
+        await waitMs(5000);
       } else {
-        log(`⚠️ Turnstile solve failed: ${tsResult.error || "unknown"} — attempting submission anyway`);
+        log("⚠️ CapSolver timed out — submitting without Turnstile token (may fail)");
+        await waitMs(1000);
       }
 
       // Force-enable submit button
