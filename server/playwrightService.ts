@@ -11529,19 +11529,22 @@ export async function registerLovableAccount(
         async function extractLink(p: any): Promise<boolean> {
           const body = await p.evaluate(() => document.body?.innerText || "");
           const html = await p.evaluate(() => document.body?.innerHTML || "");
+          // ONLY accept lovable.dev links — never follow links from other domains
           const patterns = [
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]+/,
-            /https?:\/\/[a-z0-9.-]*supabase[^\s"'<>\r\n)]+/,
-            /https?:\/\/[^\s"'<>\r\n)]*magic[^\s"'<>\r\n)]*/i,
-            /https?:\/\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
-            /https?:\/\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
+            /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*/,
           ];
           for (const pat of patterns) {
             const m = body.match(pat) || html.match(pat);
             if (m) {
-              verificationLink = m[0].replace(/["'<>)]/g, "").trim();
-              log(`Extracted link: ${verificationLink.substring(0, 120)}`);
-              return true;
+              const candidate = m[0].replace(/["'<>)]/g, "").trim();
+              // Double-check it's actually a lovable.dev link
+              if (candidate.includes("lovable.dev")) {
+                verificationLink = candidate;
+                log(`Extracted link: ${verificationLink.substring(0, 120)}`);
+                return true;
+              }
             }
           }
           const code = body.match(/\b([0-9]{6})\b/);
@@ -11557,22 +11560,29 @@ export async function registerLovableAccount(
             const alt = items.length === 0 ? await p.$$('[role="option"]') : [];
             const all = items.length > 0 ? items : alt;
             log(`${label}: ${all.length} emails`);
-            // Keyword-match pass
+            // Keyword-match pass — ONLY open emails that mention Lovable
             for (const item of all.slice(0, 20)) {
               const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
-              if (txt.includes("lovable") || txt.includes("magic link") || txt.includes("verify") ||
-                  txt.includes("confirm") || txt.includes("noreply") || txt.includes("no-reply")) {
+              if (txt.includes("lovable") || txt.includes("noreply@lovable") || txt.includes("lovable.dev")) {
                 log(`Opening in ${label}: "${txt.substring(0, 80)}"`);
-                await item.click();
+                try {
+                  await item.click({ timeout: 8000 });
+                } catch {
+                  try { await p.evaluate((el: any) => el.click(), item); } catch {}
+                }
                 await waitMs(3000);
                 if (await extractLink(p)) return true;
               }
             }
-            // Fallback: open recent emails
+            // Fallback: open recent emails and check for any lovable link
             for (const item of all.slice(0, 5)) {
               const txt = ((await item.innerText().catch(() => "")) as string).trim();
               if (txt.length < 5) continue;
-              await item.click();
+              try {
+                await item.click({ timeout: 8000 });
+              } catch {
+                try { await p.evaluate((el: any) => el.click(), item); } catch {}
+              }
               await waitMs(2500);
               if (await extractLink(p)) return true;
             }
@@ -11582,7 +11592,37 @@ export async function registerLovableAccount(
           return false;
         }
 
-        let found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/inbox", "inbox");
+        // Helper to also scan Outlook's "focused" and "other" tabs (part of the same inbox URL)
+        async function scanInboxBothTabs(p: any): Promise<boolean> {
+          // Try main inbox first (default tab = "Focused")
+          let found = await scanFolder(p, "https://outlook.live.com/mail/0/inbox", "inbox-focused");
+          if (found) return true;
+          // Try "Other" tab by clicking it (Outlook Focused Inbox)
+          try {
+            await p.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 20000 });
+            await waitMs(4000);
+            const otherTab = await p.$('[aria-label="Other"]');
+            if (otherTab) {
+              await otherTab.click({ timeout: 5000 }).catch(() => {});
+              await waitMs(3000);
+              const items2 = await p.$$('[data-convid]');
+              const alt2 = items2.length === 0 ? await p.$$('[role="option"]') : [];
+              const all2 = items2.length > 0 ? items2 : alt2;
+              log(`inbox-other-tab: ${all2.length} emails`);
+              for (const item of all2.slice(0, 10)) {
+                const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
+                if (txt.includes("lovable") || txt.includes("verify") || txt.includes("confirm")) {
+                  try { await item.click({ timeout: 8000 }); } catch { try { await p.evaluate((el: any) => el.click(), item); } catch {} }
+                  await waitMs(3000);
+                  if (await extractLink(p)) return true;
+                }
+              }
+            }
+          } catch {}
+          return false;
+        }
+
+        let found = await scanInboxBothTabs(owaPage);
         if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk");
         if (!found) {
           for (const f of ["clutter", "other"]) {
@@ -11593,8 +11633,14 @@ export async function registerLovableAccount(
         if (!found) {
           log("Email not found yet — waiting 60s more then re-scanning...");
           await waitMs(60000);
-          found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/inbox", "inbox-retry");
+          found = await scanInboxBothTabs(owaPage);
           if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
+          if (!found) {
+            for (const f of ["clutter", "other"]) {
+              found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, `${f}-retry`);
+              if (found) break;
+            }
+          }
         }
         if (!found) log("⚠️ No Lovable verification email found in any folder");
       }
@@ -11622,6 +11668,142 @@ export async function registerLovableAccount(
         vText.toLowerCase().includes("project") || vText.toLowerCase().includes("what are you building") ||
         (vUrl.includes("lovable.dev") && !vUrl.includes("signup") && !vUrl.includes("login") && !vUrl.includes("/auth/"));
       log(`Verification result: ${accountVerified ? "✅ Success" : "⚠️ Not confirmed"} — URL: ${vUrl}`);
+
+      // ── STEP 6b: Complete onboarding (getting-started flow) ────────────────
+      if (accountVerified && vUrl.includes("getting-started")) {
+        log("Starting onboarding wizard...");
+
+        async function clickLocator(selector: string, label: string): Promise<boolean> {
+          try {
+            const loc = page.locator(selector).first();
+            await loc.waitFor({ state: "visible", timeout: 3000 });
+            await loc.click({ timeout: 5000 });
+            log(label);
+            await waitMs(800);
+            return true;
+          } catch { return false; }
+        }
+
+        for (let step = 1; step <= 8; step++) {
+          await waitMs(2000);
+          const curUrl = page.url();
+          if (!curUrl.includes("getting-started")) {
+            log(`Onboarding complete — landed on: ${curUrl}`);
+            break;
+          }
+          const curText = await page.evaluate(() => document.body?.innerText || "");
+          log(`Onboarding step ${step}: ${curText.substring(0, 100).replace(/\n/g, " ")}`);
+
+          // Step 1: Pick your style — choose Dark (card is a div, not a button)
+          if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
+            const darkSelected = await clickLocator('button:has-text("Dark")', "Selected Dark theme (button)")
+              || await clickLocator('[aria-label="Dark"]', "Selected Dark theme (aria)")
+              || await clickLocator('text=Dark', "Selected Dark theme (text)")
+              || await clickLocator('div:has-text("Dark"):last-of-type', "Selected Dark theme (div last)");
+            if (!darkSelected) {
+              // Try clicking on the second card (Dark is always second)
+              try {
+                const cards = await page.$$('[class*="cursor-pointer"], figure, [role="button"]');
+                if (cards.length >= 2) { await cards[1].click(); log("Selected Dark theme (2nd card)"); await waitMs(500); }
+              } catch {}
+            }
+          }
+
+          // Step: "What's your name?" — type a realistic name
+          if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name")) {
+            try {
+              const nameInput = page.locator('input[type="text"], input[placeholder*="name" i], input[name*="name" i]').first();
+              const visible = await nameInput.isVisible().catch(() => false);
+              if (visible) {
+                await nameInput.fill("Alex Johnson");
+                log("Filled name: Alex Johnson");
+                await waitMs(500);
+              }
+            } catch {}
+          }
+
+          // Step: "Which role fits you best?" or "What best describes you?" — pick Engineer/Developer
+          if (curText.toLowerCase().includes("role fits you") || curText.toLowerCase().includes("describes you") || curText.toLowerCase().includes("what is your role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer")) {
+            const roleClicked = await clickLocator('button:has-text("Engineer")', "Selected Engineer role")
+              || await clickLocator('button:has-text("Developer")', "Selected Developer role")
+              || await clickLocator('text=Engineer', "Selected Engineer role (text)")
+              || await clickLocator('text=Developer', "Selected Developer role (text)");
+            if (roleClicked) {
+              await waitMs(2000);
+              const afterRoleUrl = page.url();
+              if (!afterRoleUrl.includes("getting-started")) { log(`Role click advanced to: ${afterRoleUrl}`); break; }
+              // Role selected — skip Next button check and advance to next step
+              log("Role selected — continuing to next onboarding step");
+              continue;
+            }
+          }
+
+          // Step: "How many people work at your company?" — pick Solo
+          if (curText.toLowerCase().includes("how many people") || curText.toLowerCase().includes("company") || curText.toLowerCase().includes("solo")) {
+            const companyClicked = await clickLocator('button:has-text("Solo")', "Selected Solo company size")
+              || await clickLocator('text=Solo', "Selected Solo (text)");
+            if (companyClicked) {
+              await waitMs(2000);
+              const afterUrl = page.url();
+              if (!afterUrl.includes("getting-started")) { log(`Company step advanced to: ${afterUrl}`); break; }
+              log("Company size selected — continuing to next onboarding step");
+              continue;
+            }
+          }
+
+          // Step: "What will you use Lovable for?" — pick Personal projects
+          if (curText.toLowerCase().includes("use lovable for") || curText.toLowerCase().includes("what will you") || curText.toLowerCase().includes("building")) {
+            const purposeClicked = await clickLocator('button:has-text("Personal")', "Selected Personal projects")
+              || await clickLocator('[role="option"]:has-text("Personal")', "Selected Personal (option)")
+              || await clickLocator('text=Personal', "Selected Personal (text)");
+            if (purposeClicked) {
+              await waitMs(2000);
+              const afterUrl = page.url();
+              if (!afterUrl.includes("getting-started")) { log(`Purpose step advanced to: ${afterUrl}`); break; }
+              log("Purpose selected — continuing to next onboarding step");
+              continue;
+            }
+          }
+
+          // Step: "How did you hear about us?" — pick Social media
+          if (curText.toLowerCase().includes("hear about") || curText.toLowerCase().includes("how did you")) {
+            const referralClicked = await clickLocator('button:has-text("Social media")', "Selected Social media")
+              || await clickLocator('[role="option"]:has-text("Social media")', "Selected Social media (option)")
+              || await clickLocator('text=Social media', "Selected Social media (text)");
+            if (referralClicked) {
+              await waitMs(2000);
+              const afterUrl = page.url();
+              if (!afterUrl.includes("getting-started")) { log(`Referral step advanced to: ${afterUrl}`); break; }
+              log("Referral selected — continuing to next onboarding step");
+              continue;
+            }
+          }
+
+          // Click Next / Continue / Start building / Finish — use fresh locator every time
+          const nextLabels = ["Next", "Continue", "Start building", "Get started", "Finish", "Done"];
+          let clicked = false;
+          for (const label of nextLabels) {
+            try {
+              const loc = page.locator(`button:has-text("${label}")`).first();
+              const visible = await loc.isVisible().catch(() => false);
+              if (visible) {
+                await loc.click({ timeout: 8000 });
+                log(`Clicked "${label}" — proceeding`);
+                clicked = true;
+                break;
+              }
+            } catch {}
+          }
+          if (!clicked) {
+            log(`No Next button found on step ${step} — onboarding may be complete`);
+            break;
+          }
+        }
+        // Final check
+        await waitMs(2000);
+        const finalUrl = page.url();
+        log(`Post-onboarding URL: ${finalUrl}`);
+      }
     } else if (verificationCode) {
       log(`Entering 6-digit code: ${verificationCode}`);
       for (const sel of ['input[name="code"]', 'input[placeholder*="code" i]', 'input[type="number"]', 'input[maxlength="6"]']) {
