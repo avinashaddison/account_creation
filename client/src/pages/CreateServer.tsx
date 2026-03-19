@@ -182,8 +182,8 @@ function PlatformIcon({ id, accentColor }: { id: string; accentColor: string }) 
     </div>
   );
   if (id === "lovable") return (
-    <div className={`${base} bg-black`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
-      <img src={lovableLogo} alt="Lovable" className="w-full h-full object-cover object-left rounded-xl" />
+    <div className={`${base} bg-black p-1`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
+      <img src={lovableLogo} alt="Lovable" className="w-full h-full object-contain" />
     </div>
   );
   if (id === "card-generator") return (
