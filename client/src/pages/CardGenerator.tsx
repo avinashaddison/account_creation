@@ -178,40 +178,40 @@ export default function CardGenerator() {
   const checkedCount = liveCount + deadCount + unkCount;
 
   const inputStyle: React.CSSProperties = { background: "rgba(0,255,65,0.03)", border: "1px solid rgba(0,255,65,0.12)", color: "rgba(255,255,255,0.75)", caretColor: "#00ff41", outline: "none" };
-  const labelCls = "block text-[8.5px] font-mono uppercase tracking-[0.2em] mb-1.5";
+  const labelCls = "block text-[10px] font-mono uppercase tracking-[0.2em] mb-2";
 
   function Toggle({ enabled, onToggle, label, accent = "#00ff41" }: { enabled: boolean; onToggle: () => void; label: string; accent?: string }) {
     return (
-      <button onClick={onToggle} className="flex items-center gap-2.5 group">
-        <div className="relative w-8 h-4 rounded-full transition-all duration-200 shrink-0" style={{ background: enabled ? `${accent}22` : "rgba(255,255,255,0.05)", border: `1px solid ${enabled ? accent + "50" : "rgba(255,255,255,0.08)"}` }}>
-          <div className="absolute top-0.5 transition-all duration-200 w-3 h-3 rounded-full" style={{ left: enabled ? "calc(100% - 14px)" : "2px", background: enabled ? accent : "rgba(255,255,255,0.2)", boxShadow: enabled ? `0 0 8px ${accent}` : "none" }} />
+      <button onClick={onToggle} className="flex items-center gap-3 group">
+        <div className="relative w-10 h-5 rounded-full transition-all duration-200 shrink-0" style={{ background: enabled ? `${accent}22` : "rgba(255,255,255,0.05)", border: `1px solid ${enabled ? accent + "50" : "rgba(255,255,255,0.08)"}` }}>
+          <div className="absolute top-0.5 transition-all duration-200 w-4 h-4 rounded-full" style={{ left: enabled ? "calc(100% - 18px)" : "2px", background: enabled ? accent : "rgba(255,255,255,0.2)", boxShadow: enabled ? `0 0 10px ${accent}` : "none" }} />
         </div>
-        <span className="text-[10px] font-mono font-bold tracking-widest" style={{ color: enabled ? accent : "rgba(255,255,255,0.2)" }}>{label}</span>
+        <span className="text-[11px] font-mono font-bold tracking-widest" style={{ color: enabled ? accent : "rgba(255,255,255,0.2)" }}>{label}</span>
       </button>
     );
   }
 
   return (
-    <div className="space-y-4 max-w-6xl mx-auto">
+    <div className="space-y-5">
       {/* Terminal header */}
-      <div className="rounded-xl px-5 py-3 flex items-center justify-between" style={{ background: "linear-gradient(135deg, rgba(0,0,0,0.8), rgba(0,20,0,0.6))", border: "1px solid rgba(0,255,65,0.15)", boxShadow: "0 0 40px rgba(0,255,65,0.04)" }}>
-        <div className="flex items-center gap-3">
+      <div className="rounded-xl px-6 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg, rgba(0,0,0,0.8), rgba(0,20,0,0.6))", border: "1px solid rgba(0,255,65,0.15)", boxShadow: "0 0 40px rgba(0,255,65,0.04)" }}>
+        <div className="flex items-center gap-4">
           <div className="relative">
-            <div className="absolute inset-0 rounded-xl blur-lg" style={{ background: "rgba(0,255,65,0.15)" }} />
-            <div className="relative w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(0,255,65,0.15), rgba(0,0,0,0.5))", border: "1px solid rgba(0,255,65,0.3)" }}>
-              <CreditCard className="w-4 h-4" style={{ color: "#00ff41", filter: "drop-shadow(0 0 4px #00ff41)" }} />
+            <div className="absolute inset-0 rounded-xl blur-lg" style={{ background: "rgba(0,255,65,0.18)" }} />
+            <div className="relative w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(0,255,65,0.15), rgba(0,0,0,0.5))", border: "1px solid rgba(0,255,65,0.3)" }}>
+              <CreditCard className="w-5 h-5" style={{ color: "#00ff41", filter: "drop-shadow(0 0 5px #00ff41)" }} />
             </div>
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-[15px] font-mono font-bold tracking-tight" style={{ color: "#00ff41", textShadow: "0 0 15px rgba(0,255,65,0.4)" }}>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-[17px] font-mono font-bold tracking-tight" style={{ color: "#00ff41", textShadow: "0 0 18px rgba(0,255,65,0.45)" }}>
                 card_generator<span className="animate-pulse" style={{ color: "#00ff41" }}>_</span>
               </h1>
-              <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(0,255,65,0.08)", border: "1px solid rgba(0,255,65,0.2)", color: "rgba(0,255,65,0.6)" }}>
+              <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ background: "rgba(0,255,65,0.08)", border: "1px solid rgba(0,255,65,0.2)", color: "rgba(0,255,65,0.6)" }}>
                 TEST ONLY
               </span>
             </div>
-            <p className="text-[9px] font-mono mt-0.5" style={{ color: "rgba(255,255,255,0.2)" }}>
+            <p className="text-[10px] font-mono mt-0.5" style={{ color: "rgba(255,255,255,0.2)" }}>
               <span style={{ color: "rgba(0,255,65,0.4)" }}>{'>'}</span> Luhn-valid generator + live checker · {cards.length > 0 ? `${cards.length} generated` : "ready"}
             </p>
           </div>
@@ -251,9 +251,9 @@ export default function CardGenerator() {
         )}
       </div>
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: "300px 1fr" }}>
+      <div className="grid gap-5" style={{ gridTemplateColumns: "380px 1fr" }}>
         {/* Config panel */}
-        <div className="rounded-xl p-4 space-y-4 h-fit sticky top-4" style={{ background: "linear-gradient(180deg, rgba(0,20,0,0.6) 0%, rgba(0,0,0,0.5) 100%)", border: "1px solid rgba(0,255,65,0.10)", boxShadow: "0 0 30px rgba(0,255,65,0.03)" }}>
+        <div className="rounded-xl p-5 space-y-5 h-fit sticky top-4" style={{ background: "linear-gradient(180deg, rgba(0,20,0,0.6) 0%, rgba(0,0,0,0.5) 100%)", border: "1px solid rgba(0,255,65,0.10)", boxShadow: "0 0 30px rgba(0,255,65,0.03)" }}>
 
           {/* BIN */}
           <div>
@@ -268,7 +268,7 @@ export default function CardGenerator() {
                 placeholder="e.g. 453590"
                 maxLength={8}
                 data-testid="input-bin"
-                className="w-full px-3 py-2.5 rounded-lg text-[12px] font-mono pr-16"
+                className="w-full px-4 py-3 rounded-lg text-[13px] font-mono pr-16"
                 style={{ ...inputStyle, borderColor: error ? "rgba(248,113,113,0.5)" : form.bin.length >= 6 ? `${network.color}40` : "rgba(0,255,65,0.12)", boxShadow: form.bin.length >= 6 ? `0 0 0 1px ${network.color}15, inset 0 0 20px ${network.color}04` : "none" }}
               />
               {form.bin.length >= 6 && (
@@ -288,7 +288,7 @@ export default function CardGenerator() {
                 <div>
                   <label className={labelCls} style={{ color: "rgba(255,255,255,0.15)" }}>Month</label>
                   <select value={form.expmon} onChange={e => set("expmon", e.target.value)} data-testid="select-expmon"
-                    className="w-full px-2.5 py-2 rounded-lg text-[11px] font-mono outline-none cursor-pointer appearance-none"
+                    className="w-full px-3 py-2.5 rounded-lg text-[12px] font-mono outline-none cursor-pointer appearance-none"
                     style={inputStyle}>
                     {MONTHS.map(m => <option key={m} style={{ background: "#0a0a0a" }}>{m}</option>)}
                   </select>
@@ -296,7 +296,7 @@ export default function CardGenerator() {
                 <div>
                   <label className={labelCls} style={{ color: "rgba(255,255,255,0.15)" }}>Year</label>
                   <select value={form.expyear} onChange={e => set("expyear", e.target.value)} data-testid="select-expyear"
-                    className="w-full px-2.5 py-2 rounded-lg text-[11px] font-mono outline-none cursor-pointer appearance-none"
+                    className="w-full px-3 py-2.5 rounded-lg text-[12px] font-mono outline-none cursor-pointer appearance-none"
                     style={inputStyle}>
                     {YEARS.map(y => <option key={y} style={{ background: "#0a0a0a" }}>{y}</option>)}
                   </select>
@@ -311,7 +311,7 @@ export default function CardGenerator() {
             {form.cvvEnabled && (
               <input type="text" value={form.cvv} onChange={e => set("cvv", e.target.value.replace(/\D/g, "").slice(0, 4))}
                 placeholder="blank = random" data-testid="input-cvv"
-                className="w-full px-3 py-2 rounded-lg text-[11px] font-mono"
+                className="w-full px-4 py-3 rounded-lg text-[12px] font-mono"
                 style={inputStyle} />
             )}
           </div>
@@ -334,7 +334,7 @@ export default function CardGenerator() {
             <div className="flex flex-wrap gap-1.5">
               {QUANTITIES.map(q => (
                 <button key={q} onClick={() => { sounds.click(); set("quantity", q); }} data-testid={`btn-qty-${q}`}
-                  className="px-2 py-1 rounded text-[10px] font-mono font-medium transition-all"
+                  className="px-3 py-1.5 rounded text-[11px] font-mono font-medium transition-all"
                   style={form.quantity === q
                     ? { background: "rgba(0,255,65,0.12)", border: "1px solid rgba(0,255,65,0.4)", color: "#00ff41", boxShadow: "0 0 8px rgba(0,255,65,0.15)" }
                     : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.25)" }}>
@@ -346,24 +346,24 @@ export default function CardGenerator() {
 
           {/* Generate */}
           <button onClick={generate} disabled={loading} data-testid="btn-generate"
-            className="w-full py-2.5 rounded-xl font-mono text-[12px] font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 active:scale-[0.98]"
-            style={{ background: loading ? "rgba(0,255,65,0.05)" : "linear-gradient(135deg, rgba(0,255,65,0.18), rgba(0,200,50,0.08))", border: "1px solid rgba(0,255,65,0.35)", color: "#00ff41", boxShadow: loading ? "none" : "0 0 25px rgba(0,255,65,0.1), inset 0 1px 0 rgba(0,255,65,0.1)", textShadow: "0 0 10px rgba(0,255,65,0.5)" }}>
-            {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            className="w-full py-4 rounded-xl font-mono text-[14px] font-bold flex items-center justify-center gap-2.5 transition-all disabled:opacity-50 active:scale-[0.98]"
+            style={{ background: loading ? "rgba(0,255,65,0.05)" : "linear-gradient(135deg, rgba(0,255,65,0.18), rgba(0,200,50,0.08))", border: "1px solid rgba(0,255,65,0.35)", color: "#00ff41", boxShadow: loading ? "none" : "0 0 30px rgba(0,255,65,0.12), inset 0 1px 0 rgba(0,255,65,0.12)", textShadow: "0 0 12px rgba(0,255,65,0.6)" }}>
+            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
             {loading ? "GENERATING..." : "GENERATE"}
           </button>
 
           {/* Manual check all */}
           {cards.length > 0 && !checking && (
             <button onClick={() => { sounds.click(); checkAll(); }} data-testid="btn-check-all"
-              className="w-full py-2 rounded-xl font-mono text-[11px] font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+              className="w-full py-3 rounded-xl font-mono text-[12px] font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
               style={{ background: "rgba(0,255,65,0.04)", border: "1px solid rgba(0,255,65,0.15)", color: "rgba(0,255,65,0.5)" }}>
-              <Shield className="w-3.5 h-3.5" />
+              <Shield className="w-4 h-4" />
               CHECK ALL ({cards.length})
             </button>
           )}
           {checking && (
             <button onClick={() => { sounds.click(); stopCheck(); }}
-              className="w-full py-2 rounded-xl font-mono text-[11px] font-bold flex items-center justify-center gap-2 transition-all"
+              className="w-full py-3 rounded-xl font-mono text-[12px] font-bold flex items-center justify-center gap-2 transition-all"
               style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", color: "#f87171" }}>
               <X className="w-3.5 h-3.5" /> STOP
             </button>
@@ -410,7 +410,7 @@ export default function CardGenerator() {
           ) : (
             <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(0,255,65,0.08)" }}>
               {/* Table header */}
-              <div className="grid px-4 py-2.5 text-[8px] font-mono uppercase tracking-[0.15em]" style={{ gridTemplateColumns: "28px 20px 1fr 100px 60px 80px 80px", borderBottom: "1px solid rgba(0,255,65,0.06)", background: "rgba(0,255,65,0.02)", color: "rgba(0,255,65,0.25)" }}>
+              <div className="grid px-5 py-3 text-[9px] font-mono uppercase tracking-[0.15em]" style={{ gridTemplateColumns: "32px 22px 1fr 110px 70px 90px 80px", borderBottom: "1px solid rgba(0,255,65,0.06)", background: "rgba(0,255,65,0.02)", color: "rgba(0,255,65,0.25)" }}>
                 <span>#</span>
                 <span></span>
                 <span>Card Number</span>
@@ -419,7 +419,7 @@ export default function CardGenerator() {
                 <span>Bank</span>
                 <span className="text-right">Action</span>
               </div>
-              <div className="overflow-y-auto" style={{ maxHeight: "520px" }}>
+              <div className="overflow-y-auto" style={{ maxHeight: "620px" }}>
                 {cards.map((pipe, i) => {
                   const { number, mm, yyyy, cvv } = parseCard(pipe);
                   const res = results[i] ?? { status: "idle" as const };
@@ -428,19 +428,19 @@ export default function CardGenerator() {
                   return (
                     <div
                       key={i}
-                      className="grid items-center px-4 py-2 transition-all group"
+                      className="grid items-center px-5 py-2.5 transition-all group"
                       data-testid={`card-row-${i}`}
                       style={{
-                        gridTemplateColumns: "28px 20px 1fr 100px 60px 80px 80px",
+                        gridTemplateColumns: "32px 22px 1fr 110px 70px 90px 80px",
                         borderBottom: "1px solid rgba(255,255,255,0.02)",
                         background: isLive ? "rgba(0,255,65,0.03)" : isDead ? "rgba(248,113,113,0.02)" : bulkCheckIdx === i ? "rgba(251,191,36,0.03)" : "transparent",
                       }}
                     >
-                      <span className="text-[9px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.12)" }}>{i + 1}</span>
-                      <div className="w-1 h-4 rounded-full shrink-0" style={{ background: network.color, opacity: 0.6, boxShadow: `0 0 4px ${network.color}60` }} />
+                      <span className="text-[10px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.12)" }}>{i + 1}</span>
+                      <div className="w-1.5 h-4 rounded-full shrink-0" style={{ background: network.color, opacity: 0.6, boxShadow: `0 0 4px ${network.color}60` }} />
                       <div className="flex items-center gap-2 min-w-0">
                         <span
-                          className="text-[11px] font-mono tabular-nums truncate cursor-pointer"
+                          className="text-[12px] font-mono tabular-nums truncate cursor-pointer"
                           style={{ color: isLive ? "#00ff41" : isDead ? "rgba(248,113,113,0.6)" : "rgba(255,255,255,0.55)" }}
                           onClick={() => { navigator.clipboard.writeText(pipe); toast({ title: "Copied!" }); }}
                         >
@@ -454,7 +454,7 @@ export default function CardGenerator() {
                           <Copy className="w-2.5 h-2.5" style={{ color: "rgba(255,255,255,0.2)" }} />
                         </button>
                       </div>
-                      <span className="text-[10px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.25)" }}>
+                      <span className="text-[11px] font-mono tabular-nums" style={{ color: "rgba(255,255,255,0.25)" }}>
                         {mm}/{yyyy}{cvv ? ` · ${cvv}` : ""}
                       </span>
                       <div>
@@ -462,12 +462,12 @@ export default function CardGenerator() {
                       </div>
                       <div className="min-w-0">
                         {res.bank && (
-                          <p className="text-[8.5px] font-mono truncate" style={{ color: "rgba(255,255,255,0.2)" }} title={res.bank}>
+                          <p className="text-[10px] font-mono truncate" style={{ color: "rgba(255,255,255,0.2)" }} title={res.bank}>
                             {res.bank}
                           </p>
                         )}
                         {res.message && !res.bank && (
-                          <p className="text-[8.5px] font-mono truncate" style={{ color: "rgba(255,255,255,0.15)" }}>{res.message}</p>
+                          <p className="text-[10px] font-mono truncate" style={{ color: "rgba(255,255,255,0.15)" }}>{res.message}</p>
                         )}
                       </div>
                       <div className="flex justify-end">
@@ -495,7 +495,7 @@ export default function CardGenerator() {
               </div>
               {/* Footer */}
               <div className="px-4 py-2 flex items-center justify-between" style={{ borderTop: "1px solid rgba(0,255,65,0.06)", background: "rgba(0,0,0,0.3)" }}>
-                <span className="text-[8.5px] font-mono" style={{ color: "rgba(0,255,65,0.2)" }}>
+                <span className="text-[10px] font-mono" style={{ color: "rgba(0,255,65,0.2)" }}>
                   {cards.length} cards · {network.name} · BIN {form.bin}
                 </span>
                 <div className="flex items-center gap-1">
