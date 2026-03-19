@@ -11529,20 +11529,50 @@ export async function registerLovableAccount(
         async function extractLink(p: any): Promise<boolean> {
           const body = await p.evaluate(() => document.body?.innerText || "");
           const html = await p.evaluate(() => document.body?.innerHTML || "");
-          // ONLY accept lovable.dev links — never follow links from other domains
-          const patterns = [
+          // Priority 1: direct lovable.dev verification links
+          const lovablePatterns = [
             /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/,
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*/,
           ];
-          for (const pat of patterns) {
+          for (const pat of lovablePatterns) {
             const m = body.match(pat) || html.match(pat);
             if (m) {
               const candidate = m[0].replace(/["'<>)]/g, "").trim();
-              // Double-check it's actually a lovable.dev link
               if (candidate.includes("lovable.dev")) {
                 verificationLink = candidate;
-                log(`Extracted link: ${verificationLink.substring(0, 120)}`);
+                log(`Extracted lovable.dev link: ${verificationLink.substring(0, 120)}`);
+                return true;
+              }
+            }
+          }
+          // Priority 2: Firebase auth action links (Lovable uses Firebase project gpt-engineer-390607)
+          const firebasePatterns = [
+            /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/,
+            /https?:\/\/[^\s"'<>\r\n]*firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/,
+            /https?:\/\/[^\s"'<>\r\n]*oobCode=[^\s"'<>\r\n)]*/,
+          ];
+          for (const pat of firebasePatterns) {
+            const m = body.match(pat) || html.match(pat);
+            if (m) {
+              const candidate = m[0].replace(/["'<>)]/g, "").trim();
+              if (candidate.includes("oobCode") || candidate.includes("firebaseapp")) {
+                verificationLink = candidate;
+                log(`Extracted Firebase auth link: ${verificationLink.substring(0, 120)}`);
+                return true;
+              }
+            }
+          }
+          // Priority 3: scan all <a> hrefs from HTML for any auth/verify/confirm link
+          const hrefMatches = html.match(/href="(https?:\/\/[^"]*(?:verify|confirm|auth\/action|oobCode)[^"]*)"/gi) || [];
+          for (const hm of hrefMatches) {
+            const urlMatch = hm.match(/href="(https?:\/\/[^"]+)"/i);
+            if (urlMatch) {
+              const url = urlMatch[1].trim();
+              if (!url.includes("outlook.live.com") && !url.includes("microsoft.com") && !url.includes("aka.ms")) {
+                verificationLink = url;
+                log(`Extracted auth link from href: ${verificationLink.substring(0, 120)}`);
                 return true;
               }
             }
@@ -11662,8 +11692,30 @@ export async function registerLovableAccount(
       await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
       await waitMs(5000);
       if (await isCloudflarePage(page)) await waitForCloudflare(page, 15000);
-      const vUrl = page.url();
-      const vText = await page.evaluate(() => document.body?.innerText || "");
+      let vUrl = page.url();
+      let vText = await page.evaluate(() => document.body?.innerText || "");
+      log(`After verification link — URL: ${vUrl.substring(0, 120)}`);
+      // Handle Firebase email action page — may show success + "Continue" button
+      if (vUrl.includes("firebaseapp.com") || vUrl.includes("__/auth/action")) {
+        log("On Firebase action page — checking for continue button or redirect...");
+        const firebaseText = vText.toLowerCase();
+        if (firebaseText.includes("verified") || firebaseText.includes("confirmed") || firebaseText.includes("success")) {
+          log("Firebase confirmed email verified");
+          // Try clicking a Continue button to redirect to lovable.dev
+          const continueBtns = await page.$$('a[href*="lovable.dev"], button:has-text("Continue"), a:has-text("Continue"), a:has-text("continue to")');
+          if (continueBtns.length > 0) {
+            await continueBtns[0].click({ timeout: 8000 }).catch(() => {});
+            await waitMs(5000);
+          } else {
+            // Navigate directly to lovable.dev since Firebase verified the email
+            await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitMs(4000);
+          }
+          vUrl = page.url();
+          vText = await page.evaluate(() => document.body?.innerText || "");
+          log(`After Firebase continue — URL: ${vUrl.substring(0, 120)}`);
+        }
+      }
       accountVerified = vUrl.includes("/builder") || vUrl.includes("/dashboard") || vUrl.includes("/projects") ||
         vText.toLowerCase().includes("project") || vText.toLowerCase().includes("what are you building") ||
         (vUrl.includes("lovable.dev") && !vUrl.includes("signup") && !vUrl.includes("login") && !vUrl.includes("/auth/"));
