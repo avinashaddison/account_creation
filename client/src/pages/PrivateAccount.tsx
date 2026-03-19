@@ -128,6 +128,7 @@ export default function PrivateAccount() {
   const [creatingGmail, setCreatingGmail] = useState(false);
   const [replitAccounts, setReplitAccounts] = useState<ReplitAccount[]>([]);
   const [replitShowPasswords, setReplitShowPasswords] = useState<Record<string, boolean>>({});
+  const [lovableShowPasswords, setLovableShowPasswords] = useState<Record<string, boolean>>({});
   const [lovableAccounts, setLovableAccounts] = useState<LovableAccount[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
@@ -1649,6 +1650,7 @@ export default function PrivateAccount() {
                   <TableHeader>
                     <TableRow className="border-pink-500/10">
                       <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Email</TableHead>
+                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Password</TableHead>
                       <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Outlook Source</TableHead>
                       <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Status</TableHead>
                       <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Created</TableHead>
@@ -1674,6 +1676,29 @@ export default function PrivateAccount() {
                           </div>
                         </TableCell>
                         <TableCell className="py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-mono text-zinc-400" data-testid={`text-lovable-pw-${acct.id}`}>
+                              {lovableShowPasswords[acct.id] ? (acct.password || "—") : "••••••••"}
+                            </span>
+                            <button
+                              onClick={() => setLovableShowPasswords((p) => ({ ...p, [acct.id]: !p[acct.id] }))}
+                              className="text-zinc-600 hover:text-pink-400 transition-colors"
+                              data-testid={`button-toggle-lovable-pw-${acct.id}`}
+                            >
+                              {lovableShowPasswords[acct.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
+                            {acct.password && (
+                              <button
+                                onClick={() => copyToClipboard(acct.password!, `lpw-${acct.id}`)}
+                                className="text-zinc-600 hover:text-pink-400 transition-colors"
+                                data-testid={`button-copy-lovable-pw-${acct.id}`}
+                              >
+                                {copied === `lpw-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-2.5">
                           <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[140px] block">{acct.outlookEmail || "—"}</span>
                         </TableCell>
                         <TableCell className="py-2.5">
@@ -1693,8 +1718,8 @@ export default function PrivateAccount() {
                               variant="ghost"
                               size="sm"
                               className="h-6 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
-                              onClick={() => copyToClipboard(acct.email, `lall-${acct.id}`)}
-                              title="Copy email"
+                              onClick={() => copyToClipboard(`${acct.email}\n${acct.password || ""}`, `lall-${acct.id}`)}
+                              title="Copy email + password"
                               data-testid={`button-copy-lovable-all-${acct.id}`}
                             >
                               {copied === `lall-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
