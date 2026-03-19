@@ -10985,48 +10985,127 @@ export async function registerLovableAccount(
   let browser: any = null;
   let page: any = null;
 
+  // ── helpers ────────────────────────────────────────────────────────────────
+  function randPass(): string {
+    const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#";
+    return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("") + "Aa1!";
+  }
+
+  async function waitMs(ms: number) {
+    await new Promise((r) => setTimeout(r, ms));
+  }
+
+  // Check if current page content indicates Cloudflare challenge
+  async function isCloudflarePage(p: any): Promise<boolean> {
+    try {
+      const content = await p.content();
+      const title = await p.title().catch(() => "");
+      return (
+        content.includes("challenge-platform") ||
+        content.includes("Please enable cookies") ||
+        content.includes("Checking your browser") ||
+        content.includes("cf-browser-verification") ||
+        title.toLowerCase().includes("just a moment") ||
+        title.toLowerCase().includes("please wait")
+      );
+    } catch { return false; }
+  }
+
+  // Wait up to `ms` for Cloudflare challenge to pass
+  async function waitForCloudflare(p: any, ms = 25000): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      await waitMs(2000);
+      if (!(await isCloudflarePage(p))) {
+        log("Cloudflare challenge passed");
+        return true;
+      }
+    }
+    log("⚠️ Cloudflare challenge did not clear — proceeding anyway");
+    return false;
+  }
+
+  // Fill a visible input identified by selector
+  async function fillInput(p: any, selectors: string[], value: string, label: string): Promise<boolean> {
+    for (const sel of selectors) {
+      try {
+        const el = await p.$(sel);
+        if (!el) continue;
+        const visible = await el.isVisible().catch(() => false);
+        if (!visible) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(150);
+        await el.type(value, { delay: 55 });
+        log(`Filled ${label} via ${sel}`);
+        return true;
+      } catch {}
+    }
+    log(`⚠️ Could not fill ${label} — no matching visible input`);
+    return false;
+  }
+
+  // Click a visible button whose text matches one of the allowed texts (skip Google/GitHub)
+  async function clickButton(p: any, selectors: string[], label: string): Promise<boolean> {
+    for (const sel of selectors) {
+      try {
+        const els = await p.$$(sel);
+        for (const el of els) {
+          const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase();
+          if (txt.includes("google") || txt.includes("github") || txt.includes("continue with")) continue;
+          const visible = await el.isVisible().catch(() => false);
+          if (!visible) continue;
+          await el.click();
+          log(`Clicked ${label}: "${txt.substring(0, 40)}"`);
+          return true;
+        }
+      } catch {}
+    }
+    log(`⚠️ No ${label} button found via selectors — pressing Enter`);
+    await p.keyboard.press("Enter");
+    return false;
+  }
+
   try {
     let zenrowsApiKey = "";
     try {
       zenrowsApiKey = await getZenRowsApiKey();
       log(`ZenRows browser mode enabled`);
     } catch {
-      log("⚠️ No ZenRows API key — using stealth headless browser");
+      log("⚠️ No ZenRows API key — using stealth headless browser (Cloudflare WAF may block)");
     }
 
-    // Use playwright-extra with stealth plugin for Castle.io/bot detection bypass
+    // ── BROWSER LAUNCH ────────────────────────────────────────────────────────
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
     stealthChromium.use(StealthPlugin());
 
+    let usingZenRows = false;
     let context: any;
+
     if (zenrowsApiKey) {
       try {
         const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
         const { chromium: vanillaChromium } = await import("playwright");
         browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
         context = browser.contexts()[0] || await browser.newContext();
-        log("Connected via ZenRows anti-bot browser");
+        usingZenRows = true;
+        log("✅ Connected via ZenRows anti-bot browser — Cloudflare WAF bypassed");
       } catch (zrErr: any) {
-        log(`⚠️ ZenRows unavailable (${(zrErr.message || "").substring(0, 60)}) — falling back to stealth browser`);
+        log(`⚠️ ZenRows connection failed (${(zrErr.message || "").substring(0, 70)}) — falling back to stealth browser`);
         browser = null;
         zenrowsApiKey = "";
       }
     }
+
     if (!zenrowsApiKey) {
       browser = await stealthChromium.launch({
         headless: true,
         args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
+          "--no-sandbox", "--disable-setuid-sandbox",
           "--disable-blink-features=AutomationControlled",
-          "--disable-dev-shm-usage",
-          "--disable-web-security",
+          "--disable-dev-shm-usage", "--disable-web-security",
           "--allow-running-insecure-content",
           "--disable-features=IsolateOrigins,site-per-process",
-          "--flag-switches-begin",
-          "--disable-site-isolation-trials",
-          "--flag-switches-end",
         ],
       });
       const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -11035,11 +11114,8 @@ export async function registerLovableAccount(
         viewport: { width: 1366, height: 768 },
         locale: "en-US",
         timezoneId: "America/New_York",
-        javaScriptEnabled: true,
-        acceptDownloads: false,
         extraHTTPHeaders: {
           "Accept-Language": "en-US,en;q=0.9",
-          "Accept-Encoding": "gzip, deflate, br",
           "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand)";v="24", "Google Chrome";v="122"',
           "Sec-Ch-Ua-Mobile": "?0",
           "Sec-Ch-Ua-Platform": '"Windows"',
@@ -11047,749 +11123,485 @@ export async function registerLovableAccount(
       });
       log("Using stealth headless browser (playwright-extra + StealthPlugin)");
     }
-    page = await context.newPage();
-    page.setDefaultTimeout(30000);
 
-    let lovableTurnstileSitekey: string | null = null;
+    page = await context.newPage();
+    page.setDefaultTimeout(35000);
+
+    // Capture Turnstile sitekey from network requests
+    let capturedTurnstileSitekey: string | null = null;
     page.on("request", (req: any) => {
       const url = req.url() || "";
       if (url.includes("challenges.cloudflare.com") || url.includes("turnstile")) {
         const m = url.match(/[?&](?:sitekey|k)=([^&]+)/);
-        if (m && m[1] && !lovableTurnstileSitekey) {
-          lovableTurnstileSitekey = m[1];
-        }
+        if (m && m[1] && !capturedTurnstileSitekey) capturedTurnstileSitekey = m[1];
         const m2 = url.match(/\/([0-9A-Za-z_-]{20,})\//);
-        if (m2 && !lovableTurnstileSitekey) {
-          lovableTurnstileSitekey = m2[1];
-        }
+        if (m2 && !capturedTurnstileSitekey) capturedTurnstileSitekey = m2[1];
       }
     });
 
+    // Log relevant API responses for debugging
     page.on("response", async (resp: any) => {
       const rUrl = resp.url() || "";
       const status = resp.status();
-      if (rUrl.includes("supabase.co") || rUrl.includes("supabase.io")) {
+      const relevant = rUrl.includes("supabase.co") || rUrl.includes("supabase.io") ||
+        rUrl.includes("api.lovable.dev") || rUrl.includes("identitytoolkit.googleapis.com");
+      if (relevant) {
         try {
           const body = await resp.text();
-          log(`[Supabase] ${rUrl.substring(0, 120)} → status=${status} body=${body.substring(0, 400)}`);
-        } catch {}
-      } else if (rUrl.includes("identitytoolkit.googleapis.com") || rUrl.includes("googleapis.com/identitytoolkit")) {
-        try {
-          const body = await resp.text();
-          log(`[Firebase] ${rUrl.substring(0, 120)} → status=${status} body=${body.substring(0, 500)}`);
-        } catch {}
-      } else if (rUrl.includes("api.lovable.dev") || rUrl.includes("lovable.dev/api")) {
-        try {
-          const body = await resp.text();
-          log(`[Lovable API RESP] ${rUrl.substring(0, 120)} → status=${status} body=${body.substring(0, 400)}`);
+          log(`[API ${status}] ${rUrl.substring(0, 100)} → ${body.substring(0, 300)}`);
         } catch {}
       } else if (status >= 400 && !rUrl.includes("challenges.cloudflare") && !rUrl.includes("capsolver")) {
-        try {
-          const body = await resp.text();
-          log(`[HTTP ${status}] ${rUrl.substring(0, 120)} body=${body.substring(0, 300)}`);
-        } catch {
-          log(`[HTTP ${status}] ${rUrl.substring(0, 120)}`);
-        }
+        log(`[HTTP ${status}] ${rUrl.substring(0, 100)}`);
       }
     });
 
-    await page.route("https://identitytoolkit.googleapis.com/**", async (route: any) => {
-      const request = route.request();
-      try {
-        const postData = request.postData() || "";
-        const headers = request.headers();
-        const allHeaderKeys = Object.keys(headers).join(", ");
-        const appCheckHeader = headers["x-firebase-appcheck"] || headers["X-Firebase-AppCheck"] || "(none)";
-        const gmpid = headers["x-firebase-gmpid"] || "(none)";
-        const clientVersion = headers["x-client-version"] || "(none)";
-        log(`[Firebase REQ] ${request.url().substring(0, 100)}`);
-        log(`[Firebase REQ HEADERS] ${allHeaderKeys}`);
-        log(`[Firebase REQ APPCHECK] ${appCheckHeader.substring(0, 60)}`);
-        log(`[Firebase REQ GMPID] ${gmpid}`);
-        log(`[Firebase REQ CLIENT_VER] ${clientVersion}`);
-        log(`[Firebase REQ BODY] ${postData.substring(0, 600)}`);
-      } catch {}
-      await route.continue();
-    });
-
-    // Match all lovable.dev and supabase calls (including api.lovable.dev subdomains)
-    for (const pattern of ["**lovable.dev/**", "**supabase.co/**", "**supabase.io/**"]) {
-      await page.route(pattern, async (route: any) => {
-        const request = route.request();
-        try {
-          const method = request.method();
-          const url = request.url();
-          const postData = request.postData() || "";
-          const headers = request.headers();
-          const interestingHeaders = Object.entries(headers).filter(([k]) => !["accept", "accept-encoding", "accept-language", "user-agent", "referer", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-ch-ua", "content-length", "cache-control"].includes(k.toLowerCase())).map(([k, v]) => `${k}: ${String(v).substring(0, 60)}`).join(", ");
-          log(`[Lovable/Supa REQ] ${method} ${url.substring(0, 200)} body=${postData.substring(0, 300)} headers={${interestingHeaders}}`);
-        } catch {}
-        await route.continue();
-      });
-    }
-
-    page.on("request", (req: any) => {
-      const url = req.url() || "";
-      const method = req.method() || "";
-      const skipPatterns = ["cdn.", "fonts.", "favicon", ".png", ".jpg", ".svg", ".ico", ".woff", ".css", "analytics", "segment.io", "intercom", "hotjar", "sentry", "logrocket", "posthog", "amplitude"];
-      const skip = skipPatterns.some(p => url.includes(p));
-      if (!skip && (method === "POST" || url.includes("api") || url.includes("auth") || url.includes("googleapis") || url.includes("lovable") || url.includes("supabase") || url.includes("challenge"))) {
-        const postData = req.postData() || "";
-        log(`[NET REQ] ${method} ${url.substring(0, 180)} ${postData ? 'body=' + postData.substring(0, 150) : ''}`);
-      }
-    });
-
-    page.on("console", (msg: any) => {
-      if (msg.type() === "error") {
-        log(`[PAGE ERROR] ${(msg.text() || "").substring(0, 200)}`);
-      }
-    });
-
+    // Patch Turnstile API to intercept callbacks and sitekeys
     await page.addInitScript(() => {
-      (window as any).__lovableTurnstileCallbacks = [];
-      (window as any).__lovableTurnstileToken = null;
-      (window as any).__allFetchCalls = [];
-      let __lovableTurnstileReal: any = null;
-
-      // Intercept ALL fetch calls to see what APIs Lovable calls
-      const origFetch = window.fetch.bind(window);
-      window.fetch = async function(url: any, options: any) {
-        const urlStr = typeof url === 'string' ? url : (url instanceof URL ? url.href : String(url));
-        const body = options?.body || '';
-        const method = options?.method || 'GET';
-        if (!urlStr.includes('challenges.cloudflare') && !urlStr.includes('capsolver')) {
-          (window as any).__allFetchCalls.push({ method, url: urlStr, body: typeof body === 'string' ? body.substring(0, 200) : '[blob]' });
-        }
-
-        // If this is the Firebase signUp call and we have a Turnstile token, try injecting it
-        if (urlStr.includes('identitytoolkit.googleapis.com') && urlStr.includes('signUp') && body && typeof body === 'string') {
-          try {
-            const parsed = JSON.parse(body);
-            const token = (window as any).__lovableTurnstileToken;
-            if (token && !parsed.captchaResponse) {
-              // Try multiple field names the blocking function might check
-              parsed.captchaResponse = token;
-              const newOptions = { ...options, body: JSON.stringify(parsed) };
-              return origFetch(url, newOptions);
-            }
-          } catch {}
-        }
-        return origFetch(url, options);
-      };
-
-      Object.defineProperty(window, 'turnstile', {
+      (window as any).__tsCallbacks = [];
+      (window as any).__tsToken = null;
+      (window as any).__tsSitekey = null;
+      let __tsReal: any = null;
+      Object.defineProperty(window, "turnstile", {
         configurable: true,
         enumerable: true,
-        get() { return __lovableTurnstileReal; },
+        get() { return __tsReal; },
         set(api: any) {
-          if (api && typeof api.render === 'function' && !api.__patched) {
+          if (api && typeof api.render === "function" && !api.__patched) {
             const origRender = api.render.bind(api);
-            const origGetResponse = api.getResponse ? api.getResponse.bind(api) : () => null;
             api.render = function(container: any, params: any) {
-              if (params && typeof params.callback === 'function') {
-                (window as any).__lovableTurnstileCallbacks.push(params.callback);
-              }
-              if (params && params.sitekey) {
-                (window as any).__lovableTurnstileSitekey = params.sitekey;
-              }
+              if (params?.callback) (window as any).__tsCallbacks.push(params.callback);
+              if (params?.sitekey) (window as any).__tsSitekey = params.sitekey;
               return origRender(container, params);
             };
-            api.getResponse = function(widgetId?: string) {
-              const injected = (window as any).__lovableTurnstileToken;
-              if (injected) return injected;
-              return origGetResponse(widgetId);
-            };
-            api.isExpired = function() {
-              return !(window as any).__lovableTurnstileToken;
-            };
+            api.getResponse = () => (window as any).__tsToken || null;
+            api.isExpired = () => !(window as any).__tsToken;
             api.__patched = true;
           }
-          __lovableTurnstileReal = api;
+          __tsReal = api;
         }
       });
     });
 
+    // ── STEP 1: Navigate to signup page ───────────────────────────────────
     log("Navigating to https://lovable.dev/signup ...");
     await page.goto("https://lovable.dev/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(4000);
+    await waitMs(4000);
 
-    const challengeContent = await page.content();
-    if (challengeContent.includes("Please enable cookies") || challengeContent.includes("Checking your browser") || challengeContent.includes("challenge-platform")) {
-      log("Cloudflare challenge detected — waiting for it to resolve (up to 15s)...");
-      try {
-        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 });
-        log("Cloudflare challenge resolved");
-        await page.waitForTimeout(2000);
-      } catch {
-        log("⚠️ Cloudflare challenge did not fully resolve — proceeding anyway");
+    // Handle Cloudflare challenge
+    if (await isCloudflarePage(page)) {
+      log("⚠️ Cloudflare challenge detected");
+      if (!usingZenRows) {
+        log("Attempting CapSolver Turnstile bypass...");
+        const cfSitekey = capturedTurnstileSitekey || "0x4AAAAAAChnKAZBY0iFpFHC";
+        const cfResult = await solveAntiTurnstile("https://lovable.dev/signup", cfSitekey);
+        if (cfResult.success && cfResult.token) {
+          log("CapSolver token received — injecting to bypass Cloudflare...");
+          await page.evaluate((token: string) => {
+            document.querySelectorAll('input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]')
+              .forEach((el: any) => { el.value = token; });
+          }, cfResult.token);
+          await waitMs(2000);
+        }
       }
+      await waitForCloudflare(page, 25000);
     }
 
-    const pageTitle = await page.title();
-    log(`Page title: ${pageTitle}`);
+    const pageTitle = await page.title().catch(() => "");
+    const initContent = await page.content();
+    log(`Page title: "${pageTitle}" | Has email input: ${initContent.includes('type="email"')}`);
 
-    log(`Filling email field with: ${outlookEmail}`);
-    const emailSelectors = [
+    if (await isCloudflarePage(page)) {
+      return { success: false, error: "Cloudflare WAF is blocking lovable.dev. Add your ZenRows API key in Settings to reliably bypass it." };
+    }
+
+    // ── STEP 2: Fill email and click Continue ─────────────────────────────
+    log(`Filling email: ${outlookEmail}`);
+    const emailFilled = await fillInput(page, [
       'input[type="email"]',
       'input[name="email"]',
       'input[placeholder*="email" i]',
       'input[id*="email" i]',
-    ];
-    let emailFilled = false;
-    for (const sel of emailSelectors) {
-      try {
-        const el = await page.$(sel);
-        if (el) {
-          await el.click({ clickCount: 3 });
-          await el.type(outlookEmail, { delay: 60 });
-          log(`Typed email into ${sel}`);
-          emailFilled = true;
-          break;
-        }
-      } catch {}
-    }
+    ], outlookEmail, "email");
+
     if (!emailFilled) {
-      log("⚠️ Could not find email field — trying to log page HTML");
-      const htmlSnip = await page.evaluate(() => document.body?.innerHTML?.substring(0, 800) || "empty");
-      log(`HTML snippet: ${htmlSnip.replace(/\s+/g, " ").substring(0, 300)}`);
+      const snippet = await page.evaluate(() => (document.body?.innerHTML || "").substring(0, 500));
+      log(`Page HTML: ${snippet.replace(/\s+/g, " ")}`);
+      return { success: false, error: "Could not find email input on lovable.dev/signup" };
     }
 
-    await page.waitForTimeout(600);
-
-    log("Clicking Continue button...");
-    const continueSelectors = [
+    await waitMs(500);
+    log("Clicking Continue...");
+    await clickButton(page, [
       'button:has-text("Continue")',
       'button[type="submit"]',
       'button:has-text("Sign up")',
       'button:has-text("Create account")',
       'input[type="submit"]',
-    ];
-    let submitted = false;
-    for (const sel of continueSelectors) {
-      try {
-        const btns = await page.$$(sel);
-        for (const btn of btns) {
-          const txt = await btn.innerText().catch(() => "");
-          if (txt.toLowerCase().includes("google") || txt.toLowerCase().includes("github")) continue;
-          await btn.click();
-          log(`Clicked button: "${txt.substring(0, 40)}" (${sel})`);
-          submitted = true;
-          break;
-        }
-        if (submitted) break;
-      } catch {}
-    }
-    if (!submitted) {
-      log("Trying Enter key to submit...");
-      await page.keyboard.press("Enter");
-    }
+    ], "Continue");
 
-    log("Waiting for response after Continue click (6s)...");
-    await page.waitForTimeout(6000);
+    log("Waiting for page response (7s)...");
+    await waitMs(7000);
 
     const afterUrl = page.url();
-    const afterText = await page.evaluate(() => document.body?.innerText || "");
     const afterContent = await page.content();
+    const afterText = await page.evaluate(() => document.body?.innerText || "");
+    log(`URL after Continue: ${afterUrl}`);
+    log(`Text snippet: ${afterText.substring(0, 200).replace(/\s+/g, " ")}`);
 
-    log(`URL after submit: ${afterUrl}`);
-    log(`Page text snippet after submit: ${afterText.substring(0, 250).replace(/\s+/g, " ")}`);
+    // ── STEP 3: Detect page state after email submit ───────────────────────
+    const hasPasswordField = afterContent.includes('type="password"') || afterContent.includes("type='password'");
+    const onDashboardNow = afterUrl.includes("/builder") || afterUrl.includes("/dashboard") ||
+      afterUrl.includes("/projects") || afterText.toLowerCase().includes("what are you building");
+    const magicLinkSent = afterText.toLowerCase().includes("check your email") ||
+      afterText.toLowerCase().includes("magic link") ||
+      afterText.toLowerCase().includes("we emailed") ||
+      afterText.toLowerCase().includes("email sent");
+    const alreadyExists = afterText.toLowerCase().includes("already in use") ||
+      afterText.toLowerCase().includes("already registered") ||
+      afterText.toLowerCase().includes("account already exists");
 
-    const hasPasswordField = afterContent.includes('type="password"') || afterContent.includes("type='password'") || afterText.toLowerCase().includes("password must contain") || afterText.toLowerCase().includes("at least 8 characters");
+    if (alreadyExists) return { success: false, error: "Lovable account already exists for this email" };
+    if (onDashboardNow) { log("✅ On dashboard instantly!"); return { success: true, email: outlookEmail }; }
 
     let generatedPassword: string | null = null;
-    let accountCreatedDirectly = false;
 
-    if (hasPasswordField && afterUrl.includes("lovable.dev/signup")) {
-      log("✅ Password field detected — Lovable uses password-based signup. Filling password...");
-      const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#";
-      generatedPassword = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join("") + "7!";
+    if (hasPasswordField) {
+      // ── STEP 4a: Password-based email registration ──────────────────────
+      log("✅ Password field detected — using email + password registration");
+      generatedPassword = randPass();
 
-      try {
-        const pwField = await page.$('input[type="password"]');
-        if (pwField) {
-          await pwField.click({ clickCount: 3 });
-          await pwField.type(generatedPassword, { delay: 60 });
-          log(`Filled password field: ${generatedPassword}`);
-        } else {
-          log("⚠️ Could not find password input — trying by placeholder/name");
-          await page.fill('input[placeholder*="assword"], input[name*="assword"]', generatedPassword);
-        }
-      } catch (e: any) {
-        log(`⚠️ Password fill error: ${e.message}`);
-      }
+      await fillInput(page, [
+        'input[type="password"]',
+        'input[name="password"]',
+        'input[placeholder*="assword" i]',
+      ], generatedPassword, "password");
+      log(`Generated password: ${generatedPassword}`);
+      await waitMs(1000);
 
-      log("Waiting for Turnstile render() to fire (up to 6s)...");
+      // Solve Cloudflare Turnstile CAPTCHA via CapSolver
+      const LOVABLE_SITEKEY = "0x4AAAAAAChnKAZBY0iFpFHC";
       await page.waitForFunction(
-        () => ((window as any).__lovableTurnstileCallbacks || []).length > 0 || (window as any).__lovableTurnstileSitekey,
-        { timeout: 6000 }
-      ).catch(() => log("⚠️ Turnstile render() did not fire within 6s"));
-      await page.waitForTimeout(500);
+        () => (window as any).__tsSitekey || ((window as any).__tsCallbacks || []).length > 0,
+        { timeout: 5000 }
+      ).catch(() => {});
 
-      log("Checking for Turnstile CAPTCHA on Lovable signup page...");
-      log(`Network-captured Turnstile sitekey: ${lovableTurnstileSitekey || 'none'}`);
-      const domCaptcha = await page.evaluate(() => {
-        const result: any = { turnstile: null, scriptSrc: null, winKeys: [] };
-        const cfEl = document.querySelector('[data-sitekey].cf-turnstile, .cf-turnstile[data-sitekey]');
-        if (cfEl) result.turnstile = (cfEl as any).getAttribute('data-sitekey') || null;
-        const cfIframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-        if (cfIframe && !result.turnstile) {
-          const m = (cfIframe as HTMLIFrameElement).src?.match(/[?&]k=([^&]+)/);
-          if (m) result.turnstile = m[1];
-        }
-        const tsScript = document.querySelector('script[src*="turnstile"]') as HTMLScriptElement | null;
-        if (tsScript) {
-          result.scriptSrc = tsScript.src?.substring(0, 100);
-          const m = tsScript.src?.match(/[?&](?:sitekey|k)=([^&]+)/);
-          if (m && !result.turnstile) result.turnstile = m[1];
-        }
-        result.winKeys = Object.keys(window as any).filter((k: string) => k.toLowerCase().includes('turnstile') || k.toLowerCase().includes('lovable'));
-        result.initSitekey = (window as any).__lovableTurnstileSitekey || null;
-        result.callbackCount = ((window as any).__lovableTurnstileCallbacks || []).length;
-        return result;
+      const domSitekey: string | null = await page.evaluate(() => {
+        const el = document.querySelector('.cf-turnstile[data-sitekey], [data-sitekey].cf-turnstile');
+        const ifr = document.querySelector('iframe[src*="challenges.cloudflare"]') as HTMLIFrameElement | null;
+        const ifrKey = ifr?.src?.match(/[?&]k=([^&]+)/)?.[1] || null;
+        return (el as HTMLElement | null)?.getAttribute("data-sitekey") || (window as any).__tsSitekey || ifrKey || null;
       });
-      const LOVABLE_HARDCODED_SITEKEY = "0x4AAAAAAChnKAZBY0iFpFHC";
-      const resolvedSitekey = lovableTurnstileSitekey || domCaptcha.initSitekey || domCaptcha.turnstile || LOVABLE_HARDCODED_SITEKEY;
-      log(`DOM sitekey: ${domCaptcha.turnstile || 'none'} | init sitekey: ${domCaptcha.initSitekey || 'none'} | callbacks: ${domCaptcha.callbackCount} | script: ${domCaptcha.scriptSrc || 'none'} | winKeys: ${domCaptcha.winKeys.join(",")}`);;
 
-      if (resolvedSitekey) {
-        log(`Solving Turnstile CAPTCHA via CapSolver (sitekey: ${resolvedSitekey})...`);
-        const tsResult = await solveAntiTurnstile("https://lovable.dev/signup", resolvedSitekey);
-        if (tsResult.success && tsResult.token) {
-          log("✅ Turnstile solved! Injecting token...");
-          const cbCount = await page.evaluate((token: string) => {
-            (window as any).__lovableTurnstileToken = token;
-            const callbacks: any[] = (window as any).__lovableTurnstileCallbacks || [];
-            let called = 0;
-            callbacks.forEach((cb: any) => { try { cb(token); called++; } catch {} });
-            const inputs = document.querySelectorAll('textarea[name="cf-turnstile-response"], input[name="cf-turnstile-response"]');
-            inputs.forEach((el: any) => { el.value = token; });
-            if ((window as any).turnstile) {
-              try { (window as any).turnstile.getResponse = () => token; } catch {}
-              try { (window as any).turnstile.isExpired = () => false; } catch {}
-            }
-            const allBtns = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
-            const createBtn = allBtns.find(b => (b.textContent || '').toLowerCase().includes('create') && !(b.textContent || '').toLowerCase().includes('google') && !(b.textContent || '').toLowerCase().includes('github'));
-            if (createBtn) { createBtn.disabled = false; createBtn.removeAttribute('disabled'); }
-            return called;
-          }, tsResult.token);
-          log(`Triggered ${cbCount} Turnstile callback(s) with solved token, __lovableTurnstileToken set`);
-          await page.waitForTimeout(1500);
-        } else {
-          log(`⚠️ Turnstile solve failed: ${tsResult.error || "unknown"} — proceeding anyway`);
-        }
+      const resolvedSitekey = capturedTurnstileSitekey || domSitekey || LOVABLE_SITEKEY;
+      log(`Solving Turnstile via CapSolver (sitekey: ${resolvedSitekey})...`);
+      const tsResult = await solveAntiTurnstile("https://lovable.dev/signup", resolvedSitekey);
+
+      if (tsResult.success && tsResult.token) {
+        log(`✅ Turnstile solved! Token length: ${tsResult.token.length}`);
+        const cbCount = await page.evaluate((token: string) => {
+          (window as any).__tsToken = token;
+          const cbs: any[] = (window as any).__tsCallbacks || [];
+          let n = 0;
+          cbs.forEach((cb: any) => { try { cb(token); n++; } catch {} });
+          document.querySelectorAll('input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]')
+            .forEach((el: any) => { el.value = token; });
+          if ((window as any).turnstile) {
+            try { (window as any).turnstile.getResponse = () => token; } catch {}
+            try { (window as any).turnstile.isExpired = () => false; } catch {}
+          }
+          return n;
+        }, tsResult.token);
+        log(`Fired ${cbCount} Turnstile callback(s)`);
+        await waitMs(1500);
       } else {
-        log("No Turnstile sitekey found — proceeding with force-enable only");
+        log(`⚠️ Turnstile solve failed: ${tsResult.error || "unknown"} — attempting submission anyway`);
       }
 
-      log("Force-enabling submit button if disabled...");
+      // Force-enable submit button
       await page.evaluate(() => {
-        const allBtns = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
-        const createBtn = allBtns.find(b => (b.textContent || '').toLowerCase().includes('create') && !(b.textContent || '').toLowerCase().includes('google') && !(b.textContent || '').toLowerCase().includes('github'));
-        if (createBtn && createBtn.disabled) {
-          createBtn.disabled = false;
-          createBtn.removeAttribute('disabled');
-          createBtn.removeAttribute('aria-disabled');
-          console.log('Force-enabled create button');
-        }
+        (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
+          const t = (b.textContent || "").toLowerCase();
+          if ((t.includes("create") || t.includes("sign up") || t.includes("get started") || t.includes("continue")) &&
+              !t.includes("google") && !t.includes("github")) {
+            b.disabled = false;
+            b.removeAttribute("disabled");
+            b.removeAttribute("aria-disabled");
+          }
+        });
       });
 
-      const pwPageDiag = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button")).map(b => `"${(b.textContent||'').trim().substring(0,40)}" disabled=${(b as HTMLButtonElement).disabled}`);
-        const forms = Array.from(document.querySelectorAll("form")).map((f, i) => `form${i}: action=${f.action || 'none'} method=${f.method || 'none'}`);
-        const cfEls = Array.from(document.querySelectorAll('[class*="turnstile"], [id*="turnstile"], [data-sitekey]')).map(e => `${e.tagName} class=${(e as any).className?.substring(0,60)} sitekey=${(e as any).getAttribute('data-sitekey')}`);
-        return { btns, forms, cfEls };
-      });
-      log(`Buttons on page: ${pwPageDiag.btns.join(" | ")}`);
-      log(`Forms: ${pwPageDiag.forms.join(" | ")}`);
-      if (pwPageDiag.cfEls.length) log(`CF/Turnstile elements: ${pwPageDiag.cfEls.join(" | ")}`);
+      const diagBtns: string[] = await page.evaluate(() =>
+        (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[])
+          .map((b) => `"${(b.textContent || "").trim().substring(0, 30)}" disabled=${b.disabled}`)
+      );
+      log(`Buttons: ${diagBtns.join(" | ")}`);
 
-      log("Submitting signup form with password...");
-      let finalSubmit = false;
-      const submitSelectors = [
+      log("Submitting password form...");
+      const submitClicked = await clickButton(page, [
         'button:has-text("Create your account")',
         'button:has-text("Create account")',
         'button:has-text("Sign up")',
         'button:has-text("Get started")',
         'button[type="submit"]',
         'button:has-text("Continue")',
-      ];
-      for (const sel of submitSelectors) {
-        try {
-          const btns = await page.$$(sel);
-          for (const btn of btns) {
-            const txt = await btn.innerText().catch(() => "");
-            if (txt.toLowerCase().includes("google") || txt.toLowerCase().includes("github")) continue;
-            await btn.click();
-            log(`Clicked final submit: "${txt.substring(0, 40)}" (${sel})`);
-            finalSubmit = true;
-            break;
-          }
-          if (finalSubmit) break;
-        } catch {}
-      }
-      if (!finalSubmit) {
-        log("Button not found via selectors — trying JS click on submit button...");
-        const jsClicked = await page.evaluate(() => {
-          const btns = Array.from(document.querySelectorAll("button"));
-          const submitBtn = btns.find(b => {
+      ], "Submit");
+
+      if (!submitClicked) {
+        const jsOk: boolean = await page.evaluate(() => {
+          const b = (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).find((b) => {
             const t = (b.textContent || "").toLowerCase();
-            return (t.includes("create") || t.includes("sign up") || t.includes("get started")) && !t.includes("google") && !t.includes("github");
+            return (t.includes("create") || t.includes("sign up") || t.includes("get started")) &&
+              !t.includes("google") && !t.includes("github");
           });
-          if (submitBtn) { (submitBtn as HTMLButtonElement).click(); return true; }
-          const subInput = document.querySelector('input[type="submit"]');
-          if (subInput) { (subInput as HTMLInputElement).click(); return true; }
+          if (b) { b.click(); return true; }
+          const sub = document.querySelector('input[type="submit"]') as HTMLInputElement | null;
+          if (sub) { sub.click(); return true; }
           return false;
         });
-        if (jsClicked) {
-          log("JS click on submit button succeeded");
-          finalSubmit = true;
-        } else {
-          log("Pressing Enter on password field...");
-          try {
-            const pwf = await page.$('input[type="password"]');
-            if (pwf) { await pwf.press("Enter"); log("Pressed Enter on password field"); }
-            else await page.keyboard.press("Enter");
-          } catch { await page.keyboard.press("Enter"); }
-          finalSubmit = true;
+        if (!jsOk) {
+          const pwf = await page.$('input[type="password"]').catch(() => null);
+          if (pwf) await pwf.press("Enter");
+          else await page.keyboard.press("Enter");
         }
       }
 
-      log("Waiting 15s after password submit...");
-      await page.waitForTimeout(15000);
+      log("Waiting 18s for signup response...");
+      await waitMs(18000);
 
-      // Dump ALL fetch calls that happened
-      const allFetchCalls = await page.evaluate(() => (window as any).__allFetchCalls || []);
-      if (allFetchCalls.length > 0) {
-        log(`[ALL FETCH CALLS - ${allFetchCalls.length} total]`);
-        allFetchCalls.slice(-20).forEach((c: any) => {
-          log(`  ${c.method} ${String(c.url).substring(0, 180)} ${c.body ? 'body=' + String(c.body).substring(0, 100) : ''}`);
-        });
-      } else {
-        log("[ALL FETCH CALLS] None captured");
-      }
+      const postUrl = page.url();
+      const postText = await page.evaluate(() => document.body?.innerText || "");
+      log(`URL after submit: ${postUrl}`);
+      log(`Text after submit: ${postText.substring(0, 200).replace(/\s+/g, " ")}`);
 
-      const postPwUrl = page.url();
-      const postPwText = await page.evaluate(() => document.body?.innerText || "");
-      log(`URL after password submit: ${postPwUrl}`);
-      log(`Page text after password: ${postPwText.substring(0, 200).replace(/\s+/g, " ")}`);
-
-      const onDashboard = postPwUrl.includes("/builder") || postPwUrl.includes("/dashboard") || postPwUrl.includes("/projects") || postPwText.toLowerCase().includes("new project") || postPwText.toLowerCase().includes("start building") || postPwText.toLowerCase().includes("what are you building");
-      if (onDashboard) {
+      const loggedIn = postUrl.includes("/builder") || postUrl.includes("/dashboard") ||
+        postUrl.includes("/projects") || postText.toLowerCase().includes("what are you building");
+      if (loggedIn) {
         log("✅ Account created and logged in directly — no email verification needed!");
-        accountCreatedDirectly = true;
-      } else if (postPwText.toLowerCase().includes("verify") || postPwText.toLowerCase().includes("check your email") || postPwText.toLowerCase().includes("confirm") || postPwText.toLowerCase().includes("sent you") || postPwText.toLowerCase().includes("email sent") || postPwText.toLowerCase().includes("we emailed")) {
-        log("✅ Signup accepted — email verification step needed");
-      } else if (postPwText.toLowerCase().includes("email already in use") || postPwText.toLowerCase().includes("email is already") || postPwText.toLowerCase().includes("account already exists") || postPwText.toLowerCase().includes("already registered")) {
-        return { success: false, error: `Lovable account already exists for this email` };
-      } else if (postPwUrl.includes("lovable.dev/signup") && !postPwUrl.includes("cf-turnstile-response") && (postPwText.toLowerCase().includes("password meets") || postPwText.toLowerCase().includes("password must"))) {
-        log("⚠️ Form still on signup page but password valid — form may not have submitted. Trying JS click...");
-        const retryClicked = await page.evaluate(() => {
-          const btns = Array.from(document.querySelectorAll("button"));
-          const b = btns.find(b => { const t = (b.textContent || "").toLowerCase(); return t.includes("create") && !t.includes("google") && !t.includes("github"); });
-          if (b) { (b as HTMLButtonElement).click(); return true; }
-          return false;
+        return { success: true, email: outlookEmail, password: generatedPassword };
+      }
+      if (postText.toLowerCase().includes("already") &&
+          (postText.toLowerCase().includes("email") || postText.toLowerCase().includes("account"))) {
+        return { success: false, error: "Lovable account already exists for this email" };
+      }
+      if (postText.toLowerCase().includes("verify") || postText.toLowerCase().includes("check your email") ||
+          postText.toLowerCase().includes("we emailed") || postText.toLowerCase().includes("email sent")) {
+        log("✅ Signup accepted — awaiting verification email");
+      } else if (postUrl.includes("lovable.dev/signup")) {
+        log("Still on signup page — one more JS submit attempt...");
+        await page.evaluate(() => {
+          const b = (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).find((b) => {
+            const t = (b.textContent || "").toLowerCase();
+            return (t.includes("create") || t.includes("continue")) && !t.includes("google") && !t.includes("github");
+          });
+          if (b) b.click();
         });
-        log(retryClicked ? "Retry JS click succeeded — waiting 10s" : "Retry JS click failed");
-        if (retryClicked) {
-          await page.waitForTimeout(10000);
-          const retryUrl = page.url();
-          const retryText = await page.evaluate(() => document.body?.innerText || "");
-          log(`After retry URL: ${retryUrl}`);
-          log(`After retry text: ${retryText.substring(0, 150).replace(/\s+/g, " ")}`);
-          if (retryUrl.includes("/builder") || retryUrl.includes("/dashboard") || retryUrl.includes("/projects")) {
-            accountCreatedDirectly = true;
-            log("✅ Account created after retry click!");
-          } else if (retryText.toLowerCase().includes("verify") || retryText.toLowerCase().includes("check your email")) {
-            log("✅ Email verification step needed after retry");
-          } else {
-            log(`Retry state: ${retryUrl} — may need email verification`);
-          }
-        }
-      } else {
-        log(`Post-password state: ${postPwUrl} — ${postPwText.substring(0, 100).replace(/\s+/g, " ")} — continuing to email check`);
+        await waitMs(10000);
+        const r2Url = page.url();
+        const r2Text = await page.evaluate(() => document.body?.innerText || "");
+        log(`After retry: ${r2Url} — ${r2Text.substring(0, 100).replace(/\s+/g, " ")}`);
       }
+    } else if (magicLinkSent) {
+      log("✅ Magic link sent (no password field) — checking Outlook for verification email");
     } else {
-      const magicLinkSent = afterText.toLowerCase().includes("check your email") ||
-        afterText.toLowerCase().includes("magic link") ||
-        afterText.toLowerCase().includes("sent") ||
-        afterContent.toLowerCase().includes("check your email") ||
-        afterUrl.includes("lovable.dev/login") ||
-        afterUrl.includes("lovable.dev/auth");
-
-      if (magicLinkSent) {
-        log("✅ Lovable signup submitted — magic link / verification email expected");
-      } else {
-        log(`⚠️ Unexpected state — URL: ${afterUrl}`);
-        if (!afterUrl.includes("lovable.dev")) {
-          return { success: false, error: `Unexpected URL after signup: ${afterUrl.substring(0, 100)}` };
-        }
+      log(`Page state unclear — URL: ${afterUrl} | text: ${afterText.substring(0, 120).replace(/\s+/g, " ")}`);
+      if (!afterUrl.includes("lovable.dev")) {
+        return { success: false, error: `Unexpected redirect after signup: ${afterUrl.substring(0, 80)}` };
       }
     }
 
-    if (accountCreatedDirectly) {
-      return { success: true, email: outlookEmail, password: generatedPassword || undefined };
-    }
-
-    log("Waiting 90s before checking Outlook inbox for Lovable verification email...");
-    await page.waitForTimeout(90000);
+    // ── STEP 5: Check Outlook inbox for verification email ─────────────────
+    log("Waiting 75s for Lovable to send verification email...");
+    await waitMs(75000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
-
-    log("Reading Lovable verification email via Outlook Web Access...");
     let owaBrowser: any = null;
+
     try {
       const { chromium: chrm } = await import("playwright");
       owaBrowser = await chrm.launch({
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
       });
-      const owaContext = await owaBrowser.newContext({
+      const owaCtx = await owaBrowser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         viewport: { width: 1366, height: 768 },
         locale: "en-US",
       });
-      await owaContext.addInitScript(() => {
+      await owaCtx.addInitScript(() => {
         Object.defineProperty(navigator, "webdriver", { get: () => undefined });
         (window as any).chrome = { runtime: {} };
       });
-      const owaPage = await owaContext.newPage();
+      const owaPage = await owaCtx.newPage();
       owaPage.setDefaultTimeout(30000);
 
-      log("Navigating to Outlook Web login...");
-      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await owaPage.waitForTimeout(2000);
+      log("Logging into Outlook Web...");
+      await owaPage.goto(
+        "https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&lc=1033&mkt=EN-US",
+        { waitUntil: "domcontentloaded", timeout: 30000 }
+      );
+      await waitMs(2000);
 
-      const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
-      if (emailInput) {
-        await emailInput.fill(outlookEmail);
-        log("Entered Outlook email on login page");
-        const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (nextBtn) { await nextBtn.click(); await owaPage.waitForTimeout(2500); }
+      const emailInp = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+      if (emailInp) {
+        await emailInp.fill(outlookEmail);
+        const nxt = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (nxt) { await nxt.click(); await waitMs(2500); }
+      }
+      const passInp = await owaPage.$('input[type="password"], input[name="passwd"]');
+      if (passInp) {
+        await passInp.fill(outlookPassword);
+        const signIn = await owaPage.$('input[type="submit"], button[type="submit"]');
+        if (signIn) { await signIn.click(); await waitMs(4000); }
       }
 
-      const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
-      if (passInput) {
-        await passInput.fill(outlookPassword);
-        log("Entered Outlook password on login page");
-        const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (signInBtn) { await signInBtn.click(); await owaPage.waitForTimeout(4000); }
-      }
+      let curUrl = owaPage.url();
+      log(`OWA login URL: ${curUrl.substring(0, 100)}`);
 
-      let currentLoginUrl = owaPage.url();
-      log(`After login URL: ${currentLoginUrl.substring(0, 100)}`);
-
-      if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
-        log("Microsoft security proofs page — skipping...");
-        let destUrl = "https://outlook.live.com/mail/0/inbox";
+      if (curUrl.includes("account.live.com") || curUrl.includes("account.microsoft.com")) {
+        let dest = "https://outlook.live.com/mail/0/inbox";
         try {
-          const parsedUrl = new URL(currentLoginUrl);
-          const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
-          if (posturl) destUrl = decodeURIComponent(posturl);
+          const pu = new URL(curUrl);
+          const wr = pu.searchParams.get("posturl") || pu.searchParams.get("wreply");
+          if (wr) dest = decodeURIComponent(wr);
         } catch {}
-        await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(3000);
-        currentLoginUrl = owaPage.url();
+        await owaPage.goto(dest, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await waitMs(3000);
+        curUrl = owaPage.url();
       }
 
-      let isOnOutlookHost = false;
-      try {
-        const parsedUrl = new URL(currentLoginUrl);
-        isOnOutlookHost = parsedUrl.hostname.includes("outlook.live.com") || parsedUrl.hostname.includes("outlook.office") || parsedUrl.hostname === "outlook.com";
-      } catch {}
-
-      if (!isOnOutlookHost) {
-        log(`Not on Outlook yet — navigating directly to inbox`);
+      if (!curUrl.includes("outlook.live.com") && !curUrl.includes("outlook.office")) {
         await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(5000);
-        currentLoginUrl = owaPage.url();
-        try { const p2 = new URL(currentLoginUrl); isOnOutlookHost = p2.hostname.includes("outlook.live.com"); } catch {}
+        await waitMs(5000);
+        curUrl = owaPage.url();
       }
 
-      if (isOnOutlookHost) {
-        log("✅ Logged into Outlook Web — searching inbox for Lovable email...");
-        await owaPage.waitForTimeout(2000);
-        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(7000);
+      const isOutlook = curUrl.includes("outlook.live.com") || curUrl.includes("outlook.office");
 
-        const emailItems = await owaPage.$$('[data-convid]');
-        const emailItemsAlt = emailItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
-        const allEmailItems = emailItems.length > 0 ? emailItems : emailItemsAlt;
-        log(`Found ${allEmailItems.length} email items in inbox ([data-convid]=${emailItems.length}, [role="option"]=${emailItemsAlt.length})`);
+      if (!isOutlook) {
+        log(`⚠️ Could not reach Outlook — URL: ${curUrl.substring(0, 80)}`);
+      } else {
+        log("✅ Logged into Outlook — scanning for Lovable verification email...");
 
-        async function extractLinkFromCurrentEmail(): Promise<boolean> {
-          const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-          const emailHtml = await owaPage.evaluate(() => document.body?.innerHTML || "");
-
-          const linkPatterns = [
+        async function extractLink(p: any): Promise<boolean> {
+          const body = await p.evaluate(() => document.body?.innerText || "");
+          const html = await p.evaluate(() => document.body?.innerHTML || "");
+          const patterns = [
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]+/,
             /https?:\/\/[a-z0-9.-]*supabase[^\s"'<>\r\n)]+/,
             /https?:\/\/[^\s"'<>\r\n)]*magic[^\s"'<>\r\n)]*/i,
             /https?:\/\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
             /https?:\/\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
-            /https?:\/\/[^\s"'<>\r\n)]*token[^\s"'<>\r\n)]*/i,
-            /https?:\/\/[^\s"'<>\r\n)]*login[^\s"'<>\r\n)]*[?&][^\s"'<>\r\n)]*/i,
           ];
-
-          for (const pattern of linkPatterns) {
-            const linkMatch = emailBody.match(pattern) || emailHtml.match(pattern);
-            if (linkMatch) {
-              verificationLink = linkMatch[0].replace(/["'<>)]/g, "").trim();
-              log(`Extracted verification link: ${verificationLink.substring(0, 120)}...`);
+          for (const pat of patterns) {
+            const m = body.match(pat) || html.match(pat);
+            if (m) {
+              verificationLink = m[0].replace(/["'<>)]/g, "").trim();
+              log(`Extracted link: ${verificationLink.substring(0, 120)}`);
               return true;
             }
           }
-
-          const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-          if (codeMatch) {
-            verificationCode = codeMatch[1];
-            log(`Extracted verification code: ${verificationCode}`);
-            return true;
-          }
+          const code = body.match(/\b([0-9]{6})\b/);
+          if (code) { verificationCode = code[1]; log(`Extracted 6-digit code: ${verificationCode}`); return true; }
           return false;
         }
 
-        let foundLovableEmail = false;
-
-        async function scanEmailList(items: any[], label: string): Promise<boolean> {
-          for (const item of items.slice(0, 15)) {
-            const itemText = await item.innerText().catch(() => "");
-            if (itemText.toLowerCase().includes("lovable") || itemText.toLowerCase().includes("magic link") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm") || itemText.toLowerCase().includes("sign in") || itemText.toLowerCase().includes("login link") || itemText.toLowerCase().includes("noreply")) {
-              log(`Found Lovable-related email in ${label} (keyword match): ${itemText.substring(0, 100)}`);
-              await item.click();
-              await owaPage.waitForTimeout(2500);
-              return await extractLinkFromCurrentEmail();
-            }
-          }
-          if (items.length > 0) {
-            log(`No keyword match in ${label} — opening most recent emails as fallback...`);
-            for (const item of items.slice(0, 5)) {
-              const itemText = await item.innerText().catch(() => "");
-              if (itemText.trim().length < 5) continue;
-              log(`Opening recent email in ${label}: ${itemText.substring(0, 80)}`);
-              await item.click();
-              await owaPage.waitForTimeout(2500);
-              const found = await extractLinkFromCurrentEmail();
-              if (found) return true;
-              log("No link found in this email — trying next...");
-            }
-          }
-          return false;
-        }
-
-        foundLovableEmail = await scanEmailList(allEmailItems, "inbox");
-
-        if (!foundLovableEmail) {
-          log("Lovable email not found in inbox — checking Junk/Spam folder...");
-          await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 20000 });
-          await owaPage.waitForTimeout(5000);
-          const junkItems = await owaPage.$$('[data-convid]');
-          const junkItemsAlt = junkItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
-          const allJunkItems = junkItems.length > 0 ? junkItems : junkItemsAlt;
-          log(`Found ${allJunkItems.length} emails in junk folder`);
-          foundLovableEmail = await scanEmailList(allJunkItems, "junk");
-        }
-
-        if (!foundLovableEmail) {
-          log("Checking Other/Clutter folder...");
-          for (const folderPath of ["clutter", "other"]) {
-            try {
-              await owaPage.goto(`https://outlook.live.com/mail/0/${folderPath}`, { waitUntil: "domcontentloaded", timeout: 15000 });
-              await owaPage.waitForTimeout(4000);
-              const otherItems = await owaPage.$$('[data-convid]');
-              const otherItemsAlt = otherItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
-              const allOtherItems = otherItems.length > 0 ? otherItems : otherItemsAlt;
-              if (allOtherItems.length > 0) {
-                log(`Found ${allOtherItems.length} emails in ${folderPath} folder`);
-                foundLovableEmail = await scanEmailList(allOtherItems, folderPath);
-                if (foundLovableEmail) break;
+        async function scanFolder(p: any, folderUrl: string, label: string): Promise<boolean> {
+          try {
+            await p.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+            await waitMs(6000);
+            const items = await p.$$('[data-convid]');
+            const alt = items.length === 0 ? await p.$$('[role="option"]') : [];
+            const all = items.length > 0 ? items : alt;
+            log(`${label}: ${all.length} emails`);
+            // Keyword-match pass
+            for (const item of all.slice(0, 20)) {
+              const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
+              if (txt.includes("lovable") || txt.includes("magic link") || txt.includes("verify") ||
+                  txt.includes("confirm") || txt.includes("noreply") || txt.includes("no-reply")) {
+                log(`Opening in ${label}: "${txt.substring(0, 80)}"`);
+                await item.click();
+                await waitMs(3000);
+                if (await extractLink(p)) return true;
               }
-            } catch {}
+            }
+            // Fallback: open recent emails
+            for (const item of all.slice(0, 5)) {
+              const txt = ((await item.innerText().catch(() => "")) as string).trim();
+              if (txt.length < 5) continue;
+              await item.click();
+              await waitMs(2500);
+              if (await extractLink(p)) return true;
+            }
+          } catch (e: any) {
+            log(`⚠️ Error scanning ${label}: ${(e.message || "").substring(0, 60)}`);
           }
+          return false;
         }
 
-        if (!foundLovableEmail) {
-          log("No Lovable email yet — waiting 60s more then re-checking inbox...");
-          await owaPage.waitForTimeout(60000);
-          await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-          await owaPage.waitForTimeout(7000);
-          const freshItems = await owaPage.$$('[data-convid]');
-          const freshItemsAlt = freshItems.length === 0 ? await owaPage.$$('[role="option"]') : [];
-          const allFreshItems = freshItems.length > 0 ? freshItems : freshItemsAlt;
-          log(`Second-pass inbox: found ${allFreshItems.length} email items`);
-          foundLovableEmail = await scanEmailList(allFreshItems, "inbox-retry");
-          if (!foundLovableEmail) {
-            await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 15000 });
-            await owaPage.waitForTimeout(4000);
-            const junkItems2 = await owaPage.$$('[data-convid]');
-            const junkItemsAlt2 = junkItems2.length === 0 ? await owaPage.$$('[role="option"]') : [];
-            foundLovableEmail = await scanEmailList(junkItems2.length > 0 ? junkItems2 : junkItemsAlt2, "junk-retry");
+        let found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/inbox", "inbox");
+        if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk");
+        if (!found) {
+          for (const f of ["clutter", "other"]) {
+            found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, f);
+            if (found) break;
           }
         }
-
-        if (!foundLovableEmail) {
-          log("No Lovable verification email found in any folder");
+        if (!found) {
+          log("Email not found yet — waiting 60s more then re-scanning...");
+          await waitMs(60000);
+          found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/inbox", "inbox-retry");
+          if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
         }
-      } else {
-        log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
+        if (!found) log("⚠️ No Lovable verification email found in any folder");
       }
     } catch (owaErr: any) {
-      log(`⚠️ Outlook web email check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
+      log(`⚠️ Outlook check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
     } finally {
       if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
+    }
+
+    // ── STEP 6: Navigate to verification link ─────────────────────────────
+    if (!verificationLink && !verificationCode) {
+      return { success: false, error: "No verification link or code found in Outlook inbox — may be in Spam or signup was WAF-blocked" };
     }
 
     let accountVerified = false;
 
     if (verificationLink) {
-      log(`Navigating to Lovable magic link...`);
-      await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(5000);
-      const verifyUrl = page.url();
-      const verifyText = await page.evaluate(() => document.body?.innerText || "");
-      const onDashboard = verifyText.toLowerCase().includes("dashboard") ||
-        verifyText.toLowerCase().includes("welcome") ||
-        verifyText.toLowerCase().includes("project") ||
-        (verifyUrl.includes("lovable.dev") && !verifyUrl.includes("signup") && !verifyUrl.includes("login") && !verifyUrl.includes("auth"));
-      if (onDashboard) {
-        log(`✅ Lovable account verified! URL: ${verifyUrl}`);
-        accountVerified = true;
-      } else {
-        log(`Verification page URL: ${verifyUrl} — redirected but dashboard not confirmed`);
-        accountVerified = false;
-      }
+      log("Navigating to verification link...");
+      await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
+      await waitMs(5000);
+      if (await isCloudflarePage(page)) await waitForCloudflare(page, 15000);
+      const vUrl = page.url();
+      const vText = await page.evaluate(() => document.body?.innerText || "");
+      accountVerified = vUrl.includes("/builder") || vUrl.includes("/dashboard") || vUrl.includes("/projects") ||
+        vText.toLowerCase().includes("project") || vText.toLowerCase().includes("what are you building") ||
+        (vUrl.includes("lovable.dev") && !vUrl.includes("signup") && !vUrl.includes("login") && !vUrl.includes("/auth/"));
+      log(`Verification result: ${accountVerified ? "✅ Success" : "⚠️ Not confirmed"} — URL: ${vUrl}`);
     } else if (verificationCode) {
-      log(`Entering verification code: ${verificationCode}`);
-      const codeSelectors = ['input[name="code"]', 'input[placeholder*="code" i]', 'input[type="number"]', 'input[maxlength="6"]'];
-      for (const sel of codeSelectors) {
-        try {
-          const el = await page.$(sel);
-          if (el) {
-            await el.type(verificationCode, { delay: 50 });
-            await page.keyboard.press("Enter");
-            log(`Entered code via ${sel}`);
-            await page.waitForTimeout(3000);
-            const afterCodeUrl = page.url();
-            const afterCodeText = await page.evaluate(() => document.body?.innerText || "");
-            accountVerified = afterCodeText.toLowerCase().includes("dashboard") ||
-              afterCodeText.toLowerCase().includes("project") ||
-              (afterCodeUrl.includes("lovable.dev") && !afterCodeUrl.includes("signup") && !afterCodeUrl.includes("login"));
-            break;
-          }
-        } catch {}
+      log(`Entering 6-digit code: ${verificationCode}`);
+      for (const sel of ['input[name="code"]', 'input[placeholder*="code" i]', 'input[type="number"]', 'input[maxlength="6"]']) {
+        const el = await page.$(sel).catch(() => null);
+        if (!el) continue;
+        await el.type(verificationCode, { delay: 50 });
+        await page.keyboard.press("Enter");
+        await waitMs(3000);
+        const cu = page.url();
+        const ct = await page.evaluate(() => document.body?.innerText || "");
+        accountVerified = ct.toLowerCase().includes("project") ||
+          (cu.includes("lovable.dev") && !cu.includes("signup") && !cu.includes("login"));
+        break;
       }
-    } else {
-      log("⚠️ No verification link or code found — email may not have arrived yet or signup was blocked");
-      return { success: false, error: "No verification link or code received from Lovable — email not found in inbox" };
     }
 
     if (!accountVerified) {
-      log(`⚠️ Lovable account not confirmed — verification may have failed or email is pending`);
-      return { success: false, error: "Lovable signup submitted but account verification could not be confirmed" };
+      return { success: false, error: "Verification link visited but dashboard not reached — account may still be valid, check manually" };
     }
 
-    log(`✅ Lovable account creation complete for: ${outlookEmail}`);
-    return { success: true, email: outlookEmail };
+    log(`✅ Lovable account creation complete: ${outlookEmail}`);
+    return { success: true, email: outlookEmail, password: generatedPassword || undefined };
+
 
   } catch (err: any) {
     log(`Error: ${(err.message || String(err)).substring(0, 200)}`);
