@@ -10535,7 +10535,13 @@ export async function registerReplitAccount(
           await el.click();
           log(`Clicked email signup button: "${btnText.substring(0, 40)}" (${sel})`);
           clicked = true;
-          await page.waitForTimeout(2000);
+          try {
+            await page.waitForLoadState("networkidle", { timeout: 8000 });
+            log("Page idle after email button click");
+          } catch {
+            log("Network idle timeout — waiting 4s instead");
+            await page.waitForTimeout(4000);
+          }
           break;
         }
       } catch {}
@@ -10551,8 +10557,23 @@ export async function registerReplitAccount(
       await page.waitForTimeout(3000);
     }
 
-    const htmlSnippet = await page.evaluate(() => document.body?.innerHTML?.substring(0, 1000) || "empty");
-    log(`Page HTML snippet (first 1000 chars): ${htmlSnippet.replace(/\s+/g, " ")}`);
+    let htmlSnippet = "not captured";
+    try {
+      htmlSnippet = await Promise.race([
+        page.evaluate(() => document.body?.innerHTML?.substring(0, 800) || "empty"),
+        new Promise<string>(r => setTimeout(() => r("timed-out"), 5000))
+      ]) as string;
+    } catch { htmlSnippet = "evaluate-error"; }
+    log(`Page HTML snippet: ${htmlSnippet.replace(/\s+/g, " ").substring(0, 400)}`);
+
+    log("Waiting for signup form fields to appear...");
+    const anyInputSel = 'input[name="username"], input[name="email"], input[type="email"], input[type="password"]';
+    try {
+      await page.waitForSelector(anyInputSel, { timeout: 12000, state: "visible" });
+      log("Form fields detected");
+    } catch {
+      log("⚠️ Form fields not found within 12s — attempting to fill anyway");
+    }
 
     log("Filling signup form...");
     const usernameSelectors = ['input[name="username"]', 'input[placeholder*="username" i]', 'input[id*="username" i]', 'input[autocomplete="username"]'];
@@ -10560,9 +10581,9 @@ export async function registerReplitAccount(
     for (const sel of usernameSelectors) {
       try {
         const el = await page.$(sel);
-        if (el) {
+        if (el && await el.isVisible().catch(() => false)) {
           await el.click({ clickCount: 3 });
-          await el.type(username, { delay: 50 });
+          await el.type(username, { delay: 40 });
           log(`Typed username into ${sel}`);
           usernameFilled = true;
           break;
@@ -10578,9 +10599,9 @@ export async function registerReplitAccount(
     for (const sel of emailSelectors) {
       try {
         const el = await page.$(sel);
-        if (el) {
+        if (el && await el.isVisible().catch(() => false)) {
           await el.click({ clickCount: 3 });
-          await el.type(outlookEmail, { delay: 50 });
+          await el.type(outlookEmail, { delay: 40 });
           log(`Typed email into ${sel}`);
           emailFilled = true;
           break;
@@ -10596,9 +10617,9 @@ export async function registerReplitAccount(
     for (const sel of passwordSelectors) {
       try {
         const el = await page.$(sel);
-        if (el) {
+        if (el && await el.isVisible().catch(() => false)) {
           await el.click({ clickCount: 3 });
-          await el.type(password, { delay: 50 });
+          await el.type(password, { delay: 40 });
           log(`Typed password into ${sel}`);
           passwordFilled = true;
           break;
