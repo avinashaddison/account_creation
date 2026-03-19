@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { sounds } from "@/lib/sounds";
 import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio } from "lucide-react";
 
 type OutlookAccount = {
@@ -103,13 +104,16 @@ export default function ReplitCreate() {
             addLog(data.message);
           } else if (data.type === "batch_complete") {
             setRunning(false);
+            sounds.complete();
             qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
             qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
           } else if (data.type === "replit_create_result") {
             if (data.success) {
               setCompletedCount((p) => p + 1);
+              sounds.success();
               toast({ title: "✅ Account Created", description: `@${data.username}` });
             } else {
+              sounds.error();
               toast({ title: "❌ Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
             }
           }
@@ -121,6 +125,7 @@ export default function ReplitCreate() {
   }, []);
 
   const handleOutlookSelect = (id: string) => {
+    sounds.click();
     setSelectedOutlookId(id);
     const acct = availableOutlookAccounts.find((a) => a.id === id);
     if (acct) {
@@ -130,6 +135,7 @@ export default function ReplitCreate() {
   };
 
   const handleCreate = async () => {
+    sounds.start();
     setLogs([]);
     setRunning(true);
     setCompletedCount(0);
@@ -144,11 +150,13 @@ export default function ReplitCreate() {
         setTotalCount(data.count);
         addLog(`🚀 Bulk job started — ${data.count} account(s) queued [${data.batchId}]`);
       } catch (err: any) {
+        sounds.error();
         toast({ title: "Error", description: err.message, variant: "destructive" });
         setRunning(false);
       }
     } else {
       if (!outlookEmail || !outlookPassword) {
+        sounds.error();
         toast({ title: "Missing fields", description: "Select or enter an Outlook account", variant: "destructive" });
         setRunning(false);
         return;
@@ -161,6 +169,7 @@ export default function ReplitCreate() {
         activeBatchId.current = data.batchId;
         addLog(`Job started: ${data.batchId}`);
       } catch (err: any) {
+        sounds.error();
         toast({ title: "Error", description: err.message, variant: "destructive" });
         setRunning(false);
       }
@@ -173,55 +182,55 @@ export default function ReplitCreate() {
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
 
   return (
-    <div className="space-y-5 animate-float-up">
+    <div className="space-y-6 animate-float-up">
 
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <Code2 className="w-4 h-4" style={{ color: G, filter: `drop-shadow(0 0 6px ${G})` }} />
-            <h1 className="text-base font-mono font-bold tracking-tight" style={{ color: G, textShadow: `0 0 20px ${GA(0.5)}` }}>
-              replit_create<span className="animate-pulse" style={{ color: G }}>{tick ? "_" : "\u00a0"}</span>
+          <div className="flex items-center gap-2.5">
+            <Code2 className="w-5 h-5" style={{ color: G, filter: `drop-shadow(0 0 8px ${G})` }} />
+            <h1 className="text-lg font-mono font-bold tracking-tight" style={{ color: G, textShadow: `0 0 24px ${GA(0.55)}` }}>
+              replit_create<span style={{ color: G }}>{tick ? "_" : "\u00a0"}</span>
             </h1>
           </div>
-          <p className="text-[10px] font-mono mt-0.5 pl-6" style={{ color: GA(0.3) }}>
+          <p className="text-[11px] font-mono mt-0.5 pl-8" style={{ color: GA(0.32) }}>
             automate account creation via stored outlook credentials
           </p>
         </div>
-        <div className="flex items-center gap-3 text-[9px] font-mono">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded" style={{ background: GA(0.05), border: `1px solid ${GA(0.15)}` }}>
-            <Cpu className="w-2.5 h-2.5" style={{ color: GA(0.5) }} />
-            <span style={{ color: GA(0.5) }}>{availableOutlookAccounts.length}</span>
-            <span style={{ color: GA(0.25) }}>avail</span>
+        <div className="flex items-center gap-2.5 text-[10px] font-mono">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: GA(0.05), border: `1px solid ${GA(0.18)}` }}>
+            <Cpu className="w-3 h-3" style={{ color: GA(0.55) }} />
+            <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{availableOutlookAccounts.length}</span>
+            <span style={{ color: GA(0.3) }}>avail</span>
           </div>
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
-            <span style={{ color: "rgba(255,255,255,0.25)" }}>{usedEmails.size}</span>
-            <span style={{ color: "rgba(255,255,255,0.12)" }}>used</span>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <span style={{ color: "rgba(255,255,255,0.3)" }}>{usedEmails.size}</span>
+            <span style={{ color: "rgba(255,255,255,0.14)" }}>used</span>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
 
         {/* Config panel */}
         <div
-          className="rounded-xl p-4 space-y-4 relative overflow-hidden"
-          style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.12)}`, boxShadow: `0 0 30px ${GA(0.04)} inset` }}
+          className="rounded-xl p-5 space-y-5 relative overflow-hidden"
+          style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.14)}`, boxShadow: `0 0 40px ${GA(0.04)} inset` }}
         >
           {/* scanline overlay */}
           <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.012) 2px, rgba(0,255,65,0.012) 4px)", borderRadius: "inherit" }} />
 
           {/* section label */}
           <div className="flex items-center gap-2">
-            <ChevronRight className="w-3 h-3" style={{ color: G }} />
-            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.5) }}>Configuration</span>
-            <div className="flex-1 h-px" style={{ background: GA(0.08) }} />
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: G }} />
+            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: GA(0.55) }}>Configuration</span>
+            <div className="flex-1 h-px" style={{ background: GA(0.1) }} />
           </div>
 
           {/* Count slider */}
           <div>
-            <label className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.35) }}>
-              <Hash className="w-2.5 h-2.5" />
+            <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
+              <Hash className="w-3 h-3" />
               Accounts to Create
             </label>
             <div className="flex items-center gap-3">
@@ -231,25 +240,25 @@ export default function ReplitCreate() {
                   min={1}
                   max={maxCount}
                   value={count}
-                  onChange={(e) => setCount(parseInt(e.target.value))}
-                  className="w-full h-1 rounded-full cursor-pointer appearance-none"
+                  onChange={(e) => { sounds.toggle(); setCount(parseInt(e.target.value)); }}
+                  className="w-full h-1.5 rounded-full cursor-pointer appearance-none"
                   style={{
-                    background: `linear-gradient(to right, ${GA(0.7)} ${pct}%, rgba(255,255,255,0.06) ${pct}%)`,
+                    background: `linear-gradient(to right, ${GA(0.7)} ${pct}%, rgba(255,255,255,0.07) ${pct}%)`,
                     accentColor: G,
                   }}
                   data-testid="input-count-slider"
                 />
               </div>
               <div
-                className="w-9 h-7 rounded-md flex items-center justify-center text-sm font-mono font-bold flex-shrink-0"
-                style={{ background: GA(0.08), border: `1px solid ${GA(0.3)}`, color: G, textShadow: `0 0 8px ${G}`, boxShadow: `0 0 10px ${GA(0.1)} inset` }}
+                className="w-11 h-8 rounded-lg flex items-center justify-center text-base font-mono font-bold flex-shrink-0"
+                style={{ background: GA(0.08), border: `1px solid ${GA(0.35)}`, color: G, textShadow: `0 0 10px ${G}`, boxShadow: `0 0 12px ${GA(0.1)} inset` }}
               >
                 {count}
               </div>
             </div>
             {isBulk && (
-              <p className="text-[9px] font-mono mt-1.5 flex items-center gap-1" style={{ color: GA(0.3) }}>
-                <Layers className="w-2.5 h-2.5" />
+              <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: GA(0.32) }}>
+                <Layers className="w-3 h-3" />
                 bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
               </p>
             )}
@@ -259,14 +268,14 @@ export default function ReplitCreate() {
             <>
               {availableOutlookAccounts.length > 0 && (
                 <div>
-                  <label className="block text-[9px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.35) }}>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
                     Stored Outlook Account
                   </label>
                   <select
                     value={selectedOutlookId}
                     onChange={(e) => handleOutlookSelect(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2 text-[11px] font-mono focus:outline-none"
-                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.15)}`, color: "rgba(255,255,255,0.7)", caretColor: G }}
+                    className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.18)}`, color: "rgba(255,255,255,0.75)" }}
                     data-testid="select-outlook-account"
                   >
                     <option value="">— Select account —</option>
@@ -278,44 +287,46 @@ export default function ReplitCreate() {
               )}
 
               <div>
-                <label className="block text-[9px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.35) }}>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
                   <Mail className="w-2.5 h-2.5 inline mr-1" />
                   Outlook Email
                 </label>
                 <div
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 transition-all"
-                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.12)}` }}
+                  className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}
                 >
-                  <Mail className="w-3 h-3 flex-shrink-0" style={{ color: GA(0.35) }} />
+                  <Mail className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
                   <input
                     type="email"
                     value={outlookEmail}
                     onChange={(e) => setOutlookEmail(e.target.value)}
+                    onKeyDown={() => sounds.keypress()}
                     placeholder="yourname@outlook.com"
-                    className="bg-transparent flex-1 text-[11px] font-mono focus:outline-none"
-                    style={{ color: "rgba(255,255,255,0.75)", caretColor: G }}
+                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.8)", caretColor: G }}
                     data-testid="input-outlook-email"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[9px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.35) }}>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
                   <Key className="w-2.5 h-2.5 inline mr-1" />
                   Outlook Password
                 </label>
                 <div
-                  className="flex items-center gap-2 rounded-lg px-3 py-2"
-                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.12)}` }}
+                  className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}
                 >
-                  <Key className="w-3 h-3 flex-shrink-0" style={{ color: GA(0.35) }} />
+                  <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
                   <input
                     type="password"
                     value={outlookPassword}
                     onChange={(e) => setOutlookPassword(e.target.value)}
+                    onKeyDown={() => sounds.keypress()}
                     placeholder="••••••••"
-                    className="bg-transparent flex-1 text-[11px] font-mono focus:outline-none"
-                    style={{ color: "rgba(255,255,255,0.75)", caretColor: G }}
+                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.8)", caretColor: G }}
                     data-testid="input-outlook-password"
                   />
                 </div>
@@ -327,23 +338,23 @@ export default function ReplitCreate() {
           <button
             onClick={handleCreate}
             disabled={running || !canCreate}
-            className="relative w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-[11px] font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+            className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
             style={{
               background: running || !canCreate
                 ? GA(0.04)
-                : `linear-gradient(135deg, ${GA(0.18)}, ${GA(0.08)})`,
-              border: `1px solid ${running || !canCreate ? GA(0.08) : GA(0.45)}`,
+                : `linear-gradient(135deg, ${GA(0.2)}, ${GA(0.08)})`,
+              border: `1px solid ${running || !canCreate ? GA(0.08) : GA(0.5)}`,
               color: running || !canCreate ? GA(0.25) : G,
-              textShadow: running || !canCreate ? "none" : `0 0 12px ${G}`,
-              boxShadow: running || !canCreate ? "none" : `0 0 20px ${GA(0.08)}, inset 0 1px 0 ${GA(0.1)}`,
+              textShadow: running || !canCreate ? "none" : `0 0 14px ${G}`,
+              boxShadow: running || !canCreate ? "none" : `0 0 25px ${GA(0.1)}, inset 0 1px 0 ${GA(0.12)}`,
               cursor: running || !canCreate ? "not-allowed" : "pointer",
             }}
             data-testid="button-create-replit"
           >
             {!(running || !canCreate) && (
-              <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.02) 2px, rgba(0,255,65,0.02) 4px)" }} />
+              <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.025) 2px, rgba(0,255,65,0.025) 4px)" }} />
             )}
-            <Play className={`w-3.5 h-3.5 relative z-10 ${running ? "animate-pulse" : ""}`} />
+            <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
             <span className="relative z-10">
               {running
                 ? totalCount > 1
@@ -357,18 +368,18 @@ export default function ReplitCreate() {
 
           {/* Progress bar */}
           {running && totalCount > 1 && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[9px] font-mono" style={{ color: GA(0.35) }}>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono" style={{ color: GA(0.38) }}>
                 <span>progress</span>
-                <span style={{ color: G }}>{completedCount}/{totalCount}</span>
+                <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{completedCount}/{totalCount}</span>
               </div>
-              <div className="h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{
                     width: `${(completedCount / totalCount) * 100}%`,
                     background: `linear-gradient(90deg, ${G}, rgba(0,200,50,0.7))`,
-                    boxShadow: `0 0 8px ${GA(0.6)}`,
+                    boxShadow: `0 0 10px ${GA(0.7)}`,
                   }}
                 />
               </div>
@@ -380,41 +391,41 @@ export default function ReplitCreate() {
         <div className="min-w-0">
           <div
             className="rounded-xl overflow-hidden flex flex-col"
-            style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${GA(0.1)}`, boxShadow: `0 0 40px ${GA(0.03)}` }}
+            style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${GA(0.12)}`, boxShadow: `0 0 40px ${GA(0.03)}` }}
           >
             {/* Terminal title bar */}
             <div
-              className="flex items-center justify-between px-3.5 py-2 flex-shrink-0"
+              className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
               style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.08)}` }}
             >
-              <div className="flex items-center gap-2">
-                <Radio className="w-2.5 h-2.5" style={{ color: running ? G : GA(0.25), filter: running ? `drop-shadow(0 0 4px ${G})` : "none" }} />
-                <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: GA(0.4) }}>live_output</span>
+              <div className="flex items-center gap-2.5">
+                <Radio className="w-3 h-3" style={{ color: running ? G : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${G})` : "none" }} />
+                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.45) }}>live_output</span>
                 {running && (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
-                    <span className="text-[8px] font-mono" style={{ color: GA(0.6) }}>RUNNING</span>
+                    <span className="text-[9px] font-mono font-bold" style={{ color: GA(0.65) }}>RUNNING</span>
                   </div>
                 )}
               </div>
               <div className="flex gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ background: "rgba(255,59,48,0.5)" }} />
-                <span className="w-2 h-2 rounded-full" style={{ background: "rgba(255,149,0,0.5)" }} />
-                <span className="w-2 h-2 rounded-full" style={{ background: `${GA(0.5)}` }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,59,48,0.55)" }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,149,0,0.55)" }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: GA(0.55) }} />
               </div>
             </div>
 
             {/* Log body */}
             <div
-              className="h-96 overflow-y-auto overflow-x-hidden p-3 space-y-px font-mono"
-              style={{ wordBreak: "break-all", overflowWrap: "anywhere" }}
+              className="overflow-y-auto overflow-x-hidden p-4 space-y-0.5 font-mono"
+              style={{ height: "420px", wordBreak: "break-all", overflowWrap: "anywhere" }}
               data-testid="container-logs"
             >
               {logs.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center gap-3">
-                  <div className="text-center space-y-1">
-                    <p className="text-[10px] font-mono" style={{ color: GA(0.2) }}>{">"}_</p>
-                    <p className="text-[9px] font-mono" style={{ color: GA(0.15) }}>waiting for output...</p>
+                  <div className="text-center space-y-1.5">
+                    <p className="text-[11px] font-mono" style={{ color: GA(0.22) }}>{">"}_</p>
+                    <p className="text-[10px] font-mono" style={{ color: GA(0.16) }}>waiting for output...</p>
                   </div>
                 </div>
               ) : (
@@ -424,12 +435,12 @@ export default function ReplitCreate() {
                   return (
                     <div
                       key={i}
-                      className={`flex items-start gap-1.5 py-px min-w-0 ${isSeparator ? "mt-1.5 mb-0.5 opacity-30" : ""}`}
+                      className={`flex items-start gap-2 min-w-0 ${isSeparator ? "mt-2 mb-1 opacity-30" : "py-px"}`}
                     >
-                      <span className="text-[8.5px] flex-shrink-0 mt-px tabular-nums" style={{ color: GA(0.2) }}>{line.time}</span>
-                      <span className="text-[9px] flex-shrink-0 mt-px w-2.5 text-center font-bold" style={{ color }}>{prefix}</span>
+                      <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: GA(0.22) }}>{line.time}</span>
+                      <span className="text-[10px] flex-shrink-0 mt-0.5 w-3 text-center font-bold" style={{ color }}>{prefix}</span>
                       <span
-                        className="text-[10px] leading-relaxed break-words min-w-0 overflow-hidden"
+                        className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden"
                         style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}
                       >
                         {line.text}
@@ -443,14 +454,20 @@ export default function ReplitCreate() {
 
             {/* Terminal footer */}
             <div
-              className="px-3.5 py-1.5 flex items-center gap-2"
-              style={{ background: GA(0.02), borderTop: `1px solid ${GA(0.06)}` }}
+              className="px-4 py-2 flex items-center gap-2"
+              style={{ background: GA(0.02), borderTop: `1px solid ${GA(0.07)}` }}
             >
-              <span className="text-[8px] font-mono" style={{ color: GA(0.2) }}>addison@panel:~$</span>
-              <span className="text-[8px] font-mono" style={{ color: GA(0.35) }}>
+              <span className="text-[9px] font-mono" style={{ color: GA(0.25) }}>addison@panel:~$</span>
+              <span className="text-[9px] font-mono" style={{ color: GA(0.4) }}>
                 {running ? "executing replit_create..." : "ready"}
               </span>
-              <span className="w-1.5 h-2.5 ml-px" style={{ background: tick && !running ? G : "transparent", boxShadow: tick && !running ? `0 0 6px ${G}` : "none" }} />
+              <span
+                className="w-1.5 h-3 ml-px"
+                style={{
+                  background: tick && !running ? G : "transparent",
+                  boxShadow: tick && !running ? `0 0 6px ${G}` : "none",
+                }}
+              />
             </div>
           </div>
         </div>
