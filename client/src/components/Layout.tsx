@@ -17,6 +17,7 @@ const TM_SUBNAV = [
   { href: "/admin/tm-live-alerts", label: "Live Alerts", icon: Bell },
   { href: "/admin/tm-tracked-events", label: "Tracked Events", icon: Bookmark },
   { href: "/admin/tm-settings", label: "Settings", icon: SlidersHorizontal },
+  { href: "/admin/my-cards", label: "My Cards", icon: CreditCard },
 ];
 
 const TAG_STYLES: Record<string, { bg: string; text: string; dot: string; glow: string }> = {
@@ -127,7 +128,8 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
   const [editName, setEditName] = useState(user.panelName || "Addison Panel");
   const [saving, setSaving] = useState(false);
   const [time, setTime] = useState(new Date());
-  const [tmExpanded, setTmExpanded] = useState(() => location.startsWith("/admin/tm-"));
+  const isTmRoute = location.startsWith("/admin/tm-") || location === "/admin/my-cards";
+  const [tmExpanded, setTmExpanded] = useState(() => location.startsWith("/admin/tm-") || location === "/admin/my-cards");
   const [uptime, setUptime] = useState(0);
   const startTime = useRef(Date.now());
 
@@ -168,7 +170,6 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin/email-workspace", label: "Email Workspace", icon: Mail, tag: "NET" },
     { href: "/admin/billing", label: "Billing", icon: Receipt, tag: "FIN" },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet, tag: "FIN" },
-    { href: "/admin/my-cards", label: "My Cards", icon: CreditCard, tag: "CRD" },
     ...(user.role === "superadmin" ? [
       { href: "/admin/private-account", label: "Private Account", icon: Shield, tag: "PVT" },
       { href: "/admin/earnings", label: "Earnings", icon: TrendingUp, tag: "ADM" },
@@ -317,14 +318,14 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
               onClick={() => { setTmExpanded((v) => !v); sounds.navigate(); }}
               onMouseEnter={() => sounds.hover()}
               className="relative flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg cursor-pointer transition-all duration-200"
-              style={location.startsWith("/admin/tm-") ? {
+              style={isTmRoute ? {
                 background: "linear-gradient(135deg, rgba(0,255,65,0.14) 0%, rgba(0,255,65,0.05) 100%)",
                 border: "1px solid rgba(0,255,65,0.28)",
                 boxShadow: "inset 0 0 24px rgba(0,255,65,0.06), 0 2px 12px rgba(0,255,65,0.08)",
               } : { border: "1px solid transparent" }}
               data-testid="nav-ticket-master"
             >
-              {location.startsWith("/admin/tm-") && (
+              {isTmRoute && (
                 <>
                   <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full" style={{ height: "55%", background: "linear-gradient(180deg, #00ff41, #00ff4180)", boxShadow: "0 0 10px #00ff41, 0 0 20px rgba(0,255,65,0.3)" }} />
                   <div className="absolute inset-0 rounded-lg opacity-30" style={{ background: "radial-gradient(ellipse at left center, rgba(0,255,65,0.2), transparent 70%)" }} />
@@ -332,14 +333,14 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
               )}
               <div
                 className="shrink-0 w-[26px] h-[26px] rounded-lg flex items-center justify-center"
-                style={location.startsWith("/admin/tm-")
+                style={isTmRoute
                   ? { background: "rgba(0,255,65,0.18)", border: "1px solid rgba(0,255,65,0.35)", boxShadow: "0 0 10px rgba(0,255,65,0.2)" }
                   : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }
                 }
               >
-                <Ticket className="w-[12px] h-[12px]" style={{ color: location.startsWith("/admin/tm-") ? "#00ff41" : "rgba(255,255,255,0.25)" }} />
+                <Ticket className="w-[12px] h-[12px]" style={{ color: isTmRoute ? "#00ff41" : "rgba(255,255,255,0.25)" }} />
               </div>
-              <span className="flex-1 font-mono text-[11.5px] font-medium" style={{ color: location.startsWith("/admin/tm-") ? "#f1f5f9" : "rgba(255,255,255,0.3)" }}>Ticket Master</span>
+              <span className="flex-1 font-mono text-[11.5px] font-medium" style={{ color: isTmRoute ? "#f1f5f9" : "rgba(255,255,255,0.3)" }}>Ticket Master</span>
               <TagBadge tag="TKT" />
               <ChevronRight className="w-3 h-3 transition-transform duration-250 ml-0.5" style={{ transform: tmExpanded ? "rotate(90deg)" : "rotate(0deg)", color: tmExpanded ? "rgba(0,255,65,0.5)" : "rgba(255,255,255,0.15)" }} />
             </div>
