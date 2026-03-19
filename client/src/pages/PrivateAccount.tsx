@@ -670,113 +670,141 @@ export default function PrivateAccount() {
   const activeZenrows = zenrowsKeys.filter((k) => k.status === "active").length;
   const activeJobs = Object.values(zenrowsRegJobs).filter((j) => j.status !== "running" || j.logs.length > 0);
 
+  const statCards = [
+    {
+      id: "outlook" as TabType,
+      label: "Outlook Accounts",
+      count: outlookAccounts.length,
+      sub: `${activeOutlook} active`,
+      color: "#3b82f6",
+      glow: "rgba(59,130,246,0.18)",
+      border: "rgba(59,130,246,0.25)",
+      textColor: "text-blue-400",
+      icon: <Mail className="w-4 h-4" />,
+      testId: "card-outlook-summary",
+    },
+    {
+      id: "zenrows" as TabType,
+      label: "Proxy API Stock",
+      count: zenrowsKeys.length,
+      sub: `${activeZenrows} active`,
+      color: "#a855f7",
+      glow: "rgba(168,85,247,0.18)",
+      border: "rgba(168,85,247,0.25)",
+      textColor: "text-purple-400",
+      icon: <Key className="w-4 h-4" />,
+      testId: "card-zenrows-summary",
+    },
+    {
+      id: "gmail" as TabType,
+      label: "Gmail Accounts",
+      count: gmailAccounts.length,
+      sub: `${gmailAccounts.filter((a) => a.status === "active").length} active`,
+      color: "#ef4444",
+      glow: "rgba(239,68,68,0.18)",
+      border: "rgba(239,68,68,0.25)",
+      textColor: "text-red-400",
+      icon: <Mail className="w-4 h-4" />,
+      testId: "card-gmail-summary",
+    },
+    {
+      id: "replit" as TabType,
+      label: "Replit Accounts",
+      count: replitAccounts.length,
+      sub: `${replitAccounts.filter((a) => a.status === "created").length} ready`,
+      color: "#7c3aed",
+      glow: "rgba(124,58,237,0.18)",
+      border: "rgba(124,58,237,0.25)",
+      textColor: "text-violet-400",
+      icon: <Code2 className="w-4 h-4" />,
+      testId: "card-replit-summary",
+    },
+    {
+      id: "lovable" as TabType,
+      label: "Lovable Accounts",
+      count: lovableAccounts.length,
+      sub: `${lovableAccounts.filter((a) => a.status === "created").length} ready`,
+      color: "#ec4899",
+      glow: "rgba(236,72,153,0.18)",
+      border: "rgba(236,72,153,0.25)",
+      textColor: "text-pink-400",
+      icon: <Shield className="w-4 h-4" />,
+      testId: "card-lovable-summary",
+    },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold font-mono text-emerald-50 flex items-center gap-2" data-testid="text-page-title">
-            <Shield className="w-5 h-5 text-emerald-400" />
-            Private Account
-          </h1>
-          <p className="text-xs text-zinc-500 font-mono mt-1">Superadmin private account stock management</p>
+    <div className="space-y-5">
+      {/* ── HEADER BANNER ── */}
+      <div className="relative rounded-xl overflow-hidden" style={{ background: "linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(10,10,20,0.98) 100%)", border: "1px solid rgba(0,255,65,0.12)", boxShadow: "0 0 40px rgba(0,255,65,0.04) inset" }}>
+        {/* scan-line overlay */}
+        <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,255,65,0.015) 3px, rgba(0,255,65,0.015) 4px)" }} />
+        {/* left glow */}
+        <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: "linear-gradient(180deg, #00ff41 0%, #00bfff 50%, #ec4899 100%)" }} />
+        <div className="pl-6 pr-5 py-5 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: "rgba(0,255,65,0.06)", border: "1px solid rgba(0,255,65,0.2)", boxShadow: "0 0 20px rgba(0,255,65,0.15)" }}>
+                <Shield className="w-5 h-5 text-emerald-400" />
+              </div>
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: "0 0 6px #00ff41" }} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-black font-mono tracking-tight" style={{ background: "linear-gradient(90deg, #00ff41 0%, #00bfff 60%, #ec4899 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }} data-testid="text-page-title">
+                  PRIVATE ACCOUNT
+                </h1>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border" style={{ color: "#00ff41", borderColor: "rgba(0,255,65,0.3)", background: "rgba(0,255,65,0.06)" }}>SUPERADMIN</span>
+              </div>
+              <p className="text-[10px] font-mono mt-0.5" style={{ color: "rgba(0,255,65,0.45)" }}>&#9632; secure account stock management system &#9632; {outlookAccounts.length + gmailAccounts.length + replitAccounts.length + lovableAccounts.length} total assets</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="font-mono text-xs border gap-1.5"
+            style={{ color: "rgba(0,255,65,0.7)", borderColor: "rgba(0,255,65,0.15)", background: "rgba(0,255,65,0.04)" }}
+            onClick={() => { fetchOutlook(); fetchZenrows(); fetchGmail(); fetchReplit(); sounds.navigate(); }}
+            data-testid="button-refresh-private"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Refresh
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/5 font-mono text-xs"
-          onClick={() => { fetchOutlook(); fetchZenrows(); fetchGmail(); fetchReplit(); sounds.navigate(); }}
-          data-testid="button-refresh-private"
-        >
-          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-          Refresh
-        </Button>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("outlook"); sounds.hover(); }} data-testid="card-outlook-summary">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)" }}>
-                <Mail className="w-5 h-5 text-blue-400" />
+      {/* ── STAT CARDS ── */}
+      <div className="grid grid-cols-5 gap-3">
+        {statCards.map((s) => (
+          <div
+            key={s.id}
+            onClick={() => { setTab(s.id); sounds.hover(); }}
+            data-testid={s.testId}
+            className="relative rounded-xl cursor-pointer group overflow-hidden transition-all duration-200"
+            style={{
+              background: tab === s.id ? `linear-gradient(135deg, ${s.glow} 0%, rgba(0,0,0,0.6) 100%)` : "rgba(0,0,0,0.35)",
+              border: `1px solid ${tab === s.id ? s.border : "rgba(255,255,255,0.06)"}`,
+              boxShadow: tab === s.id ? `0 0 24px ${s.glow}` : "none",
+            }}
+          >
+            {/* top accent bar */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-xl transition-all duration-200" style={{ background: tab === s.id ? `linear-gradient(90deg, transparent, ${s.color}, transparent)` : "transparent" }} />
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200" style={{ background: `${s.glow}`, border: `1px solid ${s.border}`, color: s.color }}>
+                  {s.icon}
+                </div>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full transition-all duration-200" style={{ color: s.color, background: `${s.glow}`, border: `1px solid ${s.border}` }}>
+                  {s.sub}
+                </span>
               </div>
-              <div>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Outlook Accounts</p>
-                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-outlook-count">{outlookAccounts.length}</p>
-              </div>
-              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
-                {activeOutlook} active
-              </Badge>
+              <p className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>{s.label}</p>
+              <p className="text-2xl font-black font-mono leading-none transition-all duration-200" style={{ color: tab === s.id ? s.color : "#f1f5f9" }} data-testid={`text-${s.id}-count`}>
+                {s.count.toString().padStart(3, "0")}
+              </p>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("zenrows"); sounds.hover(); }} data-testid="card-zenrows-summary">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,176,0,0.08)", border: "1px solid rgba(255,176,0,0.15)" }}>
-                <Key className="w-5 h-5 text-purple-400" />
-              </div>
-              <div>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Proxy API Stock</p>
-                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-zenrows-count">{zenrowsKeys.length}</p>
-              </div>
-              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
-                {activeZenrows} active
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-emerald-500/10 bg-black/20 cursor-pointer transition-all hover:border-emerald-500/25" onClick={() => { setTab("gmail"); sounds.hover(); }} data-testid="card-gmail-summary">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(234,67,53,0.08)", border: "1px solid rgba(234,67,53,0.15)" }}>
-                <Mail className="w-5 h-5 text-red-400" />
-              </div>
-              <div>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Gmail Accounts</p>
-                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-gmail-count">{gmailAccounts.length}</p>
-              </div>
-              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-emerald-500/20 text-emerald-400">
-                {gmailAccounts.filter((a) => a.status === "active").length} active
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-violet-500/10 bg-black/20 cursor-pointer transition-all hover:border-violet-500/25" onClick={() => { setTab("replit"); sounds.hover(); }} data-testid="card-replit-summary">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.15)" }}>
-                <Code2 className="w-5 h-5 text-violet-400" />
-              </div>
-              <div>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Replit Accounts</p>
-                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-replit-count">{replitAccounts.length}</p>
-              </div>
-              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-violet-500/20 text-violet-400">
-                {replitAccounts.filter((a) => a.status === "created").length} ready
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-pink-500/10 bg-black/20 cursor-pointer transition-all hover:border-pink-500/25" onClick={() => { setTab("lovable"); sounds.hover(); }} data-testid="card-lovable-summary">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "rgba(236,72,153,0.08)", border: "1px solid rgba(236,72,153,0.15)" }}>
-                <Mail className="w-5 h-5 text-pink-400" />
-              </div>
-              <div>
-                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Lovable Accounts</p>
-                <p className="text-xl font-bold text-emerald-50 font-mono" data-testid="text-lovable-count">{lovableAccounts.length}</p>
-              </div>
-              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-pink-500/20 text-pink-400">
-                {lovableAccounts.filter((a) => a.status === "created").length} ready
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        ))}
       </div>
 
       {activeJobs.length > 0 && (
@@ -834,57 +862,26 @@ export default function PrivateAccount() {
         </div>
       )}
 
-      <div className="flex gap-2">
-        <Button
-          variant={tab === "outlook" ? "default" : "ghost"}
-          size="sm"
-          className={`font-mono text-xs ${tab === "outlook" ? "bg-blue-500/15 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
-          onClick={() => { setTab("outlook"); sounds.hover(); }}
-          data-testid="tab-outlook"
-        >
-          <Mail className="w-3.5 h-3.5 mr-1.5" />
-          Outlook Accounts
-        </Button>
-        <Button
-          variant={tab === "zenrows" ? "default" : "ghost"}
-          size="sm"
-          className={`font-mono text-xs ${tab === "zenrows" ? "bg-purple-500/15 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
-          onClick={() => { setTab("zenrows"); sounds.hover(); }}
-          data-testid="tab-zenrows"
-        >
-          <Key className="w-3.5 h-3.5 mr-1.5" />
-          Proxy API Stock
-        </Button>
-        <Button
-          variant={tab === "gmail" ? "default" : "ghost"}
-          size="sm"
-          className={`font-mono text-xs ${tab === "gmail" ? "bg-red-500/15 text-red-400 border border-red-500/20 hover:bg-red-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
-          onClick={() => { setTab("gmail"); sounds.hover(); }}
-          data-testid="tab-gmail"
-        >
-          <Mail className="w-3.5 h-3.5 mr-1.5" />
-          Gmail Accounts
-        </Button>
-        <Button
-          variant={tab === "replit" ? "default" : "ghost"}
-          size="sm"
-          className={`font-mono text-xs ${tab === "replit" ? "bg-violet-500/15 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
-          onClick={() => { setTab("replit"); sounds.hover(); }}
-          data-testid="tab-replit"
-        >
-          <Code2 className="w-3.5 h-3.5 mr-1.5" />
-          Replit Accounts
-        </Button>
-        <Button
-          variant={tab === "lovable" ? "default" : "ghost"}
-          size="sm"
-          className={`font-mono text-xs ${tab === "lovable" ? "bg-pink-500/15 text-pink-400 border border-pink-500/20 hover:bg-pink-500/20" : "text-zinc-500 hover:text-zinc-300"}`}
-          onClick={() => { setTab("lovable"); sounds.hover(); }}
-          data-testid="tab-lovable"
-        >
-          <Mail className="w-3.5 h-3.5 mr-1.5" />
-          Lovable Accounts
-        </Button>
+      {/* ── TAB BAR ── */}
+      <div className="flex gap-1 p-1 rounded-xl" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.05)" }}>
+        {statCards.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => { setTab(s.id); sounds.hover(); }}
+            data-testid={`tab-${s.id}`}
+            className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-[11px] font-medium transition-all duration-200 flex-1 justify-center"
+            style={{
+              background: tab === s.id ? s.glow : "transparent",
+              color: tab === s.id ? s.color : "rgba(255,255,255,0.3)",
+              border: tab === s.id ? `1px solid ${s.border}` : "1px solid transparent",
+              boxShadow: tab === s.id ? `0 0 12px ${s.glow}` : "none",
+            }}
+          >
+            <span style={{ color: tab === s.id ? s.color : "rgba(255,255,255,0.3)" }}>{s.icon}</span>
+            {s.label}
+            {tab === s.id && <span className="w-1.5 h-1.5 rounded-full animate-pulse ml-0.5" style={{ background: s.color, boxShadow: `0 0 4px ${s.color}` }} />}
+          </button>
+        ))}
       </div>
 
       {tab === "outlook" && (
