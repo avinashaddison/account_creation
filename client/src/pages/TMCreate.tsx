@@ -14,8 +14,32 @@ import {
   Rocket, ArrowLeft, Hash, DollarSign, Loader2, CheckCircle2, XCircle,
   Terminal, Ticket, AlertTriangle, Globe, Filter, User, Mail, Phone,
   Shield, Clock, ChevronDown, Copy, Wallet, Download, Eye, EyeOff,
-  Key, ExternalLink, StopCircle
+  Key, ExternalLink, StopCircle, Music, Plus, ChevronRight, Calendar, MapPin
 } from "lucide-react";
+
+type TMEvent = {
+  id: string;
+  name: string;
+  subtitle: string;
+  date: string;
+  venue: string;
+  color: string;
+  glow: string;
+  icon: React.ReactNode;
+};
+
+const TM_EVENTS: TMEvent[] = [
+  {
+    id: "shakira",
+    name: "Shakira",
+    subtitle: "Las Mujeres Ya No Lloran World Tour",
+    date: "2025",
+    venue: "North America",
+    color: "from-rose-500/20 to-amber-500/10 border-rose-500/25",
+    glow: "shadow-rose-500/10",
+    icon: <Music className="w-6 h-6 text-rose-400" />,
+  },
+];
 
 const QUICK_AMOUNTS = [1, 3, 5, 10];
 
@@ -63,6 +87,7 @@ function getStepFromLogs(logs: LogEntry[], accountId: string): { step: string; c
 
 export default function TMCreate() {
   const { checking } = useServiceGuard("ticketmaster");
+  const [selectedEvent, setSelectedEvent] = useState<TMEvent | null>(null);
   const [count, setCount] = useState(1);
   const [proxyUrl, setProxyUrl] = useState("");
   const [isRunning, setIsRunning] = useState(false);
@@ -233,20 +258,94 @@ export default function TMCreate() {
 
   if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
 
+  // Event picker screen — shown before the creation UI
+  if (!selectedEvent) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3">
+          <Link href="/admin/create-server">
+            <div className="p-2 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors" data-testid="link-back-to-servers">
+              <ArrowLeft className="w-4 h-4" />
+            </div>
+          </Link>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight text-white">Ticketmaster Account Creator</h1>
+              <Badge className="bg-sky-500/10 text-sky-400 border-sky-500/20 hover:bg-sky-500/15 text-[10px]">TM</Badge>
+            </div>
+            <p className="text-zinc-500 text-sm mt-0.5">Select an event to create accounts for</p>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.04]">
+            <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-sm font-semibold text-emerald-400" data-testid="text-tm-wallet">${walletBalance.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div className="max-w-2xl">
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">Available Events</p>
+          <div className="grid gap-3">
+            {TM_EVENTS.map((event) => (
+              <button
+                key={event.id}
+                onClick={() => setSelectedEvent(event)}
+                data-testid={`button-event-${event.id}`}
+                className={`w-full text-left rounded-xl bg-gradient-to-r ${event.color} border p-5 shadow-lg ${event.glow} hover:brightness-110 transition-all group`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-xl bg-white/[0.06] border border-white/[0.08]">
+                    {event.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-base font-bold text-white">{event.name}</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">{event.subtitle}</p>
+                    <div className="flex items-center gap-3 mt-2">
+                      <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                        <Calendar className="w-3 h-3" />{event.date}
+                      </span>
+                      <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                        <MapPin className="w-3 h-3" />{event.venue}
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-zinc-600 group-hover:text-zinc-400 group-hover:translate-x-0.5 transition-all" />
+                </div>
+              </button>
+            ))}
+
+            {/* Placeholder for future events */}
+            <div className="rounded-xl border border-dashed border-white/[0.06] p-5 flex items-center gap-4 opacity-40">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.05]">
+                <Plus className="w-6 h-6 text-zinc-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-500">More events coming soon</p>
+                <p className="text-xs text-zinc-600 mt-0.5">Additional presale events will appear here</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <Link href="/admin/create-server">
-          <div className="p-2 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors" data-testid="link-back-to-servers">
-            <ArrowLeft className="w-4 h-4" />
-          </div>
-        </Link>
+        <button
+          onClick={() => { setSelectedEvent(null); setAccounts([]); setLogs([]); setBatchId(null); batchIdRef.current = null; setIsRunning(false); setError(""); }}
+          data-testid="button-back-to-events"
+          className="p-2 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </button>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-tm-create-title">Ticketmaster Account Creator</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white" data-testid="text-tm-create-title">
+              {selectedEvent.name}
+            </h1>
             <Badge className="bg-sky-500/10 text-sky-400 border-sky-500/20 hover:bg-sky-500/15 text-[10px]">TM</Badge>
           </div>
-          <p className="text-zinc-500 text-sm mt-0.5">Automated Ticketmaster registration with email + phone verification</p>
+          <p className="text-zinc-500 text-sm mt-0.5">{selectedEvent.subtitle}</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.04]">
           <Wallet className="w-3.5 h-3.5 text-emerald-400" />
