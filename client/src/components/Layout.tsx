@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal, Zap, Activity, Radio, CreditCard } from "lucide-react";
+import { LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users, Wallet, Server, Pencil, Check, X, TrendingUp, ChevronRight, Terminal, Settings, Shield, Ticket, Search, Bell, Bookmark, SlidersHorizontal, Zap, Activity, Radio, CreditCard, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -164,6 +164,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin/email-workspace", label: "Email Workspace", icon: Mail, tag: "NET" },
     { href: "/admin/billing", label: "Billing", icon: Receipt, tag: "FIN" },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet, tag: "FIN" },
+    { href: "/admin/checkout-cards", label: "Checkout Cards", icon: ShoppingCart, tag: "CRD" },
     ...(user.role === "superadmin" ? [
       { href: "/admin/private-account", label: "Private Account", icon: Shield, tag: "PVT" },
       { href: "/admin/earnings", label: "Earnings", icon: TrendingUp, tag: "ADM" },

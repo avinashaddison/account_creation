@@ -2833,7 +2833,7 @@ export async function registerRoutes(
 
   app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { count = 1, couponCode } = req.body;
+      const { count = 1, couponCode, cardId } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 20);
       const userId = req.session.userId;
 
@@ -2852,6 +2852,15 @@ export async function registerRoutes(
       const bulkId = randomUUID().substring(0, 8);
       const batchId = `replit-bulk-${bulkId}`;
 
+      // Fetch card details if provided
+      let bulkCardDetails: import("./playwrightService").CardDetails | undefined;
+      if (cardId) {
+        const card = await storage.getSavedCard(cardId);
+        if (card) {
+          bulkCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail, otpEmailPassword: card.otpEmailPassword };
+        }
+      }
+
       batchOwners.set(batchId, userId);
       res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
 
@@ -2868,7 +2877,8 @@ export async function registerRoutes(
               acc.email,
               acc.password,
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
-              couponCode || undefined
+              couponCode || undefined,
+              bulkCardDetails
             );
             if (result.success) {
               try {
@@ -2908,7 +2918,7 @@ export async function registerRoutes(
 
   app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword, couponCode } = req.body;
+      const { outlookEmail, outlookPassword, couponCode, cardId } = req.body;
       if (!outlookEmail || !outlookPassword) {
         return res.status(400).json({ error: "Outlook email and password are required" });
       }
@@ -2925,6 +2935,15 @@ export async function registerRoutes(
       const createId = randomUUID().substring(0, 8);
       const batchId = `replit-create-${createId}`;
 
+      // Fetch card details if provided
+      let singleCardDetails: import("./playwrightService").CardDetails | undefined;
+      if (cardId) {
+        const card = await storage.getSavedCard(cardId);
+        if (card) {
+          singleCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail, otpEmailPassword: card.otpEmailPassword };
+        }
+      }
+
       batchOwners.set(batchId, userId);
       res.json({ success: true, createId, batchId, message: "Replit account creation started" });
 
@@ -2935,7 +2954,8 @@ export async function registerRoutes(
             outlookEmail,
             outlookPassword,
             (msg) => broadcastLog(batchId, createId, msg, userId),
-            couponCode || undefined
+            couponCode || undefined,
+            singleCardDetails
           );
 
           if (result.success) {
@@ -3375,7 +3395,7 @@ export async function registerRoutes(
 
   app.post("/api/my-cards", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
-    const { label, cardholderName, cardNumber, expiryMonth, expiryYear, cvv, cardType, notes } = req.body;
+    const { label, cardholderName, cardNumber, expiryMonth, expiryYear, cvv, cardType, notes, otpEmail, otpEmailPassword } = req.body;
     if (!cardholderName || !cardNumber || !expiryMonth || !expiryYear || !cvv) {
       return res.status(400).json({ error: "Missing required card fields" });
     }
@@ -3390,6 +3410,8 @@ export async function registerRoutes(
       cardType: cardType || "visa",
       notes: notes || null,
       isActive: true,
+      otpEmail: otpEmail || null,
+      otpEmailPassword: otpEmailPassword || null,
     });
     res.json(card);
   });

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -54,6 +54,7 @@ export default function ReplitCreate() {
   const [selectedOutlookId, setSelectedOutlookId] = useState("");
   const [count, setCount] = useState(1);
   const [couponCode, setCouponCode] = useState("");
+  const [selectedCardId, setSelectedCardId] = useState("");
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
@@ -64,6 +65,9 @@ export default function ReplitCreate() {
   const wsRef = useRef<WebSocket | null>(null);
   const activeBatchId = useRef<string | null>(null);
 
+  const { data: savedCards = [] } = useQuery<{ id: string; label: string; cardNumber: string; cardType: string }[]>({
+    queryKey: ["/api/my-cards"],
+  });
   const { data: outlookAccounts = [] } = useQuery<OutlookAccount[]>({
     queryKey: ["/api/private/outlook"],
   });
@@ -147,7 +151,7 @@ export default function ReplitCreate() {
     if (count > 1) {
       setTotalCount(count);
       try {
-        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, couponCode: couponCode.trim() || undefined });
+        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start bulk");
         activeBatchId.current = data.batchId;
@@ -168,7 +172,7 @@ export default function ReplitCreate() {
       }
       setTotalCount(1);
       try {
-        const res = await apiRequest("POST", "/api/replit-create", { outlookEmail, outlookPassword, couponCode: couponCode.trim() || undefined });
+        const res = await apiRequest("POST", "/api/replit-create", { outlookEmail, outlookPassword, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start");
         activeBatchId.current = data.batchId;
@@ -372,6 +376,39 @@ export default function ReplitCreate() {
               </p>
             )}
           </div>
+
+          {/* Checkout Card selector */}
+          {savedCards.length > 0 && (
+            <div>
+              <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: "rgba(100,210,255,0.4)" }}>
+                <CreditCard className="w-2.5 h-2.5 inline mr-1" />
+                Payment Card <span style={{ color: "rgba(100,210,255,0.2)" }}>(optional — for auto checkout)</span>
+              </label>
+              <select
+                value={selectedCardId}
+                onChange={(e) => { sounds.keypress(); setSelectedCardId(e.target.value); }}
+                className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                style={{
+                  background: "rgba(0,0,0,0.5)",
+                  border: `1px solid ${selectedCardId ? "rgba(100,210,255,0.4)" : "rgba(100,210,255,0.14)"}`,
+                  color: selectedCardId ? "rgba(100,210,255,0.9)" : "rgba(255,255,255,0.35)",
+                }}
+                data-testid="select-checkout-card"
+              >
+                <option value="">— Skip auto checkout —</option>
+                {savedCards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label} (•••• {c.cardNumber.replace(/\D/g, "").slice(-4)})
+                  </option>
+                ))}
+              </select>
+              {selectedCardId && (
+                <p className="text-[9px] font-mono mt-1.5" style={{ color: "rgba(100,210,255,0.3)" }}>
+                  After coupon applied → fills card in Stripe iframe → submits → handles 3DS OTP automatically
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Checkout URL result */}
           {checkoutUrl && (

@@ -10397,12 +10397,32 @@ async function handleReplitOnboarding(page: any, log: (msg: string) => void): Pr
   }
 }
 
+export interface CardDetails {
+  id: string;
+  cardNumber: string;
+  expiryMonth: string;
+  expiryYear: string;
+  cvv: string;
+  cardholderName: string;
+  otpEmail?: string | null;
+  otpEmailPassword?: string | null;
+}
+
+const INDIAN_ADDRESSES = [
+  { line1: "42 MG Road", city: "Bengaluru", state: "Karnataka", zip: "560001", phone: "+918041234567" },
+  { line1: "15 Connaught Place", city: "New Delhi", state: "Delhi", zip: "110001", phone: "+911123456789" },
+  { line1: "22 Marine Drive", city: "Mumbai", state: "Maharashtra", zip: "400020", phone: "+912222345678" },
+  { line1: "8 Park Street", city: "Kolkata", state: "West Bengal", zip: "700016", phone: "+913322345678" },
+  { line1: "14 Anna Salai", city: "Chennai", state: "Tamil Nadu", zip: "600002", phone: "+914422345678" },
+];
+
 export async function registerReplitAccount(
   outlookEmail: string,
   outlookPassword: string,
   log: (msg: string) => void,
-  couponCode?: string
-): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; error?: string }> {
+  couponCode?: string,
+  cardDetails?: CardDetails
+): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -10964,7 +10984,260 @@ export async function registerReplitAccount(
       }
     }
 
-    return { success: true, username, email: outlookEmail, password, checkoutUrl };
+    // ── Stripe card checkout step ──
+    let checkoutComplete = false;
+    if (cardDetails) {
+      try {
+        // If no coupon step ran, navigate to checkout first
+        if (!couponCode || !couponCode.trim()) {
+          log(`💳 Navigating to Replit Core checkout for card payment...`);
+          const checkoutPageUrl = "https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?source=onboarding-purchase-modal&successRedirectPath=%2F%7E&cancelRedirectPath=%2F%7E";
+          await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.waitForTimeout(8000);
+          checkoutUrl = page.url();
+        }
+
+        log(`💳 Filling card details in Stripe checkout...`);
+
+        // Pick a random Indian address
+        const addr = INDIAN_ADDRESSES[Math.floor(Math.random() * INDIAN_ADDRESSES.length)];
+
+        // Helper: fill Stripe iframe field
+        async function fillStripeField(names: string[], value: string) {
+          const frameSelectors = [
+            'iframe[name*="privateStripeFrame"]',
+            'iframe[name*="stripe"]',
+            'iframe[data-testid*="card"]',
+            'iframe[src*="stripe"]',
+          ];
+          for (const frameSel of frameSelectors) {
+            const frames = page.frames();
+            for (const frame of frames) {
+              const url = frame.url();
+              if (!url.includes("stripe") && !url.includes("js.stripe.com")) continue;
+              for (const name of names) {
+                try {
+                  const el = frame.locator(`[name="${name}"], input[placeholder*="${name}" i]`).first();
+                  const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
+                  if (visible) {
+                    await el.click();
+                    await el.fill(value);
+                    log(`  Filled Stripe field "${name}"`);
+                    return true;
+                  }
+                } catch {}
+              }
+            }
+          }
+          // Try main page too (some Stripe integrations)
+          for (const name of names) {
+            try {
+              const el = page.locator(`[name="${name}"], input[data-elements-stable-field-name="${name}"]`).first();
+              const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
+              if (visible) {
+                await el.click();
+                await el.fill(value);
+                log(`  Filled field "${name}" on main page`);
+                return true;
+              }
+            } catch {}
+          }
+          return false;
+        }
+
+        // Fill card number
+        const cardNum = cardDetails.cardNumber.replace(/\D/g, "");
+        const expiry = `${cardDetails.expiryMonth.padStart(2, "0")}${cardDetails.expiryYear.padStart(2, "0")}`;
+        await fillStripeField(["cardnumber", "card-number", "number"], cardNum);
+        await page.waitForTimeout(800);
+        await fillStripeField(["exp-date", "expiry", "card-expiry", "exp"], expiry);
+        await page.waitForTimeout(800);
+        await fillStripeField(["cvc", "cvv", "card-cvc", "security-code"], cardDetails.cvv);
+        await page.waitForTimeout(800);
+
+        // Fill cardholder name on main page
+        const nameSelectors = [
+          'input[name="billingName"]',
+          'input[name="cardholder-name"]',
+          'input[autocomplete="cc-name"]',
+          '[data-testid="billing-name"] input',
+          'input[placeholder*="Name on card" i]',
+          'input[placeholder*="Cardholder" i]',
+        ];
+        for (const sel of nameSelectors) {
+          try {
+            const el = page.locator(sel).first();
+            const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
+            if (visible) {
+              await el.fill(cardDetails.cardholderName);
+              log(`  Filled cardholder name`);
+              break;
+            }
+          } catch {}
+        }
+        await page.waitForTimeout(500);
+
+        // Fill billing address (India)
+        const countrySelectors = [
+          'select[name="billingCountry"]',
+          'select[autocomplete="billing country"]',
+          '[data-testid="billing-country"] select',
+        ];
+        for (const sel of countrySelectors) {
+          try {
+            const el = page.locator(sel).first();
+            const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
+            if (visible) {
+              await el.selectOption({ value: "IN" });
+              log(`  Selected country: India`);
+              break;
+            }
+          } catch {}
+        }
+        await page.waitForTimeout(1000);
+
+        const addrSelectors = [
+          ['input[name="billingAddressLine1"]', 'input[autocomplete="billing address-line1"]', 'input[placeholder*="Address line 1" i]'],
+          ['input[name="billingLocality"]', 'input[autocomplete="billing address-level2"]', 'input[placeholder*="City" i]'],
+          ['input[name="billingAdministrativeArea"]', 'select[autocomplete="billing address-level1"]', 'input[placeholder*="State" i]'],
+          ['input[name="billingPostalCode"]', 'input[autocomplete="billing postal-code"]', 'input[placeholder*="PIN" i]', 'input[placeholder*="Postal" i]'],
+          ['input[name="billingPhone"]', 'input[autocomplete="tel"]', 'input[type="tel"]'],
+        ];
+        const addrValues = [addr.line1, addr.city, addr.state, addr.zip, addr.phone];
+        for (let i = 0; i < addrSelectors.length; i++) {
+          for (const sel of addrSelectors[i]) {
+            try {
+              const el = page.locator(sel).first();
+              const visible = await el.isVisible({ timeout: 1500 }).catch(() => false);
+              if (visible) {
+                const tag = await el.evaluate((e: Element) => (e as HTMLElement).tagName.toLowerCase());
+                if (tag === "select") {
+                  await el.selectOption(addrValues[i]);
+                } else {
+                  await el.fill(addrValues[i]);
+                }
+                log(`  Filled billing field ${i + 1}: ${addrValues[i]}`);
+                break;
+              }
+            } catch {}
+          }
+          await page.waitForTimeout(300);
+        }
+
+        log(`  Billing address (India): ${addr.line1}, ${addr.city}, ${addr.state} ${addr.zip}`);
+        await page.waitForTimeout(1000);
+
+        // Submit
+        const submitSelectors = [
+          'button[data-testid="hosted-payment-submit-button"]',
+          'button[type="submit"]:has-text("Subscribe")',
+          'button[type="submit"]:has-text("Pay")',
+          'button[type="submit"]:has-text("Start")',
+          'button:has-text("Subscribe")',
+          'button:has-text("Pay now")',
+        ];
+        let submitted = false;
+        for (const sel of submitSelectors) {
+          try {
+            const el = page.locator(sel).first();
+            const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
+            if (visible) {
+              await el.click();
+              log(`🖱️ Clicked payment submit button`);
+              submitted = true;
+              break;
+            }
+          } catch {}
+        }
+
+        if (submitted) {
+          // Wait for either success redirect or 3DS challenge
+          log(`⏳ Waiting for payment response...`);
+          await page.waitForTimeout(5000);
+
+          const currentUrl = page.url();
+          const is3DS = await page.locator('iframe[name*="stripe3ds"], iframe[src*="3ds"], iframe[title*="challenge"], [data-testid*="3ds"]').isVisible({ timeout: 3000 }).catch(() => false);
+
+          if (is3DS || currentUrl.includes("3ds")) {
+            log(`🔐 3D Secure challenge detected — fetching OTP from email...`);
+
+            if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
+              // Fetch OTP via IMAP
+              let otp: string | null = null;
+              try {
+                const { ImapFlow } = await import("imapflow");
+                const client = new ImapFlow({
+                  host: "imap.gmail.com",
+                  port: 993,
+                  secure: true,
+                  auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword },
+                  logger: false,
+                });
+                await client.connect();
+                await client.mailboxOpen("INBOX");
+                const since = new Date(Date.now() - 5 * 60 * 1000);
+                const messages = client.fetch({ seen: false, since }, { source: true });
+                for await (const msg of messages) {
+                  const raw = msg.source.toString();
+                  const otpMatch = raw.match(/\b(\d{4,8})\b/g);
+                  if (otpMatch) {
+                    otp = otpMatch[otpMatch.length - 1];
+                    break;
+                  }
+                }
+                await client.logout();
+              } catch (imapErr: any) {
+                log(`⚠️ IMAP error: ${(imapErr.message || "").substring(0, 80)}`);
+              }
+
+              if (otp) {
+                log(`📬 OTP received: ${otp} — entering in 3DS frame...`);
+                // Try to find OTP field in 3DS iframes
+                const frames = page.frames();
+                for (const frame of frames) {
+                  try {
+                    const otpField = frame.locator('input[name="challengeDataEntry"], input[type="password"], input[type="text"]').first();
+                    const visible = await otpField.isVisible({ timeout: 2000 }).catch(() => false);
+                    if (visible) {
+                      await otpField.fill(otp);
+                      await page.waitForTimeout(500);
+                      const submitBtn = frame.locator('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Confirm")').first();
+                      const btnVisible = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
+                      if (btnVisible) {
+                        await submitBtn.click();
+                        log(`✅ 3DS OTP submitted`);
+                      }
+                      break;
+                    }
+                  } catch {}
+                }
+                await page.waitForTimeout(8000);
+              } else {
+                log(`⚠️ No OTP found in email — 3DS may require manual intervention`);
+              }
+            } else {
+              log(`⚠️ 3DS challenge detected but no OTP email configured for this card`);
+            }
+          }
+
+          // Check final URL for success
+          const finalUrl = page.url();
+          if (finalUrl.includes("replit.com") && !finalUrl.includes("stripe")) {
+            log(`✅ Payment successful! Redirected to: ${finalUrl.substring(0, 80)}`);
+            checkoutComplete = true;
+          } else {
+            log(`📍 Final URL: ${finalUrl.substring(0, 80)}`);
+            checkoutUrl = finalUrl;
+          }
+        } else {
+          log(`⚠️ Could not find payment submit button`);
+        }
+      } catch (cardErr: any) {
+        log(`⚠️ Card checkout error: ${(cardErr.message || "").substring(0, 200)}`);
+      }
+    }
+
+    return { success: true, username, email: outlookEmail, password, checkoutUrl, checkoutComplete };
 
   } catch (err: any) {
     log(`Error: ${(err.message || String(err)).substring(0, 200)}`);

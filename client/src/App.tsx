@@ -29,6 +29,7 @@ import AdobeCreate from "@/pages/AdobeCreate";
 import CardGenerator from "@/pages/CardGenerator";
 import MyCards from "@/pages/MyCards";
 import PrivateAccount from "@/pages/PrivateAccount";
+import CheckoutCards from "@/pages/CheckoutCards";
 import TMEventScanner from "@/pages/TMEventScanner";
 import TMLiveAlerts from "@/pages/TMLiveAlerts";
 import TMTrackedEvents from "@/pages/TMTrackedEvents";
@@ -76,6 +77,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/email-server"><Redirect to="/admin/email-workspace" /></Route>
         <Route path="/admin/email-workspace" component={EmailWorkspace} />
         <Route path="/admin/wallet" component={WalletPage} />
+        <Route path="/admin/checkout-cards" component={CheckoutCards} />
         {user.role === "superadmin" && (
           <>
             <Route path="/admin/earnings" component={Earnings} />

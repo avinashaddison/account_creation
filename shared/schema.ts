@@ -261,6 +261,8 @@ export const savedCards = pgTable("saved_cards", {
   cardType: text("card_type").notNull().default("visa"),
   notes: text("notes"),
   isActive: boolean("is_active").notNull().default(true),
+  otpEmail: text("otp_email"),
+  otpEmailPassword: text("otp_email_password"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
