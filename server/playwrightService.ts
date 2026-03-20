@@ -11777,17 +11777,17 @@ export async function registerReplitAccount(
               }
             }
 
-            // Check if this is a visible hCaptcha path (Stripe A/B test)
-            // Detect by looking for HCaptcha.html frame (NOT the invisible one, but the visible checkbox one)
+            // Always attempt hCaptcha solving in any 3DS context — Stripe requires it to complete
+            // Detection is broad: any hCaptcha frame variant (HCaptcha.html, hcaptcha-inner, or newassets widget)
             const isHCaptchaVisible = page.frames().some(f => {
               const u = f.url();
-              return u.includes("HCaptcha.html") || u.includes("hcaptcha-inner");
+              return u.includes("HCaptcha.html") || u.includes("hcaptcha-inner") || u.includes("newassets.hcaptcha.com");
             });
             const hasBankAcsFrame = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth") || f.url().includes("federalbank"));
 
             if (isHCaptchaVisible) {
-              // hCaptcha MUST be solved even when bank ACS is also present — Stripe requires both to pass
-              log(`🤖 hCaptcha visible challenge detected — solving via 2captcha/CapSolver (bankACS=${hasBankAcsFrame})...`);
+              // hCaptcha MUST be solved for Stripe to complete payment — even when bank ACS is also present
+              log(`🤖 hCaptcha detected (bankACS=${hasBankAcsFrame}) — solving via 2captcha/CapSolver...`);
               try {
                 // Extract sitekey from the HCaptcha iframe source
                 let hcaptchaSiteKey = "";

@@ -166,19 +166,18 @@ export async function solveHCaptcha(
   }
 }
 
-export async function solveHCaptchaWith2Captcha(
+// Generic hCaptcha solver using anti-captcha.com compatible JSON API
+// Supports: anti-captcha.com (preferred), 2captcha.com (fallback)
+async function solveHCaptchaViaJsonApi(
+  apiKey: string,
+  baseUrl: string,
+  serviceName: string,
   websiteURL: string,
   websiteKey: string
 ): Promise<CapSolverTaskResult> {
   try {
-    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`);
-    const apiKey = result.rows.length > 0 ? (result.rows[0].value as string) : "";
-    if (!apiKey) {
-      return { success: false, error: "2captcha API key not configured (set twocaptcha_api_key in settings)" };
-    }
-
-    console.log(`[2captcha] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
-    const createResp = await axios.post("https://api.2captcha.com/createTask", {
+    console.log(`[${serviceName}] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
+    const createResp = await axios.post(`${baseUrl}/createTask`, {
       clientKey: apiKey,
       task: {
         type: "HCaptchaTaskProxyless",
@@ -187,45 +186,73 @@ export async function solveHCaptchaWith2Captcha(
       },
     }, { timeout: 30000 });
 
+    console.log(`[${serviceName}] Create task response: ${JSON.stringify(createResp.data).substring(0, 300)}`);
+
     if (createResp.data.errorId !== 0) {
-      const errMsg = createResp.data.errorDescription || "Task creation failed";
-      console.log(`[2captcha] Task creation error: ${errMsg}`);
-      return { success: false, error: errMsg };
+      const errCode = createResp.data.errorCode || "";
+      const errMsg = createResp.data.errorDescription || createResp.data.errorCode || "Task creation failed";
+      console.log(`[${serviceName}] Task creation error [${errCode}]: ${errMsg}`);
+      return { success: false, error: `${errCode}: ${errMsg}` };
     }
 
     const taskId = createResp.data.taskId;
-    console.log(`[2captcha] Task created: ${taskId}`);
+    console.log(`[${serviceName}] Task created: ${taskId} — polling every 5s (max 300s)...`);
 
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 5000));
-      const resultResp = await axios.post("https://api.2captcha.com/getTaskResult", {
+      const resultResp = await axios.post(`${baseUrl}/getTaskResult`, {
         clientKey: apiKey,
         taskId,
       }, { timeout: 15000 });
 
       if (resultResp.data.errorId !== 0) {
         const errMsg = resultResp.data.errorDescription || "Polling error";
-        console.log(`[2captcha] Poll error: ${errMsg}`);
+        console.log(`[${serviceName}] Poll error: ${errMsg}`);
         return { success: false, error: errMsg, taskId };
       }
 
       if (resultResp.data.status === "ready") {
         const token = resultResp.data.solution?.gRecaptchaResponse ||
                       resultResp.data.solution?.token;
-        console.log(`[2captcha] Solved! Token length: ${token?.length || 0}`);
+        console.log(`[${serviceName}] ✅ Solved! Token length: ${token?.length || 0}`);
         return { success: true, token, taskId };
       }
 
       if (i % 6 === 0 && i > 0) {
-        console.log(`[2captcha] Still solving... (${i * 5}s elapsed)`);
+        console.log(`[${serviceName}] Still solving... (${i * 5}s elapsed)`);
       }
     }
-    return { success: false, error: "2captcha solving timeout (300s)" };
+    return { success: false, error: `${serviceName} solving timeout (300s)` };
   } catch (err: any) {
     const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 200) : "";
-    console.log(`[2captcha] Error: ${err.message} ${body}`);
+    console.log(`[${serviceName}] Network error: ${err.message} ${body}`);
     return { success: false, error: err.message };
   }
+}
+
+export async function solveHCaptchaWith2Captcha(
+  websiteURL: string,
+  websiteKey: string
+): Promise<CapSolverTaskResult> {
+  // Priority 1: anti-captcha.com (reliable hCaptcha support)
+  const acResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`);
+  const acKey = acResult.rows.length > 0 ? (acResult.rows[0].value as string) : "";
+  if (acKey) {
+    console.log(`[AntiCaptcha] Attempting hCaptcha solve via anti-captcha.com...`);
+    const result = await solveHCaptchaViaJsonApi(acKey, "https://api.anti-captcha.com", "AntiCaptcha", websiteURL, websiteKey);
+    if (result.success) return result;
+    console.log(`[AntiCaptcha] Failed: ${result.error} — trying 2captcha fallback...`);
+  }
+
+  // Priority 2: 2captcha.com fallback
+  const tcResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`);
+  const tcKey = tcResult.rows.length > 0 ? (tcResult.rows[0].value as string) : "";
+  if (tcKey) {
+    console.log(`[2captcha] Attempting hCaptcha solve via 2captcha.com...`);
+    return solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey);
+  }
+
+  return { success: false, error: "No CAPTCHA solver configured — add anti-captcha.com or 2captcha API key in Settings" };
 }
 
 export interface FunCaptchaClassifyResult {

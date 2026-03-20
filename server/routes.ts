@@ -932,6 +932,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/anticaptcha-api-key", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("anticaptcha_api_key");
+      res.json({ key: key || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/anticaptcha-api-key", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (!key || typeof key !== "string" || key.trim().length < 5) {
+        return res.status(400).json({ error: "Valid anti-captcha API key is required" });
+      }
+      await storage.setSetting("anticaptcha_api_key", key.trim());
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/settings/gmail-email", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const email = await storage.getSetting("gmail_email");
