@@ -230,11 +230,84 @@ async function solveHCaptchaViaJsonApi(
   }
 }
 
+// NopeCHA hCaptcha solver — cheap ($1/90K solves), confirmed hCaptcha support
+// API: POST https://api.nopecha.com/ → {id} → poll GET /?key=&id= → {data: token}
+async function solveHCaptchaViaNopeCHA(
+  apiKey: string,
+  websiteURL: string,
+  websiteKey: string
+): Promise<CapSolverTaskResult> {
+  try {
+    console.log(`[NopeCHA] Submitting hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
+    const submitResp = await axios.post("https://api.nopecha.com/", {
+      key: apiKey,
+      type: "hcaptcha",
+      sitekey: websiteKey,
+      url: websiteURL,
+    }, { timeout: 30000 });
+
+    console.log(`[NopeCHA] Submit response: ${JSON.stringify(submitResp.data).substring(0, 200)}`);
+
+    if (submitResp.data.error) {
+      return { success: false, error: `NopeCHA error ${submitResp.data.error}: ${submitResp.data.message || "submission failed"}` };
+    }
+
+    const taskId = submitResp.data.data;
+    if (!taskId) {
+      return { success: false, error: `NopeCHA: no task ID returned — ${JSON.stringify(submitResp.data)}` };
+    }
+
+    console.log(`[NopeCHA] Task submitted: ${taskId} — polling every 5s (max 180s)...`);
+
+    for (let i = 0; i < 36; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+
+      const pollResp = await axios.get("https://api.nopecha.com/", {
+        params: { key: apiKey, id: taskId },
+        timeout: 15000,
+      });
+
+      console.log(`[NopeCHA] Poll ${i + 1}: ${JSON.stringify(pollResp.data).substring(0, 150)}`);
+
+      // Error 15 = still processing, any other error = failure
+      if (pollResp.data.error && pollResp.data.error !== 15) {
+        return { success: false, error: `NopeCHA error ${pollResp.data.error}: ${pollResp.data.message || "solving failed"}` };
+      }
+
+      const token = pollResp.data.data;
+      if (token && typeof token === "string" && token.length > 20) {
+        console.log(`[NopeCHA] ✅ Solved! Token length: ${token.length}`);
+        return { success: true, token, taskId };
+      }
+
+      if (i % 6 === 0 && i > 0) {
+        console.log(`[NopeCHA] Still solving... (${i * 5}s elapsed)`);
+      }
+    }
+
+    return { success: false, error: "NopeCHA solving timeout (180s)" };
+  } catch (err: any) {
+    const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 200) : "";
+    console.log(`[NopeCHA] Network error: ${err.message} ${body}`);
+    return { success: false, error: err.message };
+  }
+}
+
 export async function solveHCaptchaWith2Captcha(
   websiteURL: string,
   websiteKey: string
 ): Promise<CapSolverTaskResult> {
-  // Priority 1: anti-captcha.com (reliable hCaptcha support)
+  // Priority 1: NopeCHA — confirmed hCaptcha support, cheapest ($1/90K solves)
+  const nopeResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`);
+  const nopeKey = nopeResult.rows.length > 0 ? (nopeResult.rows[0].value as string) : "";
+  if (nopeKey) {
+    console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com...`);
+    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey);
+    if (result.success) return result;
+    console.log(`[NopeCHA] Failed: ${result.error} — trying next solver...`);
+  }
+
+  // Priority 2: anti-captcha.com
   const acResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`);
   const acKey = acResult.rows.length > 0 ? (acResult.rows[0].value as string) : "";
   if (acKey) {
@@ -244,7 +317,7 @@ export async function solveHCaptchaWith2Captcha(
     console.log(`[AntiCaptcha] Failed: ${result.error} — trying 2captcha fallback...`);
   }
 
-  // Priority 2: 2captcha.com fallback
+  // Priority 3: 2captcha.com fallback
   const tcResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`);
   const tcKey = tcResult.rows.length > 0 ? (tcResult.rows[0].value as string) : "";
   if (tcKey) {
@@ -252,7 +325,7 @@ export async function solveHCaptchaWith2Captcha(
     return solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey);
   }
 
-  return { success: false, error: "No CAPTCHA solver configured — add anti-captcha.com or 2captcha API key in Settings" };
+  return { success: false, error: "No CAPTCHA solver configured — add NopeCHA, anti-captcha.com, or 2captcha API key in Settings" };
 }
 
 export interface FunCaptchaClassifyResult {
