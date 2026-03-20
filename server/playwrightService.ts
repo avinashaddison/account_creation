@@ -10498,10 +10498,51 @@ export async function registerReplitAccount(
         },
       });
       await context.addInitScript(() => {
+        // Core webdriver spoofing
         Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-        Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3] });
         Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-        (window as any).chrome = { runtime: {} };
+        Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+        Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+        Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
+        Object.defineProperty(navigator, "connection", { get: () => ({ effectiveType: "4g", downlink: 10, rtt: 50 }) });
+        Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+
+        // Plugins spoof (real browser has plugins)
+        const pluginData = [
+          { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+          { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+          { name: "Native Client", filename: "internal-nacl-plugin", description: "" },
+        ];
+        Object.defineProperty(navigator, "plugins", {
+          get: () => Object.assign(pluginData, { item: (i: number) => pluginData[i], namedItem: (n: string) => pluginData.find(p => p.name === n) || null, length: pluginData.length }),
+        });
+        Object.defineProperty(navigator, "mimeTypes", { get: () => ({ length: 4 }) });
+
+        // Chrome API spoof
+        (window as any).chrome = {
+          app: { isInstalled: false, InstallState: {}, RunningState: {} },
+          runtime: { id: undefined, connect: () => {}, sendMessage: () => {} },
+          loadTimes: () => ({}),
+          csi: () => ({}),
+        };
+
+        // Permission spoof
+        const origQuery = window.navigator.permissions?.query;
+        if (origQuery) {
+          (window.navigator.permissions as any).query = (params: any) =>
+            params.name === "notifications"
+              ? Promise.resolve({ state: Notification.permission, onchange: null })
+              : origQuery(params);
+        }
+
+        // Screen/window spoof
+        Object.defineProperty(screen, "colorDepth", { get: () => 24 });
+        Object.defineProperty(screen, "pixelDepth", { get: () => 24 });
+
+        // Prevent iframe detection
+        Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+          get: function () { return window; },
+        });
       });
       log("Using stealth headless browser");
     }
@@ -10849,7 +10890,40 @@ export async function registerReplitAccount(
           }
         }
         if (!foundReplitEmail) {
-          log("⚠️ No Replit verification email found after 4 attempts — continuing without verification");
+          // Check Junk/Spam folder — Replit emails often end up there
+          log("📁 Checking Junk folder for Replit email...");
+          try {
+            await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await owaPage.waitForTimeout(4000);
+            const junkItems = await owaPage.$$('[data-convid], [role="row"]');
+            log(`  Junk folder: ${junkItems.length} items`);
+            for (const item of junkItems.slice(0, 30)) {
+              const itemText = await item.innerText().catch(() => "");
+              if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
+                log(`Found Replit email in Junk: ${itemText.substring(0, 100)}`);
+                await item.evaluate((el: Element) => (el as HTMLElement).click());
+                await owaPage.waitForTimeout(3000);
+                foundReplitEmail = true;
+                const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+                const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
+                if (linkMatch) {
+                  verificationLink = linkMatch[0].trim();
+                  log(`Extracted verification link from Junk: ${verificationLink.substring(0, 100)}...`);
+                }
+                const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+                if (!verificationLink && codeMatch) {
+                  verificationCode = codeMatch[1];
+                  log(`Extracted verification code from Junk: ${verificationCode}`);
+                }
+                break;
+              }
+            }
+          } catch (junkErr: any) {
+            log(`⚠️ Junk check error: ${(junkErr.message || "").substring(0, 80)}`);
+          }
+          if (!foundReplitEmail) {
+            log("⚠️ No Replit verification email found after 4 attempts + Junk check — continuing without verification");
+          }
         }
       } else {
         log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
@@ -10978,6 +11052,99 @@ export async function registerReplitAccount(
         if (checkoutUrl.includes("/verify") || checkoutUrl.includes("verifyEmail") ||
             checkoutUrl.includes("/signup") || checkoutUrl.includes("/login")) {
           log(`⚠️ Checkout redirected to gate page: ${checkoutUrl.substring(0, 80)}`);
+
+          // If it's a /verify gate, click "Resend email" and retry OWA inbox to get the verification link
+          if (checkoutUrl.includes("/verify")) {
+            try {
+              log(`📧 Hitting /verify gate — clicking "Resend email" and retrying OWA...`);
+              // Click the Resend email button
+              const resendBtn = await page.$('button:has-text("Resend"), button:has-text("resend")').catch(() => null);
+              if (resendBtn) {
+                await resendBtn.click();
+                log(`Clicked Resend email button`);
+              } else {
+                // Try JS eval
+                await page.evaluate(() => {
+                  const btns = Array.from(document.querySelectorAll("button"));
+                  const resend = btns.find(b => b.textContent?.toLowerCase().includes("resend"));
+                  if (resend) (resend as HTMLButtonElement).click();
+                });
+                log(`Clicked Resend via JS eval`);
+              }
+              await page.waitForTimeout(5000);
+
+              // Re-open OWA and check inbox + junk again
+              let gateBrowser: any = null;
+              try {
+                const { chromium: cGate } = await import("playwright");
+                gateBrowser = await cGate.launch({ headless: true, args: ["--no-sandbox"] });
+                const gateCtx = await gateBrowser.newContext();
+                const gatePg = await gateCtx.newPage();
+                await gatePg.goto("https://login.live.com/login.srf", { waitUntil: "domcontentloaded", timeout: 30000 });
+                await gatePg.waitForTimeout(3000);
+                const gEmailInput = await gatePg.$('input[name="loginfmt"], input[type="email"]').catch(() => null);
+                if (gEmailInput) {
+                  await gEmailInput.fill(outlookEmail);
+                  await gatePg.keyboard.press("Enter");
+                  await gatePg.waitForTimeout(4000);
+                  const gPassInput = await gatePg.$('input[name="passwd"], input[type="password"]').catch(() => null);
+                  if (gPassInput) {
+                    await gPassInput.fill(outlookPassword!);
+                    await gatePg.keyboard.press("Enter");
+                    await gatePg.waitForTimeout(6000);
+                  }
+                }
+                // Navigate directly to inbox
+                await gatePg.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+                await gatePg.waitForTimeout(20000); // Wait 20s for email to arrive
+
+                const gateCheckFolders = [
+                  { url: "https://outlook.live.com/mail/0/inbox", name: "inbox" },
+                  { url: "https://outlook.live.com/mail/0/junkemail", name: "junk" },
+                ];
+                for (const { url: folderUrl, name: folderName } of gateCheckFolders) {
+                  if (verificationLink) break;
+                  await gatePg.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+                  await gatePg.waitForTimeout(4000);
+                  const items = await gatePg.$$('[data-convid], [role="row"]');
+                  log(`  Gate ${folderName}: ${items.length} items`);
+                  for (const item of items.slice(0, 30)) {
+                    const itemText = await item.innerText().catch(() => "");
+                    if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify")) {
+                      await item.evaluate((el: Element) => (el as HTMLElement).click());
+                      await gatePg.waitForTimeout(3000);
+                      const gBody = await gatePg.evaluate(() => document.body?.innerText || "");
+                      const gLink = gBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
+                      if (gLink) {
+                        verificationLink = gLink[0].trim();
+                        log(`✅ Got verification link from gate retry (${folderName}): ${verificationLink.substring(0, 80)}...`);
+                      }
+                      break;
+                    }
+                  }
+                }
+              } catch (gateErr: any) {
+                log(`⚠️ Gate retry OWA error: ${(gateErr.message || "").substring(0, 80)}`);
+              } finally {
+                if (gateBrowser) { try { await gateBrowser.close(); } catch {} }
+              }
+
+              if (verificationLink) {
+                log(`Navigating to verification link (from gate retry)...`);
+                await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
+                await page.waitForTimeout(4000);
+                log(`URL after gate verification: ${page.url()}`);
+                // Now retry checkout
+                await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                await page.waitForTimeout(8000);
+                checkoutUrl = page.url();
+                log(`Checkout after gate verification: ${checkoutUrl.substring(0, 80)}`);
+              }
+            } catch (vErr: any) {
+              log(`⚠️ Verify gate handler error: ${(vErr.message || "").substring(0, 100)}`);
+            }
+          }
+
           // If it's a login/signup redirect, try logging in directly
           if (checkoutUrl.includes("/login") || checkoutUrl.includes("/signup")) {
             try {
@@ -11149,57 +11316,84 @@ export async function registerReplitAccount(
         // Pick a random Indian address
         const addr = INDIAN_ADDRESSES[Math.floor(Math.random() * INDIAN_ADDRESSES.length)];
 
-        // Helper: fill Stripe iframe field
-        async function fillStripeField(names: string[], value: string) {
-          const frameSelectors = [
-            'iframe[name*="privateStripeFrame"]',
-            'iframe[name*="stripe"]',
-            'iframe[data-testid*="card"]',
-            'iframe[src*="stripe"]',
-          ];
-          for (const frameSel of frameSelectors) {
-            const frames = page.frames();
-            for (const frame of frames) {
-              const url = frame.url();
-              if (!url.includes("stripe") && !url.includes("js.stripe.com")) continue;
-              for (const name of names) {
-                try {
-                  const el = frame.locator(`[name="${name}"], input[placeholder*="${name}" i]`).first();
-                  const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
+        // Helper: type into a Stripe iframe input (must use type not fill — Stripe needs key events)
+        async function fillStripeField(names: string[], value: string): Promise<boolean> {
+          // All frames on the page (Stripe card fields are in child iframes)
+          const frames = page.frames();
+          // Log frame URLs for debug if needed
+          for (const frame of frames) {
+            for (const name of names) {
+              try {
+                // Match by [name=] attr, data-elements-stable-field-name, or placeholder
+                const selectors = [
+                  `input[name="${name}"]`,
+                  `input[data-elements-stable-field-name="${name}"]`,
+                  `input[placeholder*="${name}" i]`,
+                  `[name="${name}"]`,
+                ];
+                for (const sel of selectors) {
+                  const el = frame.locator(sel).first();
+                  const visible = await el.isVisible({ timeout: 1500 }).catch(() => false);
                   if (visible) {
-                    await el.click();
-                    await el.fill(value);
-                    log(`  Filled Stripe field "${name}"`);
+                    await el.click({ timeout: 3000 }).catch(() => {});
+                    // Clear then type char-by-char (Stripe needs key events, not fill)
+                    await el.evaluate((input: HTMLInputElement) => { input.value = ""; });
+                    await el.type(value, { delay: 50 });
+                    // Press Tab to trigger Stripe's blur/validation event
+                    await frame.locator("body").press("Tab").catch(() => {});
+                    log(`  Filled Stripe field "${name}" (frame: ${frame.url().substring(0, 50)})`);
                     return true;
                   }
-                } catch {}
-              }
+                }
+              } catch {}
             }
           }
-          // Try main page too (some Stripe integrations)
+          // Fallback: try main page
           for (const name of names) {
             try {
-              const el = page.locator(`[name="${name}"], input[data-elements-stable-field-name="${name}"]`).first();
-              const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
-              if (visible) {
-                await el.click();
-                await el.fill(value);
-                log(`  Filled field "${name}" on main page`);
-                return true;
+              const selectors = [
+                `input[name="${name}"]`,
+                `input[data-elements-stable-field-name="${name}"]`,
+                `input[placeholder*="${name}" i]`,
+              ];
+              for (const sel of selectors) {
+                const el = page.locator(sel).first();
+                const visible = await el.isVisible({ timeout: 1500 }).catch(() => false);
+                if (visible) {
+                  await el.click().catch(() => {});
+                  await el.evaluate((input: HTMLInputElement) => { input.value = ""; });
+                  await el.type(value, { delay: 40 });
+                  log(`  Filled field "${name}" (main page)`);
+                  return true;
+                }
               }
             } catch {}
           }
           return false;
         }
 
-        // Fill card number
+        // Wait for Stripe iframes to fully load
+        await page.waitForTimeout(3000);
+
+        // Log all frames present for debug
+        const frameUrls = page.frames().map(f => f.url().substring(0, 80));
+        log(`  Frames on page: ${JSON.stringify(frameUrls)}`);
+
+        // Fill card number — Stripe uses "cardnumber" as the stable field name
         const cardNum = cardDetails.cardNumber.replace(/\D/g, "");
-        const expiry = `${cardDetails.expiryMonth.padStart(2, "0")}${cardDetails.expiryYear.padStart(2, "0")}`;
-        await fillStripeField(["cardnumber", "card-number", "number"], cardNum);
+        const expiryMonth = cardDetails.expiryMonth.padStart(2, "0");
+        const expiryYear = cardDetails.expiryYear.length === 4
+          ? cardDetails.expiryYear.slice(-2)
+          : cardDetails.expiryYear.padStart(2, "0");
+        const expiry = `${expiryMonth}${expiryYear}`;
+        const cardFilled = await fillStripeField(["cardnumber", "cardNumber", "card-number", "number", "cc-number"], cardNum);
+        if (!cardFilled) log(`⚠️ Card number field not found`);
         await page.waitForTimeout(800);
-        await fillStripeField(["exp-date", "expiry", "card-expiry", "exp"], expiry);
+        const expiryFilled = await fillStripeField(["exp-date", "cardExpiry", "card-expiry", "expiry", "exp", "cc-exp"], expiry);
+        if (!expiryFilled) log(`⚠️ Expiry field not found`);
         await page.waitForTimeout(800);
-        await fillStripeField(["cvc", "cvv", "card-cvc", "security-code"], cardDetails.cvv);
+        const cvvFilled = await fillStripeField(["cvc", "cardCvc", "cvv", "card-cvc", "security-code", "cc-csc"], cardDetails.cvv);
+        if (!cvvFilled) log(`⚠️ CVC field not found`);
         await page.waitForTimeout(800);
 
         // Fill cardholder name on main page
@@ -11435,47 +11629,46 @@ export async function registerReplitAccount(
         );
         log(`  Buttons on page: ${JSON.stringify(allBtns).substring(0, 400)}`);
 
+        // Simulate human-like mouse movement across the page before submitting
+        // Stripe's Human Security tracks mouse behavior
+        const moves = [[200, 300], [400, 250], [600, 400], [350, 500], [500, 350], [300, 200]];
+        for (const [x, y] of moves) {
+          await page.mouse.move(x + Math.random() * 30, y + Math.random() * 30, { steps: 5 });
+          await page.waitForTimeout(80 + Math.random() * 120);
+        }
+        await page.waitForTimeout(500);
+
         // Try JS eval first — finds by text, most reliable
         const submitTexts = ["subscribe", "pay now", "pay", "start", "complete", "confirm", "place order", "checkout"];
         paymentSubmitTime = new Date();
-        submitted = await page.evaluate((texts: string[]) => {
-          const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
-          // Prefer a submit-type button or one matching payment text
-          for (const t of texts) {
-            const btn = btns.find(
-              (b) => b.textContent?.trim().toLowerCase().includes(t) &&
-              (b as HTMLElement).offsetParent !== null &&
-              !(b as HTMLButtonElement).disabled
-            );
-            if (btn) { (btn as HTMLButtonElement).click(); return true; }
-          }
-          // Last resort: click any enabled visible submit button
-          const anySubmit = btns.find(
-            (b) => (b as HTMLButtonElement).type === "submit" &&
-            (b as HTMLElement).offsetParent !== null &&
-            !(b as HTMLButtonElement).disabled
-          );
-          if (anySubmit) { (anySubmit as HTMLButtonElement).click(); return true; }
-          return false;
-        }, submitTexts);
 
-        if (submitted) {
-          log(`🖱️ Clicked payment submit (anchor: ${paymentSubmitTime.toISOString()})`);
-        } else {
-          // Final fallback: Playwright locator with broad text match
-          for (const txt of submitTexts) {
-            try {
-              const el = page.locator(`button:has-text("${txt}")`).first();
-              const vis = await el.isVisible({ timeout: 1500 }).catch(() => false);
-              if (vis) {
-                paymentSubmitTime = new Date();
-                await el.click();
-                log(`🖱️ Clicked submit via fallback locator: "${txt}"`);
-                submitted = true;
-                break;
-              }
-            } catch {}
-          }
+        // Use Playwright locator click (real mouse events) — JS .click() is detectable by Stripe
+        for (const txt of submitTexts) {
+          try {
+            const el = page.locator(`button[type="submit"], button:has-text("${txt}")`).first();
+            const vis = await el.isVisible({ timeout: 2000 }).catch(() => false);
+            if (vis) {
+              await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+              await el.click({ delay: 80 });  // slight delay mimics human click
+              log(`🖱️ Clicked payment submit via locator: "${txt}" (anchor: ${paymentSubmitTime.toISOString()})`);
+              submitted = true;
+              break;
+            }
+          } catch {}
+        }
+        if (!submitted) {
+          // Final fallback: JS click
+          submitted = await page.evaluate((texts: string[]) => {
+            const btns = Array.from(document.querySelectorAll("button[type='submit'], button"));
+            for (const t of texts) {
+              const btn = btns.find(b => b.textContent?.trim().toLowerCase().includes(t) && !(b as HTMLButtonElement).disabled);
+              if (btn) { (btn as HTMLButtonElement).click(); return true; }
+            }
+            const anySubmit = document.querySelector("button[type='submit']:not(:disabled)") as HTMLButtonElement;
+            if (anySubmit) { anySubmit.click(); return true; }
+            return false;
+          }, submitTexts);
+          if (submitted) log(`🖱️ Clicked payment submit via JS fallback (anchor: ${paymentSubmitTime.toISOString()})`);
         }
 
         if (!submitted) {
@@ -11485,18 +11678,103 @@ export async function registerReplitAccount(
         if (submitted) {
           // Wait for either success redirect or 3DS challenge
           log(`⏳ Waiting for payment response...`);
-          await page.waitForTimeout(5000);
+          await page.waitForTimeout(12000);
 
           const currentUrl = page.url();
+          // Log all iframes visible on the page for debug
+          const allIframeNames = await page.evaluate(() =>
+            Array.from(document.querySelectorAll("iframe")).map(f => ({
+              name: f.name, src: (f.src || "").substring(0, 80), title: f.title
+            }))
+          ).catch(() => []);
+          log(`  Iframes after submit: ${JSON.stringify(allIframeNames)}`);
+
+          // Log page text + card iframe error messages
+          const pageText = await page.evaluate(() => (document.body?.innerText || "").replace(/\s+/g, " ").substring(0, 600)).catch(() => "");
+          log(`  Page text after submit: ${pageText}`);
+          // Read card iframe text for Stripe error messages
+          for (const frame of page.frames()) {
+            const fUrl = frame.url();
+            if (fUrl.includes("checkout.stripe.com") && fUrl !== page.url()) {
+              const frameText = await frame.evaluate(() => (document.body?.innerText || "").replace(/\s+/g, " ").substring(0, 300)).catch(() => "");
+              if (frameText && frameText.trim()) log(`  Card iframe text: ${frameText}`);
+            }
+          }
+
+          // Detect 3DS — Stripe uses "three-ds-2-challenge" in the iframe src
           const is3DS = await page
-            .locator(
-              'iframe[name*="stripe3ds"], iframe[src*="3ds"], iframe[title*="challenge"], [data-testid*="3ds"], iframe[name*="ACS"]'
-            )
-            .isVisible({ timeout: 3000 })
+            .locator([
+              'iframe[src*="three-ds"]',
+              'iframe[src*="three_ds"]',
+              'iframe[src*="challenge"]',
+              'iframe[src*="3ds"]',
+              'iframe[src*="acs"]',
+              'iframe[name*="stripe3ds"]',
+              'iframe[name*="stripe-challenge"]',
+              'iframe[title*="challenge" i]',
+              'iframe[title*="secure" i]',
+              '[data-testid*="3ds"]',
+              'iframe[name*="ACS"]',
+            ].join(", "))
+            .isVisible({ timeout: 5000 })
             .catch(() => false);
 
-          if (is3DS || currentUrl.includes("3ds")) {
-            log(`🔐 3D Secure challenge detected — starting OTP watcher...`);
+          // Also check frame URLs directly
+          const has3DSFrame = page.frames().some(f => {
+            const url = f.url();
+            return url.includes("three-ds") || url.includes("three_ds") || url.includes("challenge") || url.includes("acs");
+          });
+          log(`  3DS check: locator=${is3DS}, frameCheck=${has3DSFrame}`);
+
+          if (is3DS || has3DSFrame || currentUrl.includes("3ds") || currentUrl.includes("acs")) {
+            log(`🔐 3D Secure challenge detected — inspecting challenge frames...`);
+
+            // Log all frame URLs and their content so we can understand the 3DS structure
+            for (const frame of page.frames()) {
+              const fUrl = frame.url();
+              if (fUrl.includes("three-ds") || fUrl.includes("challenge") || fUrl.includes("acs") || fUrl.includes("federalbank") || fUrl.includes("3ds")) {
+                try {
+                  const fText = await frame.evaluate(() => document.body.innerText).catch(() => "");
+                  const fInputs = await frame.evaluate(() =>
+                    Array.from(document.querySelectorAll("input")).map(i => ({ name: i.name, type: i.type, id: i.id, placeholder: i.placeholder }))
+                  ).catch(() => []);
+                  log(`  3DS frame: ${fUrl.substring(0, 80)}`);
+                  log(`  3DS frame text: ${fText.trim().substring(0, 300)}`);
+                  log(`  3DS frame inputs: ${JSON.stringify(fInputs).substring(0, 300)}`);
+                } catch {}
+              }
+            }
+            // Also inspect nested frames (the bank's ACS iframe is often nested 2 levels deep)
+            for (const frame of page.frames()) {
+              const fUrl = frame.url();
+              if (fUrl.includes("three-ds") || fUrl.includes("challenge")) {
+                for (const childFrame of frame.childFrames()) {
+                  try {
+                    const cfUrl = childFrame.url();
+                    const cfText = await childFrame.evaluate(() => document.body.innerText).catch(() => "");
+                    const cfInputs = await childFrame.evaluate(() =>
+                      Array.from(document.querySelectorAll("input")).map(i => ({ name: i.name, type: i.type, id: i.id, placeholder: i.placeholder }))
+                    ).catch(() => []);
+                    log(`  3DS child frame: ${cfUrl.substring(0, 80)}`);
+                    log(`  3DS child frame text: ${cfText.trim().substring(0, 300)}`);
+                    log(`  3DS child frame inputs: ${JSON.stringify(cfInputs).substring(0, 300)}`);
+                    // Also check grandchildren
+                    for (const gcFrame of childFrame.childFrames()) {
+                      try {
+                        const gcUrl = gcFrame.url();
+                        const gcText = await gcFrame.evaluate(() => document.body.innerText).catch(() => "");
+                        const gcInputs = await gcFrame.evaluate(() =>
+                          Array.from(document.querySelectorAll("input")).map(i => ({ name: i.name, type: i.type, id: i.id, placeholder: i.placeholder }))
+                        ).catch(() => []);
+                        log(`  3DS grandchild frame: ${gcUrl.substring(0, 80)}`);
+                        log(`  3DS grandchild text: ${gcText.trim().substring(0, 300)}`);
+                        log(`  3DS grandchild inputs: ${JSON.stringify(gcInputs).substring(0, 300)}`);
+                      } catch {}
+                    }
+                  } catch {}
+                }
+              }
+            }
 
             if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
               const otp = await fetchBankOtp(
@@ -11547,11 +11825,18 @@ export async function registerReplitAccount(
                           const btn = frame.locator(bSel).first();
                           const btnVis = await btn.isVisible({ timeout: 1500 }).catch(() => false);
                           if (btnVis) {
+                            const btnText = await btn.evaluate((el: Element) => el.textContent?.trim() || "").catch(() => "");
                             await btn.click();
-                            log(`✅ 3DS OTP submitted`);
+                            log(`✅ 3DS OTP submitted (button: "${bSel}" text: "${btnText}")`);
                             otpEntered = true;
                             break;
                           }
+                        }
+                        // Fallback: press Enter in OTP field if no button found
+                        if (!otpEntered) {
+                          await otpField.press("Enter");
+                          log(`✅ 3DS OTP submitted via Enter key (no submit button found)`);
+                          otpEntered = true;
                         }
                         if (otpEntered) break;
                       }
@@ -11559,7 +11844,35 @@ export async function registerReplitAccount(
                   } catch {}
                 }
                 if (!otpEntered) log(`⚠️ Could not find 3DS input field to enter OTP`);
-                await page.waitForTimeout(8000);
+
+                // Poll for success redirect up to 30s after OTP submit
+                log(`⏳ Waiting for 3DS authentication to complete...`);
+                const postOtpDeadline = Date.now() + 30000;
+                while (Date.now() < postOtpDeadline) {
+                  await page.waitForTimeout(3000);
+                  const postOtpUrl = page.url();
+                  log(`  Post-OTP URL: ${postOtpUrl.substring(0, 80)}`);
+                  if (postOtpUrl.includes("replit.com") && !postOtpUrl.includes("stripe")) {
+                    log(`✅ Payment redirected to Replit after 3DS: ${postOtpUrl.substring(0, 80)}`);
+                    checkoutComplete = true;
+                    break;
+                  }
+                  if (!postOtpUrl.includes("checkout.stripe.com")) break; // left stripe
+                  // Check if 3DS frame has gone (OTP accepted — Stripe processing)
+                  const stillHas3DS = page.frames().some(f => f.url().includes("three-ds") || f.url().includes("challenge"));
+                  if (!stillHas3DS) {
+                    log(`  3DS frame gone — Stripe is processing payment`);
+                    await page.waitForTimeout(5000);
+                    const finalCheck = page.url();
+                    if (finalCheck.includes("replit.com") && !finalCheck.includes("stripe")) {
+                      log(`✅ Payment successful (after 3DS close): ${finalCheck.substring(0, 80)}`);
+                      checkoutComplete = true;
+                    } else {
+                      log(`  Final post-3DS URL: ${finalCheck.substring(0, 80)}`);
+                    }
+                    break;
+                  }
+                }
               } else {
                 log(`⚠️ No OTP received within timeout — 3DS requires manual intervention`);
               }
