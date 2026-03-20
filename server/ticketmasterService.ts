@@ -969,14 +969,17 @@ async function doTMRegistration(
         console.log("[TM-Playwright] Shakira presale step failed:", presaleResult.error);
         log(`⚠️ Shakira presale step failed — continuing to TM sign-up directly`);
       }
-      // If presale redirected us to TM auth/create page, skip the direct navigation
+      // Only skip direct TM navigation if we actually landed on TM's auth or create-account page
+      // (NOT the presale page itself which contains "ticketmaster" + "signup" in its URL)
       const postPresaleUrl = page.url();
       console.log("[TM-Playwright] URL after Shakira presale:", postPresaleUrl);
       if (
-        postPresaleUrl.includes("ticketmaster") &&
-        (postPresaleUrl.includes("auth") || postPresaleUrl.includes("create") || postPresaleUrl.includes("signup"))
+        postPresaleUrl.includes("auth.ticketmaster.com") ||
+        postPresaleUrl.includes("identity.ticketmaster") ||
+        postPresaleUrl.includes("ticketmaster.com/member/") ||
+        postPresaleUrl.includes("ticketmaster.es/member/")
       ) {
-        log(`🔗 Already on TM page after presale — skipping direct navigation`);
+        log(`🔗 Already on TM auth/create page after presale — skipping direct navigation`);
         skipDirectTMNav = true;
       }
     }
