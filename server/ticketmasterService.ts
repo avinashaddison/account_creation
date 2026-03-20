@@ -891,6 +891,9 @@ async function doTMRegistration(
             username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
             password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
           };
+          // ZenRows superproxy (and some residential proxies) do SSL interception;
+          // ignore certificate errors so HTTPS sites load through the proxy tunnel
+          contextOptions.ignoreHTTPSErrors = true;
           console.log(`[TM-Playwright] Using proxy server: ${parsed.hostname}:${parsed.port}`);
         } catch (e: any) {
           console.log(`[TM-Playwright] Could not parse proxy URL: ${e.message}`);

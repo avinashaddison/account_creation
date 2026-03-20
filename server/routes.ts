@@ -30,8 +30,8 @@ async function getDefaultBrowserApiUrl(): Promise<string | null> {
 // For Ticketmaster (Akamai-protected), always prefer WSS remote browser over HTTP proxy
 // Local headless Playwright is detected by Akamai regardless of stealth plugin
 async function getTMBrowserUrl(): Promise<string | null> {
-  const wss = await storage.getSetting("browser_proxy_url");
-  if (wss && wss.startsWith("wss://")) return wss;
+  const browserProxy = await storage.getSetting("browser_proxy_url");
+  if (browserProxy && browserProxy.trim().length > 0) return browserProxy;
   const residential = await storage.getSetting("residential_proxy_url");
   if (residential) return residential;
   const soaxTemplate = await storage.getSetting("soax_proxy_template");
