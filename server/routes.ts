@@ -517,7 +517,25 @@ export async function registerRoutes(
       console.log("[Gmail] No Gmail credentials configured — will use temp email fallback");
     }
   }
-  await ensureDefaultData();
+  // Retry ensureDefaultData with backoff — Neon endpoints can take a moment to wake up
+  let dbReady = false;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await ensureDefaultData();
+      dbReady = true;
+      break;
+    } catch (err: any) {
+      console.warn(`[DB] ensureDefaultData attempt ${attempt}/5 failed: ${err.message}`);
+      if (attempt < 5) {
+        const delay = attempt * 3000;
+        console.warn(`[DB] Retrying in ${delay / 1000}s...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  if (!dbReady) {
+    console.error('[DB] Database unreachable after 5 attempts — server will start but DB operations may fail');
+  }
 
   async function cleanupStaleAccounts() {
     try {

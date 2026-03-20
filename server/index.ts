@@ -32,6 +32,18 @@ const pgPool = new pg.Pool({ connectionString: effectiveDatabaseUrl });
 
 const PgStore = connectPgSimple(session);
 
+// Probe whether the DB is currently reachable
+async function isDbReachable(): Promise<boolean> {
+  try {
+    const client = await pgPool.connect();
+    await client.query("SELECT 1");
+    client.release();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -44,24 +56,27 @@ app.use(express.urlencoded({ extended: false }));
 
 app.set("trust proxy", 1);
 
-app.use(
-  session({
-    store: new PgStore({
+const sessionSecret = process.env.SESSION_SECRET ||
+  (process.env.NODE_ENV === "production"
+    ? (() => { console.error("FATAL: SESSION_SECRET is required in production"); process.exit(1); return ""; })()
+    : "la28-admin-dev-secret-key");
+
+// Build session store — use PgStore if DB is reachable, otherwise MemoryStore
+async function buildSessionStore(): Promise<session.Store | undefined> {
+  const reachable = await isDbReachable();
+  if (reachable) {
+    console.log("[Session] PostgreSQL session store ready");
+    return new PgStore({
       pool: pgPool,
       createTableIfMissing: true,
       tableName: "user_sessions",
-    }),
-    secret: process.env.SESSION_SECRET || (process.env.NODE_ENV === "production" ? (() => { console.error("FATAL: SESSION_SECRET is required in production"); process.exit(1); return ""; })() : "la28-admin-dev-secret-key"),
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      maxAge: 24 * 60 * 60 * 1000,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-    },
-  })
-);
+      errorLog: (err: Error) => console.warn("[Session] PgStore error:", err.message),
+    } as any);
+  } else {
+    console.warn("[Session] DB unreachable — using in-memory session store (sessions lost on restart)");
+    return undefined; // express-session defaults to MemoryStore when store is undefined
+  }
+}
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -101,6 +116,23 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const store = await buildSessionStore();
+
+  app.use(
+    session({
+      store,
+      secret: sessionSecret,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      },
+    })
+  );
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
