@@ -38,7 +38,6 @@ async function getTMBrowser(): Promise<Browser> {
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
-        "--disable-extensions",
         "--disable-background-networking",
         "--disable-sync",
         "--disable-translate",
@@ -46,6 +45,12 @@ async function getTMBrowser(): Promise<Browser> {
         "--no-zygote",
         "--disable-blink-features=AutomationControlled",
         "--js-flags=--max-old-space-size=256",
+        "--window-size=1280,720",
+        "--lang=en-US,en",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-features=IsolateOrigins",
+        "--disable-ipc-flooding-protection",
       ],
     });
     browserInstance.on("disconnected", () => {
@@ -178,7 +183,8 @@ export async function tmFullRegistrationFlow(
   onLog?: (message: string) => void,
   proxyUrl?: string,
   keepBrowserOpen?: boolean,
-  shakiraPresale?: boolean
+  shakiraPresale?: boolean,
+  presaleProxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number; browser?: any; page?: any }> {
   const log = onLog || ((msg: string) => console.log(`[TM] ${msg}`));
   const maxRetries = 4;
@@ -201,7 +207,7 @@ export async function tmFullRegistrationFlow(
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     }
 
-    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl, keepBrowserOpen, shakiraPresale);
+    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl, keepBrowserOpen, shakiraPresale, presaleProxyUrl);
     totalSmsCost += result.smsCost || 0;
 
     const closeBrowserIfKept = () => {
@@ -844,10 +850,59 @@ async function doTMRegistration(
   log: (message: string) => void,
   proxyUrl?: string,
   keepBrowserOpen?: boolean,
-  shakiraPresale?: boolean
+  shakiraPresale?: boolean,
+  presaleProxyUrl?: string
 ): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number; browser?: any; page?: any }> {
   console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
-  const isBrowserAPI = proxyUrl && proxyUrl.startsWith('wss://');
+  console.log(`[TM-Playwright] presaleProxyUrl: ${presaleProxyUrl ? presaleProxyUrl.substring(0, 60) + '...' : 'NONE'}`);
+
+  // --- Split-session hybrid: ZenRows WSS for presale, SOAX for TM account ---
+  // When presaleProxyUrl (ZenRows WSS) is provided AND shakiraPresale is enabled,
+  // run the presale form in a separate ZenRows browser then close it before opening
+  // the SOAX-proxied local browser for TM account creation.
+  const useHybridProxy = !!(shakiraPresale && presaleProxyUrl && presaleProxyUrl.startsWith('wss://'));
+  let hybridPresaleDone = false;
+
+  if (useHybridProxy) {
+    log(`🌐 Opening ZenRows browser for Shakira presale...`);
+    console.log(`[TM-Playwright] Hybrid mode: ZenRows WSS for presale, SOAX for TM account`);
+    let presaleRemote: Browser | null = null;
+    try {
+      presaleRemote = await chromium.connectOverCDP(presaleProxyUrl!, { timeout: 60000 });
+      const presaleCtx = presaleRemote.contexts()[0];
+      const presalePage: Page = presaleCtx
+        ? (presaleCtx.pages()[0] || await presaleCtx.newPage())
+        : await presaleRemote.newPage();
+      presalePage.setDefaultTimeout(60000);
+
+      // Bandwidth optimization on the presale browser too
+      try {
+        const blockedTypes = new Set(["image", "media", "font", "texttrack", "manifest"]);
+        await presalePage.route("**/*", (route: any) => {
+          if (blockedTypes.has(route.request().resourceType())) return route.abort();
+          return route.continue();
+        });
+      } catch {}
+
+      log(`✅ ZenRows browser connected for presale`);
+      const presaleResult = await doShakiraPresaleStep(presalePage, log);
+      if (!presaleResult.success) {
+        log(`⚠️ Shakira presale step failed — ${presaleResult.error}`);
+      }
+      hybridPresaleDone = true;
+    } catch (err: any) {
+      log(`⚠️ Presale ZenRows browser error: ${err.message?.substring(0, 80)} — continuing with TM account...`);
+      console.log(`[TM-Playwright] Presale ZenRows error:`, err.message);
+    } finally {
+      if (presaleRemote) {
+        try { await presaleRemote.close(); } catch {}
+        presaleRemote = null;
+      }
+      log(`🔒 ZenRows presale browser closed. Opening SOAX browser for TM account...`);
+    }
+  }
+
+  const isBrowserAPI = !useHybridProxy && proxyUrl && proxyUrl.startsWith('wss://');
   console.log(`[TM-Playwright] isBrowserAPI: ${isBrowserAPI}`);
   let remoteBrowser: Browser | null = null;
   let page: Page;
@@ -966,7 +1021,8 @@ async function doTMRegistration(
 
     // --- Shakira presale step (runs before TM sign-up when enabled) ---
     let skipDirectTMNav = false;
-    if (shakiraPresale) {
+    if (shakiraPresale && !hybridPresaleDone) {
+      // Single-session mode: presale and TM account in same browser
       const presaleResult = await doShakiraPresaleStep(page, log);
       if (!presaleResult.success) {
         console.log("[TM-Playwright] Shakira presale step failed:", presaleResult.error);
@@ -985,6 +1041,10 @@ async function doTMRegistration(
         log(`🔗 Already on TM auth/create page after presale — skipping direct navigation`);
         skipDirectTMNav = true;
       }
+    } else if (shakiraPresale && hybridPresaleDone) {
+      // Hybrid mode: presale was already done in ZenRows browser, proceed directly to TM
+      log(`🎤 Presale already completed via ZenRows — navigating to TM account creation...`);
+      console.log("[TM-Playwright] Hybrid: presale done, skipping presale step in SOAX browser");
     }
 
     if (!skipDirectTMNav) {

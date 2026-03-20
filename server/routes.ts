@@ -39,6 +39,13 @@ async function getTMBrowserUrl(): Promise<string | null> {
   return null;
 }
 
+// WSS browser URL used exclusively for the Shakira (or other) presale step
+// This is ZenRows WSS which bypasses .es presale page but cannot reach ticketmaster.com
+async function getPresaleProxyUrl(): Promise<string | null> {
+  const url = await storage.getSetting("presale_proxy_url");
+  return url && url.trim().length > 0 ? url.trim() : null;
+}
+
 function uniqueProxySession(proxyUrl: string): string {
   if (!proxyUrl || proxyUrl === "local") return proxyUrl;
   const sessionId = randomUUID().replace(/-/g, "").substring(0, 12);
@@ -877,6 +884,37 @@ export async function registerRoutes(
       }
       await storage.setSetting("zenrows_api_url", url.trim());
       res.json({ success: true, url: url.trim() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/presale-proxy", requireAuth, async (_req, res) => {
+    try {
+      const url = await storage.getSetting("presale_proxy_url");
+      res.json({ url: url || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/presale-proxy", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string" || url.trim().length < 5) {
+        return res.status(400).json({ error: "Valid presale proxy URL is required" });
+      }
+      await storage.setSetting("presale_proxy_url", url.trim());
+      res.json({ success: true, url: url.trim() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/tm-account-proxy", requireAuth, async (_req, res) => {
+    try {
+      const url = await storage.getSetting("browser_proxy_url");
+      res.json({ url: url || "" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1941,7 +1979,8 @@ export async function registerRoutes(
     addisonEmailPassword: string,
     ownerId: string,
     proxyUrl?: string,
-    shakiraPresale?: boolean
+    shakiraPresale?: boolean,
+    presaleProxyUrl?: string
   ) {
     try {
       broadcastLog(batchId, accountId, `Creating temp email: ${addisonEmail}`, ownerId);
@@ -1974,7 +2013,8 @@ export async function registerRoutes(
         },
         proxyUrl,
         undefined,
-        shakiraPresale
+        shakiraPresale,
+        presaleProxyUrl
       );
 
       const smsCost = result.smsCost || 0;
@@ -2028,6 +2068,7 @@ export async function registerRoutes(
       const numAccounts = Math.max(1, parseInt(count));
       const baseProxyUrl = req.body.proxyUrl || (await getTMBrowserUrl()) || "";
       const shakiraPresale = eventId === "shakira";
+      const basePresaleProxyUrl = shakiraPresale ? ((await getPresaleProxyUrl()) || "") : "";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -2081,15 +2122,17 @@ export async function registerRoutes(
       (async () => {
         for (const acc of created) {
           const proxyUrl = uniqueProxySession(baseProxyUrl);
+          const presaleProxyUrl = basePresaleProxyUrl ? uniqueProxySession(basePresaleProxyUrl) : undefined;
           broadcastLog(batchId, acc.id, `Starting TM registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processTMAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.email, acc.emailPassword, userId, proxyUrl, shakiraPresale
+            acc.email, acc.emailPassword, userId, proxyUrl, shakiraPresale, presaleProxyUrl
           );
 
           const afterAccount = await storage.getAccount(acc.id);
           if (afterAccount && afterAccount.status === "failed") {
             const retryProxy = uniqueProxySession(baseProxyUrl);
+            const retryPresaleProxy = basePresaleProxyUrl ? uniqueProxySession(basePresaleProxyUrl) : undefined;
             broadcastLog(batchId, acc.id, `Retrying with new email address...`, userId);
             const retryDomain = await getMailTmOnlyDomain();
             const retryUsername = generateRandomUsername();
@@ -2104,7 +2147,7 @@ export async function registerRoutes(
             }
             await processTMAccount(
               acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-              retryEmail, "TempPass123!", userId, retryProxy, shakiraPresale
+              retryEmail, "TempPass123!", userId, retryProxy, shakiraPresale, retryPresaleProxy
             );
           }
         }
