@@ -230,21 +230,27 @@ async function solveHCaptchaViaJsonApi(
   }
 }
 
-// NopeCHA hCaptcha solver — cheap ($1/90K solves), confirmed hCaptcha support
-// API: POST https://api.nopecha.com/ → {id} → poll GET /?key=&id= → {data: token}
+// NopeCHA hCaptcha token solver — $1/90K solves, confirmed hCaptcha support
+// Docs: https://nopecha.com/api-reference/#postHcaptchaToken
+// Submit: POST /v1/token/hcaptcha  Authorization: Basic API_KEY  → {data: JOB_ID}
+// Poll:   GET  /v1/token/hcaptcha?id=JOB_ID  → {data: "P0_eyJ..."} when ready
 async function solveHCaptchaViaNopeCHA(
   apiKey: string,
   websiteURL: string,
   websiteKey: string
 ): Promise<CapSolverTaskResult> {
   try {
+    const authHeader = `Basic ${apiKey}`;
+    const baseUrl = "https://api.nopecha.com/v1/token/hcaptcha";
+
     console.log(`[NopeCHA] Submitting hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
-    const submitResp = await axios.post("https://api.nopecha.com/", {
-      key: apiKey,
-      type: "hcaptcha",
+    const submitResp = await axios.post(baseUrl, {
       sitekey: websiteKey,
       url: websiteURL,
-    }, { timeout: 30000 });
+    }, {
+      headers: { "Authorization": authHeader, "Content-Type": "application/json" },
+      timeout: 30000,
+    });
 
     console.log(`[NopeCHA] Submit response: ${JSON.stringify(submitResp.data).substring(0, 200)}`);
 
@@ -253,7 +259,7 @@ async function solveHCaptchaViaNopeCHA(
     }
 
     const taskId = submitResp.data.data;
-    if (!taskId) {
+    if (!taskId || typeof taskId !== "string") {
       return { success: false, error: `NopeCHA: no task ID returned — ${JSON.stringify(submitResp.data)}` };
     }
 
@@ -262,19 +268,20 @@ async function solveHCaptchaViaNopeCHA(
     for (let i = 0; i < 36; i++) {
       await new Promise(r => setTimeout(r, 5000));
 
-      const pollResp = await axios.get("https://api.nopecha.com/", {
-        params: { key: apiKey, id: taskId },
+      const pollResp = await axios.get(baseUrl, {
+        params: { id: taskId },
+        headers: { "Authorization": authHeader },
         timeout: 15000,
       });
 
       console.log(`[NopeCHA] Poll ${i + 1}: ${JSON.stringify(pollResp.data).substring(0, 150)}`);
 
-      // Error 15 = still processing, any other error = failure
-      if (pollResp.data.error && pollResp.data.error !== 15) {
+      // data will be a string token when ready, or null/undefined while processing
+      const token = pollResp.data.data;
+      if (pollResp.data.error) {
         return { success: false, error: `NopeCHA error ${pollResp.data.error}: ${pollResp.data.message || "solving failed"}` };
       }
 
-      const token = pollResp.data.data;
       if (token && typeof token === "string" && token.length > 20) {
         console.log(`[NopeCHA] ✅ Solved! Token length: ${token.length}`);
         return { success: true, token, taskId };
