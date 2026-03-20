@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
+import { orderFivesimNumber, pollFivesimSMS, cancelFivesimOrder, isFivesimConfigured } from "./fivesimService";
 import { solveRecaptchaV2, solveHCaptcha, injectRecaptchaToken } from "./capsolverService";
 
 chromium.use(StealthPlugin());
@@ -328,26 +329,52 @@ async function attemptPhoneVerification(
   attemptNum: number,
   log: (message: string) => void
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
-  let smsOrderId: string | null = null;
   let smsCost = 0;
+  // Provider-agnostic cancel / poll helpers — set below based on which service wins
+  let cancelOrder: () => Promise<void> = async () => {};
+  let pollCode: () => Promise<string | null> = async () => null;
+  let phoneNumber = "";
 
   try {
-    log(`📲 Ordering SMS number from SMSPool...`);
-    const smsOrder = await orderSMSNumber(1, "Ticketmaster");
-    if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
-      log(`❌ SMSPool order failed: ${smsOrder.error}`);
-      return { success: false, error: `SMSPool order failed: ${smsOrder.error}`, smsCost: 0 };
+    // --- Acquire phone number: try 5sim first, fall back to SMSPool ---
+    const fivesimAvailable = await isFivesimConfigured();
+
+    if (fivesimAvailable) {
+      log(`📲 Ordering SMS number from 5sim...`);
+      const order = await orderFivesimNumber("usa", "ticketmaster", "any");
+      if (order.success && order.id && order.phone) {
+        const orderId = order.id;
+        phoneNumber = order.phone;
+        smsCost = order.price ? order.price / 100 : 0.18;
+        log(`📱 Got 5sim number: ${phoneNumber.replace(/(\d{3})\d{4}(\d{3})/, '$1****$2')} (id: ${orderId})`);
+        console.log(`[TM-Playwright] 5sim ordered (attempt ${attemptNum}): id=${orderId} phone=${phoneNumber}`);
+        cancelOrder = async () => { await cancelFivesimOrder(orderId); };
+        pollCode = async () => { return await pollFivesimSMS(orderId, 60, 3000); };
+      } else {
+        log(`⚠️ 5sim failed (${order.error}), falling back to SMSPool...`);
+        console.log(`[TM-Playwright] 5sim failed: ${order.error} — falling back to SMSPool`);
+      }
     }
 
-    smsOrderId = smsOrder.orderId;
-    smsCost = 0.36;
-    log(`📱 Got phone number: ${String(smsOrder.number).replace(/(\d{3})\d{4}(\d{3})/, '$1****$2')}`);
-    console.log(`[TM-Playwright] SMS number ordered (attempt ${attemptNum}): $${smsCost} charged from SMSPool`);
-    let phoneNumber = String(smsOrder.number);
-    if (!phoneNumber.startsWith("+")) {
-      phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
+    // Fall back to SMSPool if 5sim not used
+    if (!phoneNumber) {
+      log(`📲 Ordering SMS number from SMSPool...`);
+      const smsOrder = await orderSMSNumber(1, "Ticketmaster");
+      if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
+        log(`❌ SMSPool order failed: ${smsOrder.error}`);
+        return { success: false, error: `SMS order failed: ${smsOrder.error}`, smsCost: 0 };
+      }
+      const orderId = smsOrder.orderId;
+      smsCost = 0.36;
+      phoneNumber = String(smsOrder.number);
+      if (!phoneNumber.startsWith("+")) {
+        phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
+      }
+      log(`📱 Got SMSPool number: ${phoneNumber.replace(/(\d{3})\d{4}(\d{3})/, '$1****$2')}`);
+      console.log(`[TM-Playwright] SMSPool ordered (attempt ${attemptNum}): $${smsCost} (order: ${orderId})`);
+      cancelOrder = async () => { await cancelSMSOrder(orderId); };
+      pollCode = async () => { return await pollForSMSCode(orderId, 60, 3000); };
     }
-    console.log(`[TM-Playwright] Got SMS number: ${phoneNumber} (order: ${smsOrderId})`);
 
     const phoneClickResult = await page.evaluate(`(() => {
       function findAndClick(text) {
@@ -554,7 +581,7 @@ async function attemptPhoneVerification(
     if (!phoneFilled) {
       log(`❌ Could not find phone input field`);
       console.log("[TM-Playwright] Could not find phone input field");
-      await cancelSMSOrder(smsOrderId);
+      await cancelOrder();
       return { success: false, error: "Phone input field not found on page", smsCost };
     }
 
@@ -640,13 +667,13 @@ async function attemptPhoneVerification(
 
     onStatusUpdate("verifying");
     log(`⏳ Waiting for SMS verification code...`);
-    console.log("[TM-Playwright] Polling SMSPool for phone verification code...");
-    const smsCode = await pollForSMSCode(smsOrderId, 60, 3000);
+    console.log("[TM-Playwright] Polling for phone verification code...");
+    const smsCode = await pollCode();
 
     if (!smsCode) {
       log(`⏰ SMS code timeout - no code received`);
-      console.log("[TM-Playwright] No SMS code received from SMSPool");
-      await cancelSMSOrder(smsOrderId);
+      console.log("[TM-Playwright] No SMS code received");
+      await cancelOrder();
       return { success: false, error: "Timed out waiting for SMS verification code", smsCost };
     }
 
@@ -790,10 +817,8 @@ async function attemptPhoneVerification(
     })()`);
     console.log("[TM-Playwright] Phone verify state:", JSON.stringify(phoneVerifyState));
 
-    if (phoneVerifyState.stillNeedsPhone && smsOrderId) {
-      await cancelSMSOrder(smsOrderId);
-    }
     if (phoneVerifyState.stillNeedsPhone) {
+      await cancelOrder();
       log(`❌ Phone verification not confirmed after code entry`);
       return { success: false, error: "Phone verification not confirmed after OTP submission", smsCost };
     }
@@ -802,9 +827,7 @@ async function attemptPhoneVerification(
   } catch (err: any) {
     log(`❌ Phone error: ${err.message?.substring(0, 80)}`);
     console.log("[TM-Playwright] Phone verification error:", err.message);
-    if (smsOrderId) {
-      await cancelSMSOrder(smsOrderId);
-    }
+    await cancelOrder();
     return { success: false, error: err.message, smsCost };
   }
 }

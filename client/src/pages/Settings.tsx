@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings as SettingsIcon, Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Key, Globe, Shield, DollarSign, Cpu, Mail, CreditCard } from "lucide-react";
+import { Settings as SettingsIcon, Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Key, Globe, Shield, DollarSign, Cpu, Mail, CreditCard, Smartphone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
 import { handleUnauthorized } from "@/lib/auth";
@@ -107,6 +107,20 @@ const apiKeyFields: ApiKeyField[] = [
     placeholder: "Enter 2captcha API key...",
     borderColor: "rgba(99,102,241,0.15)",
     iconColor: "text-indigo-400",
+  },
+  {
+    id: "fivesim",
+    label: "5sim API Key",
+    description: "Primary SMS provider for Ticketmaster phone verification — 5sim.net (cheaper than SMSPool, falls back to SMSPool if not configured)",
+    icon: <Smartphone className="w-4 h-4" />,
+    getEndpoint: "/api/settings/fivesim-api-key",
+    putEndpoint: "/api/admin/fivesim-api-key",
+    fieldName: "key",
+    placeholder: "Enter 5sim.net API key...",
+    borderColor: "rgba(52,211,153,0.22)",
+    iconColor: "text-emerald-400",
+    balanceEndpoint: "/api/fivesim/balance",
+    balanceLabel: "Balance",
   },
   {
     id: "account-price",

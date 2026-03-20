@@ -14,6 +14,7 @@ import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
 import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
+import { getFivesimBalance } from "./fivesimService";
 import { clearZenrowsApiKeyCache } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
 
@@ -992,6 +993,37 @@ export async function registerRoutes(
       }
       await storage.setSetting("anticaptcha_api_key", key.trim());
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/fivesim-api-key", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("fivesim_api_key");
+      res.json({ key: key || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/fivesim-api-key", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (!key || typeof key !== "string" || key.trim().length < 5) {
+        return res.status(400).json({ error: "Valid 5sim API key is required" });
+      }
+      await storage.setSetting("fivesim_api_key", key.trim());
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/fivesim/balance", requireAuth, async (_req, res) => {
+    try {
+      const result = await getFivesimBalance();
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
