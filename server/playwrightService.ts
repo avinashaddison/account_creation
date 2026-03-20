@@ -10877,6 +10877,61 @@ export async function registerReplitAccount(
 
     await handleReplitOnboarding(page, log);
 
+    // ── Ensure Replit session is active before checkout ──
+    // After email verification the browser may not have a live auth cookie.
+    // Log in explicitly so the checkout URL doesn't redirect to signup/login.
+    try {
+      const currentPageUrl = page.url();
+      const needsLogin =
+        currentPageUrl.includes("/login") ||
+        currentPageUrl.includes("/signup") ||
+        currentPageUrl.includes("action-code") ||
+        !currentPageUrl.includes("replit.com");
+
+      if (needsLogin) {
+        log(`🔐 Session not established — logging into Replit with new account credentials...`);
+      } else {
+        // Quick check: are we actually logged in?
+        const pageText = await page.evaluate(() => document.body?.innerText || "");
+        const isLoggedOut = pageText.includes("Sign up") && pageText.includes("Log in") && !pageText.includes(username);
+        if (isLoggedOut) log(`🔐 Not logged in — forcing Replit login...`);
+      }
+
+      await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(3000);
+
+      // Fill email
+      const loginEmail = await page.$('input[name="username"], input[name="email"], input[type="email"]').catch(() => null);
+      if (loginEmail) {
+        await loginEmail.fill(outlookEmail.toLowerCase());
+        await page.waitForTimeout(500);
+      }
+
+      // Fill password
+      const loginPass = await page.$('input[name="password"], input[type="password"]').catch(() => null);
+      if (loginPass) {
+        await loginPass.fill(password);
+        await page.waitForTimeout(500);
+      }
+
+      // Submit
+      const loginBtn = await page.$('button[type="submit"], button:has-text("Log in"), button:has-text("Sign in")').catch(() => null);
+      if (loginBtn) {
+        await loginBtn.click();
+        await page.waitForTimeout(5000);
+        const afterLoginUrl = page.url();
+        if (afterLoginUrl.includes("replit.com") && !afterLoginUrl.includes("/login")) {
+          log(`✅ Logged into Replit — URL: ${afterLoginUrl.substring(0, 60)}`);
+        } else {
+          log(`⚠️ Login may have failed — URL: ${afterLoginUrl.substring(0, 60)}`);
+        }
+      } else {
+        log(`⚠️ Login button not found on Replit login page`);
+      }
+    } catch (loginErr: any) {
+      log(`⚠️ Replit login step error: ${(loginErr.message || "").substring(0, 80)}`);
+    }
+
     log(`✅ Replit account creation complete: username=${username} email=${outlookEmail} password=${password}`);
 
     // ── Coupon / Stripe checkout step ──
@@ -10891,58 +10946,34 @@ export async function registerReplitAccount(
         checkoutUrl = page.url();
         log(`Stripe checkout loaded: ${checkoutUrl.substring(0, 80)}...`);
 
-        // If Replit gates the checkout behind email verification, navigate to verify link first
-        if (checkoutUrl.includes("/verify") || checkoutUrl.includes("verifyEmail")) {
-          log(`⚠️ Checkout blocked by email verification gate — retrying OWA verification...`);
-          let retryVerified = false;
-          let owaBrowser2: import("playwright").Browser | null = null;
-          try {
-            const { chromium } = await import("playwright");
-            owaBrowser2 = await chromium.launch({ headless: true });
-            const owaCtx2 = await owaBrowser2.newContext({ ignoreHTTPSErrors: true });
-            const owaP2 = await owaCtx2.newPage();
-            await owaP2.goto("https://login.live.com", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await owaP2.waitForTimeout(2000);
-            // Enter Outlook email
-            const emailInput2 = await owaP2.$('input[type="email"], input[name="loginfmt"]').catch(() => null);
-            if (emailInput2) { await emailInput2.fill(outlookEmail); await owaP2.keyboard.press("Enter"); await owaP2.waitForTimeout(2000); }
-            const passInput2 = await owaP2.$('input[type="password"], input[name="passwd"]').catch(() => null);
-            if (passInput2) { await passInput2.fill(outlookPassword); await owaP2.keyboard.press("Enter"); await owaP2.waitForTimeout(4000); }
-            await owaP2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await owaP2.waitForTimeout(5000);
-            const items2 = await owaP2.$$('[data-convid], [role="row"]');
-            for (const itm of items2.slice(0, 20)) {
-              const txt = await itm.innerText().catch(() => "");
-              if (txt.toLowerCase().includes("replit") || txt.toLowerCase().includes("verify") || txt.toLowerCase().includes("confirm")) {
-                log(`Found verification email (retry): ${txt.substring(0, 80)}`);
-                await itm.evaluate((el: Element) => (el as HTMLElement).click());
-                await owaP2.waitForTimeout(3000);
-                const body2 = await owaP2.evaluate(() => document.body?.innerText || "");
-                const lm2 = body2.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
-                if (lm2) {
-                  const retryLink = lm2[0].trim();
-                  log(`Verification link found (retry): ${retryLink.substring(0, 80)}...`);
-                  await page.goto(retryLink, { waitUntil: "domcontentloaded", timeout: 30000 });
-                  await page.waitForTimeout(4000);
-                  retryVerified = true;
-                }
-                break;
+        // If Replit redirects away from checkout (not logged in or needs verify), handle it
+        if (checkoutUrl.includes("/verify") || checkoutUrl.includes("verifyEmail") ||
+            checkoutUrl.includes("/signup") || checkoutUrl.includes("/login")) {
+          log(`⚠️ Checkout redirected to gate page: ${checkoutUrl.substring(0, 80)}`);
+          // If it's a login/signup redirect, try logging in directly
+          if (checkoutUrl.includes("/login") || checkoutUrl.includes("/signup")) {
+            try {
+              const loginEmail2 = await page.$('input[name="username"], input[name="email"], input[type="email"]').catch(() => null);
+              if (loginEmail2) {
+                await loginEmail2.fill(outlookEmail.toLowerCase());
+                await page.waitForTimeout(400);
               }
-            }
-          } catch (retryErr: any) {
-            log(`⚠️ Retry verification error: ${(retryErr.message || "").substring(0, 80)}`);
-          } finally {
-            if (owaBrowser2) { try { await owaBrowser2.close(); } catch {} }
-          }
-
-          if (retryVerified) {
-            log(`✅ Email verified on retry — navigating to checkout`);
-            await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-            await page.waitForTimeout(8000);
-            checkoutUrl = page.url();
-            log(`Stripe checkout (after verify retry): ${checkoutUrl.substring(0, 80)}...`);
-          } else {
-            log(`⚠️ Could not verify email on retry — checkout may fail`);
+              const loginPass2 = await page.$('input[name="password"], input[type="password"]').catch(() => null);
+              if (loginPass2) {
+                await loginPass2.fill(password);
+                await page.waitForTimeout(400);
+              }
+              const loginBtn2 = await page.$('button[type="submit"]').catch(() => null);
+              if (loginBtn2) {
+                await loginBtn2.click();
+                await page.waitForTimeout(5000);
+                log(`Logged in on gate page — retrying checkout`);
+                await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                await page.waitForTimeout(8000);
+                checkoutUrl = page.url();
+                log(`Checkout after login retry: ${checkoutUrl.substring(0, 80)}`);
+              }
+            } catch {}
           }
         }
 
