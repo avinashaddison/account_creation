@@ -22,7 +22,7 @@ declare module "express-session" {
   }
 }
 
-const effectiveDatabaseUrl = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
+const effectiveDatabaseUrl = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
 if (!effectiveDatabaseUrl) {
   console.error("FATAL: DATABASE_URL environment variable is not set");
   process.exit(1);
