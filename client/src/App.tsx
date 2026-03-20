@@ -36,6 +36,7 @@ import TMSettings from "@/pages/TMSettings";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
+import CursorEffect from "@/components/CursorEffect";
 
 export type AuthUser = {
   id: string;
@@ -141,6 +142,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        <CursorEffect />
         <Toaster />
         {user ? (
           <Switch>

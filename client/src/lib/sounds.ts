@@ -66,16 +66,16 @@ export const sounds = {
     try {
       const ctx = getCtx();
       const t = ctx.currentTime;
-      const m = masterGain(ctx, 0.05);
+      const m = masterGain(ctx, 0.14);
       const o = ctx.createOscillator();
       o.type = "sine";
-      o.frequency.setValueAtTime(2400, t);
-      o.frequency.exponentialRampToValueAtTime(2800, t + 0.03);
+      o.frequency.setValueAtTime(2200, t);
+      o.frequency.exponentialRampToValueAtTime(2700, t + 0.04);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.4, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      g.gain.setValueAtTime(0.5, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.055);
       o.connect(g); g.connect(m);
-      o.start(t); o.stop(t + 0.05);
+      o.start(t); o.stop(t + 0.065);
     } catch {}
   },
 
@@ -83,8 +83,8 @@ export const sounds = {
     try {
       const ctx = getCtx();
       const t = ctx.currentTime;
-      const m = masterGain(ctx, 0.18);
-      playNoise(ctx, 0.6, 0.002, 0.04, t, m);
+      const m = masterGain(ctx, 0.28);
+      playNoise(ctx, 0.7, 0.002, 0.05, t, m);
       const o = ctx.createOscillator();
       o.type = "square";
       o.frequency.setValueAtTime(1600, t);
