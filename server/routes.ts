@@ -421,7 +421,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   const pgModule = await import("pg");
-  const wsPool = new pgModule.default.Pool({ connectionString: process.env.DATABASE_URL || process.env.NEON_DATABASE_URL, max: 2 });
+  const wsPool = new pgModule.default.Pool({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL, max: 2 });
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
   wss.on("connection", (ws, req) => {
     const cookieHeader = req.headers.cookie || "";
