@@ -83,7 +83,7 @@ export default function TMCreate() {
       if (d.role) setUserRole(d.role);
       if (d.walletBalance) setWalletBalance(parseFloat(d.walletBalance));
     }).catch(() => {});
-    fetch("/api/settings/browser-proxy", { credentials: "include" }).then(r => r.json()).then(d => {
+    fetch("/api/settings/tm-browser-url", { credentials: "include" }).then(r => r.json()).then(d => {
       if (d.url) setProxyUrl(d.url);
     }).catch(() => {});
   }, []);
@@ -269,15 +269,21 @@ export default function TMCreate() {
               <div className="space-y-2">
                 <Label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
                   <Globe className="w-3 h-3" /> Browser API Proxy
+                  <span className="text-[9px] font-normal text-amber-400/80 normal-case tracking-normal">(must be wss:// for Akamai bypass)</span>
                 </Label>
                 <Input
                   value={proxyUrl}
                   onChange={(e) => setProxyUrl(e.target.value)}
                   disabled={isRunning}
-                  placeholder="wss://... Browser API URL"
-                  className="h-8 text-xs bg-white/[0.02] border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono"
+                  placeholder="wss://browser.zenrows.com?apikey=..."
+                  className={`h-8 text-xs bg-white/[0.02] border-white/5 text-zinc-300 placeholder:text-zinc-600 font-mono ${proxyUrl && !proxyUrl.startsWith("wss://") ? "border-amber-500/50" : ""}`}
                   data-testid="input-tm-proxy"
                 />
+                {proxyUrl && !proxyUrl.startsWith("wss://") && (
+                  <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                    ⚠ HTTP proxy = local headless browser → detected by Akamai. Use wss:// for best results.
+                  </p>
+                )}
               </div>
               )}
 

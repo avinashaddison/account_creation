@@ -26,6 +26,18 @@ async function getDefaultBrowserApiUrl(): Promise<string | null> {
   return saved || null;
 }
 
+// For Ticketmaster (Akamai-protected), always prefer WSS remote browser over HTTP proxy
+// Local headless Playwright is detected by Akamai regardless of stealth plugin
+async function getTMBrowserUrl(): Promise<string | null> {
+  const wss = await storage.getSetting("browser_proxy_url");
+  if (wss && wss.startsWith("wss://")) return wss;
+  const residential = await storage.getSetting("residential_proxy_url");
+  if (residential) return residential;
+  const soaxTemplate = await storage.getSetting("soax_proxy_template");
+  if (soaxTemplate) return soaxTemplate;
+  return null;
+}
+
 function uniqueProxySession(proxyUrl: string): string {
   if (!proxyUrl || proxyUrl === "local") return proxyUrl;
   const sessionId = randomUUID().replace(/-/g, "").substring(0, 12);
@@ -797,6 +809,15 @@ export async function registerRoutes(
   app.get("/api/settings/browser-proxy", requireAuth, async (_req, res) => {
     try {
       const url = await getDefaultBrowserApiUrl();
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/tm-browser-url", requireAuth, async (_req, res) => {
+    try {
+      const url = await getTMBrowserUrl();
       res.json({ url });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1970,7 +1991,7 @@ export async function registerRoutes(
 
       const { count = 1 } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
-      const baseProxyUrl = req.body.proxyUrl || (await getDefaultBrowserApiUrl()) || "";
+      const baseProxyUrl = req.body.proxyUrl || (await getTMBrowserUrl()) || "";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
