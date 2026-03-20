@@ -10753,7 +10753,12 @@ export async function registerReplitAccount(
         await emailInput.fill(outlookEmail);
         log("Entered Outlook email on login page");
         const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (nextBtn) { await nextBtn.click(); await owaPage.waitForTimeout(2500); }
+        if (nextBtn) { await nextBtn.click(); }
+        else { await owaPage.keyboard.press("Enter"); }
+        // Wait for password field to appear (up to 12s — Microsoft login is slow)
+        try {
+          await owaPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 12000 });
+        } catch { await owaPage.waitForTimeout(4000); }
       }
 
       const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
@@ -10761,7 +10766,11 @@ export async function registerReplitAccount(
         await passInput.fill(outlookPassword);
         log("Entered Outlook password on login page");
         const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (signInBtn) { await signInBtn.click(); await owaPage.waitForTimeout(4000); }
+        if (signInBtn) { await signInBtn.click(); }
+        else { await owaPage.keyboard.press("Enter"); }
+        await owaPage.waitForTimeout(5000);
+      } else {
+        log("⚠️ Password field not found — Microsoft login page may have changed");
       }
 
       let currentLoginUrl = owaPage.url();
@@ -10804,37 +10813,43 @@ export async function registerReplitAccount(
         log("✅ Logged into Outlook Web — searching inbox for Replit email...");
         await owaPage.waitForTimeout(3000);
 
-        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(4000);
-
-        const emailItems = await owaPage.$$('[data-convid], [role="row"]');
-        log(`Found ${emailItems.length} email items in inbox`);
+        // Retry inbox check up to 4 times (20s apart) — email may be delayed
         let foundReplitEmail = false;
-        for (const item of emailItems.slice(0, 20)) {
-          const itemText = await item.innerText().catch(() => "");
-          if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
-            log(`Found Replit-related email: ${itemText.substring(0, 100)}`);
-            // Use JS eval click — avoids Playwright scroll/timeout issues on OWA rows
-            await item.evaluate((el: Element) => (el as HTMLElement).click());
-            await owaPage.waitForTimeout(3000);
-            foundReplitEmail = true;
+        for (let attempt = 1; attempt <= 4 && !foundReplitEmail; attempt++) {
+          await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await owaPage.waitForTimeout(4000);
 
-            const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-            const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
-            if (linkMatch) {
-              verificationLink = linkMatch[0].trim();
-              log(`Extracted verification link from OWA: ${verificationLink.substring(0, 100)}...`);
+          const emailItems = await owaPage.$$('[data-convid], [role="row"]');
+          log(`[Attempt ${attempt}/4] Found ${emailItems.length} email items in inbox`);
+          for (const item of emailItems.slice(0, 20)) {
+            const itemText = await item.innerText().catch(() => "");
+            if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
+              log(`Found Replit-related email: ${itemText.substring(0, 100)}`);
+              await item.evaluate((el: Element) => (el as HTMLElement).click());
+              await owaPage.waitForTimeout(3000);
+              foundReplitEmail = true;
+
+              const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+              const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
+              if (linkMatch) {
+                verificationLink = linkMatch[0].trim();
+                log(`Extracted verification link from OWA: ${verificationLink.substring(0, 100)}...`);
+              }
+              const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+              if (!verificationLink && codeMatch) {
+                verificationCode = codeMatch[1];
+                log(`Extracted verification code from OWA: ${verificationCode}`);
+              }
+              break;
             }
-            const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-            if (!verificationLink && codeMatch) {
-              verificationCode = codeMatch[1];
-              log(`Extracted verification code from OWA: ${verificationCode}`);
-            }
-            break;
+          }
+          if (!foundReplitEmail && attempt < 4) {
+            log(`No Replit email yet — waiting 20s before retry ${attempt + 1}/4...`);
+            await owaPage.waitForTimeout(20000);
           }
         }
         if (!foundReplitEmail) {
-          log("No Replit verification email found in inbox yet — account creation may complete after manual verification");
+          log("⚠️ No Replit verification email found after 4 attempts — continuing without verification");
         }
       } else {
         log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
@@ -10914,11 +10929,24 @@ export async function registerReplitAccount(
         await page.waitForTimeout(500);
       }
 
-      // Submit
-      const loginBtn = await page.$('button[type="submit"], button:has-text("Log in"), button:has-text("Sign in")').catch(() => null);
-      if (loginBtn) {
-        await loginBtn.click();
-        await page.waitForTimeout(5000);
+      // Submit — use JS eval to find button by text (page.$ doesn't support :has-text)
+      const loginClicked = await page.evaluate(() => {
+        // Try submit button first
+        const submitBtn = document.querySelector("button[type='submit'], input[type='submit']") as HTMLElement;
+        if (submitBtn) { submitBtn.click(); return true; }
+        // Fallback: any visible button with login text
+        const btns = Array.from(document.querySelectorAll("button"));
+        const btn = btns.find(b =>
+          !(b as HTMLButtonElement).disabled &&
+          (b.textContent?.toLowerCase().includes("log in") ||
+           b.textContent?.toLowerCase().includes("sign in") ||
+           b.textContent?.toLowerCase().includes("login"))
+        );
+        if (btn) { (btn as HTMLElement).click(); return true; }
+        return false;
+      });
+      if (loginClicked) {
+        await page.waitForTimeout(6000);
         const afterLoginUrl = page.url();
         if (afterLoginUrl.includes("replit.com") && !afterLoginUrl.includes("/login")) {
           log(`✅ Logged into Replit — URL: ${afterLoginUrl.substring(0, 60)}`);
