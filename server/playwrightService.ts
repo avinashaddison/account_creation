@@ -11127,7 +11127,152 @@ export async function registerReplitAccount(
         log(`  Billing address (India): ${addr.line1}, ${addr.city}, ${addr.state} ${addr.zip}`);
         await page.waitForTimeout(1000);
 
-        // Submit
+        // ── IMAP host resolver ──────────────────────────────────────────
+        function resolveImapHost(email: string): string {
+          const domain = (email.split("@")[1] || "").toLowerCase();
+          if (domain === "gmail.com") return "imap.gmail.com";
+          if (["outlook.com", "hotmail.com", "live.com"].includes(domain)) return "outlook.office365.com";
+          if (domain === "yahoo.com") return "imap.mail.yahoo.com";
+          return `imap.${domain}`;
+        }
+
+        // ── Precision OTP fetcher (bulk-safe) ───────────────────────────
+        // paymentTime = exact moment submit was clicked.
+        // We only accept emails whose Date header is >= paymentTime.
+        // After reading the OTP we immediately mark that email SEEN so the
+        // next bulk account won't pick up the same email.
+        async function fetchBankOtp(
+          otpEmail: string,
+          otpPassword: string,
+          paymentTime: Date,
+          logFn: (m: string) => void
+        ): Promise<string | null> {
+          const BANK_SENDER = "fedmail@federalbank.co.in";
+          const BANK_DOMAIN = "federalbank.co.in";
+          const POLL_INTERVAL_MS = 5000;
+          const MAX_WAIT_MS = 90000; // 90 seconds total
+          const imapHost = resolveImapHost(otpEmail);
+          const { ImapFlow } = await import("imapflow");
+
+          logFn(`📬 OTP watcher started — polling ${imapHost} every 5s (max 90s)...`);
+          logFn(`   Anchor time: ${paymentTime.toISOString()} — only emails AFTER this will be used`);
+
+          const deadline = Date.now() + MAX_WAIT_MS;
+
+          while (Date.now() < deadline) {
+            let client: any;
+            try {
+              client = new ImapFlow({
+                host: imapHost,
+                port: 993,
+                secure: true,
+                auth: { user: otpEmail, pass: otpPassword },
+                logger: false,
+                connectionTimeout: 15000,
+              });
+              await client.connect();
+              const mailbox = await client.mailboxOpen("INBOX");
+              logFn(`   INBOX: ${mailbox.exists} total messages`);
+
+              // Search: from bank sender + arrived since 2 min before payment
+              // (using a small lookback so we don't miss it if clocks drift slightly)
+              const searchSince = new Date(paymentTime.getTime() - 2 * 60 * 1000);
+
+              let uids: number[] = [];
+              try {
+                uids = await client.search({ from: BANK_SENDER, since: searchSince }) as number[];
+                logFn(`   Found ${uids.length} email(s) from ${BANK_SENDER} since ${searchSince.toISOString()}`);
+              } catch {
+                // some servers don't support FROM in search — fallback
+                uids = await client.search({ seen: false, since: searchSince }) as number[];
+                logFn(`   Fallback search: ${uids.length} unseen emails since ${searchSince.toISOString()}`);
+              }
+
+              if (uids.length > 0) {
+                // Fetch envelopes + source for all matches, sort newest first
+                const candidates: Array<{ uid: number; date: Date; raw: string }> = [];
+                for await (const msg of client.fetch(uids, { envelope: true, source: true })) {
+                  const emailDate: Date = msg.envelope?.date
+                    ? new Date(msg.envelope.date)
+                    : new Date(0);
+                  const raw: string = msg.source?.toString() || "";
+
+                  // Must be FROM bank domain
+                  const fromBank =
+                    raw.toLowerCase().includes(BANK_DOMAIN) ||
+                    (msg.envelope?.from || []).some((a: any) =>
+                      (a.host || "").toLowerCase().includes(BANK_DOMAIN)
+                    );
+                  if (!fromBank) continue;
+
+                  // Must have arrived AFTER payment was submitted
+                  if (emailDate < paymentTime) {
+                    logFn(`   Skipping old email (date: ${emailDate.toISOString()}) — predates payment`);
+                    continue;
+                  }
+
+                  candidates.push({ uid: Number(msg.uid), date: emailDate, raw });
+                }
+
+                // Sort newest first
+                candidates.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+                for (const { uid, date, raw } of candidates) {
+                  logFn(`   Checking email uid=${uid} date=${date.toISOString()}`);
+
+                  // Extract 6-digit OTP
+                  let otp: string | null = null;
+                  const exact6 = raw.match(/\b([0-9]{6})\b/g);
+                  if (exact6 && exact6.length > 0) {
+                    // prefer the last one (usually the OTP is at the end of bank emails)
+                    otp = exact6[exact6.length - 1];
+                  }
+                  if (!otp) {
+                    // Wider OTP keyword pattern
+                    const kwMatch = raw.match(
+                      /(?:OTP|One.?Time.?Password|verification code|passcode)[^0-9]*([0-9]{4,8})/i
+                    );
+                    if (kwMatch) otp = kwMatch[1];
+                  }
+                  if (!otp) {
+                    // Last-resort: any 4-8 digit block in the email
+                    const any = raw.match(/\b([0-9]{4,8})\b/g);
+                    if (any) otp = any[any.length - 1];
+                  }
+
+                  if (otp) {
+                    logFn(`✅ OTP extracted: ${otp} (from email dated ${date.toISOString()})`);
+                    // Mark this email as SEEN immediately so bulk runs won't reuse it
+                    try {
+                      await client.messageFlagsAdd({ uid }, ["\\Seen"]);
+                      logFn(`   Email uid=${uid} marked as READ — won't be reused`);
+                    } catch {
+                      logFn(`   ⚠️ Could not mark email as read (non-fatal)`);
+                    }
+                    await client.logout();
+                    return otp;
+                  } else {
+                    logFn(`   ⚠️ No parseable OTP in this email — skipping`);
+                  }
+                }
+              }
+
+              await client.logout();
+            } catch (imapErr: any) {
+              logFn(`⚠️ IMAP error: ${(imapErr.message || "").substring(0, 120)}`);
+              try { await client?.logout(); } catch {}
+            }
+
+            const remaining = Math.round((deadline - Date.now()) / 1000);
+            logFn(`   No OTP yet — polling again in 5s (${remaining}s remaining)...`);
+            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          }
+
+          logFn(`⏰ OTP timeout — no email found within 90s after payment`);
+          return null;
+        }
+
+        // ── Submit payment ───────────────────────────────────────────────
         const submitSelectors = [
           'button[data-testid="hosted-payment-submit-button"]',
           'button[type="submit"]:has-text("Subscribe")',
@@ -11137,13 +11282,16 @@ export async function registerReplitAccount(
           'button:has-text("Pay now")',
         ];
         let submitted = false;
+        // Record exact moment of payment submission — used as OTP anchor
+        let paymentSubmitTime = new Date();
         for (const sel of submitSelectors) {
           try {
             const el = page.locator(sel).first();
             const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
             if (visible) {
+              paymentSubmitTime = new Date(); // snapshot right before click
               await el.click();
-              log(`🖱️ Clicked payment submit button`);
+              log(`🖱️ Clicked payment submit (anchor: ${paymentSubmitTime.toISOString()})`);
               submitted = true;
               break;
             }
@@ -11156,110 +11304,80 @@ export async function registerReplitAccount(
           await page.waitForTimeout(5000);
 
           const currentUrl = page.url();
-          const is3DS = await page.locator('iframe[name*="stripe3ds"], iframe[src*="3ds"], iframe[title*="challenge"], [data-testid*="3ds"]').isVisible({ timeout: 3000 }).catch(() => false);
+          const is3DS = await page
+            .locator(
+              'iframe[name*="stripe3ds"], iframe[src*="3ds"], iframe[title*="challenge"], [data-testid*="3ds"], iframe[name*="ACS"]'
+            )
+            .isVisible({ timeout: 3000 })
+            .catch(() => false);
 
           if (is3DS || currentUrl.includes("3ds")) {
-            log(`🔐 3D Secure challenge detected — fetching OTP from email...`);
+            log(`🔐 3D Secure challenge detected — starting OTP watcher...`);
 
             if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
-              // Fetch OTP via IMAP — retry up to 3 times with 10s gap
-              let otp: string | null = null;
-              const bankSenderDomain = "federalbank.co.in";
-              const bankSenderEmail = "fedmail@federalbank.co.in";
-
-              // Detect IMAP host from email domain
-              function getImapHost(email: string): string {
-                const domain = email.split("@")[1]?.toLowerCase() || "";
-                if (domain === "gmail.com") return "imap.gmail.com";
-                if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") return "outlook.office365.com";
-                if (domain === "yahoo.com") return "imap.mail.yahoo.com";
-                return `imap.${domain}`;
-              }
-
-              for (let attempt = 1; attempt <= 3; attempt++) {
-                try {
-                  const { ImapFlow } = await import("imapflow");
-                  const imapHost = getImapHost(cardDetails.otpEmail);
-                  log(`📬 IMAP attempt ${attempt}/3 — connecting to ${imapHost}...`);
-                  const client = new ImapFlow({
-                    host: imapHost,
-                    port: 993,
-                    secure: true,
-                    auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword },
-                    logger: false,
-                  });
-                  await client.connect();
-                  await client.mailboxOpen("INBOX");
-                  const since = new Date(Date.now() - 8 * 60 * 1000);
-                  // Search for emails from Federal Bank OTP sender
-                  let uids: number[] = [];
-                  try {
-                    uids = await client.search({ from: bankSenderEmail, since }) as number[];
-                    log(`  Found ${uids.length} email(s) from ${bankSenderEmail}`);
-                  } catch {
-                    // Fallback: fetch all recent unseen emails
-                    uids = await client.search({ seen: false, since }) as number[];
-                    log(`  Fallback: searching ${uids.length} recent unseen emails`);
-                  }
-                  if (uids.length > 0) {
-                    const latestUids = uids.slice(-3); // check last 3
-                    for await (const msg of client.fetch(latestUids, { source: true })) {
-                      const raw = msg.source.toString();
-                      // Filter: only process if from Federal Bank domain
-                      const fromBank = raw.toLowerCase().includes(bankSenderDomain) || raw.toLowerCase().includes(bankSenderEmail);
-                      if (!fromBank && uids.length > 1) continue;
-                      // Extract 6-digit OTP (Indian bank OTPs are always 6 digits)
-                      const otpMatch = raw.match(/\b(\d{6})\b/g);
-                      if (otpMatch && otpMatch.length > 0) {
-                        otp = otpMatch[otpMatch.length - 1];
-                        log(`  Extracted OTP: ${otp}`);
-                        break;
-                      }
-                      // Fallback: any 4–8 digit sequence
-                      const fallback = raw.match(/OTP[^\d]*(\d{4,8})|(\d{4,8})[^\d]*OTP/i);
-                      if (fallback) {
-                        otp = (fallback[1] || fallback[2]);
-                        log(`  Extracted OTP (fallback pattern): ${otp}`);
-                        break;
-                      }
-                    }
-                  }
-                  await client.logout();
-                  if (otp) break;
-                  if (attempt < 3) {
-                    log(`  No OTP yet — waiting 10s before retry...`);
-                    await page.waitForTimeout(10000);
-                  }
-                } catch (imapErr: any) {
-                  log(`⚠️ IMAP error (attempt ${attempt}): ${(imapErr.message || "").substring(0, 100)}`);
-                  if (attempt < 3) await page.waitForTimeout(5000);
-                }
-              }
+              const otp = await fetchBankOtp(
+                cardDetails.otpEmail,
+                cardDetails.otpEmailPassword,
+                paymentSubmitTime,
+                log
+              );
 
               if (otp) {
-                log(`📬 OTP received: ${otp} — entering in 3DS frame...`);
-                // Try to find OTP field in 3DS iframes
-                const frames = page.frames();
-                for (const frame of frames) {
+                log(`📬 Entering OTP ${otp} in 3DS frame...`);
+                // Try all frames — 3DS challenge can be in nested iframes
+                const allFrames = page.frames();
+                let otpEntered = false;
+                for (const frame of allFrames) {
+                  if (otpEntered) break;
                   try {
-                    const otpField = frame.locator('input[name="challengeDataEntry"], input[type="password"], input[type="text"]').first();
-                    const visible = await otpField.isVisible({ timeout: 2000 }).catch(() => false);
-                    if (visible) {
-                      await otpField.fill(otp);
-                      await page.waitForTimeout(500);
-                      const submitBtn = frame.locator('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Confirm")').first();
-                      const btnVisible = await submitBtn.isVisible({ timeout: 2000 }).catch(() => false);
-                      if (btnVisible) {
-                        await submitBtn.click();
-                        log(`✅ 3DS OTP submitted`);
+                    const otpSelectors = [
+                      'input[name="challengeDataEntry"]',
+                      'input[name="otp"]',
+                      'input[name="code"]',
+                      'input[autocomplete="one-time-code"]',
+                      'input[type="tel"]',
+                      'input[type="number"]',
+                      'input[type="password"]',
+                      'input[type="text"]',
+                    ];
+                    for (const oSel of otpSelectors) {
+                      const otpField = frame.locator(oSel).first();
+                      const visible = await otpField.isVisible({ timeout: 1500 }).catch(() => false);
+                      if (visible) {
+                        await otpField.click();
+                        await otpField.fill("");
+                        await otpField.type(otp, { delay: 60 });
+                        log(`   Filled OTP in frame: ${frame.url().substring(0, 60)}`);
+                        await page.waitForTimeout(600);
+
+                        const submitSelectors3ds = [
+                          'button[type="submit"]',
+                          'input[type="submit"]',
+                          'button:has-text("Submit")',
+                          'button:has-text("Confirm")',
+                          'button:has-text("Verify")',
+                          'button:has-text("Proceed")',
+                          'button:has-text("Continue")',
+                        ];
+                        for (const bSel of submitSelectors3ds) {
+                          const btn = frame.locator(bSel).first();
+                          const btnVis = await btn.isVisible({ timeout: 1500 }).catch(() => false);
+                          if (btnVis) {
+                            await btn.click();
+                            log(`✅ 3DS OTP submitted`);
+                            otpEntered = true;
+                            break;
+                          }
+                        }
+                        if (otpEntered) break;
                       }
-                      break;
                     }
                   } catch {}
                 }
+                if (!otpEntered) log(`⚠️ Could not find 3DS input field to enter OTP`);
                 await page.waitForTimeout(8000);
               } else {
-                log(`⚠️ No OTP found in email — 3DS may require manual intervention`);
+                log(`⚠️ No OTP received within timeout — 3DS requires manual intervention`);
               }
             } else {
               log(`⚠️ 3DS challenge detected but no OTP email configured for this card`);
