@@ -11776,6 +11776,88 @@ export async function registerReplitAccount(
               }
             }
 
+            // Check if this is a visible hCaptcha path (Stripe A/B test)
+            // Detect by looking for HCaptcha.html frame (NOT the invisible one, but the visible checkbox one)
+            const isHCaptchaVisible = page.frames().some(f => {
+              const u = f.url();
+              return u.includes("HCaptcha.html") || u.includes("hcaptcha-inner");
+            });
+            const hasBankAcsFrame = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth") || f.url().includes("federalbank"));
+
+            if (isHCaptchaVisible && !hasBankAcsFrame) {
+              log(`🤖 hCaptcha visible challenge detected — using CapSolver to solve...`);
+              try {
+                // Extract sitekey from the HCaptcha iframe source
+                let hcaptchaSiteKey = "";
+                for (const frame of page.frames()) {
+                  const fUrl = frame.url();
+                  if (fUrl.includes("HCaptcha.html") || fUrl.includes("hcaptcha-inner")) {
+                    try {
+                      // Try to extract sitekey from the frame's DOM
+                      hcaptchaSiteKey = await frame.evaluate(() => {
+                        const el = document.querySelector("[data-sitekey]") as HTMLElement | null;
+                        if (el) return (el as any).dataset?.sitekey || "";
+                        // Also check window.__hcaptcha_sitekey
+                        return (window as any).__hcaptcha_sitekey || (window as any).hcaptchaSiteKey || "";
+                      }).catch(() => "");
+                      if (hcaptchaSiteKey) {
+                        log(`   Found hCaptcha sitekey in HCaptcha.html frame: ${hcaptchaSiteKey.substring(0, 20)}...`);
+                        break;
+                      }
+                    } catch {}
+                  }
+                }
+                // If not found in frames, check the main page
+                if (!hcaptchaSiteKey) {
+                  hcaptchaSiteKey = await page.evaluate(() => {
+                    const el = document.querySelector("[data-sitekey]") as HTMLElement | null;
+                    if (el) return (el as any).dataset?.sitekey || "";
+                    // Stripe embeds hcaptcha with a known sitekey — check page source
+                    const scripts = document.querySelectorAll("script");
+                    for (const s of Array.from(scripts)) {
+                      const m = s.textContent?.match(/"sitekey":\s*"([^"]+)"/);
+                      if (m) return m[1];
+                    }
+                    return "";
+                  }).catch(() => "");
+                }
+                // Stripe's known hCaptcha sitekey (used on checkout.stripe.com)
+                if (!hcaptchaSiteKey) {
+                  hcaptchaSiteKey = "a9b5fb07-92ff-493f-86fe-352a2803b3df";
+                  log(`   Using Stripe's known hCaptcha sitekey: ${hcaptchaSiteKey}`);
+                } else {
+                  log(`   Extracted hCaptcha sitekey: ${hcaptchaSiteKey}`);
+                }
+
+                log(`   Calling CapSolver to solve hCaptcha...`);
+                const capResult = await solveHCaptcha(page.url(), hcaptchaSiteKey);
+                if (capResult.success && capResult.token) {
+                  log(`   ✅ CapSolver solved hCaptcha! Token: ${capResult.token.substring(0, 30)}...`);
+                  // Inject token into all hcaptcha response fields on the page and iframes
+                  const injected = await page.evaluate((token) => {
+                    let count = 0;
+                    // Set response in all textarea/input with hcaptcha-related names
+                    document.querySelectorAll("textarea[name='h-captcha-response'], input[name='h-captcha-response']").forEach(el => {
+                      (el as HTMLInputElement).value = token;
+                      count++;
+                    });
+                    // Trigger hcaptcha callback if available
+                    if ((window as any).hcaptcha?.execute) (window as any).hcaptcha.execute();
+                    if ((window as any).__hcaptchaCallback) (window as any).__hcaptchaCallback(token);
+                    return count;
+                  }, capResult.token).catch(() => 0);
+                  log(`   Injected token into ${injected} field(s) — waiting for bank 3DS...`);
+                  await page.waitForTimeout(5000);
+                  const bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+                  log(`   Bank ACS loaded after hCaptcha solve: ${bankAcsNow}`);
+                } else {
+                  log(`   ⚠️ CapSolver failed to solve hCaptcha: ${capResult.error || "unknown error"}`);
+                }
+              } catch (capErr: any) {
+                log(`   ⚠️ hCaptcha CapSolver error: ${capErr.message || capErr}`);
+              }
+            }
+
             if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
               const otp = await fetchBankOtp(
                 cardDetails.otpEmail,
