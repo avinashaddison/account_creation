@@ -11835,22 +11835,83 @@ export async function registerReplitAccount(
                 // Use base domain only — CapSolver blocks the full session URL
                 const capsolverUrl = "https://checkout.stripe.com";
                 const capResult = await solveHCaptcha(capsolverUrl, hcaptchaSiteKey);
-                // Helper: inject hCaptcha token and wait for bank ACS
+                // Helper: inject hCaptcha token into ALL frames (main page + each iframe)
                 const injectHCaptchaToken = async (token: string, source: string) => {
                   log(`   ✅ ${source} solved hCaptcha! Token: ${token.substring(0, 30)}...`);
-                  // Inject token into the page via multiple strategies
-                  const injected = await page.evaluate((tok) => {
-                    let count = 0;
-                    document.querySelectorAll("textarea[name='h-captcha-response'], input[name='h-captcha-response']").forEach(el => {
-                      (el as HTMLInputElement).value = tok;
-                      count++;
-                    });
-                    if ((window as any).hcaptcha?.execute) (window as any).hcaptcha.execute();
-                    if ((window as any).__hcaptchaCallback) (window as any).__hcaptchaCallback(tok);
-                    return count;
-                  }, token).catch(() => 0);
-                  log(`   Injected token into ${injected} field(s) — waiting for bank 3DS...`);
-                  await page.waitForTimeout(5000);
+                  let totalInjected = 0;
+
+                  // Inject into every frame, not just the main page
+                  for (const frame of page.frames()) {
+                    try {
+                      const count = await frame.evaluate((tok) => {
+                        let n = 0;
+                        // Set h-captcha-response textarea/input fields
+                        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+                          "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+                        ).forEach(el => { el.value = tok; n++; });
+                        // Fire hCaptcha internal callbacks
+                        const w = window as any;
+                        if (w.hcaptcha?.execute) { try { w.hcaptcha.execute(); } catch {} }
+                        if (w.__hcaptchaCallback) { try { w.__hcaptchaCallback(tok); } catch {} }
+                        // Trigger hCaptcha widget callback (used in iframe)
+                        if (w.hcaptcha?.getRespKey) {
+                          try {
+                            const wk = Object.keys(w.hcaptcha._hcaptchas || {})[0];
+                            if (wk !== undefined) w.hcaptcha._hcaptchas[wk].response = tok;
+                          } catch {}
+                        }
+                        // Dispatch custom event that some integrations listen to
+                        document.dispatchEvent(new CustomEvent("hCaptchaCallback", { detail: tok }));
+                        return n;
+                      }, token).catch(() => 0);
+                      if (count > 0) {
+                        totalInjected += count;
+                        log(`   Injected token into ${count} field(s) in frame: ${frame.url().substring(0, 70)}`);
+                      }
+                    } catch {}
+                  }
+
+                  // Extra: target the newassets.hcaptcha.com frame directly — fire the internal success callback
+                  for (const frame of page.frames()) {
+                    if (!frame.url().includes("newassets.hcaptcha.com")) continue;
+                    try {
+                      await frame.evaluate((tok) => {
+                        const w = window as any;
+                        // Try calling hcaptcha widget success callbacks directly
+                        if (w.hcaptcha?._hcaptchas) {
+                          Object.values(w.hcaptcha._hcaptchas as Record<string, any>).forEach((widget: any) => {
+                            try { if (widget.successCallback) widget.successCallback(tok); } catch {}
+                            try { if (widget.callback) widget.callback(tok); } catch {}
+                          });
+                        }
+                        // Set response field
+                        const ta = document.querySelector<HTMLTextAreaElement>("textarea[name='h-captcha-response']");
+                        if (ta) ta.value = tok;
+                        // Send postMessage to parent (HCaptcha.html on stripecdn.com)
+                        window.parent.postMessage(JSON.stringify({ id: "hcaptcha", event: "challenge-passed", token: tok }), "*");
+                        window.parent.postMessage({ source: "hcaptcha", data: { token: tok, event: "verified" } }, "*");
+                      }, token).catch(() => {});
+                      log(`   Fired hCaptcha widget callbacks in newassets frame`);
+                    } catch {}
+                  }
+
+                  // Extra: target stripecdn.com/HCaptcha.html — send success event up to Stripe
+                  for (const frame of page.frames()) {
+                    if (!frame.url().includes("HCaptcha.html")) continue;
+                    try {
+                      await frame.evaluate((tok) => {
+                        const w = window as any;
+                        // Some Stripe builds register a global success handler
+                        if (w.__stripeHcaptchaCallback) w.__stripeHcaptchaCallback(tok);
+                        // Dispatch to parent (js.stripe.com/hcaptcha-inner-*.html)
+                        window.parent.postMessage(JSON.stringify({ id: "hcaptcha", token: tok, type: "challenge.passed" }), "*");
+                      }, token).catch(() => {});
+                      log(`   Fired HCaptcha.html → parent postMessage`);
+                    } catch {}
+                  }
+
+                  log(`   Total fields injected: ${totalInjected} across all frames — waiting 8s for Stripe to process...`);
+                  await page.waitForTimeout(8000);
                   const bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
                   log(`   Bank ACS loaded after hCaptcha solve: ${bankAcsNow}`);
                 };
