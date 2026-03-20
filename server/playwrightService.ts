@@ -10890,91 +10890,123 @@ export async function registerReplitAccount(
         checkoutUrl = page.url();
         log(`Stripe checkout loaded: ${checkoutUrl.substring(0, 80)}...`);
 
-        // Look for "Add promotion code" link or input
-        const promoSelectors = [
-          'a[data-testid="promotion-code-toggle"]',
-          'button:has-text("Add promotion code")',
-          'a:has-text("Add promotion code")',
-          'span:has-text("Add promotion code")',
-          '[data-testid="promotion-code-toggle"]',
-          'text=Add promotion code',
-        ];
-        let promoClicked = false;
-        for (const sel of promoSelectors) {
-          try {
-            const el = page.locator(sel).first();
-            const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
-            if (visible) {
-              await el.click();
-              await page.waitForTimeout(1500);
-              promoClicked = true;
-              log(`Clicked promotion code toggle`);
-              break;
-            }
-          } catch {}
+        // ── Dump page state for debugging ──
+        await page.waitForTimeout(2000);
+        const pageTitle = await page.title().catch(() => "");
+        log(`Page title: "${pageTitle}" | URL: ${page.url().substring(0, 100)}`);
+
+        // ── Helper: click element by visible text (JS eval — immune to selector changes) ──
+        async function clickByText(texts: string[], timeout = 5000): Promise<boolean> {
+          const deadline = Date.now() + timeout;
+          while (Date.now() < deadline) {
+            const clicked = await page.evaluate((words: string[]) => {
+              const all = Array.from(document.querySelectorAll("a, button, span, div, p, label"));
+              for (const word of words) {
+                const el = all.find(
+                  (e) => e.textContent?.trim().toLowerCase().includes(word.toLowerCase()) &&
+                  (e as HTMLElement).offsetParent !== null
+                );
+                if (el) { (el as HTMLElement).click(); return el.textContent?.trim().substring(0, 40) || ""; }
+              }
+              return "";
+            }, texts);
+            if (clicked) { log(`Clicked: "${clicked}"`); return true; }
+            await page.waitForTimeout(500);
+          }
+          return false;
         }
 
-        // Find the promo code input field
-        const inputSelectors = [
-          'input[placeholder*="Promotion code" i]',
-          'input[placeholder*="coupon" i]',
-          'input[placeholder*="promo" i]',
-          'input[name="promotionCode"]',
-          'input[data-testid="promotion-code-input"]',
-          '[data-testid="checkout-field-promotion-code"] input',
-        ];
-        let codeEntered = false;
-        for (const sel of inputSelectors) {
-          try {
-            const el = page.locator(sel).first();
-            const visible = await el.isVisible({ timeout: 4000 }).catch(() => false);
+        // ── Helper: fill first visible input matching placeholder/name ──
+        async function fillInput(hints: string[], value: string, timeout = 6000): Promise<boolean> {
+          const deadline = Date.now() + timeout;
+          while (Date.now() < deadline) {
+            const filled = await page.evaluate(({ hints, value }: { hints: string[], value: string }) => {
+              const inputs = Array.from(document.querySelectorAll("input"));
+              for (const hint of hints) {
+                const el = inputs.find((i) => {
+                  const ph = (i.placeholder || "").toLowerCase();
+                  const nm = (i.name || "").toLowerCase();
+                  const id = (i.id || "").toLowerCase();
+                  return (ph.includes(hint) || nm.includes(hint) || id.includes(hint)) &&
+                    (i as HTMLElement).offsetParent !== null;
+                });
+                if (el) {
+                  el.focus();
+                  el.value = value;
+                  el.dispatchEvent(new Event("input", { bubbles: true }));
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                  return el.placeholder || el.name || el.id || "input";
+                }
+              }
+              return "";
+            }, { hints, value });
+            if (filled) { log(`Filled input "${filled}" with value`); return true; }
+            await page.waitForTimeout(500);
+          }
+          return false;
+        }
+
+        // Step 1 — click "Add promotion code" toggle
+        let promoClicked = await clickByText(
+          ["add promotion code", "promotion code", "have a promo", "coupon", "discount code"],
+          5000
+        );
+        if (!promoClicked) log(`⚠️ Promo toggle not found — trying direct input`);
+        else await page.waitForTimeout(1500);
+
+        // Step 2 — fill the promo code input
+        let codeEntered = await fillInput(
+          ["promotion", "promo", "coupon", "discount", "code"],
+          code,
+          6000
+        );
+
+        // Fallback: try any visible text input that appeared after clicking toggle
+        if (!codeEntered) {
+          codeEntered = await page.evaluate((val: string) => {
+            const inputs = Array.from(document.querySelectorAll("input[type='text'], input:not([type])"));
+            const visible = inputs.find((i) => (i as HTMLElement).offsetParent !== null && !(i as HTMLInputElement).value);
             if (visible) {
-              await el.fill(code);
-              await page.waitForTimeout(500);
-              codeEntered = true;
-              log(`Entered coupon code: ${code}`);
-              break;
+              (visible as HTMLInputElement).focus();
+              (visible as HTMLInputElement).value = val;
+              visible.dispatchEvent(new Event("input", { bubbles: true }));
+              visible.dispatchEvent(new Event("change", { bubbles: true }));
+              return true;
             }
-          } catch {}
+            return false;
+          }, code);
+          if (codeEntered) log(`Filled code via fallback empty-input method`);
         }
 
         if (codeEntered) {
-          // Click Apply button
-          const applySelectors = [
-            'button:has-text("Apply")',
-            '[data-testid="promotion-code-apply-button"]',
-            'button[type="submit"]:has-text("Apply")',
-            'text=Apply',
-          ];
-          for (const sel of applySelectors) {
-            try {
-              const el = page.locator(sel).first();
-              const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
-              if (visible) {
-                await el.click();
-                await page.waitForTimeout(3000);
-                log(`Clicked Apply`);
-                break;
-              }
-            } catch {}
+          log(`Entered coupon code: ${code}`);
+          await page.waitForTimeout(400);
+
+          // Step 3 — click Apply
+          const applied = await clickByText(["apply", "redeem", "submit code"], 4000);
+          if (applied) {
+            await page.waitForTimeout(3000);
+            log(`Clicked Apply`);
           }
 
           // Check result
-          const successText = await page.locator('text=discount, text=off, text=applied, [data-testid="coupon-name"]').first().textContent({ timeout: 3000 }).catch(() => "");
-          if (successText) {
-            log(`✅ Coupon applied! Discount: ${successText.substring(0, 80)}`);
+          const pageText = await page.evaluate(() => document.body.innerText.toLowerCase());
+          if (pageText.includes("discount") || pageText.includes("% off") || pageText.includes("applied") || pageText.includes("free")) {
+            log(`✅ Coupon applied! Discount reflected on page`);
+          } else if (pageText.includes("invalid") || pageText.includes("expired") || pageText.includes("not valid")) {
+            log(`⚠️ Coupon may be invalid or expired`);
           } else {
-            const errorText = await page.locator('[data-testid="promotion-code-error"], .coupon-error, text=invalid, text=expired').first().textContent({ timeout: 2000 }).catch(() => "");
-            if (errorText) {
-              log(`⚠️ Coupon error: ${errorText.substring(0, 80)}`);
-            } else {
-              log(`Coupon submitted — check checkout for discount`);
-            }
+            log(`Coupon submitted — discount may apply at checkout`);
           }
-        } else if (!promoClicked) {
-          log(`⚠️ Could not find promotion code field on Stripe checkout`);
         } else {
-          log(`⚠️ Promotion code toggle clicked but input not found`);
+          log(`⚠️ Could not find promotion code input — dumping visible inputs for debug:`);
+          const inputDump = await page.evaluate(() =>
+            Array.from(document.querySelectorAll("input")).map((i) => ({
+              type: i.type, name: i.name, placeholder: i.placeholder, id: i.id,
+              visible: (i as HTMLElement).offsetParent !== null,
+            }))
+          );
+          log(`  Inputs found: ${JSON.stringify(inputDump).substring(0, 300)}`);
         }
 
         checkoutUrl = page.url();
@@ -11273,29 +11305,66 @@ export async function registerReplitAccount(
         }
 
         // ── Submit payment ───────────────────────────────────────────────
-        const submitSelectors = [
-          'button[data-testid="hosted-payment-submit-button"]',
-          'button[type="submit"]:has-text("Subscribe")',
-          'button[type="submit"]:has-text("Pay")',
-          'button[type="submit"]:has-text("Start")',
-          'button:has-text("Subscribe")',
-          'button:has-text("Pay now")',
-        ];
-        let submitted = false;
         // Record exact moment of payment submission — used as OTP anchor
         let paymentSubmitTime = new Date();
-        for (const sel of submitSelectors) {
-          try {
-            const el = page.locator(sel).first();
-            const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
-            if (visible) {
-              paymentSubmitTime = new Date(); // snapshot right before click
-              await el.click();
-              log(`🖱️ Clicked payment submit (anchor: ${paymentSubmitTime.toISOString()})`);
-              submitted = true;
-              break;
-            }
-          } catch {}
+        let submitted = false;
+
+        // Dump all buttons for debugging
+        const allBtns = await page.evaluate(() =>
+          Array.from(document.querySelectorAll("button, input[type='submit']")).map((b) => ({
+            text: (b.textContent || "").trim().substring(0, 40),
+            type: (b as HTMLButtonElement).type,
+            visible: (b as HTMLElement).offsetParent !== null,
+            disabled: (b as HTMLButtonElement).disabled,
+          }))
+        );
+        log(`  Buttons on page: ${JSON.stringify(allBtns).substring(0, 400)}`);
+
+        // Try JS eval first — finds by text, most reliable
+        const submitTexts = ["subscribe", "pay now", "pay", "start", "complete", "confirm", "place order", "checkout"];
+        paymentSubmitTime = new Date();
+        submitted = await page.evaluate((texts: string[]) => {
+          const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
+          // Prefer a submit-type button or one matching payment text
+          for (const t of texts) {
+            const btn = btns.find(
+              (b) => b.textContent?.trim().toLowerCase().includes(t) &&
+              (b as HTMLElement).offsetParent !== null &&
+              !(b as HTMLButtonElement).disabled
+            );
+            if (btn) { (btn as HTMLButtonElement).click(); return true; }
+          }
+          // Last resort: click any enabled visible submit button
+          const anySubmit = btns.find(
+            (b) => (b as HTMLButtonElement).type === "submit" &&
+            (b as HTMLElement).offsetParent !== null &&
+            !(b as HTMLButtonElement).disabled
+          );
+          if (anySubmit) { (anySubmit as HTMLButtonElement).click(); return true; }
+          return false;
+        }, submitTexts);
+
+        if (submitted) {
+          log(`🖱️ Clicked payment submit (anchor: ${paymentSubmitTime.toISOString()})`);
+        } else {
+          // Final fallback: Playwright locator with broad text match
+          for (const txt of submitTexts) {
+            try {
+              const el = page.locator(`button:has-text("${txt}")`).first();
+              const vis = await el.isVisible({ timeout: 1500 }).catch(() => false);
+              if (vis) {
+                paymentSubmitTime = new Date();
+                await el.click();
+                log(`🖱️ Clicked submit via fallback locator: "${txt}"`);
+                submitted = true;
+                break;
+              }
+            } catch {}
+          }
+        }
+
+        if (!submitted) {
+          log(`⚠️ Could not find submit button — dumped buttons above for debug`);
         }
 
         if (submitted) {
