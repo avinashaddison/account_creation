@@ -11162,32 +11162,78 @@ export async function registerReplitAccount(
             log(`🔐 3D Secure challenge detected — fetching OTP from email...`);
 
             if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
-              // Fetch OTP via IMAP
+              // Fetch OTP via IMAP — retry up to 3 times with 10s gap
               let otp: string | null = null;
-              try {
-                const { ImapFlow } = await import("imapflow");
-                const client = new ImapFlow({
-                  host: "imap.gmail.com",
-                  port: 993,
-                  secure: true,
-                  auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword },
-                  logger: false,
-                });
-                await client.connect();
-                await client.mailboxOpen("INBOX");
-                const since = new Date(Date.now() - 5 * 60 * 1000);
-                const messages = client.fetch({ seen: false, since }, { source: true });
-                for await (const msg of messages) {
-                  const raw = msg.source.toString();
-                  const otpMatch = raw.match(/\b(\d{4,8})\b/g);
-                  if (otpMatch) {
-                    otp = otpMatch[otpMatch.length - 1];
-                    break;
+              const bankSenderDomain = "federalbank.co.in";
+              const bankSenderEmail = "fedmail@federalbank.co.in";
+
+              // Detect IMAP host from email domain
+              function getImapHost(email: string): string {
+                const domain = email.split("@")[1]?.toLowerCase() || "";
+                if (domain === "gmail.com") return "imap.gmail.com";
+                if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") return "outlook.office365.com";
+                if (domain === "yahoo.com") return "imap.mail.yahoo.com";
+                return `imap.${domain}`;
+              }
+
+              for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                  const { ImapFlow } = await import("imapflow");
+                  const imapHost = getImapHost(cardDetails.otpEmail);
+                  log(`📬 IMAP attempt ${attempt}/3 — connecting to ${imapHost}...`);
+                  const client = new ImapFlow({
+                    host: imapHost,
+                    port: 993,
+                    secure: true,
+                    auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword },
+                    logger: false,
+                  });
+                  await client.connect();
+                  await client.mailboxOpen("INBOX");
+                  const since = new Date(Date.now() - 8 * 60 * 1000);
+                  // Search for emails from Federal Bank OTP sender
+                  let uids: number[] = [];
+                  try {
+                    uids = await client.search({ from: bankSenderEmail, since }) as number[];
+                    log(`  Found ${uids.length} email(s) from ${bankSenderEmail}`);
+                  } catch {
+                    // Fallback: fetch all recent unseen emails
+                    uids = await client.search({ seen: false, since }) as number[];
+                    log(`  Fallback: searching ${uids.length} recent unseen emails`);
                   }
+                  if (uids.length > 0) {
+                    const latestUids = uids.slice(-3); // check last 3
+                    for await (const msg of client.fetch(latestUids, { source: true })) {
+                      const raw = msg.source.toString();
+                      // Filter: only process if from Federal Bank domain
+                      const fromBank = raw.toLowerCase().includes(bankSenderDomain) || raw.toLowerCase().includes(bankSenderEmail);
+                      if (!fromBank && uids.length > 1) continue;
+                      // Extract 6-digit OTP (Indian bank OTPs are always 6 digits)
+                      const otpMatch = raw.match(/\b(\d{6})\b/g);
+                      if (otpMatch && otpMatch.length > 0) {
+                        otp = otpMatch[otpMatch.length - 1];
+                        log(`  Extracted OTP: ${otp}`);
+                        break;
+                      }
+                      // Fallback: any 4–8 digit sequence
+                      const fallback = raw.match(/OTP[^\d]*(\d{4,8})|(\d{4,8})[^\d]*OTP/i);
+                      if (fallback) {
+                        otp = (fallback[1] || fallback[2]);
+                        log(`  Extracted OTP (fallback pattern): ${otp}`);
+                        break;
+                      }
+                    }
+                  }
+                  await client.logout();
+                  if (otp) break;
+                  if (attempt < 3) {
+                    log(`  No OTP yet — waiting 10s before retry...`);
+                    await page.waitForTimeout(10000);
+                  }
+                } catch (imapErr: any) {
+                  log(`⚠️ IMAP error (attempt ${attempt}): ${(imapErr.message || "").substring(0, 100)}`);
+                  if (attempt < 3) await page.waitForTimeout(5000);
                 }
-                await client.logout();
-              } catch (imapErr: any) {
-                log(`⚠️ IMAP error: ${(imapErr.message || "").substring(0, 80)}`);
               }
 
               if (otp) {
