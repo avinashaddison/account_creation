@@ -106,13 +106,13 @@ function NavItem({ item, location }: { item: { href: string; label: string; icon
         >
           <item.icon
             className="w-[12px] h-[12px] shrink-0 transition-all duration-200"
-            style={{ color: isActive ? tag.dot : "rgba(255,255,255,0.25)" }}
+            style={{ color: isActive ? tag.dot : "rgba(255,255,255,0.6)" }}
           />
         </div>
 
         <span
           className="flex-1 font-mono text-[11.5px] font-medium transition-colors duration-200"
-          style={{ color: isActive ? "#f1f5f9" : "rgba(255,255,255,0.3)" }}
+          style={{ color: isActive ? "#ffffff" : "rgba(255,255,255,0.88)" }}
         >
           {item.label}
         </span>
@@ -338,11 +338,11 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                   : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }
                 }
               >
-                <Ticket className="w-[12px] h-[12px]" style={{ color: isTmRoute ? "#00ff41" : "rgba(255,255,255,0.25)" }} />
+                <Ticket className="w-[12px] h-[12px]" style={{ color: isTmRoute ? "#00ff41" : "rgba(255,255,255,0.6)" }} />
               </div>
-              <span className="flex-1 font-mono text-[11.5px] font-medium" style={{ color: isTmRoute ? "#f1f5f9" : "rgba(255,255,255,0.3)" }}>Ticket Master</span>
+              <span className="flex-1 font-mono text-[11.5px] font-medium" style={{ color: isTmRoute ? "#ffffff" : "rgba(255,255,255,0.88)" }}>Ticket Master</span>
               <TagBadge tag="TKT" />
-              <ChevronRight className="w-3 h-3 transition-transform duration-250 ml-0.5" style={{ transform: tmExpanded ? "rotate(90deg)" : "rotate(0deg)", color: tmExpanded ? "rgba(0,255,65,0.5)" : "rgba(255,255,255,0.15)" }} />
+              <ChevronRight className="w-3 h-3 transition-transform duration-250 ml-0.5" style={{ transform: tmExpanded ? "rotate(90deg)" : "rotate(0deg)", color: tmExpanded ? "rgba(0,255,65,0.5)" : "rgba(255,255,255,0.45)" }} />
             </div>
 
             {tmExpanded && (
@@ -357,14 +357,14 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                         className="relative flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150"
                         style={isActive
                           ? { background: "rgba(0,255,65,0.07)", border: "1px solid rgba(0,255,65,0.14)", color: "#86efac" }
-                          : { border: "1px solid transparent", color: "rgba(255,255,255,0.25)" }
+                          : { border: "1px solid transparent", color: "rgba(255,255,255,0.85)" }
                         }
                         data-testid={`nav-tm-${item.label.toLowerCase().replace(/ /g, "-")}`}
                       >
                         {isActive && (
                           <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3 rounded-r-full" style={{ background: "#00ff41", boxShadow: "0 0 6px rgba(0,255,65,0.6)" }} />
                         )}
-                        <item.icon className="w-[11px] h-[11px] shrink-0" style={{ color: isActive ? "#4ade80" : "rgba(255,255,255,0.18)" }} />
+                        <item.icon className="w-[11px] h-[11px] shrink-0" style={{ color: isActive ? "#4ade80" : "rgba(255,255,255,0.55)" }} />
                         <span className="font-mono">{item.label}</span>
                       </div>
                     </Link>
