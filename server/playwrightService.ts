@@ -10400,8 +10400,9 @@ async function handleReplitOnboarding(page: any, log: (msg: string) => void): Pr
 export async function registerReplitAccount(
   outlookEmail: string,
   outlookPassword: string,
-  log: (msg: string) => void
-): Promise<{ success: boolean; username?: string; email?: string; password?: string; error?: string }> {
+  log: (msg: string) => void,
+  couponCode?: string
+): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -10856,7 +10857,114 @@ export async function registerReplitAccount(
     await handleReplitOnboarding(page, log);
 
     log(`✅ Replit account creation complete: username=${username} email=${outlookEmail} password=${password}`);
-    return { success: true, username, email: outlookEmail, password };
+
+    // ── Coupon / Stripe checkout step ──
+    let checkoutUrl: string | undefined;
+    if (couponCode && couponCode.trim()) {
+      const code = couponCode.trim();
+      try {
+        log(`🎟️ Applying coupon "${code}" to Replit Core checkout...`);
+        const checkoutPageUrl = "https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?source=onboarding-purchase-modal&successRedirectPath=%2F%7E&cancelRedirectPath=%2F%7E";
+        await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.waitForTimeout(8000);
+        checkoutUrl = page.url();
+        log(`Stripe checkout loaded: ${checkoutUrl.substring(0, 80)}...`);
+
+        // Look for "Add promotion code" link or input
+        const promoSelectors = [
+          'a[data-testid="promotion-code-toggle"]',
+          'button:has-text("Add promotion code")',
+          'a:has-text("Add promotion code")',
+          'span:has-text("Add promotion code")',
+          '[data-testid="promotion-code-toggle"]',
+          'text=Add promotion code',
+        ];
+        let promoClicked = false;
+        for (const sel of promoSelectors) {
+          try {
+            const el = page.locator(sel).first();
+            const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
+            if (visible) {
+              await el.click();
+              await page.waitForTimeout(1500);
+              promoClicked = true;
+              log(`Clicked promotion code toggle`);
+              break;
+            }
+          } catch {}
+        }
+
+        // Find the promo code input field
+        const inputSelectors = [
+          'input[placeholder*="Promotion code" i]',
+          'input[placeholder*="coupon" i]',
+          'input[placeholder*="promo" i]',
+          'input[name="promotionCode"]',
+          'input[data-testid="promotion-code-input"]',
+          '[data-testid="checkout-field-promotion-code"] input',
+        ];
+        let codeEntered = false;
+        for (const sel of inputSelectors) {
+          try {
+            const el = page.locator(sel).first();
+            const visible = await el.isVisible({ timeout: 4000 }).catch(() => false);
+            if (visible) {
+              await el.fill(code);
+              await page.waitForTimeout(500);
+              codeEntered = true;
+              log(`Entered coupon code: ${code}`);
+              break;
+            }
+          } catch {}
+        }
+
+        if (codeEntered) {
+          // Click Apply button
+          const applySelectors = [
+            'button:has-text("Apply")',
+            '[data-testid="promotion-code-apply-button"]',
+            'button[type="submit"]:has-text("Apply")',
+            'text=Apply',
+          ];
+          for (const sel of applySelectors) {
+            try {
+              const el = page.locator(sel).first();
+              const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
+              if (visible) {
+                await el.click();
+                await page.waitForTimeout(3000);
+                log(`Clicked Apply`);
+                break;
+              }
+            } catch {}
+          }
+
+          // Check result
+          const successText = await page.locator('text=discount, text=off, text=applied, [data-testid="coupon-name"]').first().textContent({ timeout: 3000 }).catch(() => "");
+          if (successText) {
+            log(`✅ Coupon applied! Discount: ${successText.substring(0, 80)}`);
+          } else {
+            const errorText = await page.locator('[data-testid="promotion-code-error"], .coupon-error, text=invalid, text=expired').first().textContent({ timeout: 2000 }).catch(() => "");
+            if (errorText) {
+              log(`⚠️ Coupon error: ${errorText.substring(0, 80)}`);
+            } else {
+              log(`Coupon submitted — check checkout for discount`);
+            }
+          }
+        } else if (!promoClicked) {
+          log(`⚠️ Could not find promotion code field on Stripe checkout`);
+        } else {
+          log(`⚠️ Promotion code toggle clicked but input not found`);
+        }
+
+        checkoutUrl = page.url();
+        log(`🔗 Checkout URL: ${checkoutUrl}`);
+      } catch (couponErr: any) {
+        log(`⚠️ Coupon step error: ${(couponErr.message || "").substring(0, 150)}`);
+      }
+    }
+
+    return { success: true, username, email: outlookEmail, password, checkoutUrl };
 
   } catch (err: any) {
     log(`Error: ${(err.message || String(err)).substring(0, 200)}`);

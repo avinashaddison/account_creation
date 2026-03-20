@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -53,6 +53,8 @@ export default function ReplitCreate() {
   const [outlookPassword, setOutlookPassword] = useState("");
   const [selectedOutlookId, setSelectedOutlookId] = useState("");
   const [count, setCount] = useState(1);
+  const [couponCode, setCouponCode] = useState("");
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
@@ -111,6 +113,7 @@ export default function ReplitCreate() {
             if (data.success) {
               setCompletedCount((p) => p + 1);
               sounds.success();
+              if (data.checkoutUrl) setCheckoutUrl(data.checkoutUrl);
               toast({ title: "✅ Account Created", description: `@${data.username}` });
             } else {
               sounds.error();
@@ -139,16 +142,18 @@ export default function ReplitCreate() {
     setLogs([]);
     setRunning(true);
     setCompletedCount(0);
+    setCheckoutUrl(null);
 
     if (count > 1) {
       setTotalCount(count);
       try {
-        const res = await apiRequest("POST", "/api/replit-create/bulk", { count });
+        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, couponCode: couponCode.trim() || undefined });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start bulk");
         activeBatchId.current = data.batchId;
         setTotalCount(data.count);
         addLog(`🚀 Bulk job started — ${data.count} account(s) queued [${data.batchId}]`);
+        if (couponCode.trim()) addLog(`🎟️ Coupon "${couponCode.trim()}" will be applied after each creation`);
       } catch (err: any) {
         sounds.error();
         toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -163,11 +168,12 @@ export default function ReplitCreate() {
       }
       setTotalCount(1);
       try {
-        const res = await apiRequest("POST", "/api/replit-create", { outlookEmail, outlookPassword });
+        const res = await apiRequest("POST", "/api/replit-create", { outlookEmail, outlookPassword, couponCode: couponCode.trim() || undefined });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start");
         activeBatchId.current = data.batchId;
         addLog(`Job started: ${data.batchId}`);
+        if (couponCode.trim()) addLog(`🎟️ Coupon "${couponCode.trim()}" will be applied after creation`);
       } catch (err: any) {
         sounds.error();
         toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -332,6 +338,75 @@ export default function ReplitCreate() {
                 </div>
               </div>
             </>
+          )}
+
+          {/* Coupon Code field */}
+          <div>
+            <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
+              <Tag className="w-2.5 h-2.5 inline mr-1" />
+              Coupon Code <span style={{ color: GA(0.22) }}>(optional)</span>
+            </label>
+            <div
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
+              style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${couponCode.trim() ? GA(0.4) : GA(0.14)}` }}
+            >
+              <Tag className="w-3.5 h-3.5 flex-shrink-0" style={{ color: couponCode.trim() ? G : GA(0.3) }} />
+              <input
+                type="text"
+                value={couponCode}
+                onChange={(e) => { sounds.keypress(); setCouponCode(e.target.value.toUpperCase()); }}
+                placeholder="PROMO2025 (leave blank to skip)"
+                className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                style={{ color: couponCode.trim() ? G : "rgba(255,255,255,0.5)", caretColor: G, letterSpacing: couponCode ? "0.12em" : undefined }}
+                data-testid="input-coupon-code"
+              />
+              {couponCode.trim() && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: GA(0.1), border: `1px solid ${GA(0.28)}`, color: G }}>
+                  WILL APPLY
+                </span>
+              )}
+            </div>
+            {couponCode.trim() && (
+              <p className="text-[9px] font-mono mt-1.5" style={{ color: GA(0.32) }}>
+                After account creation, logs into Replit → opens Stripe checkout → applies coupon → logs checkout URL
+              </p>
+            )}
+          </div>
+
+          {/* Checkout URL result */}
+          {checkoutUrl && (
+            <div
+              className="rounded-lg p-3 space-y-1.5"
+              style={{ background: GA(0.04), border: `1px solid ${GA(0.25)}`, boxShadow: `0 0 16px ${GA(0.06)} inset` }}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
+                <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: GA(0.55) }}>Checkout URL (coupon applied)</span>
+              </div>
+              <a
+                href={checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-1.5 group"
+                onClick={() => sounds.click()}
+              >
+                <ExternalLink className="w-3 h-3 flex-shrink-0 mt-0.5 group-hover:opacity-100" style={{ color: GA(0.45) }} />
+                <span
+                  className="text-[9px] font-mono break-all leading-relaxed"
+                  style={{ color: G, textShadow: `0 0 8px ${GA(0.3)}` }}
+                >
+                  {checkoutUrl.length > 120 ? checkoutUrl.substring(0, 120) + "..." : checkoutUrl}
+                </span>
+              </a>
+              <button
+                onClick={() => { navigator.clipboard.writeText(checkoutUrl); sounds.click(); toast({ title: "Copied!", description: "Checkout URL copied to clipboard" }); }}
+                className="text-[8px] font-mono px-2 py-0.5 rounded transition-all"
+                style={{ background: GA(0.08), border: `1px solid ${GA(0.22)}`, color: GA(0.6) }}
+                data-testid="button-copy-checkout-url"
+              >
+                copy url
+              </button>
+            </div>
           )}
 
           {/* Create button */}

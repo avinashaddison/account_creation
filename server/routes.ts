@@ -2833,7 +2833,7 @@ export async function registerRoutes(
 
   app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { count = 1 } = req.body;
+      const { count = 1, couponCode } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 20);
       const userId = req.session.userId;
 
@@ -2867,7 +2867,8 @@ export async function registerRoutes(
             const result = await registerReplitAccount(
               acc.email,
               acc.password,
-              (msg) => broadcastLog(batchId, bulkId, msg, userId)
+              (msg) => broadcastLog(batchId, bulkId, msg, userId),
+              couponCode || undefined
             );
             if (result.success) {
               try {
@@ -2907,7 +2908,7 @@ export async function registerRoutes(
 
   app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword } = req.body;
+      const { outlookEmail, outlookPassword, couponCode } = req.body;
       if (!outlookEmail || !outlookPassword) {
         return res.status(400).json({ error: "Outlook email and password are required" });
       }
@@ -2933,7 +2934,8 @@ export async function registerRoutes(
           const result = await registerReplitAccount(
             outlookEmail,
             outlookPassword,
-            (msg) => broadcastLog(batchId, createId, msg, userId)
+            (msg) => broadcastLog(batchId, createId, msg, userId),
+            couponCode || undefined
           );
 
           if (result.success) {
@@ -2950,7 +2952,7 @@ export async function registerRoutes(
             } catch (dbErr: any) {
               broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
             }
-            broadcast({ type: "replit_create_result", createId, batchId, success: true, username: result.username, email: result.email, password: result.password }, userId);
+            broadcast({ type: "replit_create_result", createId, batchId, success: true, username: result.username, email: result.email, password: result.password, checkoutUrl: result.checkoutUrl }, userId);
           } else {
             broadcastLog(batchId, createId, `❌ Replit creation failed: ${result.error || "Unknown error"}`, userId);
             broadcast({ type: "replit_create_result", createId, batchId, success: false, error: result.error }, userId);
