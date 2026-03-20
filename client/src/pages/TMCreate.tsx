@@ -162,7 +162,7 @@ export default function TMCreate() {
       const res = await fetch("/api/tm-create-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ count: numAccounts, proxyUrl: proxyUrl || undefined }),
+        body: JSON.stringify({ count: numAccounts, proxyUrl: proxyUrl || undefined, eventId: selectedEvent?.id }),
         credentials: "include",
       });
 

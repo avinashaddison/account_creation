@@ -1940,7 +1940,8 @@ export async function registerRoutes(
     addisonEmail: string,
     addisonEmailPassword: string,
     ownerId: string,
-    proxyUrl?: string
+    proxyUrl?: string,
+    shakiraPresale?: boolean
   ) {
     try {
       broadcastLog(batchId, accountId, `Creating temp email: ${addisonEmail}`, ownerId);
@@ -1971,7 +1972,9 @@ export async function registerRoutes(
         (message) => {
           broadcastLog(batchId, accountId, message, ownerId);
         },
-        proxyUrl
+        proxyUrl,
+        undefined,
+        shakiraPresale
       );
 
       const smsCost = result.smsCost || 0;
@@ -2021,9 +2024,10 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user) return res.status(401).json({ error: "User not found" });
 
-      const { count = 1 } = req.body;
+      const { count = 1, eventId } = req.body;
       const numAccounts = Math.max(1, parseInt(count));
       const baseProxyUrl = req.body.proxyUrl || (await getTMBrowserUrl()) || "";
+      const shakiraPresale = eventId === "shakira";
 
       const costPerAccount = await getCostPerAccount();
       const walletBalance = parseFloat(user.walletBalance || "0");
@@ -2080,7 +2084,7 @@ export async function registerRoutes(
           broadcastLog(batchId, acc.id, `Starting TM registration for ${acc.firstName} ${acc.lastName}...`, userId);
           await processTMAccount(
             acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-            acc.email, acc.emailPassword, userId, proxyUrl
+            acc.email, acc.emailPassword, userId, proxyUrl, shakiraPresale
           );
 
           const afterAccount = await storage.getAccount(acc.id);
@@ -2100,7 +2104,7 @@ export async function registerRoutes(
             }
             await processTMAccount(
               acc.id, batchId, acc.firstName, acc.lastName, acc.la28Password,
-              retryEmail, "TempPass123!", userId, retryProxy
+              retryEmail, "TempPass123!", userId, retryProxy, shakiraPresale
             );
           }
         }

@@ -3,6 +3,7 @@ import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import { orderFivesimNumber, pollFivesimSMS, cancelFivesimOrder, isFivesimConfigured } from "./fivesimService";
 import { solveRecaptchaV2, solveHCaptcha, injectRecaptchaToken } from "./capsolverService";
+import { doShakiraPresaleStep } from "./shakiraService";
 
 chromium.use(StealthPlugin());
 
@@ -176,7 +177,8 @@ export async function tmFullRegistrationFlow(
   getVerificationCode: () => Promise<string | null>,
   onLog?: (message: string) => void,
   proxyUrl?: string,
-  keepBrowserOpen?: boolean
+  keepBrowserOpen?: boolean,
+  shakiraPresale?: boolean
 ): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number; browser?: any; page?: any }> {
   const log = onLog || ((msg: string) => console.log(`[TM] ${msg}`));
   const maxRetries = 4;
@@ -199,7 +201,7 @@ export async function tmFullRegistrationFlow(
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     }
 
-    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl, keepBrowserOpen);
+    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl, keepBrowserOpen, shakiraPresale);
     totalSmsCost += result.smsCost || 0;
 
     const closeBrowserIfKept = () => {
@@ -841,7 +843,8 @@ async function doTMRegistration(
   getVerificationCode: () => Promise<string | null>,
   log: (message: string) => void,
   proxyUrl?: string,
-  keepBrowserOpen?: boolean
+  keepBrowserOpen?: boolean,
+  shakiraPresale?: boolean
 ): Promise<{ success: boolean; error?: string; pageContent?: string; smsCost?: number; browser?: any; page?: any }> {
   console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
   const isBrowserAPI = proxyUrl && proxyUrl.startsWith('wss://');
@@ -958,34 +961,58 @@ async function doTMRegistration(
       console.log("[TM-Playwright] Could not set bandwidth optimization:", e.message);
     }
 
-    log(`🔗 Navigating to Ticketmaster sign-up page...`);
-    console.log("[TM-Playwright] Navigating to TM create_account...");
-    try {
-      await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 60000 });
-    } catch (navErr: any) {
-      if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("brob") || navErr.message.includes("restricted"))) {
-        console.log("[TM-Playwright] robots.txt restriction, navigating directly to auth URL...");
-        try {
-          await page.goto("https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf7204a7e97.web.ticketmaster.us&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-us", { waitUntil: "domcontentloaded", timeout: 60000 });
-        } catch (authNavErr: any) {
-          console.log("[TM-Playwright] Auth URL navigation failed:", authNavErr.message?.substring(0, 150));
-          throw new Error("Proxy connection failed - could not navigate to Ticketmaster auth page");
-        }
-      } else if (navErr.message && (navErr.message.includes("Proxy Error") || navErr.message.includes("proxy_error") || navErr.message.includes("ERR_PROXY") || navErr.message.includes("net::ERR"))) {
-        console.log("[TM-Playwright] Proxy error during navigation:", navErr.message?.substring(0, 150));
-        throw new Error("Proxy connection failed - Bright Data proxy error during navigation");
-      } else {
-        throw navErr;
+    // --- Shakira presale step (runs before TM sign-up when enabled) ---
+    let skipDirectTMNav = false;
+    if (shakiraPresale) {
+      const presaleResult = await doShakiraPresaleStep(page, log);
+      if (!presaleResult.success) {
+        console.log("[TM-Playwright] Shakira presale step failed:", presaleResult.error);
+        log(`⚠️ Shakira presale step failed — continuing to TM sign-up directly`);
+      }
+      // If presale redirected us to TM auth/create page, skip the direct navigation
+      const postPresaleUrl = page.url();
+      console.log("[TM-Playwright] URL after Shakira presale:", postPresaleUrl);
+      if (
+        postPresaleUrl.includes("ticketmaster") &&
+        (postPresaleUrl.includes("auth") || postPresaleUrl.includes("create") || postPresaleUrl.includes("signup"))
+      ) {
+        log(`🔗 Already on TM page after presale — skipping direct navigation`);
+        skipDirectTMNav = true;
       }
     }
 
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 30000 });
-    } catch {
-      console.log("[TM-Playwright] Network idle timeout, continuing...");
+    if (!skipDirectTMNav) {
+      log(`🔗 Navigating to Ticketmaster sign-up page...`);
+      console.log("[TM-Playwright] Navigating to TM create_account...");
+      try {
+        await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 60000 });
+      } catch (navErr: any) {
+        if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("brob") || navErr.message.includes("restricted"))) {
+          console.log("[TM-Playwright] robots.txt restriction, navigating directly to auth URL...");
+          try {
+            await page.goto("https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf7204a7e97.web.ticketmaster.us&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-us", { waitUntil: "domcontentloaded", timeout: 60000 });
+          } catch (authNavErr: any) {
+            console.log("[TM-Playwright] Auth URL navigation failed:", authNavErr.message?.substring(0, 150));
+            throw new Error("Proxy connection failed - could not navigate to Ticketmaster auth page");
+          }
+        } else if (navErr.message && (navErr.message.includes("Proxy Error") || navErr.message.includes("proxy_error") || navErr.message.includes("ERR_PROXY") || navErr.message.includes("net::ERR"))) {
+          console.log("[TM-Playwright] Proxy error during navigation:", navErr.message?.substring(0, 150));
+          throw new Error("Proxy connection failed - Bright Data proxy error during navigation");
+        } else {
+          throw navErr;
+        }
+      }
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 30000 });
+      } catch {
+        console.log("[TM-Playwright] Network idle timeout, continuing...");
+      }
+      await page.waitForTimeout(5000);
+    } else {
+      // Came from presale — give page a moment to settle
+      await page.waitForTimeout(3000);
     }
 
-    await page.waitForTimeout(5000);
     console.log("[TM-Playwright] After navigation URL:", page.url().substring(0, 200));
 
     let pageText = await getPageText(page);
