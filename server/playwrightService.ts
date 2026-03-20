@@ -11786,22 +11786,43 @@ export async function registerReplitAccount(
 
               if (otp) {
                 log(`📬 Entering OTP ${otp} in 3DS frame...`);
-                // Try all frames — 3DS challenge can be in nested iframes
-                const allFrames = page.frames();
                 let otpEntered = false;
-                for (const frame of allFrames) {
+
+                // PRIORITY: Find the bank's ACS frame directly (m2pfintech or similar ACS domains)
+                // This avoids accidentally filling Stripe's CVC/card fields which also match password/text inputs
+                const allFrames = page.frames();
+                const bankAcsDomains = ["m2pfintech.com", "m2p.finance", "acs.", "secureauth", "3dsecure", "federalbank"];
+                const bankFrames = allFrames.filter(f => {
+                  const u = f.url();
+                  return bankAcsDomains.some(d => u.includes(d)) && u.includes("m2pSecAuth");
+                });
+                // Fallback: any frame whose URL contains m2pSecAuth or the ACS endpoint
+                const acsFrames = bankFrames.length > 0 ? bankFrames : allFrames.filter(f => f.url().includes("m2pSecAuth"));
+                log(`   Bank ACS frames found: ${acsFrames.length} (of ${allFrames.length} total frames)`);
+                acsFrames.forEach(f => log(`   ACS frame URL: ${f.url().substring(0, 80)}`));
+
+                const framesToCheck = acsFrames.length > 0 ? acsFrames : allFrames.filter(f => {
+                  const u = f.url();
+                  // Skip Stripe's own frames and well-known non-bank frames
+                  return !u.includes("js.stripe.com") && !u.includes("checkout.stripe.com") && 
+                         !u.includes("stripecdn.com") && !u.includes("hcaptcha.com") &&
+                         !u.includes("stripe.network") && u !== "about:blank" && u !== "";
+                });
+
+                const otpSelectors = [
+                  'input[name="challengeDataEntry"]',
+                  'input[name="otp"]',
+                  'input[name="code"]',
+                  'input[autocomplete="one-time-code"]',
+                  'input[type="tel"]',
+                  'input[type="number"]',
+                  'input[type="password"]',
+                  'input[type="text"]',
+                ];
+
+                for (const frame of framesToCheck) {
                   if (otpEntered) break;
                   try {
-                    const otpSelectors = [
-                      'input[name="challengeDataEntry"]',
-                      'input[name="otp"]',
-                      'input[name="code"]',
-                      'input[autocomplete="one-time-code"]',
-                      'input[type="tel"]',
-                      'input[type="number"]',
-                      'input[type="password"]',
-                      'input[type="text"]',
-                    ];
                     for (const oSel of otpSelectors) {
                       const otpField = frame.locator(oSel).first();
                       const visible = await otpField.isVisible({ timeout: 1500 }).catch(() => false);
@@ -11809,7 +11830,7 @@ export async function registerReplitAccount(
                         await otpField.click();
                         await otpField.fill("");
                         await otpField.type(otp, { delay: 60 });
-                        log(`   Filled OTP in frame: ${frame.url().substring(0, 60)}`);
+                        log(`   Filled OTP in frame: ${frame.url().substring(0, 80)}`);
                         await page.waitForTimeout(600);
 
                         const submitSelectors3ds = [
