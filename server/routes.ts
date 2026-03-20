@@ -959,6 +959,50 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/card-otp-gmail", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const email = await storage.getSetting("card_otp_gmail");
+      res.json({ email: email || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/card-otp-gmail", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        return res.status(400).json({ error: "A valid email address is required" });
+      }
+      await storage.setSetting("card_otp_gmail", email.trim().toLowerCase());
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/card-otp-gmail-password", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const pass = await storage.getSetting("card_otp_gmail_password");
+      res.json({ password: pass ? `${pass.substring(0, 4)}****${pass.substring(pass.length - 4)}` : "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/card-otp-gmail-password", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { password } = req.body;
+      if (!password || typeof password !== "string" || password.replace(/\s/g, "").length < 16) {
+        return res.status(400).json({ error: "A valid Gmail App Password (16 chars) is required" });
+      }
+      await storage.setSetting("card_otp_gmail_password", password.replace(/\s/g, ""));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/smspool/balance", requireAuth, async (_req, res) => {
     try {
       const result = await getSMSPoolBalance();
@@ -2857,7 +2901,9 @@ export async function registerRoutes(
       if (cardId) {
         const card = await storage.getSavedCard(cardId);
         if (card) {
-          bulkCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail, otpEmailPassword: card.otpEmailPassword };
+          const sysOtpEmail = await storage.getSetting("card_otp_gmail");
+          const sysOtpPass = await storage.getSetting("card_otp_gmail_password");
+          bulkCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail || sysOtpEmail || null, otpEmailPassword: card.otpEmailPassword || sysOtpPass || null };
         }
       }
 
@@ -2940,7 +2986,9 @@ export async function registerRoutes(
       if (cardId) {
         const card = await storage.getSavedCard(cardId);
         if (card) {
-          singleCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail, otpEmailPassword: card.otpEmailPassword };
+          const sysOtpEmail = await storage.getSetting("card_otp_gmail");
+          const sysOtpPass = await storage.getSetting("card_otp_gmail_password");
+          singleCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail || sysOtpEmail || null, otpEmailPassword: card.otpEmailPassword || sysOtpPass || null };
         }
       }
 

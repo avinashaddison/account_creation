@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Settings as SettingsIcon, Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Key, Globe, Shield, DollarSign, Cpu, Mail } from "lucide-react";
+import { Settings as SettingsIcon, Eye, EyeOff, Save, Loader2, CheckCircle2, AlertTriangle, Key, Globe, Shield, DollarSign, Cpu, Mail, CreditCard } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
 import { handleUnauthorized } from "@/lib/auth";
@@ -107,6 +107,30 @@ const apiKeyFields: ApiKeyField[] = [
     placeholder: "xxxx xxxx xxxx xxxx",
     borderColor: "rgba(66,133,244,0.15)",
     iconColor: "text-blue-400/70",
+  },
+  {
+    id: "card-otp-gmail",
+    label: "Card OTP Gmail",
+    description: "Gmail address that receives 3DS OTP / bank verification emails for card payments",
+    icon: <CreditCard className="w-4 h-4" />,
+    getEndpoint: "/api/settings/card-otp-gmail",
+    putEndpoint: "/api/admin/card-otp-gmail",
+    fieldName: "email",
+    placeholder: "yourbank_otp@gmail.com",
+    borderColor: "rgba(100,210,255,0.25)",
+    iconColor: "text-sky-400",
+  },
+  {
+    id: "card-otp-gmail-password",
+    label: "Card OTP Gmail App Password",
+    description: "16-char Google App Password for the Card OTP Gmail — used to read 3DS OTP emails via IMAP",
+    icon: <Key className="w-4 h-4" />,
+    getEndpoint: "/api/settings/card-otp-gmail-password",
+    putEndpoint: "/api/admin/card-otp-gmail-password",
+    fieldName: "password",
+    placeholder: "xxxx xxxx xxxx xxxx",
+    borderColor: "rgba(100,210,255,0.15)",
+    iconColor: "text-sky-400/70",
   },
 ];
 
