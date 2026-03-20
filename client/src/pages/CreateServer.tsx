@@ -253,67 +253,79 @@ export default function CreateServer() {
   return (
     <div className="space-y-4 animate-float-up">
 
-      {/* ── TERMINAL HEADER BANNER ── */}
+      {/* ── GLASS HEADER BANNER ── */}
       <div
         className="relative rounded-2xl overflow-hidden"
         style={{
-          background: "linear-gradient(135deg, rgba(0,0,0,0.97) 0%, rgba(5,5,14,0.99) 100%)",
-          border: "1px solid rgba(0,255,65,0.14)",
-          boxShadow: "0 0 60px rgba(0,255,65,0.03) inset, 0 4px 32px rgba(0,0,0,0.6)",
+          background: "rgba(255,255,255,0.045)",
+          backdropFilter: "blur(24px) saturate(180%)",
+          WebkitBackdropFilter: "blur(24px) saturate(180%)",
+          border: "1px solid rgba(255,255,255,0.10)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)",
         }}
       >
-        {/* scanline */}
-        <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,65,0.012) 2px,rgba(0,255,65,0.012) 3px)" }} />
-        {/* bottom gradient fade */}
-        <div className="absolute bottom-0 left-0 right-0 h-px" style={{ background: "linear-gradient(90deg,transparent,rgba(0,255,65,0.2),rgba(0,191,255,0.2),rgba(236,72,153,0.2),transparent)" }} />
+        {/* Subtle top shimmer */}
+        <div className="absolute top-0 inset-x-0 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent)" }} />
 
         <div className="relative px-6 py-5 flex items-center justify-between gap-4">
           {/* Left: branding */}
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-4">
             <div className="relative shrink-0">
               <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center"
-                style={{ background: "rgba(0,255,65,0.05)", border: "1px solid rgba(0,255,65,0.2)", boxShadow: "0 0 24px rgba(0,255,65,0.12)" }}
+                className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                style={{
+                  background: "linear-gradient(135deg, rgba(48,209,88,0.2) 0%, rgba(48,209,88,0.07) 100%)",
+                  border: "1px solid rgba(48,209,88,0.28)",
+                  boxShadow: "0 4px 16px rgba(48,209,88,0.15), inset 0 1px 0 rgba(255,255,255,0.1)",
+                }}
               >
-                <Server className="w-6 h-6 text-emerald-400" />
+                <Server className="w-5.5 h-5.5" style={{ color: "#30d158" }} />
               </div>
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: "0 0 8px #00ff41" }} />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-[#08080f]" />
             </div>
             <div>
-              <div className="flex items-center gap-3 mb-0.5">
-                <h1 className="text-lg font-black font-mono tracking-tight" data-testid="text-create-server-title"
-                  style={{ background: "linear-gradient(90deg,#00ff41 0%,#00bfff 55%,#ec4899 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                  CREATE_ACCOUNT
+              <div className="flex items-center gap-2.5 mb-1">
+                <h1
+                  className="text-[17px] font-semibold tracking-tight text-white"
+                  style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif" }}
+                  data-testid="text-create-server-title"
+                >
+                  Create Account
                 </h1>
-                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border" style={{ color: "#00ff41", borderColor: "rgba(0,255,65,0.25)", background: "rgba(0,255,65,0.05)" }}>
+                <span
+                  className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
+                  style={{ color: "rgba(48,209,88,0.85)", background: "rgba(48,209,88,0.12)", border: "1px solid rgba(48,209,88,0.22)", fontFamily: "SF Mono, JetBrains Mono, monospace" }}
+                >
                   v2.4.1
                 </span>
               </div>
-              <p className="text-[10px] font-mono" style={{ color: "rgba(0,255,65,0.35)" }}>
-                &#9632; module registry &#9632; select automation target to initialize
+              <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.4)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}>
+                Select an automation module to initialize
               </p>
             </div>
           </div>
 
-          {/* Right: live stats row */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex flex-col items-end gap-1">
+          {/* Right: stats */}
+          <div className="flex items-center gap-4 shrink-0">
+            <div
+              className="flex flex-col items-end gap-1.5 px-4 py-2.5 rounded-xl"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+            >
               <div className="flex items-center gap-1.5">
-                <Activity className="w-3 h-3 text-emerald-400" />
-                <span className="text-[10px] font-mono text-emerald-400/70">UPTIME</span>
-                <span className="text-[10px] font-mono font-bold text-emerald-400">{fmtUptime}</span>
+                <Activity className="w-3 h-3" style={{ color: "rgba(48,209,88,0.7)" }} />
+                <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.35)" }}>Uptime</span>
+                <span className="text-[10px] font-mono font-bold" style={{ color: "#30d158" }}>{fmtUptime}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
-                <span className="text-[10px] font-mono" style={{ color: "rgba(0,255,65,0.5)" }}>
-                  <span className="text-emerald-400 font-bold">{activeCount}</span>/{visible.length} active
+                <Radio className="w-3 h-3" style={{ color: "rgba(48,209,88,0.5)" }} />
+                <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.38)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}>
+                  <span className="font-semibold" style={{ color: "#30d158" }}>{activeCount}</span> / {visible.length} active
                 </span>
               </div>
             </div>
-            {/* mini bar chart */}
             <div className="flex items-end gap-0.5 h-8">
               {[0.4,0.7,0.5,0.9,0.6,0.8,1.0,0.75,0.55,0.85].map((h, i) => (
-                <div key={i} className="w-1 rounded-sm" style={{ height: `${h * 100}%`, background: `rgba(0,255,65,${0.15 + h * 0.4})` }} />
+                <div key={i} className="w-1 rounded-sm" style={{ height: `${h * 100}%`, background: `rgba(48,209,88,${0.18 + h * 0.42})` }} />
               ))}
             </div>
           </div>
@@ -322,9 +334,8 @@ export default function CreateServer() {
 
       {/* ── MODULE GRID ── */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        {visible.map((platform, idx) => {
+        {visible.map((platform) => {
           const isHovered = hoveredId === platform.id;
-          const cardNum = String(idx + 1).padStart(2, "0");
           return (
             <div
               key={platform.id}
@@ -333,72 +344,72 @@ export default function CreateServer() {
               onMouseLeave={() => setHoveredId(null)}
               className="group relative cursor-pointer select-none"
               data-testid={`card-platform-${platform.id}`}
+              style={{ transition: "transform 0.2s cubic-bezier(0.34,1.56,0.64,1)" }}
             >
-              {/* Ambient glow blob */}
+              {/* Hover ambient glow */}
               <div
-                className="absolute inset-0 rounded-2xl pointer-events-none transition-opacity duration-400"
+                className="absolute -inset-1 rounded-3xl pointer-events-none transition-opacity duration-300"
                 style={{
-                  background: `radial-gradient(ellipse at 50% 0%, ${platform.accentGlow}, transparent 65%)`,
-                  opacity: isHovered ? 1 : 0,
-                  transform: "scaleY(1.2) translateY(-8px)",
-                  filter: "blur(12px)",
+                  background: `radial-gradient(ellipse at 50% 100%, ${platform.accentGlow}, transparent 70%)`,
+                  opacity: isHovered ? 0.7 : 0,
+                  filter: "blur(16px)",
                 }}
               />
 
               <div
-                className="relative rounded-2xl overflow-hidden transition-all duration-250 flex flex-col"
+                className="relative rounded-2xl overflow-hidden flex flex-col"
                 style={{
                   background: isHovered
-                    ? `linear-gradient(160deg, ${platform.gradientFrom}, ${platform.gradientTo}, rgba(6,6,10,0.98))`
-                    : "linear-gradient(160deg, rgba(255,255,255,0.028), rgba(0,0,0,0.65))",
-                  border: `1px solid ${isHovered ? platform.accentColor + "50" : "rgba(255,255,255,0.07)"}`,
+                    ? `linear-gradient(160deg, ${platform.gradientFrom}, rgba(255,255,255,0.05))`
+                    : "rgba(255,255,255,0.05)",
+                  backdropFilter: "blur(20px) saturate(160%)",
+                  WebkitBackdropFilter: "blur(20px) saturate(160%)",
+                  border: `1px solid ${isHovered ? platform.accentColor + "40" : "rgba(255,255,255,0.09)"}`,
                   boxShadow: isHovered
-                    ? `0 0 0 1px ${platform.accentColor}15, 0 16px 48px ${platform.accentGlow}, inset 0 1px 0 ${platform.accentColor}30`
-                    : "0 2px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
-                  transform: isHovered ? "translateY(-4px) scale(1.015)" : "translateY(0) scale(1)",
+                    ? `0 20px 50px rgba(0,0,0,0.4), 0 0 0 1px ${platform.accentColor}18, inset 0 1px 0 ${platform.accentColor}28`
+                    : "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06)",
+                  transform: isHovered ? "translateY(-5px) scale(1.018)" : "translateY(0) scale(1)",
+                  transition: "all 0.25s cubic-bezier(0.34,1.56,0.64,1)",
                 }}
               >
-                {/* Top shimmer line */}
-                <div className="absolute top-0 inset-x-0 h-px pointer-events-none transition-opacity duration-300"
-                  style={{ background: `linear-gradient(90deg,transparent 5%,${platform.accentColor}90 50%,transparent 95%)`, opacity: isHovered ? 1 : 0.15 }} />
+                {/* Top accent line */}
+                <div
+                  className="absolute top-0 inset-x-0 h-px pointer-events-none"
+                  style={{
+                    background: `linear-gradient(90deg, transparent 10%, ${platform.accentColor}${isHovered ? "80" : "28"} 50%, transparent 90%)`,
+                    transition: "opacity 0.25s",
+                  }}
+                />
 
-                {/* Scanlines */}
-                <div className="absolute inset-0 pointer-events-none rounded-2xl"
-                  style={{ backgroundImage: "repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(255,255,255,0.007) 3px,rgba(255,255,255,0.007) 4px)" }} />
-
-                {/* Corner glow */}
-                <div className="absolute top-0 right-0 w-20 h-20 pointer-events-none overflow-hidden rounded-2xl"
-                  style={{ opacity: isHovered ? 0.22 : 0.07 }}>
-                  <div className="absolute -top-10 -right-10 w-20 h-20 rounded-full"
-                    style={{ background: platform.accentColor, filter: "blur(18px)" }} />
+                {/* Corner accent glow */}
+                <div
+                  className="absolute top-0 right-0 w-24 h-24 pointer-events-none overflow-hidden rounded-2xl"
+                  style={{ opacity: isHovered ? 0.18 : 0.05, transition: "opacity 0.25s" }}
+                >
+                  <div className="absolute -top-8 -right-8 w-20 h-20 rounded-full" style={{ background: platform.accentColor, filter: "blur(20px)" }} />
                 </div>
 
-                {/* Card index — top-left corner bracket */}
-                <div className="absolute top-2.5 left-3 font-mono text-[9px] font-bold pointer-events-none transition-all duration-200"
-                  style={{ color: isHovered ? platform.accentColor + "90" : "rgba(255,255,255,0.1)" }}>
-                  [{cardNum}]
-                </div>
-
-                <div className="relative p-3.5 pt-4 flex flex-col gap-2.5">
-                  {/* Icon row + status badge */}
-                  <div className="flex items-start justify-between gap-1.5">
-                    <div style={{ filter: isHovered ? `drop-shadow(0 0 8px ${platform.accentColor}60)` : "none", transition: "filter 0.2s" }}>
+                <div className="relative p-4 flex flex-col gap-3">
+                  {/* Icon + badge */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div style={{ filter: isHovered ? `drop-shadow(0 4px 12px ${platform.accentColor}50)` : "none", transition: "filter 0.25s" }}>
                       <PlatformIcon id={platform.id} accentColor={platform.accentColor} />
                     </div>
-                    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md shrink-0"
+                    <div
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-full shrink-0"
                       style={{
-                        background: platform.badgeActive ? "rgba(0,255,65,0.07)" : "rgba(251,191,36,0.07)",
-                        border: `1px solid ${platform.badgeActive ? "rgba(0,255,65,0.2)" : "rgba(251,191,36,0.2)"}`,
-                        boxShadow: isHovered ? (platform.badgeActive ? "0 0 8px rgba(0,255,65,0.15)" : "0 0 8px rgba(251,191,36,0.15)") : "none",
-                      }}>
-                      <span className="w-1.5 h-1.5 rounded-full"
-                        style={{
-                          background: platform.badgeActive ? "#00ff41" : "#fbbf24",
-                          boxShadow: platform.badgeActive ? "0 0 6px rgba(0,255,65,0.9)" : "0 0 6px rgba(251,191,36,0.8)",
-                          animation: platform.badgeActive ? "pulse 2s infinite" : "none",
-                        }} />
-                      <span className="text-[8px] font-mono uppercase tracking-widest"
-                        style={{ color: platform.badgeActive ? "rgba(0,255,65,0.8)" : "rgba(251,191,36,0.8)" }}>
+                        background: platform.badgeActive ? "rgba(48,209,88,0.12)" : "rgba(255,159,10,0.12)",
+                        border: `1px solid ${platform.badgeActive ? "rgba(48,209,88,0.28)" : "rgba(255,159,10,0.28)"}`,
+                      }}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ background: platform.badgeActive ? "#30d158" : "#ff9f0a" }}
+                      />
+                      <span
+                        className="text-[8px] font-medium uppercase tracking-wide"
+                        style={{ color: platform.badgeActive ? "rgba(48,209,88,0.9)" : "rgba(255,159,10,0.9)", fontFamily: "SF Mono, JetBrains Mono, monospace" }}
+                      >
                         {platform.badge}
                       </span>
                     </div>
@@ -406,42 +417,63 @@ export default function CreateServer() {
 
                   {/* Name + description */}
                   <div>
-                    <h3 className="text-[13px] font-bold tracking-tight font-mono leading-tight transition-all duration-200"
-                      style={{ color: isHovered ? platform.accentColor : "#f0f0f2", textShadow: isHovered ? `0 0 20px ${platform.accentColor}70` : "none" }}>
+                    <h3
+                      className="text-[13px] font-semibold leading-tight transition-colors duration-200"
+                      style={{
+                        color: isHovered ? platform.accentColor : "rgba(255,255,255,0.92)",
+                        fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
+                      }}
+                    >
                       {platform.name}
                     </h3>
-                    <p className="text-[10px] leading-relaxed font-mono mt-1"
-                      style={{ color: isHovered ? "rgba(255,255,255,0.42)" : "rgba(255,255,255,0.25)" }}>
+                    <p
+                      className="text-[10px] leading-relaxed mt-1"
+                      style={{
+                        color: "rgba(255,255,255,0.42)",
+                        fontFamily: "-apple-system, BlinkMacSystemFont, system-ui",
+                      }}
+                    >
                       {platform.description}
                     </p>
                   </div>
 
-                  {/* Footer: stats + arrow */}
-                  <div className="flex items-center justify-between pt-2.5"
-                    style={{ borderTop: `1px solid ${isHovered ? platform.accentColor + "18" : "rgba(255,255,255,0.05)"}` }}>
+                  {/* Footer */}
+                  <div
+                    className="flex items-center justify-between pt-2.5"
+                    style={{ borderTop: `1px solid ${isHovered ? platform.accentColor + "18" : "rgba(255,255,255,0.06)"}` }}
+                  >
                     <div className="flex gap-2 flex-wrap">
                       {platform.stats.map((stat) => (
-                        <div key={stat.label} className="flex items-center gap-1 text-[8.5px] font-mono transition-colors duration-200"
-                          style={{ color: isHovered ? "rgba(255,255,255,0.38)" : "rgba(255,255,255,0.18)" }}>
-                          <stat.icon className="w-2 h-2" />
+                        <div
+                          key={stat.label}
+                          className="flex items-center gap-1 text-[9px] transition-colors duration-200"
+                          style={{
+                            color: "rgba(255,255,255,0.35)",
+                            fontFamily: "-apple-system, BlinkMacSystemFont, system-ui",
+                          }}
+                        >
+                          <stat.icon className="w-2.5 h-2.5" />
                           <span>{stat.label}</span>
                         </div>
                       ))}
                     </div>
-                    <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200"
+                    <div
+                      className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200"
                       style={{
-                        background: isHovered ? `${platform.accentColor}25` : "rgba(255,255,255,0.04)",
-                        border: `1px solid ${isHovered ? platform.accentColor + "65" : "rgba(255,255,255,0.08)"}`,
-                        boxShadow: isHovered ? `0 0 12px ${platform.accentColor}35` : "none",
-                      }}>
+                        background: isHovered ? `${platform.accentColor}22` : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${isHovered ? platform.accentColor + "55" : "rgba(255,255,255,0.09)"}`,
+                      }}
+                    >
                       {platform.comingSoon
-                        ? <Lock className="w-2.5 h-2.5 text-zinc-600" />
-                        : <ArrowUpRight className="w-3 h-3 transition-all duration-200"
+                        ? <Lock className="w-2.5 h-2.5" style={{ color: "rgba(255,255,255,0.25)" }} />
+                        : <ArrowUpRight
+                            className="w-3 h-3"
                             style={{
-                              color: isHovered ? platform.accentColor : "rgba(255,255,255,0.2)",
+                              color: isHovered ? platform.accentColor : "rgba(255,255,255,0.3)",
                               transform: isHovered ? "translate(1px,-1px)" : "none",
-                              filter: isHovered ? `drop-shadow(0 0 5px ${platform.accentColor})` : "none",
-                            }} />
+                              transition: "all 0.2s",
+                            }}
+                          />
                       }
                     </div>
                   </div>
@@ -453,23 +485,30 @@ export default function CreateServer() {
       </div>
 
       {/* ── BOTTOM STATUS STRIP ── */}
-      <div className="flex items-center justify-between px-4 py-2.5 rounded-xl"
-        style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.05)" }}>
-        <div className="flex items-center gap-4">
+      <div
+        className="flex items-center justify-between px-4 py-2.5 rounded-xl"
+        style={{
+          background: "rgba(255,255,255,0.035)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          border: "1px solid rgba(255,255,255,0.07)",
+        }}
+      >
+        <div className="flex items-center gap-5">
           {[
-            { label: "SYS", val: "NOMINAL", color: "#00ff41" },
-            { label: "CAPTCHA", val: "CAPSOLVER", color: "#00bfff" },
-            { label: "PROXY", val: "ZENROWS", color: "#a855f7" },
+            { label: "System", val: "Nominal", color: "#30d158" },
+            { label: "Captcha", val: "CapSolver", color: "#0a84ff" },
+            { label: "Proxy", val: "ZenRows", color: "#bf5af2" },
           ].map((s) => (
             <div key={s.label} className="flex items-center gap-1.5">
-              <span className="text-[8px] font-mono tracking-widest" style={{ color: "rgba(255,255,255,0.2)" }}>{s.label}</span>
-              <span className="text-[8px] font-mono font-bold" style={{ color: s.color }}>{s.val}</span>
+              <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.28)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}>{s.label}</span>
+              <span className="text-[9px] font-medium" style={{ color: s.color, fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}>{s.val}</span>
             </div>
           ))}
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[8px] font-mono" style={{ color: "rgba(255,255,255,0.15)" }}>SESSION</span>
-          <span className="text-[8px] font-mono font-bold text-emerald-400">{fmtUptime}</span>
+          <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.22)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}>Session</span>
+          <span className="text-[9px] font-mono font-bold" style={{ color: "#30d158" }}>{fmtUptime}</span>
         </div>
       </div>
 
