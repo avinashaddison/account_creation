@@ -11785,8 +11785,9 @@ export async function registerReplitAccount(
             });
             const hasBankAcsFrame = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth") || f.url().includes("federalbank"));
 
-            if (isHCaptchaVisible && !hasBankAcsFrame) {
-              log(`🤖 hCaptcha visible challenge detected — using CapSolver to solve...`);
+            if (isHCaptchaVisible) {
+              // hCaptcha MUST be solved even when bank ACS is also present — Stripe requires both to pass
+              log(`🤖 hCaptcha visible challenge detected — solving via 2captcha/CapSolver (bankACS=${hasBankAcsFrame})...`);
               try {
                 // Extract sitekey from the HCaptcha iframe source
                 let hcaptchaSiteKey = "";
@@ -12005,25 +12006,33 @@ export async function registerReplitAccount(
                 }
                 if (!otpEntered) log(`⚠️ Could not find 3DS input field to enter OTP`);
 
-                // Poll for success redirect up to 30s after OTP submit
+                // Poll for success redirect up to 90s after OTP submit
                 log(`⏳ Waiting for 3DS authentication to complete...`);
-                const postOtpDeadline = Date.now() + 30000;
+                const postOtpDeadline = Date.now() + 90000;
+                let pollCount = 0;
                 while (Date.now() < postOtpDeadline) {
                   await page.waitForTimeout(3000);
+                  pollCount++;
                   const postOtpUrl = page.url();
-                  log(`  Post-OTP URL: ${postOtpUrl.substring(0, 80)}`);
+                  if (pollCount <= 5 || pollCount % 5 === 0) {
+                    log(`  Post-OTP URL [${pollCount}]: ${postOtpUrl.substring(0, 80)}`);
+                  }
                   if (postOtpUrl.includes("replit.com") && !postOtpUrl.includes("stripe")) {
                     log(`✅ Payment redirected to Replit after 3DS: ${postOtpUrl.substring(0, 80)}`);
                     checkoutComplete = true;
                     break;
                   }
-                  if (!postOtpUrl.includes("checkout.stripe.com")) break; // left stripe
+                  if (!postOtpUrl.includes("checkout.stripe.com")) {
+                    log(`  Left Stripe checkout — URL: ${postOtpUrl.substring(0, 80)}`);
+                    break;
+                  }
                   // Check if 3DS frame has gone (OTP accepted — Stripe processing)
                   const stillHas3DS = page.frames().some(f => f.url().includes("three-ds") || f.url().includes("challenge"));
                   if (!stillHas3DS) {
                     log(`  3DS frame gone — Stripe is processing payment`);
-                    await page.waitForTimeout(5000);
+                    await page.waitForTimeout(8000);
                     const finalCheck = page.url();
+                    log(`  Post-3DS-close URL: ${finalCheck.substring(0, 80)}`);
                     if (finalCheck.includes("replit.com") && !finalCheck.includes("stripe")) {
                       log(`✅ Payment successful (after 3DS close): ${finalCheck.substring(0, 80)}`);
                       checkoutComplete = true;
@@ -12031,6 +12040,19 @@ export async function registerReplitAccount(
                       log(`  Final post-3DS URL: ${finalCheck.substring(0, 80)}`);
                     }
                     break;
+                  }
+                  // Also check page text for error/success signals
+                  if (pollCount % 4 === 0) {
+                    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "").catch(() => "");
+                    if (pageText.includes("Payment failed") || pageText.includes("Your payment was declined")) {
+                      log(`  ⚠️ Payment failure detected in page text`);
+                      break;
+                    }
+                    if (pageText.includes("Thanks for subscribing") || pageText.includes("Payment successful")) {
+                      log(`✅ Payment success detected in page text`);
+                      checkoutComplete = true;
+                      break;
+                    }
                   }
                 }
               } else {
