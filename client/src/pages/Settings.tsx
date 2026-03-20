@@ -73,6 +73,18 @@ const apiKeyFields: ApiKeyField[] = [
     balanceLabel: "Balance",
   },
   {
+    id: "twocaptcha",
+    label: "2captcha API Key",
+    description: "Fallback CAPTCHA solver for Stripe hCaptcha (CapSolver is blocked for Stripe)",
+    icon: <Shield className="w-4 h-4" />,
+    getEndpoint: "/api/settings/twocaptcha-api-key",
+    putEndpoint: "/api/admin/twocaptcha-api-key",
+    fieldName: "key",
+    placeholder: "Enter 2captcha API key...",
+    borderColor: "rgba(99,102,241,0.15)",
+    iconColor: "text-indigo-400",
+  },
+  {
     id: "account-price",
     label: "Account Price",
     description: "Cost per account creation charged to admin wallets",

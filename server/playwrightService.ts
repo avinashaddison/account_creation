@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, classifyFunCaptchaImages } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import * as ProxyChain from "proxy-chain";
 
@@ -10439,6 +10439,7 @@ export async function registerReplitAccount(
 
   let browser: any = null;
   let page: any = null;
+  let zenrowsStripeBrowser: any = null; // separate ZenRows browser for Stripe checkout
 
   try {
     let zenrowsApiKey = "";
@@ -10449,23 +10450,12 @@ export async function registerReplitAccount(
       log("⚠️ No ZenRows API key — using stealth headless browser");
     }
 
-    log("Launching browser...");
+    // Always use stealth browser for Replit signup/login (ZenRows is only used for Stripe)
+    log("Launching stealth browser for Replit...");
     const { chromium } = await import("playwright");
 
     let context: any;
-    if (zenrowsApiKey) {
-      try {
-        const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
-        browser = await chromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
-        context = browser.contexts()[0] || await browser.newContext();
-        log("Connected via ZenRows anti-bot browser");
-      } catch (zrErr: any) {
-        log(`⚠️ ZenRows unavailable (${(zrErr.message || "").substring(0, 60)}) — falling back to stealth browser`);
-        browser = null;
-        zenrowsApiKey = "";
-      }
-    }
-    if (!zenrowsApiKey) {
+    {
       browser = await chromium.launch({
         headless: true,
         args: [
@@ -11372,12 +11362,23 @@ export async function registerReplitAccount(
           return false;
         }
 
-        // Wait for Stripe iframes to fully load
-        await page.waitForTimeout(3000);
+        // Wait for Stripe iframes to fully load (Stripe injects card iframes via JS)
+        await page.waitForTimeout(5000);
+        // Poll up to 30s for Stripe card iframes to appear
+        for (let iframeWait = 0; iframeWait < 15; iframeWait++) {
+          const frames = page.frames();
+          const hasCardIframe = frames.some(f => {
+            const u = f.url();
+            return u.includes("js.stripe.com") || (u.includes("stripe.com") && u !== page.url());
+          });
+          if (hasCardIframe || frames.length > 1) break;
+          log(`  Waiting for Stripe card iframes... (attempt ${iframeWait + 1}/15)`);
+          await page.waitForTimeout(2000);
+        }
 
         // Log all frames present for debug
         const frameUrls = page.frames().map(f => f.url().substring(0, 80));
-        log(`  Frames on page: ${JSON.stringify(frameUrls)}`);
+        log(`  Frames on page (${frameUrls.length}): ${JSON.stringify(frameUrls)}`);
 
         // Fill card number — Stripe uses "cardnumber" as the stable field name
         const cardNum = cardDetails.cardNumber.replace(/\D/g, "");
@@ -11830,31 +11831,87 @@ export async function registerReplitAccount(
                 }
 
                 log(`   Calling CapSolver to solve hCaptcha...`);
-                const capResult = await solveHCaptcha(page.url(), hcaptchaSiteKey);
-                if (capResult.success && capResult.token) {
-                  log(`   ✅ CapSolver solved hCaptcha! Token: ${capResult.token.substring(0, 30)}...`);
-                  // Inject token into all hcaptcha response fields on the page and iframes
-                  const injected = await page.evaluate((token) => {
+                // Use base domain only — CapSolver blocks the full session URL
+                const capsolverUrl = "https://checkout.stripe.com";
+                const capResult = await solveHCaptcha(capsolverUrl, hcaptchaSiteKey);
+                // Helper: inject hCaptcha token and wait for bank ACS
+                const injectHCaptchaToken = async (token: string, source: string) => {
+                  log(`   ✅ ${source} solved hCaptcha! Token: ${token.substring(0, 30)}...`);
+                  // Inject token into the page via multiple strategies
+                  const injected = await page.evaluate((tok) => {
                     let count = 0;
-                    // Set response in all textarea/input with hcaptcha-related names
                     document.querySelectorAll("textarea[name='h-captcha-response'], input[name='h-captcha-response']").forEach(el => {
-                      (el as HTMLInputElement).value = token;
+                      (el as HTMLInputElement).value = tok;
                       count++;
                     });
-                    // Trigger hcaptcha callback if available
                     if ((window as any).hcaptcha?.execute) (window as any).hcaptcha.execute();
-                    if ((window as any).__hcaptchaCallback) (window as any).__hcaptchaCallback(token);
+                    if ((window as any).__hcaptchaCallback) (window as any).__hcaptchaCallback(tok);
                     return count;
-                  }, capResult.token).catch(() => 0);
+                  }, token).catch(() => 0);
                   log(`   Injected token into ${injected} field(s) — waiting for bank 3DS...`);
                   await page.waitForTimeout(5000);
                   const bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
                   log(`   Bank ACS loaded after hCaptcha solve: ${bankAcsNow}`);
+                };
+
+                if (capResult.success && capResult.token) {
+                  await injectHCaptchaToken(capResult.token, "CapSolver");
                 } else {
-                  log(`   ⚠️ CapSolver failed to solve hCaptcha: ${capResult.error || "unknown error"}`);
+                  log(`   ⚠️ CapSolver failed: ${capResult.error || "unknown error"}`);
+                  // Fallback 1: try 2captcha
+                  log(`   Trying 2captcha as fallback for Stripe hCaptcha...`);
+                  const cap2Result = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", hcaptchaSiteKey);
+                  if (cap2Result.success && cap2Result.token) {
+                    await injectHCaptchaToken(cap2Result.token, "2captcha");
+                  } else {
+                    log(`   ⚠️ 2captcha also failed: ${cap2Result.error || "unknown error"}`);
+                    // Fallback 2: try clicking the "I am human" checkbox directly
+                    log(`   Trying direct hCaptcha checkbox click (last resort)...`);
+                    let clicked = false;
+                    // Priority: click the newassets.hcaptcha.com frame that shows "I am human" (actual checkbox)
+                    for (const frame of page.frames()) {
+                      const fUrl = frame.url();
+                      if (!fUrl.includes("newassets.hcaptcha.com")) continue;
+                      try {
+                        const frameText = await frame.evaluate(() => document.body?.innerText || "").catch(() => "");
+                        if (!frameText.includes("I am human")) continue;
+                        // Try clicking the checkbox element
+                        const checkbox = frame.locator("#checkbox, [id^='checkbox'], .challenge-container, [aria-label='I am human']").first();
+                        const visible = await checkbox.isVisible({ timeout: 2000 }).catch(() => false);
+                        if (visible) {
+                          await checkbox.click({ timeout: 5000 });
+                          log(`   Clicked hCaptcha "I am human" checkbox in frame: ${fUrl.substring(0, 80)}`);
+                        } else {
+                          // Click in the center-left area where the checkbox typically is
+                          await frame.locator("body").click({ position: { x: 30, y: 30 }, timeout: 3000 });
+                          log(`   Clicked hCaptcha "I am human" frame body in: ${fUrl.substring(0, 80)}`);
+                        }
+                        clicked = true;
+                        await page.waitForTimeout(5000);
+                        break;
+                      } catch {}
+                    }
+                    if (!clicked) {
+                      log(`   Could not click hCaptcha checkbox — no "I am human" frame found`);
+                    }
+                  }
                 }
               } catch (capErr: any) {
                 log(`   ⚠️ hCaptcha CapSolver error: ${capErr.message || capErr}`);
+                // Still try direct click
+                try {
+                  for (const frame of page.frames()) {
+                    if (frame.url().includes("hcaptcha.com") || frame.url().includes("HCaptcha.html")) {
+                      const cb = frame.locator("#checkbox, .hcaptcha-checkbox").first();
+                      if (await cb.isVisible({ timeout: 2000 }).catch(() => false)) {
+                        await cb.click({ timeout: 3000 });
+                        log(`   Clicked hCaptcha checkbox (error fallback)`);
+                        await page.waitForTimeout(3000);
+                        break;
+                      }
+                    }
+                  }
+                } catch {}
               }
             }
 
@@ -12008,6 +12065,7 @@ export async function registerReplitAccount(
     return { success: false, error: err.message || String(err) };
   } finally {
     try { if (page) await page.close(); } catch {}
+    try { if (zenrowsStripeBrowser) await zenrowsStripeBrowser.close(); } catch {}
     try { if (browser) await browser.close(); } catch {}
   }
 }
@@ -12229,7 +12287,11 @@ export async function registerLovableAccount(
 
     if (zenrowsApiKey) {
       try {
-        const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
+        // Use the stored URL directly from DB (do NOT append extra params — they break the connection)
+        const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+        const storedZrUrl = zrUrlRow.rows.length > 0 ? (zrUrlRow.rows[0].value as string) : "";
+        const wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
+        log(`Connecting to ZenRows browser: ${wsEndpoint.substring(0, 60)}...`);
         const { chromium: vanillaChromium } = await import("playwright");
         browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
         context = browser.contexts()[0] || await browser.newContext();
@@ -13158,7 +13220,10 @@ export async function registerAdobeAccount(
     let context: any;
     if (zenrowsApiKey) {
       try {
-        const wsEndpoint = `wss://browser.zenrows.com?apikey=${zenrowsApiKey}&resolution=1920x1080&antibot=true`;
+        const zrUrlRow3 = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+        const storedZrUrl3 = zrUrlRow3.rows.length > 0 ? (zrUrlRow3.rows[0].value as string) : "";
+        const wsEndpoint = storedZrUrl3 || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
+        log(`Connecting to ZenRows: ${wsEndpoint.substring(0, 60)}...`);
         const { chromium: vanillaChromium } = await import("playwright");
         browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
         context = browser.contexts()[0] || await browser.newContext();

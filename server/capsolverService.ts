@@ -166,6 +166,68 @@ export async function solveHCaptcha(
   }
 }
 
+export async function solveHCaptchaWith2Captcha(
+  websiteURL: string,
+  websiteKey: string
+): Promise<CapSolverTaskResult> {
+  try {
+    const result = await db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`);
+    const apiKey = result.rows.length > 0 ? (result.rows[0].value as string) : "";
+    if (!apiKey) {
+      return { success: false, error: "2captcha API key not configured (set twocaptcha_api_key in settings)" };
+    }
+
+    console.log(`[2captcha] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
+    const createResp = await axios.post("https://api.2captcha.com/createTask", {
+      clientKey: apiKey,
+      task: {
+        type: "HCaptchaTaskProxyless",
+        websiteURL,
+        websiteKey,
+      },
+    }, { timeout: 30000 });
+
+    if (createResp.data.errorId !== 0) {
+      const errMsg = createResp.data.errorDescription || "Task creation failed";
+      console.log(`[2captcha] Task creation error: ${errMsg}`);
+      return { success: false, error: errMsg };
+    }
+
+    const taskId = createResp.data.taskId;
+    console.log(`[2captcha] Task created: ${taskId}`);
+
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const resultResp = await axios.post("https://api.2captcha.com/getTaskResult", {
+        clientKey: apiKey,
+        taskId,
+      }, { timeout: 15000 });
+
+      if (resultResp.data.errorId !== 0) {
+        const errMsg = resultResp.data.errorDescription || "Polling error";
+        console.log(`[2captcha] Poll error: ${errMsg}`);
+        return { success: false, error: errMsg, taskId };
+      }
+
+      if (resultResp.data.status === "ready") {
+        const token = resultResp.data.solution?.gRecaptchaResponse ||
+                      resultResp.data.solution?.token;
+        console.log(`[2captcha] Solved! Token length: ${token?.length || 0}`);
+        return { success: true, token, taskId };
+      }
+
+      if (i % 6 === 0 && i > 0) {
+        console.log(`[2captcha] Still solving... (${i * 5}s elapsed)`);
+      }
+    }
+    return { success: false, error: "2captcha solving timeout (300s)" };
+  } catch (err: any) {
+    const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 200) : "";
+    console.log(`[2captcha] Error: ${err.message} ${body}`);
+    return { success: false, error: err.message };
+  }
+}
+
 export interface FunCaptchaClassifyResult {
   success: boolean;
   answer?: number[];
