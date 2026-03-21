@@ -38,6 +38,8 @@ const NOPECHA_HDRS  = {
   "Content-Type": "application/json",
   "Authorization": `Basic ${NOPECHA_KEY}`,
 };
+// 2captcha API (fallback)
+const TWOCAPTCHA_KEY = "3cd7a9b9cccd581f39296b9c9e397360";
 
 // Gmail IMAP for OTP
 const GMAIL_USER    = "ajayvaishwakarma@gmail.com";
@@ -55,12 +57,50 @@ function log(msg: string) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// Solve hCaptcha using NopeCHA /v1/token/hcaptcha
+// Solve hCaptcha using 2captcha (primary) with NopeCHA fallback
 async function solveHcaptcha(rqdata: string | null): Promise<string> {
+  // ── Try 2captcha first ──────────────────────────────────────────────────────
+  try {
+    log(`🤖 2captcha submit${rqdata ? " (with rqdata)" : " (no rqdata)"}...`);
+    const params = new URLSearchParams({
+      key: TWOCAPTCHA_KEY,
+      method: "hcaptcha",
+      sitekey: HCAP_SITEKEY,
+      pageurl: HCAP_PAGEURL,
+      invisible: "1",
+      json: "1",
+    });
+    if (rqdata) params.set("rqdata", rqdata);
+    const submitRes = await fetch("https://2captcha.com/in.php", {
+      method: "POST",
+      body: params,
+    });
+    const submitJson = await submitRes.json() as any;
+    if (submitJson.status !== 1 || !submitJson.request) throw new Error(`2captcha submit failed: ${JSON.stringify(submitJson)}`);
+    const taskId = submitJson.request;
+    log(`  2captcha job ID: ${taskId} — polling...`);
+    // Poll up to 36 × 5s = 180s
+    for (let i = 1; i <= 36; i++) {
+      await sleep(5000);
+      const pollRes = await fetch(`https://2captcha.com/res.php?key=${TWOCAPTCHA_KEY}&action=get&id=${taskId}&json=1`);
+      const pollJson = await pollRes.json() as any;
+      if (pollJson.status === 1 && pollJson.request && pollJson.request.length > 30) {
+        log(`  ✅ 2captcha solved at poll ${i}, token len=${pollJson.request.length}`);
+        return pollJson.request;
+      }
+      if (pollJson.request !== "CAPCHA_NOT_READY") {
+        log(`  ⚠️  2captcha poll ${i}: ${JSON.stringify(pollJson)}`);
+      }
+    }
+    throw new Error("2captcha timed out");
+  } catch (err2cap) {
+    log(`  ⚠️  2captcha failed: ${err2cap} — trying NopeCHA...`);
+  }
+
+  // ── Fallback: NopeCHA ───────────────────────────────────────────────────────
   const body: any = { sitekey: HCAP_SITEKEY, url: HCAP_PAGEURL };
   if (rqdata) body.data = { rqdata };
   log(`🤖 NopeCHA submit${rqdata ? " (with rqdata)" : " (no rqdata)"}...`);
-
   const submitRes = await fetch("https://api.nopecha.com/v1/token/hcaptcha", {
     method: "POST",
     headers: NOPECHA_HDRS,
@@ -69,14 +109,10 @@ async function solveHcaptcha(rqdata: string | null): Promise<string> {
   const submitJson = await submitRes.json() as any;
   const jobId = submitJson.data;
   if (!jobId || submitJson.error) throw new Error(`NopeCHA submit failed: ${JSON.stringify(submitJson)}`);
-  log(`  Job ID: ${jobId} — polling...`);
-
-  // Poll up to 24 × 5s = 120s
+  log(`  NopeCHA Job ID: ${jobId} — polling...`);
   for (let i = 1; i <= 24; i++) {
     await sleep(5000);
-    const pollRes = await fetch(`https://api.nopecha.com/v1/token/hcaptcha?id=${jobId}`, {
-      headers: NOPECHA_HDRS,
-    });
+    const pollRes = await fetch(`https://api.nopecha.com/v1/token/hcaptcha?id=${jobId}`, { headers: NOPECHA_HDRS });
     const pollJson = await pollRes.json() as any;
     if (pollJson.data && typeof pollJson.data === "string" && pollJson.data.length > 30) {
       log(`  ✅ NopeCHA solved at poll ${i}, token len=${pollJson.data.length}`);
@@ -234,20 +270,23 @@ async function fetchGmailOtp(sinceMs: number): Promise<string | null> {
         const from = (msg as any).envelope?.from?.[0]?.address || "";
 
         // Check the email's Date header to ensure it arrived AFTER payment time
-        const dateHeader = text.match(/^Date:\s*(.+)$/im)?.[1] || "";
+        const dateHeader = text.match(/^Date:\s*(.+)$/im)?.[1]?.trim() || "";
         const emailTime = dateHeader ? new Date(dateHeader).getTime() : 0;
-        if (emailTime > 0 && emailTime < sinceMs - 30000) { // must be within 30s before payment (allow buffer)
-          log(`  📧 Skip stale email from=${from} emailTime=${new Date(emailTime).toLocaleTimeString()} < paymentTime=${sinceDate.toLocaleTimeString()}`);
+        // Allow emails up to 5 min before sinceMs (buffer) — but must be after sinceMs-5min
+        if (emailTime > 0 && emailTime < sinceMs - 300000) { // skip if >5min before payment
+          log(`  📧 Skip stale email from=${from} emailTime=${new Date(emailTime).toLocaleTimeString()} (${emailTime}) < paymentTime=${sinceDate.toLocaleTimeString()} (${sinceMs})`);
           continue;
         }
 
         log(`  📧 Email from=${from} subject="${subj.substring(0,60)}" time=${dateHeader ? new Date(dateHeader).toLocaleTimeString() : "??"}`);
 
         // Only accept OTP emails from banking/payment domains
-        const isBankSender = from.includes("federalbank") || from.includes("rbi.org") ||
-          from.includes("npci.org") || from.includes("visa.com") || from.includes("mastercard") ||
+        const isBankSender = from.includes("federalbank") || from.includes("federal.bank") ||
+          from.includes("rbi.org") || from.includes("npci.org") || from.includes("visa.com") ||
+          from.includes("mastercard") || from.includes("hdfc") || from.includes("sbi.") ||
           subj.toLowerCase().includes("otp") || subj.toLowerCase().includes("one time") ||
-          subj.toLowerCase().includes("verification") || subj.toLowerCase().includes("transaction");
+          subj.toLowerCase().includes("verification") || subj.toLowerCase().includes("transaction") ||
+          subj.toLowerCase().includes("secure") || subj.toLowerCase().includes("authenticate");
 
         if (!isBankSender) {
           log(`  📧 Skipping non-bank email from ${from}`);
@@ -285,7 +324,7 @@ async function main() {
   log(`🚀 Starting checkout — ${REPLIT_EMAIL}`);
   log(`   Coupon: ${COUPON}`);
 
-  const EXTENSION_PATH = path.resolve(process.cwd(), "extensions/captcha-solver");
+  const EXTENSION_PATH = path.resolve(process.cwd(), "extensions/capsolver");
   const userDataDir = `/tmp/chrome-profile-${Date.now()}`;
   const USE_EXTENSION = process.env.STRIPE_NO_EXT !== "1";
   log(`  Extension: ${USE_EXTENSION ? "ENABLED" : "DISABLED (STRIPE_NO_EXT=1)"}`);
@@ -726,7 +765,7 @@ async function main() {
     let otpDone = false;
     let visualTokenSent = false;  // track whether we've already injected the visual token
 
-    for (let tick = 0; tick < 160; tick++) {
+    for (let tick = 0; tick < 1200; tick++) {
       await sleep(3000);
       const allFrames = page.frames();
       const allUrls = allFrames.map(f => f.url());
@@ -788,10 +827,44 @@ async function main() {
         await sleep(5000);
 
       } else if (newHcapUrls.length > 0 && captchaSolved) {
-        log(`🔄 New hCaptcha appeared again — resetting token injection state`);
+        log(`🔄 New secondary hCaptcha detected — solving via 2captcha automatically...`);
         newHcapUrls.forEach(u => solvedFrames.add(u));
-        visualTokenSent = false;  // allow injection for new challenge round
-        autoToken = null;         // clear old token; wait for new TOKEN-UPSTREAM
+        visualTokenSent = false;
+        autoToken = null;
+        await sleep(3000);
+        try {
+          const secToken = await solveHcaptcha(rqdata);
+          if (secToken) {
+            log(`💉 Secondary hCaptcha token obtained (len=${secToken.length}) — injecting...`);
+            await injectToken(page, secToken);
+            // Also try injecting via all hcaptcha frames directly
+            for (const fr of page.frames()) {
+              const fu = fr.url();
+              if (fu.includes("hcaptcha.com") || fu.includes("HCaptcha")) {
+                await fr.evaluate((t: string) => {
+                  const fid = new URLSearchParams(window.location.search).get("id") || "";
+                  window.parent.postMessage({
+                    type: "stripe-third-party-child-to-parent",
+                    frameID: fid,
+                    payload: { tag: "RESPONSE_HCAPTCHA", value: { response: t } }
+                  }, "*");
+                }, secToken).catch(() => {});
+              }
+            }
+            // Click "I am human" checkbox if visible in any frame
+            for (const fr of page.frames()) {
+              const anchor = await fr.$('#checkbox, [id*="checkbox"], .anchor-checkbox, [aria-label*="human"]').catch(() => null);
+              if (anchor) {
+                log(`  🖱️  Clicking I am human checkbox...`);
+                await anchor.click().catch(() => {});
+                break;
+              }
+            }
+            visualTokenSent = true;
+          }
+        } catch (err) {
+          log(`  ⚠️  Secondary hCaptcha auto-solve error: ${err}`);
+        }
         await sleep(5000);
       }
 
@@ -824,6 +897,30 @@ async function main() {
           log(`  ⚠️  No HCaptcha.html frame found (${allFrames.length} frames total)`);
         }
       } else if (captchaSolved && !visualTokenSent && !autoToken) {
+        // ── Auto-click "I am human" if "One more step" modal is visible ──────────
+        if (pageText.includes("One more step") || pageText.includes("Select the checkbox below")) {
+          log(`  🔲 "One more step" modal detected — clicking hCaptcha checkbox...`);
+          let clicked = false;
+          for (const fr of allFrames) {
+            const fu = fr.url();
+            if (!fu.includes("hcaptcha") && !fu.includes("HCaptcha")) continue;
+            try {
+              const cbClicked = await fr.evaluate(() => {
+                const cb = document.querySelector('#checkbox, .anchor-checkbox, [id*="checkbox"], [aria-label*="human"]') as HTMLElement | null;
+                if (cb) { cb.click(); return true; }
+                return false;
+              });
+              if (cbClicked) { log(`  ✅ Clicked hCaptcha checkbox in frame ${fu.substring(0,60)}`); clicked = true; break; }
+            } catch {}
+          }
+          if (!clicked) {
+            // Try clicking on the main page at known coordinates for the checkbox
+            await page.mouse.click(416, 322).catch(() => {});
+            log(`  🖱️  Fallback: clicked at main page (416,322) for I am human checkbox`);
+          }
+          await sleep(2000);
+        }
+
         // ── Direct visual solve: take screenshot and check for manual click file ──
         if (tick % 5 === 0) {
           log(`  ⏳ Waiting for visual solve... (tick=${tick})`);
@@ -866,12 +963,38 @@ async function main() {
           if (fs2.existsSync("/tmp/hcap-clicks.json")) {
             const clickData = JSON.parse(fs2.readFileSync("/tmp/hcap-clicks.json", "utf8")) as {
               coords?: Array<{x: number; y: number}>;
+              drag?: {from: {x: number; y: number}; to: {x: number; y: number}};
               indices?: number[];
               verifyCoord?: {x: number; y: number};
               verify?: boolean;
             };
             fs2.unlinkSync("/tmp/hcap-clicks.json");
             log(`  🖱️  Got clicks from /tmp/hcap-clicks.json: ${JSON.stringify(clickData)}`);
+
+            // ── Drag operation (for drag-to-match challenges) ──────────────────
+            if (clickData.drag) {
+              const { from, to } = clickData.drag;
+              log(`  🖱️  Drag from (${from.x},${from.y}) to (${to.x},${to.y})`);
+              await page.mouse.move(from.x, from.y);
+              await sleep(300);
+              await page.mouse.down();
+              await sleep(400);
+              // Move gradually to simulate human drag
+              const steps = 15;
+              for (let i = 1; i <= steps; i++) {
+                await page.mouse.move(
+                  from.x + (to.x - from.x) * i / steps,
+                  from.y + (to.y - from.y) * i / steps
+                );
+                await sleep(50);
+              }
+              await sleep(300);
+              await page.mouse.up();
+              log(`  ✅ Drag complete`);
+              await sleep(1000);
+              await page.screenshot({ path: "/tmp/hcap-after-cells.png" }).catch(() => {});
+              log(`  📸 Post-drag screenshot saved to /tmp/hcap-after-cells.png`);
+            }
 
             // ── Coordinate-based clicking (preferred) ──────────────────────────
             if (clickData.coords && clickData.coords.length > 0) {
@@ -884,23 +1007,51 @@ async function main() {
               }
               log(`  ✅ Clicked ${clickData.coords.length} coordinate points`);
 
+              // Save post-cell-click screenshot so we can see Verify button position
+              await sleep(800);
+              await page.screenshot({ path: "/tmp/hcap-after-cells.png" }).catch(() => {});
+              log(`  📸 Post-cell screenshot saved to /tmp/hcap-after-cells.png`);
+
               // Click Verify at provided coordinate or search for the button
               if (clickData.verifyCoord) {
-                await sleep(1200);
+                await sleep(800);
                 log(`  🖱️  Clicking Verify at (${clickData.verifyCoord.x}, ${clickData.verifyCoord.y})`);
                 await page.mouse.click(clickData.verifyCoord.x, clickData.verifyCoord.y);
               } else if (clickData.verify !== false) {
-                await sleep(1200);
-                // Try to find and click Verify button in HCaptcha.html or hcaptcha frames
+                await sleep(800);
+                let verifyClicked = false;
+                // Try getByText in each hcaptcha frame first
                 for (const frame of allFrames) {
                   if (!frame.url().includes("hcaptcha") && !frame.url().includes("HCaptcha")) continue;
-                  const clicked = await frame.evaluate(() => {
-                    const btn = Array.from(document.querySelectorAll("button, [role='button']"))
-                      .find(el => el.textContent?.toLowerCase().includes("verif")) as HTMLElement | null;
-                    if (btn) { btn.click(); return true; }
-                    return false;
-                  }).catch(() => false);
-                  if (clicked) { log(`  ✅ Clicked Verify via frame evaluate`); break; }
+                  try {
+                    const btn = frame.getByText("Verify", { exact: true });
+                    await btn.click({ timeout: 2000 });
+                    log(`  ✅ Clicked Verify via getByText`);
+                    verifyClicked = true;
+                    break;
+                  } catch { /* try next */ }
+                }
+                if (!verifyClicked) {
+                  // Try querySelectorAll approach
+                  for (const frame of allFrames) {
+                    if (!frame.url().includes("hcaptcha") && !frame.url().includes("HCaptcha")) continue;
+                    const clicked = await frame.evaluate(() => {
+                      const allEls = Array.from(document.querySelectorAll("*"));
+                      const btn = allEls.find(el =>
+                        el.children.length === 0 && el.textContent?.trim() === "Verify"
+                      ) as HTMLElement | null;
+                      if (btn) { btn.click(); return true; }
+                      const btn2 = Array.from(document.querySelectorAll("button, [role='button']"))
+                        .find(el => el.textContent?.toLowerCase().includes("verif")) as HTMLElement | null;
+                      if (btn2) { btn2.click(); return true; }
+                      return false;
+                    }).catch(() => false);
+                    if (clicked) { log(`  ✅ Clicked Verify via frame evaluate`); verifyClicked = true; break; }
+                  }
+                }
+                if (!verifyClicked) {
+                  // Wait for user to provide verifyCoord in a new click file
+                  log(`  ⚠️  Could not find Verify button via DOM — check /tmp/hcap-after-cells.png and provide {"verifyCoord":{x,y}} in /tmp/hcap-clicks.json`);
                 }
               }
             }
@@ -940,6 +1091,33 @@ async function main() {
         } catch (err) { /* no click file yet */ }
       }
 
+      // ── Dismiss Stripe Link / bank-connection popups (they block payment) ───
+      if (pageText.toLowerCase().includes("log in to chase") || pageText.toLowerCase().includes("agree and continue") ||
+          pageText.toLowerCase().includes("connect your bank")) {
+        // Click X button to close the Stripe Link modal (top-right of modal, ~(629,74))
+        const dismissed = await page.evaluate(() => {
+          // Find close/X button inside any modal overlay
+          const btns = Array.from(document.querySelectorAll("button, [role='button']"));
+          for (const b of btns) {
+            const t = (b as HTMLElement).textContent?.trim() || "";
+            const label = (b as HTMLElement).getAttribute("aria-label") || "";
+            if (t === "×" || t === "✕" || t === "✗" || label.toLowerCase().includes("close") || label.toLowerCase().includes("dismiss")) {
+              (b as HTMLElement).click(); return "button-" + t;
+            }
+          }
+          return null;
+        }).catch(() => null);
+        if (dismissed) {
+          log(`  🔒 Dismissed Stripe Link modal (${dismissed})`);
+          await sleep(1000);
+        } else {
+          // Try clicking the close X by coordinate from screenshot (629, 74)
+          await page.mouse.click(629, 74).catch(() => {});
+          log(`  🔒 Clicked close X at (629, 74) to dismiss Link modal`);
+          await sleep(1000);
+        }
+      }
+
       // ── OTP section appeared ──────────────────────────────────────────────────
       const otpTriggerText = pageText.toLowerCase().includes("verification code") ||
           pageText.toLowerCase().includes("enter code") ||
@@ -959,13 +1137,50 @@ async function main() {
         t.toLowerCase().includes("otp") || t.toLowerCase().includes("verification") || t.toLowerCase().includes("one-time") || t.toLowerCase().includes("authenticate")
       );
 
-      if (!otpDone && captchaSolved && (otpTriggerText || otpTriggerUrl || otpTriggerPopup)) {
-        log(`🔐 OTP / 3DS detected (text=${otpTriggerText} url=${otpTriggerUrl} popup=${otpTriggerPopup})`);
+      // Detect inline Federal Bank ACS frame in any page frame
+      let acsFrame: any = null;
+      for (const f of allFrames) {
+        const fu = f.url();
+        if ((fu.includes("federalbank") || fu.includes("federal.bank") || fu.includes("eazypay") ||
+             (fu.includes("acs") && !fu.includes("hcaptcha")) ||
+             (fu.includes("3ds") && !fu.includes("hcaptcha") && !fu.includes("stripe"))) && fu !== "about:blank") {
+          log(`🏦 Inline ACS frame found: ${fu.substring(0, 100)}`);
+          acsFrame = f;
+          break;
+        }
+      }
 
-        // ── Wait for ACS popup to navigate (up to 120s after OTP trigger) ──────
-        log(`  Waiting for ACS popup to load (up to 120s)...`);
-        for (let w = 0; w < 40 && !acsPage; w++) {
+      // OTP trigger: URL-based ACS frames take priority; also trigger on inline ACS frame
+      const realOtpTrigger = otpTriggerUrl || !!acsFrame || (acsPage !== null);
+      // Only trigger text-based if very specific phrases (not Stripe Link bank UI)
+      const pageTextLower = pageText.toLowerCase();
+      const otpTriggerTextStrict = (pageTextLower.includes("enter otp") || pageTextLower.includes("enter the otp") ||
+          pageTextLower.includes("one time password") || pageTextLower.includes("otp sent") ||
+          pageTextLower.includes("secure code")) && !pageTextLower.includes("log in to chase") &&
+          !pageTextLower.includes("connect your bank");
+
+      if (!otpDone && captchaSolved && (realOtpTrigger || otpTriggerTextStrict || otpTriggerPopup)) {
+        log(`🔐 OTP / 3DS detected (url=${otpTriggerUrl} frame=${!!acsFrame} text=${otpTriggerTextStrict} popup=${otpTriggerPopup})`);
+
+        // ── Wait for ACS popup/frame to navigate (up to 120s after OTP trigger) ──────
+        log(`  Waiting for ACS popup/frame to load (up to 120s)...`);
+        for (let w = 0; w < 40 && !acsPage && !acsFrame; w++) {
           await sleep(3000);
+          // Check for inline ACS frames on any page
+          const allPgs2 = ctx.pages();
+          for (const pg2 of allPgs2) {
+            for (const f of pg2.frames()) {
+              const fu = f.url();
+              if ((fu.includes("federalbank") || fu.includes("federal.bank") ||
+                   (fu.includes("acs") && !fu.includes("hcaptcha")) ||
+                   (fu.includes("3ds") && !fu.includes("hcaptcha") && !fu.includes("stripe"))) && fu !== "about:blank") {
+                log(`  🏦 Inline ACS frame detected: ${fu.substring(0, 100)}`);
+                acsFrame = f;
+                break;
+              }
+            }
+            if (acsFrame) break;
+          }
           if (w % 5 === 4) {
             const allPgs = ctx.pages();
             log(`  ACS wait poll ${w + 1}/40: ${allPgs.length} pages open`);
@@ -977,7 +1192,44 @@ async function main() {
         await page.screenshot({ path: "/tmp/stripe-3ds-debug.png" }).catch(() => {});
         log(`  Main page screenshot saved`);
 
-        // Screenshot ACS page if found
+        // Handle inline ACS frame
+        if (acsFrame) {
+          log(`  ✅ Inline ACS frame: ${acsFrame.url().substring(0, 100)}`);
+          const acsText = await acsFrame.evaluate(() => document.body?.innerText || "").catch(() => "");
+          log(`  ACS frame text: "${acsText.replace(/\n/g, " ").substring(0, 400)}"`);
+          const acsInputs = await acsFrame.evaluate(() =>
+            Array.from(document.querySelectorAll("input")).map((i: any) =>
+              `${i.type}[name=${i.name}][id=${i.id}][maxlen=${i.maxLength}]`
+            )
+          ).catch(() => [] as string[]);
+          log(`  ACS frame inputs: ${JSON.stringify(acsInputs)}`);
+          const otp = await fetchGmailOtp(paymentTime);
+          if (otp) {
+            log(`  OTP from email: ${otp}`);
+            // Try to fill OTP in ACS frame
+            const otpSelectors = ['input[type="number"]','input[type="text"]','input[type="tel"]','input[type="password"]','input'];
+            for (const sel of otpSelectors) {
+              const filled = await acsFrame.evaluate((args: {sel: string, otp: string}) => {
+                const inp = document.querySelector(args.sel) as HTMLInputElement | null;
+                if (inp) { inp.value = args.otp; inp.dispatchEvent(new Event("input", {bubbles:true})); inp.dispatchEvent(new Event("change", {bubbles:true})); return true; }
+                return false;
+              }, {sel, otp}).catch(() => false);
+              if (filled) {
+                log(`  ✅ Filled OTP in ACS frame via ${sel}`);
+                await sleep(1000);
+                // Click submit
+                await acsFrame.evaluate(() => {
+                  const btn = (document.querySelector('button[type="submit"], input[type="submit"], button') as HTMLElement | null);
+                  if (btn) btn.click();
+                }).catch(() => {});
+                otpDone = true;
+                break;
+              }
+            }
+          }
+        }
+
+        // Screenshot ACS popup page if found
         if (acsPage) {
           log(`  ✅ ACS page ready: ${acsPage.url().substring(0, 100)}`);
           await acsPage.screenshot({ path: "/tmp/stripe-3ds-acs.png" }).catch(() => {});

@@ -1,0 +1,17 @@
+{
+  "creditKey": "CSK_9a40bd4d251b96ac2a0e47d0a3ff905c64c96382d0234e1ac66ab76744081e4c",
+  "enableCaptchaSolver": true,
+  "enableHCaptcha": true,
+  "hcSolveGridClick": true,
+  "hcSolveBoundingClick": true,
+  "hcSolveBoundingDrag": false,
+  "hCaptchaMaxContinuousFailures": 12,
+  "enableReCaptcha": true,
+  "reSolveGridClick": true,
+  "reSolveBoundingClick": true,
+  "reCaptchaMaxContinuousFailures": 12,
+  "enableMTCaptcha": true,
+  "mtCaptchaMaxContinuousFailures": 12,
+  "enableIgnoreDomainList": true,
+  "ignoredDomainList": []
+}
