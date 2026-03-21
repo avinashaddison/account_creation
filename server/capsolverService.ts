@@ -268,18 +268,32 @@ async function solveHCaptchaViaNopeCHA(
     for (let i = 0; i < 36; i++) {
       await new Promise(r => setTimeout(r, 5000));
 
-      const pollResp = await axios.get(baseUrl, {
-        params: { id: taskId },
-        headers: { "Authorization": authHeader },
-        timeout: 15000,
-      });
+      let pollData: any = null;
+      try {
+        const pollResp = await axios.get(baseUrl, {
+          params: { id: taskId },
+          headers: { "Authorization": authHeader },
+          timeout: 15000,
+          // 409 = "Incomplete job" (still solving) — treat as non-fatal
+          validateStatus: (status) => status === 200 || status === 409,
+        });
+        pollData = pollResp.data;
+        console.log(`[NopeCHA] Poll ${i + 1} (HTTP ${pollResp.status}): ${JSON.stringify(pollData).substring(0, 150)}`);
 
-      console.log(`[NopeCHA] Poll ${i + 1}: ${JSON.stringify(pollResp.data).substring(0, 150)}`);
+        // HTTP 409 with error=14 "Incomplete job" = still solving, continue polling
+        if (pollResp.status === 409) {
+          if (i % 6 === 0 && i > 0) console.log(`[NopeCHA] Still solving... (${i * 5}s elapsed)`);
+          continue;
+        }
+      } catch (pollErr: any) {
+        console.log(`[NopeCHA] Poll ${i + 1} network error: ${pollErr.message} — retrying...`);
+        continue;
+      }
 
       // data will be a string token when ready, or null/undefined while processing
-      const token = pollResp.data.data;
-      if (pollResp.data.error) {
-        return { success: false, error: `NopeCHA error ${pollResp.data.error}: ${pollResp.data.message || "solving failed"}` };
+      const token = pollData?.data;
+      if (pollData?.error && pollData.error !== 14) {
+        return { success: false, error: `NopeCHA error ${pollData.error}: ${pollData.message || "solving failed"}` };
       }
 
       if (token && typeof token === "string" && token.length > 20) {

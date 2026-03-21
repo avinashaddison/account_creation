@@ -11912,9 +11912,58 @@ export async function registerReplitAccount(
                     } catch {}
                   }
 
-                  log(`   Total fields injected: ${totalInjected} across all frames — waiting 8s for Stripe to process...`);
-                  await page.waitForTimeout(8000);
-                  const bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+                  log(`   Total fields injected: ${totalInjected} across all frames — waiting 5s for Stripe to pick up token...`);
+                  await page.waitForTimeout(5000);
+
+                  // Also click "Verify" in the visible hCaptcha challenge frame (triggers Stripe's callback)
+                  for (const frame of page.frames()) {
+                    if (!frame.url().includes("newassets.hcaptcha.com")) continue;
+                    try {
+                      const verifyBtn = frame.locator('button:has-text("Verify"), button.verify-btn, #checkbox').first();
+                      if (await verifyBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+                        await verifyBtn.click({ timeout: 3000 });
+                        log(`   Clicked hCaptcha "Verify" button in frame: ${frame.url().substring(0, 80)}`);
+                        await page.waitForTimeout(3000);
+                        break;
+                      }
+                    } catch {}
+                  }
+
+                  // Also try firing token via hcaptcha-inner frame (Stripe's hCaptcha wrapper)
+                  for (const frame of page.frames()) {
+                    if (!frame.url().includes("hcaptcha-inner")) continue;
+                    try {
+                      await frame.evaluate((tok) => {
+                        const w = window as any;
+                        if (w.hcaptcha?.execute) w.hcaptcha.execute();
+                        // Try dispatching a message event that Stripe's hcaptcha-inner listens for
+                        window.dispatchEvent(new MessageEvent("message", {
+                          data: JSON.stringify({ id: "hcaptcha", token: tok, type: "challenge.passed" }),
+                          origin: "https://newassets.hcaptcha.com",
+                          bubbles: false,
+                        }));
+                      }, token).catch(() => {});
+                      log(`   Fired token into hcaptcha-inner frame`);
+                    } catch {}
+                  }
+
+                  await page.waitForTimeout(5000);
+
+                  // If Bank ACS not yet showing, try re-clicking subscribe to re-trigger payment
+                  let bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+                  if (!bankAcsNow) {
+                    log(`   Bank ACS not yet loaded — trying subscribe re-click to force payment...`);
+                    try {
+                      const resubBtn = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
+                      if (await resubBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+                        await resubBtn.click({ timeout: 5000, force: true });
+                        log(`   Re-clicked Subscribe after hCaptcha solve`);
+                        await page.waitForTimeout(10000);
+                        bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+                      }
+                    } catch {}
+                  }
+
                   log(`   Bank ACS loaded after hCaptcha solve: ${bankAcsNow}`);
                 };
 
