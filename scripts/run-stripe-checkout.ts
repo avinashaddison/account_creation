@@ -8,12 +8,60 @@
  *  6. Payment processes → if 3DS → fetch OTP from Gmail → enter it
  */
 
-import { chromium as chromiumBase, type Page, type Frame } from "playwright";
-import { chromium as chromiumExtra } from "playwright-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-chromiumExtra.use(StealthPlugin());
+import { chromium, type Page, type Frame } from "playwright";
 import { ImapFlow } from "imapflow";
 import * as fs from "fs";
+import * as path from "path";
+
+// ── Inline injectCaptchaSolverListener from Captcha Solver extension ──────────
+async function injectCaptchaSolverListener(a: Page) {
+  await a.exposeFunction("captchaSolverPlaywrightTaskSs", async () => {
+    await a.waitForTimeout(1000);
+    return `data:image/png;base64,${(await a.screenshot()).toString("base64")}`;
+  });
+  await a.exposeFunction("captchaSolverPlaywrightTaskExec", async (t: any) => {
+    if (t.action === "click") {
+      const e = t.answers, i = t.canvasPosOnView;
+      if (e?.length > 0 && i) {
+        for (let k = 0; k < e.length; k++) {
+          await a.mouse.click(e[k].x + i.x, e[k].y + i.y);
+          await a.waitForTimeout(300);
+        }
+      }
+    } else if (t.action === "drag") {
+      const e = t.paths, i = t.canvasPosOnView;
+      if (e?.length > 0 && i) {
+        for (let k = 0; k < e.length; k++) {
+          const o = e[k];
+          await a.mouse.move(o.start.x + i.x, o.start.y + i.y);
+          await a.mouse.down();
+          await a.waitForTimeout(200);
+          await a.mouse.move(o.end.x + i.x, o.end.y + i.y, { steps: 15 });
+          await a.mouse.up();
+          await a.waitForTimeout(300);
+        }
+      }
+    }
+    return true;
+  });
+  await a.addInitScript(() => {
+    window.addEventListener("cs-request-ba-ss", async () => {
+      if (typeof (window as any).captchaSolverPlaywrightTaskSs === "function") {
+        setTimeout(async () => {
+          try {
+            const dataUrl = await (window as any).captchaSolverPlaywrightTaskSs();
+            window.postMessage({ from: "browser-automation", action: "ba-response-cs-ss", dataUrl }, "*");
+          } catch (e) { console.error("Fail to call captchaSolverPlaywrightTaskSs:", e); }
+        }, 10);
+      }
+    });
+    window.addEventListener("cs-request-ba-op", async (ev: any) => {
+      if (typeof (window as any).captchaSolverPlaywrightTaskExec === "function") {
+        return await (window as any).captchaSolverPlaywrightTaskExec(ev.detail);
+      }
+    });
+  });
+}
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const REPLIT_EMAIL    = "mitchellrobles7884@outlook.com";
@@ -209,11 +257,17 @@ async function fetchGmailOtp(sinceMs: number): Promise<string | null> {
 async function main() {
   log(`🚀 Starting — ${REPLIT_EMAIL}`);
 
-  const browser = await chromiumExtra.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"]
-  });
-  const ctx = await browser.newContext({
+  const EXTENSION_PATH = path.resolve(process.cwd(), "extensions/captcha-solver");
+  const userDataDir = `/tmp/chrome-profile-${Date.now()}`;
+  const ctx = await chromium.launchPersistentContext(userDataDir, {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${EXTENSION_PATH}`,
+      `--load-extension=${EXTENSION_PATH}`,
+      "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-web-security", "--window-size=1280,800"
+    ],
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     viewport: { width: 1280, height: 800 },
   });
@@ -290,6 +344,10 @@ async function main() {
   });
 
   const page = await ctx.newPage();
+
+  // Inject Captcha Solver extension listener (handles hCaptcha automatically via extension)
+  await injectCaptchaSolverListener(page);
+  log(`🧩 Captcha Solver extension listener injected`);
 
   // Track rqdata from hCaptcha network calls
   let rqdata: string | null = null;
@@ -587,11 +645,17 @@ async function main() {
       }
       lastFrameCount = framesNow.length;
     }
-    for (let tick = 0; tick < 80; tick++) {
+    const handledCaptchaFrames = new Set<string>(); // Track which hCaptcha frames we've solved
+    for (let tick = 0; tick < 150; tick++) {
       await sleep(3000);
       const allFrameObjs = page.frames();
       const allFrames = allFrameObjs.map(f => f.url());
-      const newHcapFrames = allFrames.filter(u => u.includes("newassets.hcaptcha.com") && !framesBeforeSubscribe.has(u));
+      // Only NEW unhandled hCaptcha frames (excludes already-solved ones)
+      const newHcapFrames = allFrames.filter(u =>
+        u.includes("newassets.hcaptcha.com") &&
+        !framesBeforeSubscribe.has(u) &&
+        !handledCaptchaFrames.has(u)
+      );
       const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
 
       // Log new frames when frame count changes
@@ -797,30 +861,11 @@ async function main() {
         }).catch(() => "error");
         log(`  Button: ${btnState}`);
 
-        // Wait for processing
-        log(`  ⏳ Waiting for payment to process...`);
-        await sleep(8000);
-
-        const textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-        if (textAfter.includes("successful") || textAfter.includes("activated")) {
-          log(`🎉 SUCCESS after captcha solve!`);
-          break;
-        }
-        log(`  Page after solve: ${textAfter.substring(0, 200)}`);
-
-        // If another captcha appeared, the rqdata is stale — reset and retry
-        const framesNow = page.frames().map(f => f.url());
-        const moreHcap = framesNow.filter(u => u.includes("newassets.hcaptcha.com") && !newHcapFrames.includes(u));
-        if (moreHcap.length > 0 || framesNow.filter(u => u.includes("newassets.hcaptcha.com")).length > 0) {
-          log(`  ♻️  Another captcha — resetting rqdata and retrying solve...`);
-          rqdata = null;
-          await sleep(2000);
-          const token2 = await solveHcaptcha(rqdata);
-          await injectHcapToken(page, token2);
-          await sleep(5000);
-        }
-
-        break;
+        // Mark these captcha frames as handled so we don't re-solve them
+        newHcapFrames.forEach(u => handledCaptchaFrames.add(u));
+        rqdata = null; // Reset so we can capture fresh rqdata if another captcha appears
+        log(`  ✅ Captcha handled — continuing to monitor for success/3DS...`);
+        // DO NOT break — continue the loop to detect success or 3DS
       }
 
       log(`  tick=${tick} frames=${allFrames.length} 3DS=${stripe3dsTriggered} text="${pageText.substring(0, 60)}"`);
@@ -830,7 +875,7 @@ async function main() {
     log(`❌ Error: ${e.message}`);
     log(e.stack || "");
   } finally {
-    await browser.close().catch(() => {});
+    await ctx.close().catch(() => {});
     log(`🏁 Done`);
     process.exit(0);
   }

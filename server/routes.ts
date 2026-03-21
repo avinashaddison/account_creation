@@ -3654,5 +3654,38 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  // ── Stripe Checkout Automation Endpoint ──────────────────────────────────────
+  app.post("/api/stripe-checkout", async (req: Request, res: Response) => {
+    const { spawn } = await import("child_process");
+    const fsSync = await import("fs");
+    const logFile = `/tmp/stripe-script-${Date.now()}.log`;
+    fsSync.writeFileSync("/tmp/stripe-current-log.txt", logFile);
+    const out = fsSync.openSync(logFile, "w");
+    const child = spawn("npx", ["tsx", "scripts/run-stripe-checkout.ts"], {
+      detached: true,
+      stdio: ["ignore", out, out],
+      cwd: process.cwd(),
+      env: { ...process.env, DISPLAY: ":0" },
+    });
+    child.unref();
+    res.json({ logFile, pid: child.pid, started: new Date().toISOString() });
+  });
+
+  app.get("/api/stripe-checkout/status", async (req: Request, res: Response) => {
+    const fsSync = await import("fs");
+    const currentLogFile = "/tmp/stripe-current-log.txt";
+    if (!fsSync.existsSync(currentLogFile)) {
+      return res.json({ status: "no-run", log: "" });
+    }
+    const logFile = fsSync.readFileSync(currentLogFile, "utf-8").trim();
+    if (!logFile || !fsSync.existsSync(logFile)) {
+      return res.json({ status: "no-log", logFile });
+    }
+    const log = fsSync.readFileSync(logFile, "utf-8");
+    const lines = log.split("\n");
+    const tail = lines.slice(-40).join("\n");
+    res.json({ logFile, lineCount: lines.length, tail, done: log.includes("🏁 Done") || log.includes("🎉 SUCCESS") });
+  });
+
   return httpServer;
 }
