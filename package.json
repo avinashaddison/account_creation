@@ -55,6 +55,7 @@
     "express": "^5.0.1",
     "express-session": "^1.18.1",
     "framer-motion": "^12.23.24",
+    "googleapis": "^171.4.0",
     "https-proxy-agent": "^7.0.6",
     "imapflow": "^1.2.15",
     "input-otp": "^1.4.2",
