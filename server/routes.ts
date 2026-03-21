@@ -3656,16 +3656,20 @@ export async function registerRoutes(
 
   // ── Stripe Checkout Automation Endpoint ──────────────────────────────────────
   app.post("/api/stripe-checkout", async (req: Request, res: Response) => {
-    const { spawn } = await import("child_process");
+    const { spawn, execSync } = await import("child_process");
     const fsSync = await import("fs");
+    // Kill any existing checkout processes first
+    try { execSync("pkill -f run-stripe-checkout || true", { stdio: "ignore" }); } catch {}
+    await new Promise(r => setTimeout(r, 2000));
     const logFile = `/tmp/stripe-script-${Date.now()}.log`;
     fsSync.writeFileSync("/tmp/stripe-current-log.txt", logFile);
     const out = fsSync.openSync(logFile, "w");
+    const noExt = req.body?.noExt === true || req.query.noExt === "1";
     const child = spawn("npx", ["tsx", "scripts/run-stripe-checkout.ts"], {
       detached: true,
       stdio: ["ignore", out, out],
       cwd: process.cwd(),
-      env: { ...process.env, DISPLAY: ":0" },
+      env: { ...process.env, DISPLAY: ":0", ...(noExt ? { STRIPE_NO_EXT: "1" } : {}) },
     });
     child.unref();
     res.json({ logFile, pid: child.pid, started: new Date().toISOString() });
