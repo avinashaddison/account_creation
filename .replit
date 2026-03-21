@@ -55,9 +55,6 @@ expertMode = true
 
 [userenv.shared]
 LA28_PROXY_URL = "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222"
-DECODO_PROXY_USERNAME = "spzg7axtkh"
-DECODO_PROXY_PASSWORD = "ua62voA3DQqvi9Zf=t"
-DECODO_PROXY_HOST = "us.decodo.com"
 NEON_DATABASE_URL = "postgresql://neondb_owner:npg_qiZSW7d0TJoB@ep-winter-base-an9kkwgp-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
 [postMerge]
