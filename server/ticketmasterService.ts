@@ -45,12 +45,14 @@ async function getTMBrowser(): Promise<Browser> {
         "--no-zygote",
         "--disable-blink-features=AutomationControlled",
         "--js-flags=--max-old-space-size=256",
-        "--window-size=1280,720",
+        "--window-size=1366,768",
         "--lang=en-US,en",
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
         "--disable-features=IsolateOrigins",
         "--disable-ipc-flooding-protection",
+        `--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`,
+        "--accept-lang=en-US,en;q=0.9",
       ],
     });
     browserInstance.on("disconnected", () => {
@@ -934,7 +936,7 @@ async function doTMRegistration(
 
       const contextOptions: any = {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        viewport: { width: 1280, height: 720 },
+        viewport: { width: 1366, height: 768 },
         locale: "en-US",
         timezoneId: "America/New_York",
       };
