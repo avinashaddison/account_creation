@@ -11031,8 +11031,8 @@ export async function registerReplitAccount(
     if (couponCode && couponCode.trim()) {
       const code = couponCode.trim();
       try {
-        log(`🎟️ Applying coupon "${code}" to Replit Core checkout...`);
-        const checkoutPageUrl = "https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?source=onboarding-purchase-modal&successRedirectPath=%2F%7E&cancelRedirectPath=%2F%7E";
+        log(`🎟️ Applying coupon "${code}" to Replit Core checkout (via URL param)...`);
+        const checkoutPageUrl = `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=${encodeURIComponent(code)}&source=onboarding-purchase-modal&successRedirectPath=%2F%7E&cancelRedirectPath=%2F%7E`;
         await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
         await page.waitForTimeout(8000);
         checkoutUrl = page.url();
@@ -11218,67 +11218,21 @@ export async function registerReplitAccount(
           return false;
         }
 
-        // Step 1 — click "Add promotion code" toggle
-        let promoClicked = await clickByText(
-          ["add promotion code", "promotion code", "have a promo", "coupon", "discount code"],
-          5000
-        );
-        if (!promoClicked) log(`⚠️ Promo toggle not found — trying direct input`);
-        else await page.waitForTimeout(1500);
-
-        // Step 2 — fill the promo code input
-        let codeEntered = await fillInput(
-          ["promotion", "promo", "coupon", "discount", "code"],
-          code,
-          6000
-        );
-
-        // Fallback: try any visible text input that appeared after clicking toggle
-        if (!codeEntered) {
-          codeEntered = await page.evaluate((val: string) => {
-            const inputs = Array.from(document.querySelectorAll("input[type='text'], input:not([type])"));
-            const visible = inputs.find((i) => (i as HTMLElement).offsetParent !== null && !(i as HTMLInputElement).value);
-            if (visible) {
-              (visible as HTMLInputElement).focus();
-              (visible as HTMLInputElement).value = val;
-              visible.dispatchEvent(new Event("input", { bubbles: true }));
-              visible.dispatchEvent(new Event("change", { bubbles: true }));
-              return true;
-            }
-            return false;
-          }, code);
-          if (codeEntered) log(`Filled code via fallback empty-input method`);
-        }
-
-        if (codeEntered) {
-          log(`Entered coupon code: ${code}`);
-          await page.waitForTimeout(400);
-
-          // Step 3 — click Apply
-          const applied = await clickByText(["apply", "redeem", "submit code"], 4000);
-          if (applied) {
-            await page.waitForTimeout(3000);
-            log(`Clicked Apply`);
-          }
-
-          // Check result
-          const pageText = await page.evaluate(() => document.body.innerText.toLowerCase());
-          if (pageText.includes("discount") || pageText.includes("% off") || pageText.includes("applied") || pageText.includes("free")) {
-            log(`✅ Coupon applied! Discount reflected on page`);
-          } else if (pageText.includes("invalid") || pageText.includes("expired") || pageText.includes("not valid")) {
-            log(`⚠️ Coupon may be invalid or expired`);
-          } else {
-            log(`Coupon submitted — discount may apply at checkout`);
-          }
+        // Coupon is embedded in the URL — check if Stripe auto-applied it
+        await page.waitForTimeout(2000);
+        const couponPageText = await page.evaluate(() => document.body.innerText.toLowerCase());
+        if (couponPageText.includes("discount") || couponPageText.includes("% off") || couponPageText.includes("applied") || couponPageText.includes("free")) {
+          log(`✅ Coupon auto-applied via URL! Discount reflected on page`);
+        } else if (couponPageText.includes("invalid") || couponPageText.includes("expired") || couponPageText.includes("not valid")) {
+          log(`⚠️ Coupon appears invalid or expired on Stripe page`);
         } else {
-          log(`⚠️ Could not find promotion code input — dumping visible inputs for debug:`);
-          const inputDump = await page.evaluate(() =>
-            Array.from(document.querySelectorAll("input")).map((i) => ({
-              type: i.type, name: i.name, placeholder: i.placeholder, id: i.id,
-              visible: (i as HTMLElement).offsetParent !== null,
-            }))
-          );
-          log(`  Inputs found: ${JSON.stringify(inputDump).substring(0, 300)}`);
+          log(`Coupon passed in URL — verifying total on page...`);
+          const priceSnippet = await page.evaluate(() => {
+            const text = document.body.innerText;
+            const m = text.match(/Total due today[\s\S]{0,60}/);
+            return m ? m[0].replace(/\n/g, " ").trim() : text.substring(0, 200);
+          });
+          log(`  Page total: ${priceSnippet}`);
         }
 
         checkoutUrl = page.url();
@@ -12111,6 +12065,15 @@ export async function registerReplitAccount(
                 }
                 if (!otpEntered) log(`⚠️ Could not find 3DS input field to enter OTP`);
 
+                // Capture ACS frame text immediately after OTP submit
+                await page.waitForTimeout(3000);
+                for (const f of page.frames()) {
+                  if (f.url().includes("m2pfintech") || f.url().includes("acsv2") || f.url().includes("federalbank")) {
+                    const acsText = await f.evaluate(() => document.body?.innerText?.trim() || "").catch(() => "");
+                    if (acsText) log(`  ACS frame after OTP: ${acsText.substring(0, 200)}`);
+                  }
+                }
+
                 // Poll for success redirect up to 90s after OTP submit
                 log(`⏳ Waiting for 3DS authentication to complete...`);
                 const postOtpDeadline = Date.now() + 90000;
@@ -12132,9 +12095,9 @@ export async function registerReplitAccount(
                     break;
                   }
                   // Check if 3DS frame has gone (OTP accepted — Stripe processing)
-                  const stillHas3DS = page.frames().some(f => f.url().includes("three-ds") || f.url().includes("challenge"));
+                  const stillHas3DS = page.frames().some(f => f.url().includes("three-ds") || f.url().includes("challenge") || f.url().includes("m2pfintech"));
                   if (!stillHas3DS) {
-                    log(`  3DS frame gone — Stripe is processing payment`);
+                    log(`  3DS/ACS frame gone — Stripe is processing payment`);
                     await page.waitForTimeout(8000);
                     const finalCheck = page.url();
                     log(`  Post-3DS-close URL: ${finalCheck.substring(0, 80)}`);
@@ -12142,21 +12105,30 @@ export async function registerReplitAccount(
                       log(`✅ Payment successful (after 3DS close): ${finalCheck.substring(0, 80)}`);
                       checkoutComplete = true;
                     } else {
-                      log(`  Final post-3DS URL: ${finalCheck.substring(0, 80)}`);
+                      const finalText = await page.evaluate(() => document.body?.innerText?.substring(0, 400) || "").catch(() => "");
+                      log(`  Final post-3DS page text: ${finalText.replace(/\n/g, " ").substring(0, 300)}`);
                     }
                     break;
                   }
-                  // Also check page text for error/success signals
-                  if (pollCount % 4 === 0) {
-                    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "").catch(() => "");
-                    if (pageText.includes("Payment failed") || pageText.includes("Your payment was declined")) {
-                      log(`  ⚠️ Payment failure detected in page text`);
+                  // Check page text every 3 polls for error/success signals
+                  if (pollCount % 3 === 0) {
+                    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 600) || "").catch(() => "");
+                    const lc = pageText.toLowerCase();
+                    if (lc.includes("payment failed") || lc.includes("your payment was declined") || lc.includes("card was declined") || lc.includes("do not honor")) {
+                      log(`  ⚠️ Payment declined: ${pageText.substring(0, 200).replace(/\n/g, " ")}`);
                       break;
                     }
-                    if (pageText.includes("Thanks for subscribing") || pageText.includes("Payment successful")) {
+                    if (lc.includes("thanks for subscribing") || lc.includes("payment successful") || lc.includes("subscription active")) {
                       log(`✅ Payment success detected in page text`);
                       checkoutComplete = true;
                       break;
+                    }
+                    // Log ACS frame status periodically
+                    for (const f of page.frames()) {
+                      if (f.url().includes("m2pfintech") || f.url().includes("acsv2")) {
+                        const acsT = await f.evaluate(() => document.body?.innerText?.trim() || "").catch(() => "");
+                        if (acsT) log(`  ACS frame [poll ${pollCount}]: ${acsT.substring(0, 150)}`);
+                      }
                     }
                   }
                 }
