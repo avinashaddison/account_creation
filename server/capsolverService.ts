@@ -144,7 +144,8 @@ export async function solveRecaptchaV2(
 export async function solveHCaptcha(
   websiteURL: string,
   websiteKey: string,
-  proxy?: string
+  proxy?: string,
+  rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   try {
     const taskType = proxy ? "HCaptchaTask" : "HCaptchaTaskProxyLess";
@@ -157,8 +158,9 @@ export async function solveHCaptcha(
       const parsed = parseProxy(proxy);
       Object.assign(task, parsed);
     }
+    if (rqdata) task.enterprisePayload = { rqdata };
 
-    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL}`);
+    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL}${rqdata ? " [+rqdata]" : ""}`);
     return await createAndPollTask(task);
   } catch (err: any) {
     console.log(`[CapSolver] HCaptcha error: ${err.message}`);
@@ -173,17 +175,21 @@ async function solveHCaptchaViaJsonApi(
   baseUrl: string,
   serviceName: string,
   websiteURL: string,
-  websiteKey: string
+  websiteKey: string,
+  rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   try {
-    console.log(`[${serviceName}] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
+    const taskPayload: Record<string, any> = {
+      type: "HCaptchaTaskProxyless",
+      websiteURL,
+      websiteKey,
+    };
+    if (rqdata) taskPayload.enterprisePayload = { rqdata };
+
+    console.log(`[${serviceName}] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}${rqdata ? " [+rqdata]" : ""}...`);
     const createResp = await axios.post(`${baseUrl}/createTask`, {
       clientKey: apiKey,
-      task: {
-        type: "HCaptchaTaskProxyless",
-        websiteURL,
-        websiteKey,
-      },
+      task: taskPayload,
     }, { timeout: 30000 });
 
     console.log(`[${serviceName}] Create task response: ${JSON.stringify(createResp.data).substring(0, 300)}`);
@@ -237,17 +243,18 @@ async function solveHCaptchaViaJsonApi(
 async function solveHCaptchaViaNopeCHA(
   apiKey: string,
   websiteURL: string,
-  websiteKey: string
+  websiteKey: string,
+  rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   try {
     const authHeader = `Basic ${apiKey}`;
     const baseUrl = "https://api.nopecha.com/v1/token/hcaptcha";
 
-    console.log(`[NopeCHA] Submitting hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}...`);
-    const submitResp = await axios.post(baseUrl, {
-      sitekey: websiteKey,
-      url: websiteURL,
-    }, {
+    const payload: Record<string, any> = { sitekey: websiteKey, url: websiteURL };
+    if (rqdata) { payload.rq = rqdata; payload.rqdata = rqdata; }
+
+    console.log(`[NopeCHA] Submitting hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}${rqdata ? " [+rqdata]" : ""}...`);
+    const submitResp = await axios.post(baseUrl, payload, {
       headers: { "Authorization": authHeader, "Content-Type": "application/json" },
       timeout: 30000,
     });
@@ -316,14 +323,15 @@ async function solveHCaptchaViaNopeCHA(
 
 export async function solveHCaptchaWith2Captcha(
   websiteURL: string,
-  websiteKey: string
+  websiteKey: string,
+  rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   // Priority 1: NopeCHA — confirmed hCaptcha support, cheapest ($1/90K solves)
   const nopeResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`);
   const nopeKey = nopeResult.rows.length > 0 ? (nopeResult.rows[0].value as string) : "";
   if (nopeKey) {
     console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com...`);
-    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey);
+    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata);
     if (result.success) return result;
     console.log(`[NopeCHA] Failed: ${result.error} — trying next solver...`);
   }
@@ -333,7 +341,7 @@ export async function solveHCaptchaWith2Captcha(
   const acKey = acResult.rows.length > 0 ? (acResult.rows[0].value as string) : "";
   if (acKey) {
     console.log(`[AntiCaptcha] Attempting hCaptcha solve via anti-captcha.com...`);
-    const result = await solveHCaptchaViaJsonApi(acKey, "https://api.anti-captcha.com", "AntiCaptcha", websiteURL, websiteKey);
+    const result = await solveHCaptchaViaJsonApi(acKey, "https://api.anti-captcha.com", "AntiCaptcha", websiteURL, websiteKey, rqdata);
     if (result.success) return result;
     console.log(`[AntiCaptcha] Failed: ${result.error} — trying 2captcha fallback...`);
   }
@@ -343,7 +351,7 @@ export async function solveHCaptchaWith2Captcha(
   const tcKey = tcResult.rows.length > 0 ? (tcResult.rows[0].value as string) : "";
   if (tcKey) {
     console.log(`[2captcha] Attempting hCaptcha solve via 2captcha.com...`);
-    return solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey);
+    return solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey, rqdata);
   }
 
   return { success: false, error: "No CAPTCHA solver configured — add NopeCHA, anti-captcha.com, or 2captcha API key in Settings" };

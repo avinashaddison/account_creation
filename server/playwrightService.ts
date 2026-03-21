@@ -11572,6 +11572,39 @@ export async function registerReplitAccount(
         // Solve hCaptcha in advance so we have a token ready when Stripe's API call goes out.
         // Also set up route interceptor to log/inject token into Stripe's payment API request.
         let preSolvedHcapToken: string | null = null;
+
+        // Set up rqdata listener — captures Stripe's enterprise hCaptcha rqdata via postMessage
+        // Must be injected BEFORE Subscribe click so we catch when Stripe triggers hCaptcha
+        let capturedRqdata: string | null = null;
+        try {
+          await page.evaluate(() => {
+            (window as any).__capturedRqdata = null;
+            window.addEventListener("message", (e: MessageEvent) => {
+              try {
+                const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
+                const m = str.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
+                if (m) (window as any).__capturedRqdata = m[1];
+              } catch {}
+            }, true);
+          });
+          // Also inject into hcaptcha-invisible frame if already loaded
+          for (const fr of page.frames()) {
+            if (fr.url().includes("hcaptcha-invisible")) {
+              await fr.evaluate(() => {
+                (window as any).__capturedRqdata = null;
+                window.addEventListener("message", (e: MessageEvent) => {
+                  try {
+                    const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
+                    const m = str.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
+                    if (m) (window as any).__capturedRqdata = m[1];
+                  } catch {}
+                }, true);
+              }).catch(() => {});
+              break;
+            }
+          }
+        } catch {}
+
         try {
           log(`🤖 Pre-solving hCaptcha before Subscribe click (token will be injected into Stripe API call)...`);
           const preResult = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
@@ -11827,12 +11860,46 @@ export async function registerReplitAccount(
                   log(`   Extracted hCaptcha sitekey: ${hcaptchaSiteKey}`);
                 }
 
+                // Collect rqdata — check page listener first, then poll hcaptcha frames
+                // Strategy: page postMessage listener (set up before Subscribe) + direct frame extraction
+                capturedRqdata = await page.evaluate(() => (window as any).__capturedRqdata).catch(() => null);
+                if (!capturedRqdata) {
+                  for (const fr of page.frames()) {
+                    if (fr.url().includes("hcaptcha-invisible") || fr.url().includes("newassets.hcaptcha.com")) {
+                      const rd = await fr.evaluate(() => {
+                        // Try captured value first
+                        if ((window as any).__capturedRqdata) return (window as any).__capturedRqdata;
+                        // Try data attribute
+                        const el = document.querySelector("[data-rqdata]");
+                        if (el) return el.getAttribute("data-rqdata");
+                        // Try hcaptcha internal state
+                        const hcap = (window as any).hcaptcha;
+                        if (hcap && typeof hcap === "object") {
+                          for (const k of Object.keys(hcap)) {
+                            const v = hcap[k];
+                            if (v && typeof v === "object" && v.rqdata) return v.rqdata;
+                          }
+                        }
+                        // Scan entire window for rqdata
+                        try {
+                          const full = JSON.stringify(window);
+                          const m = full.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
+                          if (m) return m[1];
+                        } catch {}
+                        return null;
+                      }).catch(() => null);
+                      if (rd) { capturedRqdata = rd; break; }
+                    }
+                  }
+                }
+                log(`   rqdata for hCaptcha solve: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found"}`);
+
                 log(`   Solving hCaptcha via NopeCHA / anti-captcha / 2captcha (then CapSolver fallback)...`);
                 // Use base domain only — some solvers block the full session URL
                 const capsolverUrl = "https://checkout.stripe.com";
                 // Try NopeCHA → anti-captcha → 2captcha first (CapSolver is a last resort due to policy blocks)
-                const primaryResult = await solveHCaptchaWith2Captcha(capsolverUrl, hcaptchaSiteKey);
-                const capResult = primaryResult.success ? primaryResult : await solveHCaptcha(capsolverUrl, hcaptchaSiteKey);
+                const primaryResult = await solveHCaptchaWith2Captcha(capsolverUrl, hcaptchaSiteKey, capturedRqdata);
+                const capResult = primaryResult.success ? primaryResult : await solveHCaptcha(capsolverUrl, hcaptchaSiteKey, undefined, capturedRqdata);
                 // Helper: inject hCaptcha token into ALL frames (main page + each iframe)
                 const injectHCaptchaToken = async (token: string, source: string) => {
                   log(`   ✅ ${source} solved hCaptcha! Token: ${token.substring(0, 30)}...`);
