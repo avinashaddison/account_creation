@@ -10533,59 +10533,89 @@ export async function registerReplitAccount(
         // (EXECUTE_HCAPTCHA_INVISIBLE was being sent to the main frame instead of hcaptcha-invisible.htm)
 
         // ── Stripe hCaptcha Intercept: runs in ALL frames (including cross-origin) ──
-        // This intercepts EXECUTE_HCAPTCHA_INVISIBLE from parent and responds with our pre-solved token.
-        // Also captures rqdata from EXECUTE and forwards it to the main page.
+        // Strategy: When EXECUTE arrives, store it as "pending" (don't respond immediately if no token).
+        // When token arrives via inject-hcap-token, immediately respond to any pending EXECUTE.
+        // This handles the case where EXECUTE arrives before the rqdata-aware solve is complete.
         (function() {
           const w = window as any;
           w.__hcapToken = null;
+          w.__pendingExecute = null; // { frameID, requestID } waiting for token
+
+          function sendHcapResponse(frameID: string, requestID: any, token: string) {
+            const response = {
+              type: "stripe-third-party-child-to-parent",
+              frameID,
+              requestID,
+              payload: { response: token },
+            };
+            try { window.parent.postMessage(response, "*"); } catch {}
+            try { (window.top as any)?.postMessage(response, "*"); } catch {}
+            console.error("[HCAP-INTERCEPT] Sent RESPONSE frameID=" + frameID + " reqID=" + requestID + " tokenLen=" + token.length);
+          }
 
           window.addEventListener("message", function hcapIntercept(e: MessageEvent) {
             try {
               const d = e.data;
               if (!d || typeof d !== "object") return;
 
-              // Receive injected token from main page
+              // ── Receive injected token from main page ──
               if (d.type === "inject-hcap-token") {
                 w.__hcapToken = d.token;
+                // If EXECUTE was already received and we hadn't responded, respond NOW
+                if (w.__pendingExecute) {
+                  const pe = w.__pendingExecute;
+                  w.__pendingExecute = null;
+                  sendHcapResponse(pe.frameID, pe.requestID, d.token);
+                }
                 return;
               }
 
-              // Capture rqdata from EXECUTE and forward to main page (for pre-solve)
+              // ── Intercept stripe-third-party-parent-to-child (EXECUTE_HCAPTCHA_INVISIBLE) ──
               if (d.type === "stripe-third-party-parent-to-child") {
                 const payload = d.payload;
+
+                // Extract and forward rqdata to main page so it can solve with correct enterprise payload
                 const rqdata = (typeof payload === "object" && payload?.rqdata) || null;
                 if (rqdata) {
-                  // Forward rqdata up the frame chain to main page
                   try { window.parent.postMessage({ type: "hcap-rqdata", rqdata }, "*"); } catch {}
                   try { (window.top as any)?.postMessage({ type: "hcap-rqdata", rqdata }, "*"); } catch {}
                 }
 
-                // Intercept EXECUTE_HCAPTCHA_INVISIBLE
                 const isExecute = payload === "EXECUTE_HCAPTCHA_INVISIBLE" ||
                   (typeof payload === "object" && (payload?.action === "EXECUTE_HCAPTCHA_INVISIBLE" || payload?.type === "EXECUTE_HCAPTCHA_INVISIBLE"));
-                if (isExecute && w.__hcapToken) {
-                  const params = new URLSearchParams(window.location.search);
-                  const frameID = d.frameID || params.get("id") || "hcaptcha-invisible";
-                  const response = {
-                    type: "stripe-third-party-child-to-parent",
-                    frameID,
-                    requestID: d.requestID,
-                    payload: { response: w.__hcapToken },
-                  };
-                  try { window.parent.postMessage(response, "*"); } catch {}
-                  try { (window.top as any)?.postMessage(response, "*"); } catch {}
-                  console.error("[HCAP-INTERCEPT] Fired RESPONSE_HCAPTCHA_INVISIBLE frameID=" + frameID + " requestID=" + d.requestID);
+                if (!isExecute) return;
+
+                const params = new URLSearchParams(window.location.search);
+                const frameID = d.frameID || params.get("id") || "hcaptcha-invisible";
+                const requestID = d.requestID;
+
+                if (w.__hcapToken) {
+                  // Token already available — respond immediately
+                  sendHcapResponse(frameID, requestID, w.__hcapToken);
+                } else {
+                  // No token yet — store EXECUTE details; respond as soon as token arrives
+                  w.__pendingExecute = { frameID, requestID };
+                  // Also forward rqdata from EXECUTE payload if present (some flows put it here)
+                  if (rqdata) {
+                    try { window.parent.postMessage({ type: "hcap-rqdata-execute", rqdata }, "*"); } catch {}
+                  }
+                  console.error("[HCAP-INTERCEPT] EXECUTE stored as pending (no token yet) frameID=" + frameID);
                 }
               }
             } catch {}
           }, true);
 
-          // Also listen for rqdata forwarded FROM child frames (main page collects it)
+          // ── Collect rqdata forwarded FROM child hcaptcha frames (runs in main page context) ──
           window.addEventListener("message", function rqdataCollect(e: MessageEvent) {
             try {
               const d = e.data;
-              if (d && d.type === "hcap-rqdata" && d.rqdata) {
+              if (d && (d.type === "hcap-rqdata" || d.type === "hcap-rqdata-execute") && d.rqdata) {
+                const isNew = d.rqdata !== w.__capturedRqdata;
                 w.__capturedRqdata = d.rqdata;
+                // Signal main page Node code that rqdata is ready (via exposed function if available)
+                if (isNew && typeof (window as any).__onHcapRqdataReady === "function") {
+                  try { (window as any).__onHcapRqdataReady(d.rqdata); } catch {}
+                }
               }
             } catch {}
           }, true);
@@ -11640,7 +11670,13 @@ export async function registerReplitAccount(
               try {
                 const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
                 const m = str.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
-                if (m) (window as any).__capturedRqdata = m[1];
+                if (m && m[1] !== (window as any).__capturedRqdata) {
+                  (window as any).__capturedRqdata = m[1];
+                  // Trigger reactive rqdata solve immediately
+                  if (typeof (window as any).__onHcapRqdataReady === "function") {
+                    try { (window as any).__onHcapRqdataReady(m[1]); } catch {}
+                  }
+                }
               } catch {}
             }, true);
           });
@@ -11653,7 +11689,11 @@ export async function registerReplitAccount(
                   try {
                     const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
                     const m = str.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
-                    if (m) (window as any).__capturedRqdata = m[1];
+                    if (m && m[1] !== (window as any).__capturedRqdata) {
+                      (window as any).__capturedRqdata = m[1];
+                      // Forward rqdata to main page for reactive solve
+                      try { window.parent.postMessage({ type: "hcap-rqdata", rqdata: m[1] }, "*"); } catch {}
+                    }
                   } catch {}
                 }, true);
               }).catch(() => {});
@@ -11679,20 +11719,42 @@ export async function registerReplitAccount(
           } catch {}
         };
 
+        // ── Reactive rqdata solver: fires the moment rqdata arrives from the hcaptcha frame ──
+        // The init script in the hcaptcha-invisible frame calls __onHcapRqdataReady(rqdata) on the
+        // main page when EXECUTE (with rqdata) or hcap-rqdata arrives. We immediately solve and
+        // broadcast, so the pending EXECUTE in the init script gets responded to within ~5s.
+        let rqdataSolveInFlight = false;
+        let rqdataSolveDone = false;
         try {
-          log(`🤖 Pre-solving hCaptcha before Subscribe click...`);
-          // Check if rqdata already captured by init script (from INITIALIZE messages)
-          const preRqdata = await page.evaluate(() => (window as any).__capturedRqdata).catch(() => null);
-          if (preRqdata) log(`  📦 rqdata captured before pre-solve: ${preRqdata.substring(0, 40)}...`);
+          await page.exposeFunction("__onHcapRqdataReady", async (rqdata: string) => {
+            if (rqdataSolveInFlight || rqdataSolveDone) return; // only one solve at a time
+            rqdataSolveInFlight = true;
+            log(`📦 __onHcapRqdataReady fired — solving hCaptcha with rqdata: ${rqdata.substring(0, 30)}...`);
+            try {
+              const r = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df", rqdata);
+              const tok = r.success ? r : await solveHCaptcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df", undefined, rqdata);
+              if (tok.success && tok.token) {
+                preSolvedHcapToken = tok.token;
+                rqdataSolveDone = true;
+                log(`✅ rqdata-aware solve complete: ${tok.token.substring(0, 30)}... (len=${tok.token.length})`);
+                await broadcastHcapToken(tok.token);
+                log(`  🔧 rqdata token broadcasted — pending EXECUTE will be answered`);
+              }
+            } catch (e: any) { log(`⚠️ __onHcapRqdataReady solve failed: ${e.message}`); }
+            finally { rqdataSolveInFlight = false; }
+          });
+        } catch {} // exposeFunction may fail if already exposed (e.g. page reload)
 
-          const preResult = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df", preRqdata || undefined);
-          const capResult2 = preResult.success ? preResult : await solveHCaptcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df", undefined, preRqdata || undefined);
+        try {
+          log(`🤖 Pre-solving hCaptcha before Subscribe click (no rqdata yet — will re-solve when EXECUTE arrives)...`);
+          const preResult = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
+          const capResult2 = preResult.success ? preResult : await solveHCaptcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
           if (capResult2.success && capResult2.token) {
             preSolvedHcapToken = capResult2.token;
-            log(`✅ Pre-solved hCaptcha token: ${preSolvedHcapToken.substring(0, 30)}... (len=${preSolvedHcapToken.length})`);
-            // Broadcast token to all frames — init script intercept will use it on EXECUTE
-            await broadcastHcapToken(preSolvedHcapToken);
-            log(`  🔧 Token broadcasted to all frames via postMessage`);
+            log(`✅ Pre-solved hCaptcha token (no rqdata): ${preSolvedHcapToken.substring(0, 30)}... (len=${preSolvedHcapToken.length})`);
+            // DO NOT broadcast yet — wait for rqdata-aware solve to override this.
+            // Only broadcast if __onHcapRqdataReady doesn't fire within 5s of Subscribe click.
+            log(`  ℹ️ Pre-solve complete — will be used as fallback if rqdata solve doesn't complete in time`);
           }
         } catch (e: any) { log(`⚠️ Pre-solve hCaptcha failed: ${e.message}`); }
 
@@ -11789,7 +11851,17 @@ export async function registerReplitAccount(
         if (submitted) {
           // Wait for either success redirect or 3DS challenge
           log(`⏳ Waiting for payment response...`);
-          await page.waitForTimeout(12000);
+          // Give __onHcapRqdataReady up to 8s to fire and solve with rqdata.
+          // If it fires, it will broadcast the rqdata token and the pending EXECUTE will respond.
+          // If it doesn't fire (rqdata not sent), fall back to the pre-solved (no-rqdata) token.
+          await page.waitForTimeout(8000);
+          if (!rqdataSolveDone && !rqdataSolveInFlight && preSolvedHcapToken) {
+            log(`  ⚡ rqdata solve not triggered — broadcasting pre-solved (no-rqdata) token as fallback`);
+            await broadcastHcapToken(preSolvedHcapToken);
+          } else if (rqdataSolveDone) {
+            log(`  ✅ rqdata solve already completed — no fallback needed`);
+          }
+          await page.waitForTimeout(4000);
 
           // Dump intercepted Stripe API calls for debugging
           if (stripeApiLogs.length > 0) {
