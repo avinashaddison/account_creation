@@ -899,7 +899,7 @@ export async function registerRoutes(
 
   app.get("/api/settings/presale-proxy", requireAuth, async (_req, res) => {
     try {
-      const url = await storage.getSetting("presale_proxy_url");
+      const url = await getPresaleProxyUrl();
       res.json({ url: url || "" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
