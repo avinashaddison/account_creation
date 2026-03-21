@@ -11044,68 +11044,120 @@ export async function registerReplitAccount(
     await handleReplitOnboarding(page, log);
 
     // ── Ensure Replit session is active before checkout ──
-    // After email verification the browser may not have a live auth cookie.
-    // Log in explicitly so the checkout URL doesn't redirect to signup/login.
-    try {
-      const currentPageUrl = page.url();
-      const needsLogin =
-        currentPageUrl.includes("/login") ||
-        currentPageUrl.includes("/signup") ||
-        currentPageUrl.includes("action-code") ||
-        !currentPageUrl.includes("replit.com");
+    // Replit login is a two-step flow: email/username → Continue → password → Submit.
+    // We attempt login with both the outlook email and the generated username as identifier.
+    async function doReplitLogin(pg: any, identifier: string, pwd: string, label: string): Promise<boolean> {
+      try {
+        log(`🔐 ${label}: navigating to Replit login...`);
+        await pg.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await pg.waitForTimeout(3000);
 
-      if (needsLogin) {
-        log(`🔐 Session not established — logging into Replit with new account credentials...`);
-      } else {
-        // Quick check: are we actually logged in?
-        const pageText = await page.evaluate(() => document.body?.innerText || "");
-        const isLoggedOut = pageText.includes("Sign up") && pageText.includes("Log in") && !pageText.includes(username);
-        if (isLoggedOut) log(`🔐 Not logged in — forcing Replit login...`);
-      }
-
-      await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(3000);
-
-      // Fill email
-      const loginEmail = await page.$('input[name="username"], input[name="email"], input[type="email"]').catch(() => null);
-      if (loginEmail) {
-        await loginEmail.fill(outlookEmail.toLowerCase());
-        await page.waitForTimeout(500);
-      }
-
-      // Fill password
-      const loginPass = await page.$('input[name="password"], input[type="password"]').catch(() => null);
-      if (loginPass) {
-        await loginPass.fill(password);
-        await page.waitForTimeout(500);
-      }
-
-      // Submit — use JS eval to find button by text (page.$ doesn't support :has-text)
-      const loginClicked = await page.evaluate(() => {
-        // Try submit button first
-        const submitBtn = document.querySelector("button[type='submit'], input[type='submit']") as HTMLElement;
-        if (submitBtn) { submitBtn.click(); return true; }
-        // Fallback: any visible button with login text
-        const btns = Array.from(document.querySelectorAll("button"));
-        const btn = btns.find(b =>
-          !(b as HTMLButtonElement).disabled &&
-          (b.textContent?.toLowerCase().includes("log in") ||
-           b.textContent?.toLowerCase().includes("sign in") ||
-           b.textContent?.toLowerCase().includes("login"))
-        );
-        if (btn) { (btn as HTMLElement).click(); return true; }
-        return false;
-      });
-      if (loginClicked) {
-        await page.waitForTimeout(6000);
-        const afterLoginUrl = page.url();
-        if (afterLoginUrl.includes("replit.com") && !afterLoginUrl.includes("/login")) {
-          log(`✅ Logged into Replit — URL: ${afterLoginUrl.substring(0, 60)}`);
-        } else {
-          log(`⚠️ Login may have failed — URL: ${afterLoginUrl.substring(0, 60)}`);
+        // Step 1 — fill identifier (email or username)
+        const identifierSel = 'input[name="username"], input[name="email"], input[type="email"], input[placeholder*="username" i], input[placeholder*="email" i]';
+        const identField = await pg.$(identifierSel).catch(() => null);
+        if (!identField) {
+          log(`⚠️ ${label}: no identifier field found on login page`);
+          return false;
         }
-      } else {
-        log(`⚠️ Login button not found on Replit login page`);
+        await identField.click({ clickCount: 3 });
+        await identField.type(identifier, { delay: 40 });
+        log(`${label}: entered identifier "${identifier}"`);
+        await pg.waitForTimeout(600);
+
+        // Click Continue / Next / Log in (whichever is visible after identifier entry)
+        const step1Clicked = await pg.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll("button, input[type='submit']")) as HTMLElement[];
+          const btn = btns.find(b => {
+            const txt = (b.textContent || (b as HTMLInputElement).value || "").trim().toLowerCase();
+            return txt === "continue" || txt === "next" || txt === "log in" || txt === "login" || txt === "sign in";
+          });
+          if (btn) { btn.click(); return true; }
+          // fallback: first visible submit button
+          const submit = btns.find(b => b.getAttribute("type") === "submit" && (b as HTMLElement).offsetParent !== null);
+          if (submit) { submit.click(); return true; }
+          return false;
+        });
+        if (!step1Clicked) {
+          log(`⚠️ ${label}: could not click step-1 button`);
+          return false;
+        }
+        log(`${label}: clicked step-1 button`);
+
+        // Wait for password field to appear (two-step) or check if already logged in
+        try {
+          await pg.waitForSelector('input[name="password"], input[type="password"]', { timeout: 8000, state: "visible" });
+        } catch {
+          // Check if step-1 already completed login (e.g., active session from verification)
+          const urlAfterStep1 = pg.url();
+          if (urlAfterStep1.includes("replit.com") && !urlAfterStep1.includes("/login") && !urlAfterStep1.includes("/signup")) {
+            log(`✅ ${label}: step-1 landed on logged-in URL (${urlAfterStep1.substring(0, 60)}) — no password step needed`);
+            return true;
+          }
+          log(`${label}: password field not appeared after step-1 — checking URL`);
+        }
+        await pg.waitForTimeout(1000);
+
+        // Check again if already redirected to logged-in page
+        const urlMidStep = pg.url();
+        if (urlMidStep.includes("replit.com") && !urlMidStep.includes("/login") && !urlMidStep.includes("/signup")) {
+          log(`✅ ${label}: already logged in (URL: ${urlMidStep.substring(0, 60)})`);
+          return true;
+        }
+
+        // Step 2 — fill password
+        const passField = await pg.$('input[name="password"], input[type="password"]').catch(() => null);
+        if (!passField) {
+          const urlNow = pg.url();
+          log(`⚠️ ${label}: no password field found (URL: ${urlNow.substring(0, 60)})`);
+          return false;
+        }
+        await passField.click({ clickCount: 3 });
+        await passField.type(pwd, { delay: 40 });
+        log(`${label}: entered password`);
+        await pg.waitForTimeout(600);
+
+        // Submit
+        const step2Clicked = await pg.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll("button, input[type='submit']")) as HTMLElement[];
+          const btn = btns.find(b => {
+            const txt = (b.textContent || (b as HTMLInputElement).value || "").trim().toLowerCase();
+            return txt === "log in" || txt === "login" || txt === "sign in" || txt === "continue";
+          });
+          if (btn) { btn.click(); return true; }
+          const submit = btns.find(b => b.getAttribute("type") === "submit" && (b as HTMLElement).offsetParent !== null);
+          if (submit) { submit.click(); return true; }
+          return false;
+        });
+        if (!step2Clicked) {
+          // fallback: press Enter
+          await pg.keyboard.press("Enter");
+          log(`${label}: pressed Enter to submit`);
+        } else {
+          log(`${label}: clicked submit button`);
+        }
+
+        await pg.waitForTimeout(7000);
+        const afterUrl = pg.url();
+        if (afterUrl.includes("replit.com") && !afterUrl.includes("/login") && !afterUrl.includes("/signup")) {
+          log(`✅ ${label}: logged in — URL: ${afterUrl.substring(0, 60)}`);
+          return true;
+        }
+        log(`⚠️ ${label}: login may have failed — URL: ${afterUrl.substring(0, 60)}`);
+        return false;
+      } catch (e: any) {
+        log(`⚠️ ${label}: login error — ${(e.message || "").substring(0, 80)}`);
+        return false;
+      }
+    }
+
+    try {
+      // Try login with email first, then fall back to generated username
+      let loggedIn = await doReplitLogin(page, outlookEmail.toLowerCase(), password, "Login(email)");
+      if (!loggedIn) {
+        loggedIn = await doReplitLogin(page, username, password, "Login(username)");
+      }
+      if (!loggedIn) {
+        log(`⚠️ All Replit login attempts failed — checkout may not complete`);
       }
     } catch (loginErr: any) {
       log(`⚠️ Replit login step error: ${(loginErr.message || "").substring(0, 80)}`);
@@ -11222,28 +11274,22 @@ export async function registerReplitAccount(
             }
           }
 
-          // If it's a login/signup redirect, try logging in directly
+          // If it's a login/signup redirect, use the two-step login helper then retry checkout
           if (checkoutUrl.includes("/login") || checkoutUrl.includes("/signup")) {
             try {
-              const loginEmail2 = await page.$('input[name="username"], input[name="email"], input[type="email"]').catch(() => null);
-              if (loginEmail2) {
-                await loginEmail2.fill(outlookEmail.toLowerCase());
-                await page.waitForTimeout(400);
+              log(`🔐 Gate is login/signup wall — re-running two-step login before retrying checkout...`);
+              let gateLoggedIn = await doReplitLogin(page, outlookEmail.toLowerCase(), password, "GateLogin(email)");
+              if (!gateLoggedIn) {
+                gateLoggedIn = await doReplitLogin(page, username, password, "GateLogin(username)");
               }
-              const loginPass2 = await page.$('input[name="password"], input[type="password"]').catch(() => null);
-              if (loginPass2) {
-                await loginPass2.fill(password);
-                await page.waitForTimeout(400);
-              }
-              const loginBtn2 = await page.$('button[type="submit"]').catch(() => null);
-              if (loginBtn2) {
-                await loginBtn2.click();
-                await page.waitForTimeout(5000);
-                log(`Logged in on gate page — retrying checkout`);
+              if (gateLoggedIn) {
+                log(`✅ Gate login succeeded — retrying checkout`);
                 await page.goto(checkoutPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-                await page.waitForTimeout(8000);
+                await page.waitForTimeout(10000);
                 checkoutUrl = page.url();
-                log(`Checkout after login retry: ${checkoutUrl.substring(0, 80)}`);
+                log(`Checkout after gate login retry: ${checkoutUrl.substring(0, 80)}`);
+              } else {
+                log(`⚠️ Gate login failed — checkout may not complete`);
               }
             } catch {}
           }
