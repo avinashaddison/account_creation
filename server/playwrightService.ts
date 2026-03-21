@@ -11833,6 +11833,9 @@ export async function registerReplitAccount(
                     try {
                       await frame.evaluate((tok) => {
                         const w = window as any;
+                        // Set response field
+                        const ta = document.querySelector<HTMLTextAreaElement>("textarea[name='h-captcha-response']");
+                        if (ta) { ta.value = tok; ta.dispatchEvent(new Event("change", { bubbles: true })); }
                         // Try calling hcaptcha widget success callbacks directly
                         if (w.hcaptcha?._hcaptchas) {
                           Object.values(w.hcaptcha._hcaptchas as Record<string, any>).forEach((widget: any) => {
@@ -11840,34 +11843,94 @@ export async function registerReplitAccount(
                             try { if (widget.callback) widget.callback(tok); } catch {}
                           });
                         }
-                        // Set response field
-                        const ta = document.querySelector<HTMLTextAreaElement>("textarea[name='h-captcha-response']");
-                        if (ta) ta.value = tok;
-                        // Send postMessage to parent (HCaptcha.html on stripecdn.com)
-                        window.parent.postMessage(JSON.stringify({ id: "hcaptcha", event: "challenge-passed", token: tok }), "*");
-                        window.parent.postMessage({ source: "hcaptcha", data: { token: tok, event: "verified" } }, "*");
+                        // hCaptcha sends this exact format to its parent when challenge passes
+                        // Format confirmed from hCaptcha source: event="challenge-passed", response=token
+                        const msg = JSON.stringify({ event: "challenge-passed", response: tok });
+                        try { window.parent.postMessage(msg, "*"); } catch {}
+                        // Also try raw object (some builds don't JSON-stringify)
+                        try { (window.parent as any).postMessage({ event: "challenge-passed", response: tok }, "*"); } catch {}
                       }, token).catch(() => {});
-                      log(`   Fired hCaptcha widget callbacks in newassets frame`);
+                      log(`   Fired hCaptcha widget callbacks in newassets frame (with correct challenge-passed format)`);
                     } catch {}
                   }
 
-                  // Extra: target stripecdn.com/HCaptcha.html — send success event up to Stripe
+                  // Extra: target stripecdn.com/HCaptcha.html — forward the solved token up to Stripe checkout
                   for (const frame of page.frames()) {
                     if (!frame.url().includes("HCaptcha.html")) continue;
                     try {
                       await frame.evaluate((tok) => {
                         const w = window as any;
-                        // Some Stripe builds register a global success handler
-                        if (w.__stripeHcaptchaCallback) w.__stripeHcaptchaCallback(tok);
-                        // Dispatch to parent (js.stripe.com/hcaptcha-inner-*.html)
-                        window.parent.postMessage(JSON.stringify({ id: "hcaptcha", token: tok, type: "challenge.passed" }), "*");
+                        // Call Stripe's internal callback if available
+                        if (w.__stripeHcaptchaCallback) { try { w.__stripeHcaptchaCallback(tok); } catch {} }
+                        // Set any response fields in this frame
+                        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+                          "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+                        ).forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
+                        // HCaptcha.html forwards to its parent (checkout.stripe.com) using this format
+                        // Stripe listens for: { id:"hcaptcha", type:"success"|"challenge.passed", token/response }
+                        const formats = [
+                          JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
+                          JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+                          JSON.stringify({ id: "hcaptcha", token: tok, type: "challenge.passed" }),
+                          JSON.stringify({ source: "hcaptcha", response: tok }),
+                        ];
+                        formats.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
                       }, token).catch(() => {});
-                      log(`   Fired HCaptcha.html → parent postMessage`);
+                      log(`   Fired HCaptcha.html → parent postMessage (multiple formats)`);
                     } catch {}
                   }
 
-                  log(`   Total fields injected: ${totalInjected} across all frames — waiting 5s for Stripe to pick up token...`);
-                  await page.waitForTimeout(5000);
+                  // Also target HCaptchaInvisible.html — same approach as HCaptcha.html
+                  for (const frame of page.frames()) {
+                    if (!frame.url().includes("HCaptchaInvisible.html")) continue;
+                    try {
+                      await frame.evaluate((tok) => {
+                        const w = window as any;
+                        if (w.__stripeHcaptchaCallback) { try { w.__stripeHcaptchaCallback(tok); } catch {} }
+                        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+                          "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+                        ).forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
+                        const formats = [
+                          JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
+                          JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+                          JSON.stringify({ source: "hcaptchaInvisible", response: tok, token: tok }),
+                          JSON.stringify({ event: "challenge-passed", response: tok }),
+                        ];
+                        formats.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
+                      }, token).catch(() => {});
+                      log(`   Fired HCaptchaInvisible.html → parent postMessage`);
+                    } catch {}
+                  }
+
+                  // Also inject directly into main checkout page — search for any hCaptcha internal state
+                  try {
+                    await page.mainFrame().evaluate((tok) => {
+                      const w = window as any;
+                      // Try Stripe's internal hCaptcha completion callback if exposed on main frame
+                      if (w.__stripeHcaptchaCallback) { try { w.__stripeHcaptchaCallback(tok); } catch {} }
+                      if (w.onHcaptchaSuccess) { try { w.onHcaptchaSuccess(tok); } catch {} }
+                      // Set any h-captcha-response fields directly on main page
+                      document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+                        "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+                      ).forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
+                      // Dispatch "message" events that Stripe's checkout listens for (from its child frames)
+                      const origins = ["https://js.stripe.com", "https://b.stripecdn.com", "https://newassets.hcaptcha.com"];
+                      const formats = [
+                        JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
+                        JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+                        JSON.stringify({ source: "hcaptcha", response: tok }),
+                      ];
+                      origins.forEach(origin => {
+                        formats.forEach(data => {
+                          try { window.dispatchEvent(new MessageEvent("message", { data, origin, bubbles: false })); } catch {}
+                        });
+                      });
+                    }, token).catch(() => {});
+                    log(`   Injected token into main checkout page frame + dispatched message events`);
+                  } catch {}
+
+                  log(`   Total fields injected: ${totalInjected} across all frames — waiting 8s for Stripe to pick up token...`);
+                  await page.waitForTimeout(8000);
 
                   // Also click "Verify" in the visible hCaptcha challenge frame (triggers Stripe's callback)
                   for (const frame of page.frames()) {
@@ -11884,38 +11947,71 @@ export async function registerReplitAccount(
                   }
 
                   // Also try firing token via hcaptcha-inner frame (Stripe's hCaptcha wrapper)
+                  // hcaptcha-inner listens for messages from newassets.hcaptcha.com — we simulate them here
                   for (const frame of page.frames()) {
                     if (!frame.url().includes("hcaptcha-inner")) continue;
                     try {
                       await frame.evaluate((tok) => {
                         const w = window as any;
                         if (w.hcaptcha?.execute) w.hcaptcha.execute();
-                        // Try dispatching a message event that Stripe's hcaptcha-inner listens for
-                        window.dispatchEvent(new MessageEvent("message", {
-                          data: JSON.stringify({ id: "hcaptcha", token: tok, type: "challenge.passed" }),
-                          origin: "https://newassets.hcaptcha.com",
-                          bubbles: false,
-                        }));
+                        // Try all known hCaptcha message formats that the hcaptcha-inner frame listens for
+                        const hcapOrigin = "https://newassets.hcaptcha.com";
+                        const formats = [
+                          JSON.stringify({ action: "challenge-passed", response: tok }),
+                          JSON.stringify({ event: "challenge-passed", response: tok }),
+                          JSON.stringify({ id: "hcaptcha", token: tok, type: "challenge.passed" }),
+                          JSON.stringify({ id: "hcaptcha", response: tok, type: "success" }),
+                        ];
+                        formats.forEach(data => {
+                          window.dispatchEvent(new MessageEvent("message", {
+                            data, origin: hcapOrigin, bubbles: false,
+                          }));
+                        });
+                        // Also try calling any internal Stripe callback found on this frame
+                        if (w.__stripeHcaptchaSuccess) { try { w.__stripeHcaptchaSuccess(tok); } catch {} }
+                        if (w.onHcaptchaSuccess) { try { w.onHcaptchaSuccess(tok); } catch {} }
+                        // Forward to parent (checkout.stripe.com) — the token must reach there
+                        const parentFormats = [
+                          JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
+                          JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+                        ];
+                        parentFormats.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
                       }, token).catch(() => {});
-                      log(`   Fired token into hcaptcha-inner frame`);
+                      log(`   Fired token into hcaptcha-inner frame (all formats)`);
                     } catch {}
                   }
 
                   await page.waitForTimeout(5000);
 
-                  // If Bank ACS not yet showing, try re-clicking subscribe to re-trigger payment
+                  // If Bank ACS not yet showing, re-click Subscribe then poll up to 45s for it to appear
+                  // (Even for $0.00, Federal Bank sends OTP for card verification — we must wait for ACS)
                   let bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
                   if (!bankAcsNow) {
-                    log(`   Bank ACS not yet loaded — trying subscribe re-click to force payment...`);
+                    log(`   Bank ACS not yet loaded — re-clicking Subscribe and polling up to 45s...`);
                     try {
                       const resubBtn = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
                       if (await resubBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
                         await resubBtn.click({ timeout: 5000, force: true });
                         log(`   Re-clicked Subscribe after hCaptcha solve`);
-                        await page.waitForTimeout(10000);
-                        bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
                       }
                     } catch {}
+                    // Poll every 3s for up to 45s for bank ACS frame
+                    const acsDeadline = Date.now() + 45000;
+                    let pollN = 0;
+                    while (!bankAcsNow && Date.now() < acsDeadline) {
+                      await page.waitForTimeout(3000);
+                      pollN++;
+                      bankAcsNow = page.frames().some(f => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+                      // Also check for success redirect (some $0 flows skip 3DS entirely)
+                      const currentUrl = page.url();
+                      if (currentUrl.includes("replit.com") && !currentUrl.includes("stripe")) {
+                        log(`   ✅ Payment succeeded without 3DS (redirected): ${currentUrl.substring(0, 80)}`);
+                        checkoutComplete = true;
+                        break;
+                      }
+                      if (pollN % 5 === 0) log(`   ACS poll ${pollN}: bankACS=${bankAcsNow}, url=${currentUrl.substring(0, 60)}`);
+                      if (bankAcsNow) { log(`   ✅ Bank ACS frame appeared after ${pollN * 3}s`); break; }
+                    }
                   }
 
                   log(`   Bank ACS loaded after hCaptcha solve: ${bankAcsNow}`);
