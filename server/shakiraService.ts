@@ -28,92 +28,142 @@ export async function doShakiraPresaleStep(
     const pageTitle = await page.title().catch(() => "");
     console.log("[Shakira] Page title:", pageTitle);
 
-    // --- Select concert date(s) ---
-    log(`📅 Selecting concert date(s)...`);
-    const datesChecked = await page.evaluate(`(() => {
-      // Look for concert date checkboxes — they're typically input[type="checkbox"] near date elements
+    // Dump all checkboxes for debugging
+    const allCheckboxDump = await page.evaluate(`(() => {
+      var cbs = document.querySelectorAll('input[type="checkbox"]');
+      return Array.from(cbs).map(cb => {
+        var p = cb.closest('label, li, div, tr, section') || cb.parentElement;
+        return {
+          id: cb.id,
+          name: cb.name,
+          value: cb.value,
+          checked: cb.checked,
+          text: p ? (p.innerText || p.textContent || '').trim().substring(0, 120) : ''
+        };
+      });
+    })()`);
+    console.log("[Shakira] All checkboxes on page:", JSON.stringify(allCheckboxDump));
+
+    // --- Select ONLY the Sept 26 concert date ---
+    log(`📅 Selecting Sept 26 concert date...`);
+    const dateResult = await page.evaluate(`(() => {
       var checkboxes = document.querySelectorAll('input[type="checkbox"]');
-      var dateBoxes = [];
-      var consentBoxes = [];
+      var result = { checked26: false, unchecked25: false, unchecked27: false, found: [] };
 
       for (var i = 0; i < checkboxes.length; i++) {
         var cb = checkboxes[i];
-        // Try to identify if this is a date checkbox or consent checkbox by surrounding text
-        var parent = cb.closest('label, li, div, tr') || cb.parentElement;
-        var text = parent ? (parent.innerText || parent.textContent || '').toLowerCase() : '';
-        var isConsent = text.includes('consent') || text.includes('marketing') || text.includes('fan list')
-          || text.includes('live nation') || text.includes('privacy') || text.includes('mailing');
-        if (isConsent) {
-          consentBoxes.push(cb);
-        } else {
-          dateBoxes.push(cb);
-        }
-      }
+        var parent = cb.closest('label, li, div, tr, section') || cb.parentElement;
+        var text = parent ? (parent.innerText || parent.textContent || '').trim() : '';
+        var textLower = text.toLowerCase();
 
-      // Check all date boxes (select all concert dates)
-      var dateResult = [];
-      for (var j = 0; j < dateBoxes.length; j++) {
-        if (!dateBoxes[j].checked) {
-          dateBoxes[j].click();
-          dateBoxes[j].dispatchEvent(new Event('change', { bubbles: true }));
+        // Skip consent/marketing checkboxes
+        var isConsent = textLower.includes('consent') || textLower.includes('marketing')
+          || textLower.includes('fan list') || textLower.includes('live nation')
+          || textLower.includes('privacy') || textLower.includes('mailing')
+          || textLower.includes('sign up') || textLower.includes('terms');
+        if (isConsent) continue;
+
+        // Detect which date this checkbox belongs to
+        var has26 = /\\b26\\b/.test(text) || text.includes('26\\nSEPT') || text.includes('26 SEPT') || text.includes('26\\nSept');
+        var has25 = /\\b25\\b/.test(text) || text.includes('25\\nSEPT') || text.includes('25 SEPT') || text.includes('25\\nSept');
+        var has27 = /\\b27\\b/.test(text) || text.includes('27\\nSEPT') || text.includes('27 SEPT') || text.includes('27\\nSept');
+
+        result.found.push({ text: text.substring(0, 80), has25, has26, has27 });
+
+        if (has26) {
+          // Check this one
+          if (!cb.checked) {
+            cb.click();
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          result.checked26 = true;
+        } else if (has25 || has27) {
+          // Uncheck these
+          if (cb.checked) {
+            cb.click();
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          if (has25) result.unchecked25 = true;
+          if (has27) result.unchecked27 = true;
         }
-        var parent2 = dateBoxes[j].closest('label, li, div, tr') || dateBoxes[j].parentElement;
-        var text2 = parent2 ? (parent2.innerText || '').trim().substring(0, 60) : 'date';
-        dateResult.push(text2);
       }
-      return { dateCount: dateBoxes.length, consentCount: consentBoxes.length, dates: dateResult };
+      return result;
     })()`);
-    console.log("[Shakira] Date selection result:", JSON.stringify(datesChecked));
+    console.log("[Shakira] Date selection result:", JSON.stringify(dateResult));
 
-    if ((datesChecked as any).dateCount === 0) {
-      log(`⚠️ No date checkboxes found — page may have loaded differently, continuing...`);
+    if (!(dateResult as any).checked26) {
+      log(`⚠️ Could not find Sept 26 checkbox by date text — trying fallback (check second date checkbox)...`);
+      console.log("[Shakira] Fallback: checking the second date checkbox");
+      const fallbackResult = await page.evaluate(`(() => {
+        var checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(cb => {
+          var p = cb.closest('label, li, div, tr, section') || cb.parentElement;
+          var text = (p ? p.innerText || p.textContent || '' : '').toLowerCase();
+          return !text.includes('consent') && !text.includes('marketing') && !text.includes('fan list')
+            && !text.includes('live nation') && !text.includes('privacy') && !text.includes('mailing');
+        });
+        if (checkboxes.length >= 2) {
+          // Uncheck all
+          checkboxes.forEach(cb => { if (cb.checked) { cb.click(); cb.dispatchEvent(new Event('change', { bubbles: true })); } });
+          // Check second (index 1 = Sept 26)
+          checkboxes[1].click();
+          checkboxes[1].dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true, total: checkboxes.length };
+        }
+        return { success: false, total: checkboxes.length };
+      })()`);
+      console.log("[Shakira] Fallback date check result:", JSON.stringify(fallbackResult));
+      if ((fallbackResult as any).success) {
+        log(`✅ Sept 26 selected via fallback (2nd checkbox)`);
+      } else {
+        log(`⚠️ Could not select date — continuing anyway`);
+      }
     } else {
-      log(`✅ Selected ${(datesChecked as any).dateCount} concert date(s)`);
+      log(`✅ Sept 26 selected`);
     }
 
     await page.waitForTimeout(1000);
 
-    // --- Check all consent checkboxes ---
-    log(`✅ Checking consent boxes...`);
+    // --- Check all 3 consent checkboxes ---
+    log(`✅ Checking all consent boxes...`);
     const consentsChecked = await page.evaluate(`(() => {
       var checkboxes = document.querySelectorAll('input[type="checkbox"]');
       var count = 0;
       for (var i = 0; i < checkboxes.length; i++) {
         var cb = checkboxes[i];
-        var parent = cb.closest('label, li, div, tr') || cb.parentElement;
-        var text = parent ? (parent.innerText || parent.textContent || '').toLowerCase() : '';
-        var isConsent = text.includes('consent') || text.includes('marketing') || text.includes('fan list')
-          || text.includes('live nation') || text.includes('privacy') || text.includes('mailing')
-          || text.includes('sign up') || text.includes('terms');
-        if (isConsent && !cb.checked) {
-          cb.click();
-          cb.dispatchEvent(new Event('change', { bubbles: true }));
-          count++;
-        } else if (isConsent) {
+        var parent = cb.closest('label, li, div, tr, section') || cb.parentElement;
+        var text = (parent ? parent.innerText || parent.textContent || '' : '').toLowerCase();
+        var isConsent = text.includes('consent') || text.includes('marketing')
+          || text.includes('fan list') || text.includes('live nation')
+          || text.includes('privacy') || text.includes('mailing')
+          || text.includes('terms');
+        if (isConsent) {
+          if (!cb.checked) {
+            cb.click();
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+          }
           count++;
         }
       }
       return count;
     })()`);
     console.log("[Shakira] Consent boxes checked:", consentsChecked);
-    log(`✅ Consent boxes: ${consentsChecked}`);
+    log(`✅ ${consentsChecked} consent box(es) checked`);
 
     await page.waitForTimeout(1000);
 
-    // Dump all checkboxes for debugging
-    const allCheckboxState = await page.evaluate(`(() => {
+    // Dump final checkbox state for debug
+    const finalCheckboxState = await page.evaluate(`(() => {
       var cbs = document.querySelectorAll('input[type="checkbox"]');
       return Array.from(cbs).map(cb => {
-        var p = cb.closest('label, li, div, p') || cb.parentElement;
-        return { checked: cb.checked, id: cb.id, name: cb.name, text: p ? (p.innerText||'').substring(0,60) : '' };
+        var p = cb.closest('label, li, div, tr, section') || cb.parentElement;
+        return { checked: cb.checked, text: (p ? (p.innerText || '').trim() : '').substring(0, 60) };
       });
     })()`);
-    console.log("[Shakira] All checkbox states:", JSON.stringify(allCheckboxState).substring(0, 1000));
+    console.log("[Shakira] Final checkbox states:", JSON.stringify(finalCheckboxState));
 
     // --- Click Sign Up button ---
     log(`🖱️ Clicking Sign Up...`);
     const signUpResult = await page.evaluate(`(() => {
-      // Look for Sign Up button
       var buttons = document.querySelectorAll('button, input[type="submit"], a[role="button"]');
       for (var i = 0; i < buttons.length; i++) {
         var btn = buttons[i];
@@ -126,7 +176,7 @@ export async function doShakiraPresaleStep(
           }
         }
       }
-      // Fallback: find by value
+      // Fallback: any visible submit input
       var inputs = document.querySelectorAll('input[type="submit"], input[type="button"]');
       for (var j = 0; j < inputs.length; j++) {
         var rect2 = inputs[j].getBoundingClientRect();
@@ -147,20 +197,38 @@ export async function doShakiraPresaleStep(
       log(`✅ Clicked: ${signUpResult}`);
     }
 
-    // Wait for redirect to TM account page
-    log(`⏳ Waiting for redirect to Ticketmaster...`);
+    // Wait for redirect to TM registration/auth page
+    log(`⏳ Waiting for redirect to Ticketmaster registration...`);
     let redirected = false;
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 20; i++) {
       await page.waitForTimeout(2000);
       const url = page.url();
-      console.log(`[Shakira] URL after wait ${i + 1}: ${url}`);
-      if (url.includes("ticketmaster") || url.includes("auth.") || url.includes("account") || url.includes("signup") && !url.includes("shakira")) {
-        log(`🔗 Redirected to: ${url.substring(0, 80)}`);
+      console.log(`[Shakira] URL after wait ${i + 1}: ${url.substring(0, 120)}`);
+
+      // Confirmed on TM auth / registration page
+      if (
+        url.includes("auth.ticketmaster") ||
+        url.includes("identity.ticketmaster") ||
+        url.includes("ticketmaster.com/member/") ||
+        url.includes("ticketmaster.es/member/") ||
+        url.includes("ticketmaster.com/login") ||
+        url.includes("ticketmaster.es/login")
+      ) {
+        log(`🔗 Redirected to TM registration: ${url.substring(0, 80)}`);
         redirected = true;
         break;
       }
+
+      // Confirmation page
       if (url.includes("thankyou") || url.includes("thank-you") || url.includes("confirmation") || url.includes("success")) {
         log(`✅ Presale signup confirmed!`);
+        redirected = true;
+        break;
+      }
+
+      // Still on Shakira page — check if the URL changed at all
+      if (!url.includes("shakira") && url.includes("ticketmaster")) {
+        log(`🔗 Left Shakira page → now at: ${url.substring(0, 80)}`);
         redirected = true;
         break;
       }
@@ -168,7 +236,7 @@ export async function doShakiraPresaleStep(
 
     if (!redirected) {
       const finalUrl = page.url();
-      log(`📍 Still at: ${finalUrl.substring(0, 80)} — continuing with TM registration...`);
+      log(`📍 Still at: ${finalUrl.substring(0, 80)} — TM registration will navigate directly`);
     }
 
     return { success: true };
