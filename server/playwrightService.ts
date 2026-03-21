@@ -11961,9 +11961,16 @@ export async function registerReplitAccount(
             const url = f.url();
             return url.includes("three-ds") || url.includes("three_ds") || url.includes("challenge") || url.includes("acs");
           });
-          log(`  3DS check: locator=${is3DS}, frameCheck=${has3DSFrame}`);
 
-          if (is3DS || has3DSFrame || currentUrl.includes("3ds") || currentUrl.includes("acs")) {
+          // Check if visible hCaptcha appeared after submit (Stripe can trigger this without 3DS)
+          const isHCaptchaOnly = page.frames().some(f => {
+            const u = f.url();
+            return u.includes("HCaptcha.html") || u.includes("hcaptcha-inner") || u.includes("newassets.hcaptcha.com");
+          });
+
+          log(`  3DS check: locator=${is3DS}, frameCheck=${has3DSFrame}, hcaptchaOnly=${isHCaptchaOnly}`);
+
+          if (is3DS || has3DSFrame || isHCaptchaOnly || currentUrl.includes("3ds") || currentUrl.includes("acs")) {
             log(`🔐 3D Secure challenge detected — inspecting challenge frames...`);
 
             // Log all frame URLs and their content so we can understand the 3DS structure
