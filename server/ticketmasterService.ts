@@ -31,7 +31,7 @@ async function getTMBrowser(): Promise<Browser> {
   launching = true;
   try {
     browserInstance = await chromium.launch({
-      headless: true,
+      headless: "new" as any,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -52,7 +52,7 @@ async function getTMBrowser(): Promise<Browser> {
         "--disable-features=IsolateOrigins",
         "--disable-ipc-flooding-protection",
         `--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`,
-        "--accept-lang=en-US,en;q=0.9",
+        "--accept-language=en-US,en;q=0.9",
       ],
     });
     browserInstance.on("disconnected", () => {

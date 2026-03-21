@@ -41,9 +41,17 @@ async function getTMBrowserUrl(): Promise<string | null> {
 
 // WSS browser URL used exclusively for the Shakira (or other) presale step
 // This is ZenRows WSS which bypasses .es presale page but cannot reach ticketmaster.com
+// On first use, seeds from browser_proxy_url so existing ZenRows configs work automatically.
 async function getPresaleProxyUrl(): Promise<string | null> {
   const url = await storage.getSetting("presale_proxy_url");
-  return url && url.trim().length > 0 ? url.trim() : null;
+  if (url && url.trim().length > 0) return url.trim();
+  // First-use seed: if presale_proxy_url is not set, try browser_proxy_url as fallback
+  const fallback = await storage.getSetting("browser_proxy_url");
+  if (fallback && fallback.trim().length > 0 && fallback.trim().startsWith("wss://")) {
+    await storage.setSetting("presale_proxy_url", fallback.trim());
+    return fallback.trim();
+  }
+  return null;
 }
 
 function uniqueProxySession(proxyUrl: string): string {
