@@ -11568,6 +11568,40 @@ export async function registerReplitAccount(
           return null;
         }
 
+        // ── Pre-solve hCaptcha + Route interception ───────────────────────
+        // Solve hCaptcha in advance so we have a token ready when Stripe's API call goes out.
+        // Also set up route interceptor to log/inject token into Stripe's payment API request.
+        let preSolvedHcapToken: string | null = null;
+        try {
+          log(`🤖 Pre-solving hCaptcha before Subscribe click (token will be injected into Stripe API call)...`);
+          const preResult = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
+          const capResult = preResult.success ? preResult : await solveHCaptcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
+          if (capResult.success && capResult.token) {
+            preSolvedHcapToken = capResult.token;
+            log(`✅ Pre-solved hCaptcha token: ${preSolvedHcapToken.substring(0, 30)}... (len=${preSolvedHcapToken.length})`);
+          }
+        } catch (e: any) { log(`⚠️ Pre-solve hCaptcha failed: ${e.message}`); }
+
+        // Intercept ALL POST requests to Stripe APIs — log what's sent + inject hCaptcha token
+        const stripeApiLogs: string[] = [];
+        await page.route("**/*.stripe.com/**", async (route) => {
+          const req = route.request();
+          if (req.method() === "POST") {
+            const url = req.url();
+            const body = req.postData() || "";
+            const bodyPreview = body.substring(0, 300);
+            stripeApiLogs.push(`POST ${url.substring(0, 80)} | body: ${bodyPreview}`);
+            // Inject pre-solved hCaptcha token into Stripe's payment confirm/create API calls
+            if (preSolvedHcapToken && (url.includes("/confirm") || url.includes("/create") || url.includes("checkout") || url.includes("payment_intent") || url.includes("/pay"))) {
+              const tokenParam = `&hcaptcha_token=${encodeURIComponent(preSolvedHcapToken)}&captcha_token=${encodeURIComponent(preSolvedHcapToken)}&expected_payment_method_options%5Bcard%5D%5Bhcaptcha_response%5D=${encodeURIComponent(preSolvedHcapToken)}`;
+              const modifiedBody = body + tokenParam;
+              log(`  [Stripe Route] Injecting hCaptcha token into: ${url.substring(0, 70)}`);
+              try { await route.continue({ postData: modifiedBody }); return; } catch {}
+            }
+          }
+          try { await route.continue(); } catch {}
+        }).catch(() => {});
+
         // ── Submit payment ───────────────────────────────────────────────
         // Record exact moment of payment submission — used as OTP anchor
         let paymentSubmitTime = new Date();
@@ -11634,6 +11668,14 @@ export async function registerReplitAccount(
           // Wait for either success redirect or 3DS challenge
           log(`⏳ Waiting for payment response...`);
           await page.waitForTimeout(12000);
+
+          // Dump intercepted Stripe API calls for debugging
+          if (stripeApiLogs.length > 0) {
+            log(`  [Stripe API intercepted ${stripeApiLogs.length} calls]:`);
+            stripeApiLogs.forEach(l => log(`    ${l.substring(0, 250)}`));
+          } else {
+            log(`  [Stripe API] No POST calls intercepted during payment submission`);
+          }
 
           const currentUrl = page.url();
           // Log all iframes visible on the page for debug
