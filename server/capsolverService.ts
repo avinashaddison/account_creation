@@ -250,8 +250,9 @@ async function solveHCaptchaViaNopeCHA(
     const authHeader = `Basic ${apiKey}`;
     const baseUrl = "https://api.nopecha.com/v1/token/hcaptcha";
 
+    // Per NopeCHA API docs: rqdata must be nested inside data: { rqdata: "..." }
     const payload: Record<string, any> = { sitekey: websiteKey, url: websiteURL };
-    if (rqdata) { payload.rq = rqdata; payload.rqdata = rqdata; }
+    if (rqdata) { payload.data = { rqdata }; }
 
     console.log(`[NopeCHA] Submitting hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}${rqdata ? " [+rqdata]" : ""}...`);
     const submitResp = await axios.post(baseUrl, payload, {
@@ -326,34 +327,86 @@ export async function solveHCaptchaWith2Captcha(
   websiteKey: string,
   rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
-  // Priority 1: NopeCHA — confirmed hCaptcha support, cheapest ($1/90K solves)
-  const nopeResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`);
-  const nopeKey = nopeResult.rows.length > 0 ? (nopeResult.rows[0].value as string) : "";
+  // Fetch all solver keys from DB in parallel
+  const [nopeRow, acRow, tcRow] = await Promise.all([
+    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`),
+    db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`),
+    db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`),
+  ]);
+  const nopeKey = nopeRow.rows.length > 0 ? (nopeRow.rows[0].value as string) : "";
+  const acKey   = acRow.rows.length > 0   ? (acRow.rows[0].value as string)   : "";
+  const tcKey   = tcRow.rows.length > 0   ? (tcRow.rows[0].value as string)   : "";
+
+  // When rqdata is present: race ALL available solvers in parallel.
+  // NopeCHA is capped at 50s (it hangs indefinitely with invalid keys).
+  // CapSolver is always included if configured — it reliably handles enterprise hCaptcha.
+  if (rqdata) {
+    const solvers: Array<{ name: string; promise: Promise<CapSolverTaskResult> }> = [];
+
+    if (nopeKey) {
+      // Cap NopeCHA at 50s — it hangs forever on bad keys / slow queues
+      const nopeTimeout = new Promise<CapSolverTaskResult>(r =>
+        setTimeout(() => r({ success: false, error: "NopeCHA race timeout (50s)" }), 50000)
+      );
+      console.log(`[NopeCHA] Starting enterprise hCaptcha race (rqdata, 50s cap)...`);
+      solvers.push({ name: "NopeCHA", promise: Promise.race([solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata), nopeTimeout]) });
+    }
+    if (acKey) {
+      console.log(`[AntiCaptcha] Starting enterprise hCaptcha race (rqdata present)...`);
+      solvers.push({ name: "AntiCaptcha", promise: solveHCaptchaViaJsonApi(acKey, "https://api.anti-captcha.com", "AntiCaptcha", websiteURL, websiteKey, rqdata) });
+    }
+    if (tcKey) {
+      console.log(`[2captcha] Starting enterprise hCaptcha race (rqdata present)...`);
+      solvers.push({ name: "2captcha", promise: solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey, rqdata) });
+    }
+    // Always include CapSolver in the race — it reliably handles enterprise hCaptcha with rqdata
+    console.log(`[CapSolver] Starting enterprise hCaptcha race (rqdata present)...`);
+    solvers.push({ name: "CapSolver", promise: solveHCaptcha(websiteURL, websiteKey, undefined, rqdata) });
+
+    // Race: first successful result wins
+    return new Promise<CapSolverTaskResult>((resolve) => {
+      let done = false;
+      let failures = 0;
+      let lastError = "All solvers failed";
+      solvers.forEach(({ name, promise }) => {
+        promise.then(result => {
+          if (result.success && !done) {
+            done = true;
+            console.log(`[Race] ✅ ${name} won the enterprise hCaptcha race!`);
+            resolve(result);
+          } else if (!result.success) {
+            failures++;
+            lastError = `${name}: ${result.error}`;
+            console.log(`[Race] ${name} failed (${failures}/${solvers.length}): ${result.error}`);
+            if (failures === solvers.length && !done) resolve({ success: false, error: lastError });
+          }
+        }).catch(err => {
+          failures++;
+          lastError = `${name}: ${err.message}`;
+          console.log(`[Race] ${name} threw (${failures}/${solvers.length}): ${err.message}`);
+          if (failures === solvers.length && !done) resolve({ success: false, error: lastError });
+        });
+      });
+    });
+  }
+
+  // Without rqdata: try sequentially (cheapest → fallback)
   if (nopeKey) {
     console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com...`);
     const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata);
     if (result.success) return result;
     console.log(`[NopeCHA] Failed: ${result.error} — trying next solver...`);
   }
-
-  // Priority 2: anti-captcha.com
-  const acResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`);
-  const acKey = acResult.rows.length > 0 ? (acResult.rows[0].value as string) : "";
   if (acKey) {
     console.log(`[AntiCaptcha] Attempting hCaptcha solve via anti-captcha.com...`);
     const result = await solveHCaptchaViaJsonApi(acKey, "https://api.anti-captcha.com", "AntiCaptcha", websiteURL, websiteKey, rqdata);
     if (result.success) return result;
     console.log(`[AntiCaptcha] Failed: ${result.error} — trying 2captcha fallback...`);
   }
-
-  // Priority 3: 2captcha.com fallback
-  const tcResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`);
-  const tcKey = tcResult.rows.length > 0 ? (tcResult.rows[0].value as string) : "";
   if (tcKey) {
     console.log(`[2captcha] Attempting hCaptcha solve via 2captcha.com...`);
     return solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey, rqdata);
   }
-
   return { success: false, error: "No CAPTCHA solver configured — add NopeCHA, anti-captcha.com, or 2captcha API key in Settings" };
 }
 

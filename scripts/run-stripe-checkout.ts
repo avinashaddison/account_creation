@@ -237,18 +237,48 @@ async function enterOtpIn3DS(page: Page, otp: string) {
   }
 }
 
+async function getResidentialProxy() {
+  try {
+    const { db } = await import("../server/db");
+    const { sql: drizzleSql } = await import("drizzle-orm");
+    // Prefer ZenRows browser_proxy_url (confirmed working residential proxy)
+    const res = await db.execute(drizzleSql`SELECT key, value FROM settings WHERE key IN ('browser_proxy_url', 'soax_proxy_template', 'residential_proxy_url')`);
+    const byKey: Record<string, string> = {};
+    for (const r of res.rows) byKey[r.key as string] = r.value as string;
+    // ZenRows superproxy: confirmed working (190.5.33.30)
+    const rawUrl = byKey["browser_proxy_url"] || byKey["residential_proxy_url"] || byKey["soax_proxy_template"] || null;
+    if (!rawUrl) return null;
+    const m = rawUrl.match(/^http:\/\/([^:]+):([^@]+)@([^:]+):(\d+)/);
+    if (!m) return null;
+    const [, user, pass, host, port] = m;
+    // For ZenRows: inject a fresh random session ID each run for a new residential IP
+    const randSession = Math.random().toString(36).substring(2, 14);
+    const freshPass = pass.replace(/_session-[^_]+/, `_session-${randSession}`);
+    log(`🌐 Proxy: ${host}:${port} user=${user.substring(0, 15)}...`);
+    return { server: `http://${host}:${port}`, username: user, password: freshPass };
+  } catch (e: any) {
+    log(`⚠️ Proxy fetch failed: ${e.message} — proceeding without proxy`);
+    return null;
+  }
+}
+
 async function main() {
   log(`🚀 Checkout: ${REPLIT_EMAIL}`);
+
+  const proxy = await getResidentialProxy();
 
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+    ...(proxy ? { proxy } : {}),
   });
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
     viewport: { width: 1366, height: 768 },
     locale: "en-US",
     timezoneId: "America/New_York",
+    // ZenRows and other MitM proxies re-sign TLS — ignore certificate errors
+    ...(proxy ? { ignoreHTTPSErrors: true } : {}),
   });
   await context.addInitScript(() => {
     const w = window as any;
