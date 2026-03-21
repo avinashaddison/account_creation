@@ -31,7 +31,7 @@ async function getTMBrowser(): Promise<Browser> {
   launching = true;
   try {
     browserInstance = await chromium.launch({
-      headless: "new" as any,
+      headless: true,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
