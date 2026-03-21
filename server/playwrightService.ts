@@ -11831,10 +11831,12 @@ export async function registerReplitAccount(
                   log(`   Extracted hCaptcha sitekey: ${hcaptchaSiteKey}`);
                 }
 
-                log(`   Calling CapSolver to solve hCaptcha...`);
-                // Use base domain only — CapSolver blocks the full session URL
+                log(`   Solving hCaptcha via NopeCHA / anti-captcha / 2captcha (then CapSolver fallback)...`);
+                // Use base domain only — some solvers block the full session URL
                 const capsolverUrl = "https://checkout.stripe.com";
-                const capResult = await solveHCaptcha(capsolverUrl, hcaptchaSiteKey);
+                // Try NopeCHA → anti-captcha → 2captcha first (CapSolver is a last resort due to policy blocks)
+                const primaryResult = await solveHCaptchaWith2Captcha(capsolverUrl, hcaptchaSiteKey);
+                const capResult = primaryResult.success ? primaryResult : await solveHCaptcha(capsolverUrl, hcaptchaSiteKey);
                 // Helper: inject hCaptcha token into ALL frames (main page + each iframe)
                 const injectHCaptchaToken = async (token: string, source: string) => {
                   log(`   ✅ ${source} solved hCaptcha! Token: ${token.substring(0, 30)}...`);
@@ -11917,45 +11919,38 @@ export async function registerReplitAccount(
                 };
 
                 if (capResult.success && capResult.token) {
-                  await injectHCaptchaToken(capResult.token, "CapSolver");
+                  await injectHCaptchaToken(capResult.token, "hCaptcha solver");
                 } else {
-                  log(`   ⚠️ CapSolver failed: ${capResult.error || "unknown error"}`);
-                  // Fallback 1: try 2captcha
-                  log(`   Trying 2captcha as fallback for Stripe hCaptcha...`);
-                  const cap2Result = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", hcaptchaSiteKey);
-                  if (cap2Result.success && cap2Result.token) {
-                    await injectHCaptchaToken(cap2Result.token, "2captcha");
-                  } else {
-                    log(`   ⚠️ 2captcha also failed: ${cap2Result.error || "unknown error"}`);
-                    // Fallback 2: try clicking the "I am human" checkbox directly
-                    log(`   Trying direct hCaptcha checkbox click (last resort)...`);
-                    let clicked = false;
-                    // Priority: click the newassets.hcaptcha.com frame that shows "I am human" (actual checkbox)
-                    for (const frame of page.frames()) {
-                      const fUrl = frame.url();
-                      if (!fUrl.includes("newassets.hcaptcha.com")) continue;
-                      try {
-                        const frameText = await frame.evaluate(() => document.body?.innerText || "").catch(() => "");
-                        if (!frameText.includes("I am human")) continue;
-                        // Try clicking the checkbox element
-                        const checkbox = frame.locator("#checkbox, [id^='checkbox'], .challenge-container, [aria-label='I am human']").first();
-                        const visible = await checkbox.isVisible({ timeout: 2000 }).catch(() => false);
-                        if (visible) {
-                          await checkbox.click({ timeout: 5000 });
-                          log(`   Clicked hCaptcha "I am human" checkbox in frame: ${fUrl.substring(0, 80)}`);
-                        } else {
-                          // Click in the center-left area where the checkbox typically is
-                          await frame.locator("body").click({ position: { x: 30, y: 30 }, timeout: 3000 });
-                          log(`   Clicked hCaptcha "I am human" frame body in: ${fUrl.substring(0, 80)}`);
-                        }
-                        clicked = true;
-                        await page.waitForTimeout(5000);
-                        break;
-                      } catch {}
-                    }
-                    if (!clicked) {
-                      log(`   Could not click hCaptcha checkbox — no "I am human" frame found`);
-                    }
+                  log(`   ⚠️ All hCaptcha solvers failed: ${capResult.error || "unknown error"}`);
+                  log(`   💡 Tip: Configure a NopeCHA or anti-captcha.com key in Settings for better hCaptcha solving`);
+                  // Fallback: try clicking the "I am human" checkbox directly
+                  log(`   Trying direct hCaptcha checkbox click (last resort)...`);
+                  let clicked = false;
+                  // Priority: click the newassets.hcaptcha.com frame that shows "I am human" (actual checkbox)
+                  for (const frame of page.frames()) {
+                    const fUrl = frame.url();
+                    if (!fUrl.includes("newassets.hcaptcha.com")) continue;
+                    try {
+                      const frameText = await frame.evaluate(() => document.body?.innerText || "").catch(() => "");
+                      if (!frameText.includes("I am human")) continue;
+                      // Try clicking the checkbox element
+                      const checkbox = frame.locator("#checkbox, [id^='checkbox'], .challenge-container, [aria-label='I am human']").first();
+                      const visible = await checkbox.isVisible({ timeout: 2000 }).catch(() => false);
+                      if (visible) {
+                        await checkbox.click({ timeout: 5000 });
+                        log(`   Clicked hCaptcha "I am human" checkbox in frame: ${fUrl.substring(0, 80)}`);
+                      } else {
+                        // Click in the center-left area where the checkbox typically is
+                        await frame.locator("body").click({ position: { x: 30, y: 30 }, timeout: 3000 });
+                        log(`   Clicked hCaptcha "I am human" frame body in: ${fUrl.substring(0, 80)}`);
+                      }
+                      clicked = true;
+                      await page.waitForTimeout(5000);
+                      break;
+                    } catch {}
+                  }
+                  if (!clicked) {
+                    log(`   Could not click hCaptcha checkbox — no "I am human" frame found`);
                   }
                 }
               } catch (capErr: any) {

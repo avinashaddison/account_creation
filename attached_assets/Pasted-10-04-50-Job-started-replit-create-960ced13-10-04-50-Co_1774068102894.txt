@@ -1,0 +1,399 @@
+10:04:50
+·
+Job started: replit-create-960ced13
+10:04:50
+·
+🎟️ Coupon "AGENT449628AB89BC7" will be applied after creation
+10:04:54
+>
+Using stealth headless browser
+10:04:54
+>
+Navigating to https://replit.com/signup ...
+10:04:59
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+10:04:59
+·
+Page title: Sign Up - Replit
+10:04:59
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+10:04:59
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+10:05:07
+·
+Network idle timeout — waiting 4s instead
+10:05:11
+·
+Page HTML snippet: <div id="__next"><div class=" useView-module__etopAW__view _sdz_default _sdz_surface-bg _sdz_surface _sdz_switch-theme css-b2skly" id="main-content"><div class="css-1dp71ui"><div class=" useView-module__etopAW__view css-13zqyyc"><main class="css-1u21y0c"><div class=" useView-module__etopAW__view css-r9arcl" as="header"><a href="/" aria-label="Home" class="css-19tfcnj"><svg width="86.58823529411765
+10:05:11
+·
+Waiting for signup form fields to appear...
+10:05:11
+·
+Form fields detected
+10:05:11
+·
+Filling signup form...
+10:05:11
+~
+⚠️ Could not find username field
+10:05:13
+·
+Typed email into input[name="email"]
+10:05:14
+»
+Typed password into input[name="password"]
+10:05:15
+·
+Submitting signup form...
+10:05:15
+·
+Clicked submit button "Create Account" (button[type="submit"])
+10:05:15
+·
+Waiting for signup response...
+10:05:21
++
+✅ Signup submitted — verification email expected
+10:05:21
+·
+Now waiting 20s before checking Outlook inbox for verification email...
+10:05:41
+·
+Reading Replit verification email via Outlook Web Access...
+10:05:41
+>
+Navigating to Outlook Web login...
+10:05:44
+·
+Entered Outlook email on login page
+10:05:44
+»
+Entered Outlook password on login page
+10:05:50
+·
+After login URL: https://account.live.com/proofs/Add?mkt=EN-US&uiflavor=web&id=292841&mpcxt=CATB&sn=604800&posturl=ht
+10:05:50
+·
+Microsoft security proofs / confirmation page — extracting posturl to skip...
+10:05:50
+·
+Extracted posturl: https://login.live.com/ppsecure/post.srf?lc=1033&mkt=EN-US&id=292841&opid=EB8429330079CC1A&opidt=177
+10:05:50
+>
+Navigating directly to: https://login.live.com/ppsecure/post.srf?lc=1033&mkt=EN-US&id=292841&opid=EB8429330079CC1A&opidt=177
+10:05:53
+>
+URL after skip navigation: https://login.live.com/ppsecure/post.srf?lc=1033&mkt=EN-US&id=292841&opid=EB8429330079CC1A&opidt=177
+10:05:53
+>
+Not on Outlook yet (host: https://login.live.com/ppsecure/post.srf?lc=1033&m) — navigating directly to inbox
+10:05:58
+·
+URL after direct nav: https://outlook.live.com/mail/0/inbox
+10:05:59
++
+✅ Logged into Outlook Web — searching inbox for Replit email...
+10:06:06
+·
+[Attempt 1/4] Found 1 email items in inbox
+10:06:06
+·
+Found Replit-related email: R Replit Replit: Verify Your Email 12:35 PM Welcome to Replit! Please verify your email address to c
+10:06:09
+·
+Extracted verification link from OWA: https://replit.com/action-code?mode=verifyEmail&oobCode=aZ_rwAQkxS5TDieL9oRqdbd_GQ7RTgqvwkkl0cSPU6sA...
+10:06:09
+>
+Navigating to verification link...
+10:06:13
++
+✅ Account verified! URL: https://replit.com/action-code?mode=verifyEmail&oobCode=aZ_rwAQkxS5TDieL9oRqdbd_GQ7RTgqvwkkl0cSPU6sAAAGdDq0YNQ&apiKey=AIzaSyDdqupzUUvLXidm5MYw3Bqz50A_1t2Lxlc&lang=en
+10:06:17
+·
+No onboarding wizard detected — skipping
+10:06:17
+·
+🔐 Session not established — logging into Replit with new account credentials...
+10:06:27
++
+✅ Logged into Replit — URL: https://replit.com/~
+10:06:27
++
+✅ Replit account creation complete: username=cddxeb25lsef0tp email=CDdXEb25lsNkw834@outlook.com password=KC354i2v#95
+10:06:27
+·
+🎟️ Applying coupon "AGENT449628AB89BC7" to Replit Core checkout...
+10:06:36
+·
+Stripe checkout loaded: https://checkout.stripe.com/c/pay/cs_live_b1I3GBgmE6FVjG2iyZ0Bh9bNMCx2UjEmcOzDEc...
+10:06:38
+·
+Page title: "Replit" | URL: https://checkout.stripe.com/c/pay/cs_live_b1I3GBgmE6FVjG2iyZ0Bh9bNMCx2UjEmcOzDEcBUnORDDQWTyG4TrpB75d
+10:06:38
+·
+Clicked: "BackSubscribe to Replit Core$20.00per mo"
+10:06:40
+·
+Filled input "Add promotion code" with value
+10:06:40
+·
+Entered coupon code: AGENT449628AB89BC7
+10:06:40
+·
+Clicked: "BackSubscribe to Replit Core$20.00per mo"
+10:06:43
+·
+Clicked Apply
+10:06:43
+·
+Coupon submitted — discount may apply at checkout
+10:06:43
+·
+🔗 Checkout URL: https://checkout.stripe.com/c/pay/cs_live_b1I3GBgmE6FVjG2iyZ0Bh9bNMCx2UjEmcOzDEcBUnORDDQWTyG4TrpB75d#fidnandhYHdWcXxpYCc%2FJ2FgY2RwaXEnKSd2cGd2ZndsdXFsamtQa2x0cGBrYHZ2QGtkZ2lgYSc%2FY2RpdmApJ2R1bE5gfCc%2FJ3VuWmlsc2BaMDQwXHVLdk9EaGtcU0pzY2t2R3RXYURRUlYzVn9nS0R2aUp%2FNH83cXBvYU5wc1dIQURyUkhgQ111M2FPSTRcTld3VG9HNVJEdTVQQUJyaUNcSTJtfXIyQ2Y1NVRuY31HQ3ZJJyknY3dqaFZgd3Ngdyc%2FcXdwYCknZ2RmbmJ3anBrYUZqaWp3Jz8nJjc2NzA3YycpJ2lkfGpwcVF8dWAnPydocGlxbFpscWBoJyknYGtkZ2lgVWlkZmBtamlhYHd2Jz9xd3BgeCUl
+10:06:43
+·
+💳 Filling card details in Stripe checkout...
+10:06:48
+·
+Frames on page (18): ["https://checkout.stripe.com/c/pay/cs_live_b1I3GBgmE6FVjG2iyZ0Bh9bNMCx2UjEmcOzDEc","https://js.stripe.com/v3/link-login-inner-2ede40a7e2184337fb0822bb65ca3d74.html#","https://js.stripe.com/v3/checkout-inner-origin-frame-448a052ebc7fe7232b5c872ef41","https://js.stripe.com/v3/controller-fb696ba5d44dd6e9225f3ffc0cb59e2f.html#__shar","https://js.stripe.com/v3/checkout-inner-address-autocomplete-93b5acd7d40b2dd6c27","https://js.stripe.com/v3/elements-inner-express-checkout-c1a8d3e93830b2e3958972b","https://js.stripe.com/v3/hcaptcha-invisible-74a63b2567df2c33c842aa0ab594ae44.htm","https://js.stripe.com/v3/human-security-544ed3db4611b9b69f9d571db7c4cf1f.html#de","https://js.stripe.com/v3/elements-inner-express-checkout-c1a8d3e93830b2e3958972b","https://b.stripecdn.com/stripethirdparty-srv/assets/v32.1/HCaptchaInvisible.html","https://b.stripecdn.com/stripethirdparty-srv/assets/v32.1/HumanSecurity.html?id=","https://b.stripecdn.com/stripethirdparty-srv/assets/v32.1/GoogleMaps.html?id=f70","https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html#url=https","https://m.stripe.network/inner-preview.html#url=https%3A%2F%2Fcheckout.stripe.co","https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344","https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344","https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344","https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344"]
+10:06:49
+·
+Filled Stripe field "cardNumber" (frame: https://checkout.stripe.com/c/pay/cs_live_b1I3GBgm)
+10:06:51
+·
+Filled Stripe field "cardExpiry" (frame: https://checkout.stripe.com/c/pay/cs_live_b1I3GBgm)
+10:06:52
+·
+Filled Stripe field "cvc" (frame: https://checkout.stripe.com/c/pay/cs_live_b1I3GBgm)
+10:06:52
+·
+Filled cardholder name
+10:06:53
+·
+Selected country: India
+10:06:54
+·
+Filled billing field 1: 15 Connaught Place
+10:06:54
+·
+Filled billing field 2: New Delhi
+10:06:55
+·
+Filled billing field 3: Delhi
+10:06:55
+·
+Filled billing field 4: 110001
+10:06:55
+·
+Filled billing field 5: +911123456789
+10:06:56
+·
+Billing address (India): 15 Connaught Place, New Delhi, Delhi 110001
+10:06:57
+·
+Buttons on page: [{"text":"","type":"button","visible":true,"disabled":true},{"text":"Apply","type":"button","visible":true,"disabled":true},{"text":"","type":"button","visible":true,"disabled":false},{"text":"Clear","type":"button","visible":true,"disabled":false},{"text":"","type":"button","visible":true,"disabled":false},{"text":"SubscribeProcessing","type":"submit","visible":true,"disabled":false},{"text":"Eli
+10:06:59
+·
+🖱️ Clicked payment submit via locator: "subscribe" (anchor: 2026-03-21T04:36:59.747Z)
+10:06:59
+·
+⏳ Waiting for payment response...
+10:07:11
+·
+Iframes after submit: [{"name":"__privateStripeFrame7187","src":"https://js.stripe.com/v3/hcaptcha-inner-5b49ebd9d2bbd67cdc069659015e2a94.html#in","title":""},{"name":"link-login","src":"https://js.stripe.com/v3/link-login-inner-2ede40a7e2184337fb0822bb65ca3d74.html#","title":""},{"name":"stripe-origin-frame","src":"https://js.stripe.com/v3/checkout-inner-origin-frame-448a052ebc7fe7232b5c872ef41","title":""},{"name":"__privateStripeFrame7184","src":"https://js.stripe.com/v3/elements-inner-express-checkout-c1a8d3e93830b2e3958972b","title":"Secure express checkout frame"},{"name":"__privateStripeFrame7186","src":"https://js.stripe.com/v3/elements-inner-express-checkout-c1a8d3e93830b2e3958972b","title":"Secure express checkout frame"},{"name":"__privateStripeController7181","src":"https://js.stripe.com/v3/controller-fb696ba5d44dd6e9225f3ffc0cb59e2f.html#__shar","title":""},{"name":"address-autocomplete-iframe","src":"https://js.stripe.com/v3/checkout-inner-address-autocomplete-93b5acd7d40b2dd6c27","title":""},{"name":"hcaptcha-invisible","src":"https://js.stripe.com/v3/hcaptcha-invisible-74a63b2567df2c33c842aa0ab594ae44.htm","title":""},{"name":"human-security","src":"https://js.stripe.com/v3/human-security-544ed3db4611b9b69f9d571db7c4cf1f.html#de","title":""},{"name":"__privateStripeMetricsController7180","src":"https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html#url=https","title":""}]
+10:07:11
+·
+Page text after submit: Back Subscribe to Replit Core $23.60 per month Replit Core Billed monthly $20.00 Save $36 with annual billing $17.00/month Subtotal $20.00 Apply GST (18%) $3.60 Total due today $23.60 OR Contact information Email CDdXEb25lsNkw834@outlook.com Payment method Card Card information Cardholder name Billing address Afghanistan Åland Islands Albania Algeria Andorra Angola Anguilla Antarctica Antigua & Barbuda Argentina Armenia Aruba Ascension Island Australia Austria Azerbaijan Bahamas Bahrain Bangladesh Barbados Belarus Belgium Belize Benin Bermuda Bhutan Bolivia Bosnia & Herzegovina Botswana Bouvet
+10:07:11
+·
+3DS check: locator=false, frameCheck=true
+10:07:11
+·
+🔐 3D Secure challenge detected — inspecting challenge frames...
+10:07:11
+·
+3DS frame: https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344
+10:07:11
+~
+3DS frame text: EN Please try again. ⚠️ Verify
+10:07:11
+·
+3DS frame inputs: []
+10:07:11
+·
+3DS frame: https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344
+10:07:11
+~
+3DS frame text: EN Please try again. ⚠️ Verify
+10:07:11
+·
+3DS frame inputs: []
+10:07:11
+·
+3DS frame: https://js.stripe.com/v3/hcaptcha-inner-5b49ebd9d2bbd67cdc069659015e2a94.html#in
+10:07:11
+·
+3DS frame text:
+10:07:11
+·
+3DS frame inputs: []
+10:07:11
+·
+3DS frame: https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344
+10:07:11
+~
+3DS frame text: EN Please try again. ⚠️ Verify
+10:07:11
+·
+3DS frame inputs: []
+10:07:11
+·
+3DS child frame: https://b.stripecdn.com/stripethirdparty-srv/assets/v32.1/HCaptcha.html?id=de2d3
+10:07:11
+·
+3DS child frame text: CLOSE One more step before you’re done Select the checkbox below.
+10:07:11
+·
+3DS child frame inputs: []
+10:07:11
+·
+3DS grandchild frame: https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344
+10:07:11
+~
+3DS grandchild text: EN Please try again. ⚠️ Verify
+10:07:11
+·
+3DS grandchild inputs: []
+10:07:11
+·
+3DS grandchild frame: https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344
+10:07:11
+·
+3DS grandchild text: I am human Privacy - Terms
+10:07:11
+·
+3DS grandchild inputs: []
+10:07:11
+·
+🤖 hCaptcha detected (bankACS=false) — solving via 2captcha/CapSolver...
+10:07:11
+·
+Using Stripe's known hCaptcha sitekey: a9b5fb07-92ff-493f-86fe-352a2803b3df
+10:07:11
+·
+Calling CapSolver to solve hCaptcha...
+10:07:11
+!
+⚠️ CapSolver failed: Request has been blocked due to a violation of our usage policies. If you believe this is an error, please reach out to our support team for assistance
+10:07:11
+·
+Trying 2captcha as fallback for Stripe hCaptcha...
+10:07:12
+!
+⚠️ 2captcha also failed: ERROR_METHOD_CALL: Error
+10:07:12
+·
+Trying direct hCaptcha checkbox click (last resort)...
+10:07:12
+·
+Clicked hCaptcha "I am human" checkbox in frame: https://newassets.hcaptcha.com/captcha/v1/6ae4a3c801c9d99b7e0b591e01eb3ddc17b344
+10:07:17
+·
+📬 OTP watcher started — polling imap.gmail.com every 5s (max 90s)...
+10:07:17
+·
+Anchor time: 2026-03-21T04:36:59.747Z — only emails AFTER this will be used
+10:07:18
+·
+INBOX: 11243 total messages
+10:07:18
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:18
+·
+No OTP yet — polling again in 5s (89s remaining)...
+10:07:24
+·
+INBOX: 11243 total messages
+10:07:24
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:24
+·
+No OTP yet — polling again in 5s (83s remaining)...
+10:07:30
+·
+INBOX: 11243 total messages
+10:07:30
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:30
+·
+No OTP yet — polling again in 5s (77s remaining)...
+10:07:36
+·
+INBOX: 11243 total messages
+10:07:36
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:36
+·
+No OTP yet — polling again in 5s (71s remaining)...
+10:07:41
+·
+INBOX: 11243 total messages
+10:07:41
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:41
+·
+No OTP yet — polling again in 5s (66s remaining)...
+10:07:47
+·
+INBOX: 11243 total messages
+10:07:47
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:47
+·
+No OTP yet — polling again in 5s (60s remaining)...
+10:07:52
+·
+INBOX: 11243 total messages
+10:07:53
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:53
+·
+No OTP yet — polling again in 5s (54s remaining)...
+10:07:58
+·
+INBOX: 11243 total messages
+10:07:58
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:07:58
+·
+No OTP yet — polling again in 5s (49s remaining)...
+10:08:04
+·
+INBOX: 11243 total messages
+10:08:04
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:08:04
+·
+No OTP yet — polling again in 5s (43s remaining)...
+10:08:09
+·
+INBOX: 11243 total messages
+10:08:09
+·
+Found 0 email(s) from fedmail@federalbank.co.in since 2026-03-21T04:34:59.747Z
+10:08:09
+·
+No OTP yet — polling again in 5s (38s remaining)...
