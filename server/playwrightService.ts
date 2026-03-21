@@ -10529,10 +10529,67 @@ export async function registerReplitAccount(
         Object.defineProperty(screen, "colorDepth", { get: () => 24 });
         Object.defineProperty(screen, "pixelDepth", { get: () => 24 });
 
-        // Prevent iframe detection
-        Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
-          get: function () { return window; },
-        });
+        // NOTE: contentWindow override removed — it was breaking Stripe's cross-iframe hCaptcha protocol
+        // (EXECUTE_HCAPTCHA_INVISIBLE was being sent to the main frame instead of hcaptcha-invisible.htm)
+
+        // ── Stripe hCaptcha Intercept: runs in ALL frames (including cross-origin) ──
+        // This intercepts EXECUTE_HCAPTCHA_INVISIBLE from parent and responds with our pre-solved token.
+        // Also captures rqdata from EXECUTE and forwards it to the main page.
+        (function() {
+          const w = window as any;
+          w.__hcapToken = null;
+
+          window.addEventListener("message", function hcapIntercept(e: MessageEvent) {
+            try {
+              const d = e.data;
+              if (!d || typeof d !== "object") return;
+
+              // Receive injected token from main page
+              if (d.type === "inject-hcap-token") {
+                w.__hcapToken = d.token;
+                return;
+              }
+
+              // Capture rqdata from EXECUTE and forward to main page (for pre-solve)
+              if (d.type === "stripe-third-party-parent-to-child") {
+                const payload = d.payload;
+                const rqdata = (typeof payload === "object" && payload?.rqdata) || null;
+                if (rqdata) {
+                  // Forward rqdata up the frame chain to main page
+                  try { window.parent.postMessage({ type: "hcap-rqdata", rqdata }, "*"); } catch {}
+                  try { (window.top as any)?.postMessage({ type: "hcap-rqdata", rqdata }, "*"); } catch {}
+                }
+
+                // Intercept EXECUTE_HCAPTCHA_INVISIBLE
+                const isExecute = payload === "EXECUTE_HCAPTCHA_INVISIBLE" ||
+                  (typeof payload === "object" && (payload?.action === "EXECUTE_HCAPTCHA_INVISIBLE" || payload?.type === "EXECUTE_HCAPTCHA_INVISIBLE"));
+                if (isExecute && w.__hcapToken) {
+                  const params = new URLSearchParams(window.location.search);
+                  const frameID = d.frameID || params.get("id") || "hcaptcha-invisible";
+                  const response = {
+                    type: "stripe-third-party-child-to-parent",
+                    frameID,
+                    requestID: d.requestID,
+                    payload: { response: w.__hcapToken },
+                  };
+                  try { window.parent.postMessage(response, "*"); } catch {}
+                  try { (window.top as any)?.postMessage(response, "*"); } catch {}
+                  console.error("[HCAP-INTERCEPT] Fired RESPONSE_HCAPTCHA_INVISIBLE frameID=" + frameID + " requestID=" + d.requestID);
+                }
+              }
+            } catch {}
+          }, true);
+
+          // Also listen for rqdata forwarded FROM child frames (main page collects it)
+          window.addEventListener("message", function rqdataCollect(e: MessageEvent) {
+            try {
+              const d = e.data;
+              if (d && d.type === "hcap-rqdata" && d.rqdata) {
+                w.__capturedRqdata = d.rqdata;
+              }
+            } catch {}
+          }, true);
+        })();
       });
       log("Using stealth headless browser");
     }
@@ -11605,15 +11662,47 @@ export async function registerReplitAccount(
           }
         } catch {}
 
+        // ── Broadcast helper: inject token into ALL frames via postMessage from main page ──
+        // The context.addInitScript listener in each frame receives "inject-hcap-token" and stores token.
+        // When EXECUTE_HCAPTCHA_INVISIBLE arrives in the hcaptcha-invisible frame, it responds immediately.
+        const broadcastHcapToken = async (token: string) => {
+          try {
+            await page.evaluate((tok) => {
+              // Broadcast to all iframes from main page
+              document.querySelectorAll("iframe").forEach((iframe: HTMLIFrameElement) => {
+                try { iframe.contentWindow?.postMessage({ type: "inject-hcap-token", token: tok }, "*"); } catch {}
+              });
+              // Also set on main window (in case main page itself is "hcaptcha-invisible" frame parent)
+              (window as any).__hcapToken = tok;
+              console.error("[HCAP-BROADCAST] Token broadcasted to " + document.querySelectorAll("iframe").length + " iframes");
+            }, token);
+          } catch {}
+        };
+
         try {
-          log(`🤖 Pre-solving hCaptcha before Subscribe click (token will be injected into Stripe API call)...`);
-          const preResult = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
-          const capResult = preResult.success ? preResult : await solveHCaptcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df");
-          if (capResult.success && capResult.token) {
-            preSolvedHcapToken = capResult.token;
+          log(`🤖 Pre-solving hCaptcha before Subscribe click...`);
+          // Check if rqdata already captured by init script (from INITIALIZE messages)
+          const preRqdata = await page.evaluate(() => (window as any).__capturedRqdata).catch(() => null);
+          if (preRqdata) log(`  📦 rqdata captured before pre-solve: ${preRqdata.substring(0, 40)}...`);
+
+          const preResult = await solveHCaptchaWith2Captcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df", preRqdata || undefined);
+          const capResult2 = preResult.success ? preResult : await solveHCaptcha("https://checkout.stripe.com", "a9b5fb07-92ff-493f-86fe-352a2803b3df", undefined, preRqdata || undefined);
+          if (capResult2.success && capResult2.token) {
+            preSolvedHcapToken = capResult2.token;
             log(`✅ Pre-solved hCaptcha token: ${preSolvedHcapToken.substring(0, 30)}... (len=${preSolvedHcapToken.length})`);
+            // Broadcast token to all frames — init script intercept will use it on EXECUTE
+            await broadcastHcapToken(preSolvedHcapToken);
+            log(`  🔧 Token broadcasted to all frames via postMessage`);
           }
         } catch (e: any) { log(`⚠️ Pre-solve hCaptcha failed: ${e.message}`); }
+
+        // Capture console messages from all frames (including hcaptcha frames)
+        page.on("console", (msg) => {
+          const txt = msg.text();
+          if (txt.includes("[HCAP-INTERCEPT]") || txt.includes("HCAPTCHA") || txt.includes("stripe-third-party")) {
+            log(`  [frame-console] ${msg.type()}: ${txt.substring(0, 200)}`);
+          }
+        });
 
         // Intercept ALL POST requests to Stripe APIs — log what's sent + inject hCaptcha token
         const stripeApiLogs: string[] = [];
@@ -12037,6 +12126,14 @@ export async function registerReplitAccount(
                     }, token).catch(() => {});
                     log(`   Injected token into main checkout page frame + dispatched message events`);
                   } catch {}
+
+                  // ── CORRECT STRIPE PROTOCOL via broadcastHcapToken ──
+                  // Broadcasts "inject-hcap-token" to all iframes from main page.
+                  // The context.addInitScript listener in hcaptcha-invisible frame:
+                  //   1. Stores token in window.__hcapToken
+                  //   2. When EXECUTE_HCAPTCHA_INVISIBLE arrives, sends RESPONSE with correct requestID
+                  await broadcastHcapToken(token);
+                  log(`   ✅ Token broadcasted to all frames — init script will respond on EXECUTE`);
 
                   log(`   Total fields injected: ${totalInjected} across all frames — waiting 8s for Stripe to pick up token...`);
                   await page.waitForTimeout(8000);
