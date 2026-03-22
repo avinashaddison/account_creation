@@ -1544,7 +1544,13 @@ export default function PrivateAccount() {
 
                 {/* Rows */}
                 {replitAccounts.map((acct, idx) => {
-                  const isSold = acct.status === "sold_out";
+                  const st = acct.status;
+                  const statusConfig: Record<string, { label: string; emoji: string; color: string; glow: string; bg: string; border: string }> = {
+                    processing: { label: "Processing", emoji: "⏳", color: "#facc15", glow: "rgba(250,204,21,0.25)", bg: "rgba(250,204,21,0.1)", border: "#facc15" },
+                    created:    { label: "Available",  emoji: "✅", color: "#22c55e", glow: "rgba(34,197,94,0.25)",  bg: "rgba(34,197,94,0.1)",  border: "#22c55e" },
+                    sold_out:   { label: "Sold Out",   emoji: "🔴", color: "#ef4444", glow: "rgba(239,68,68,0.25)",  bg: "rgba(239,68,68,0.1)",  border: "#ef4444" },
+                  };
+                  const cfg = statusConfig[st] ?? statusConfig.created;
                   const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.01)";
                   return (
                     <div
@@ -1553,25 +1559,35 @@ export default function PrivateAccount() {
                       style={{ gridTemplateColumns: "2fr 1.4fr 0.7fr 1fr 0.5fr", background: rowBg }}
                       data-testid={`row-replit-private-${acct.id}`}
                     >
-                      {/* Email */}
+                      {/* Email — click to copy */}
                       <div className="px-4 py-3.5 flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-mono text-zinc-100 truncate max-w-[240px]" data-testid={`text-replit-email-${acct.id}`}>{acct.email}</span>
-                          <button onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)} className="text-zinc-600 hover:text-sky-400 transition-colors flex-shrink-0" data-testid={`button-copy-replit-email-${acct.id}`}>
-                            {copied === `re-${acct.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)}
+                          className="flex items-center gap-2 group text-left"
+                          title="Click to copy email"
+                          data-testid={`button-copy-replit-email-${acct.id}`}
+                        >
+                          <span className="text-sm font-mono text-zinc-100 truncate max-w-[240px] group-hover:text-sky-300 transition-colors" data-testid={`text-replit-email-${acct.id}`}>
+                            {copied === `re-${acct.id}` ? <span className="text-emerald-400">✓ Copied!</span> : acct.email}
+                          </span>
+                        </button>
                         <div className="flex items-center gap-1">
                           <Code2 className="w-2.5 h-2.5 text-violet-400/40" />
                           <span className="text-[11px] font-mono text-violet-400/50">@{acct.username}</span>
                         </div>
                       </div>
 
-                      {/* Password — always visible */}
-                      <div className="px-4 py-3.5 flex items-center gap-2">
-                        <span className="text-sm font-mono text-zinc-300" data-testid={`text-replit-pw-${acct.id}`}>{acct.password}</span>
-                        <button onClick={() => copyToClipboard(acct.password, `rp-${acct.id}`)} className="text-zinc-600 hover:text-sky-400 transition-colors flex-shrink-0" data-testid={`button-copy-replit-pw-${acct.id}`}>
-                          {copied === `rp-${acct.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {/* Password — click to copy */}
+                      <div className="px-4 py-3.5">
+                        <button
+                          onClick={() => copyToClipboard(acct.password, `rp-${acct.id}`)}
+                          className="flex items-center gap-2 group text-left"
+                          title="Click to copy password"
+                          data-testid={`button-copy-replit-pw-${acct.id}`}
+                        >
+                          <span className="text-sm font-mono text-zinc-300 group-hover:text-sky-300 transition-colors" data-testid={`text-replit-pw-${acct.id}`}>
+                            {copied === `rp-${acct.id}` ? <span className="text-emerald-400">✓ Copied!</span> : acct.password}
+                          </span>
                         </button>
                       </div>
 
@@ -1586,40 +1602,34 @@ export default function PrivateAccount() {
                         </span>
                       </div>
 
-                      {/* Status — one-click toggle buttons */}
-                      <div className="px-4 py-3.5 flex items-center gap-1.5">
-                        <button
-                          onClick={async () => {
-                            await fetch(`/api/replit-accounts/${acct.id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ status: "created" }) });
-                            fetchReplit();
-                          }}
-                          className="px-3 py-1.5 rounded-md text-[11px] font-mono font-bold uppercase tracking-wide transition-all duration-150"
-                          style={{
-                            background: !isSold ? "rgba(34,197,94,0.18)" : "rgba(255,255,255,0.04)",
-                            border: !isSold ? "1.5px solid #22c55e" : "1.5px solid rgba(255,255,255,0.08)",
-                            color: !isSold ? "#22c55e" : "rgba(255,255,255,0.2)",
-                            boxShadow: !isSold ? "0 0 8px rgba(34,197,94,0.2)" : "none",
-                          }}
-                          data-testid={`button-status-available-${acct.id}`}
-                        >
-                          Available
-                        </button>
-                        <button
-                          onClick={async () => {
-                            await fetch(`/api/replit-accounts/${acct.id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ status: "sold_out" }) });
-                            fetchReplit();
-                          }}
-                          className="px-3 py-1.5 rounded-md text-[11px] font-mono font-bold uppercase tracking-wide transition-all duration-150"
-                          style={{
-                            background: isSold ? "rgba(239,68,68,0.18)" : "rgba(255,255,255,0.04)",
-                            border: isSold ? "1.5px solid #ef4444" : "1.5px solid rgba(255,255,255,0.08)",
-                            color: isSold ? "#ef4444" : "rgba(255,255,255,0.2)",
-                            boxShadow: isSold ? "0 0 8px rgba(239,68,68,0.2)" : "none",
-                          }}
-                          data-testid={`button-status-sold-${acct.id}`}
-                        >
-                          Sold Out
-                        </button>
+                      {/* Status — dropdown with 3 emoji options */}
+                      <div className="px-4 py-3.5">
+                        <div className="relative">
+                          <select
+                            value={st}
+                            onChange={async (e) => {
+                              await fetch(`/api/replit-accounts/${acct.id}/status`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({ status: e.target.value }),
+                              });
+                              fetchReplit();
+                            }}
+                            className="w-full appearance-none rounded-lg px-3 py-2 text-sm font-mono font-semibold cursor-pointer focus:outline-none transition-all duration-150"
+                            style={{
+                              background: cfg.bg,
+                              border: `1.5px solid ${cfg.border}`,
+                              color: cfg.color,
+                              boxShadow: `0 0 10px ${cfg.glow}`,
+                            }}
+                            data-testid={`select-replit-status-${acct.id}`}
+                          >
+                            <option value="processing">⏳ Processing</option>
+                            <option value="created">✅ Available</option>
+                            <option value="sold_out">🔴 Sold Out</option>
+                          </select>
+                        </div>
                       </div>
 
                       {/* Actions */}
