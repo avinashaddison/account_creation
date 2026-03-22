@@ -800,7 +800,7 @@ export default function PrivateAccount() {
               </div>
               <p className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>{s.label}</p>
               <p className="text-2xl font-black font-mono leading-none transition-all duration-200" style={{ color: tab === s.id ? s.color : "#f1f5f9" }} data-testid={`text-${s.id}-count`}>
-                {s.count.toString().padStart(3, "0")}
+                {s.count}
               </p>
             </div>
           </div>
