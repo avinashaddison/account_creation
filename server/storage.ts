@@ -436,6 +436,11 @@ export class DatabaseStorage implements IStorage {
     await db.delete(replitAccounts).where(eq(replitAccounts.id, id));
   }
 
+  async updateReplitAccountStatus(id: string, status: string): Promise<ReplitAccount> {
+    const [row] = await db.update(replitAccounts).set({ status }).where(eq(replitAccounts.id, id)).returning();
+    return row;
+  }
+
   async createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount> {
     const [row] = await db.insert(lovableAccounts).values(data).returning();
     return row;

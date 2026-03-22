@@ -3333,6 +3333,17 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/replit-accounts/:id/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.body;
+      if (!status) return res.status(400).json({ error: "status required" });
+      const row = await storage.updateReplitAccountStatus(req.params.id, status);
+      res.json(row);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/replit-accounts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       await storage.deleteReplitAccount(req.params.id);
