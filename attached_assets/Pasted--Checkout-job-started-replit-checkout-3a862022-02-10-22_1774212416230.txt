@@ -1,0 +1,94 @@
+🎟️ Checkout job started [replit-checkout-3a862022]
+02:10:22
+·
+🔐 Logging in to Replit as surlahcuetoydlm@hotmail.com...
+02:10:41
++
+✅ Logged in — URL: https://replit.com/~
+02:10:41
+>
+🔗 Navigating to checkout URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=AGENT42246484BB1C5...
+02:10:50
+>
+📍 Post-navigation URL: https://checkout.stripe.com/c/pay/cs_live_a1ofMRdPx56UGr36JlseKkncUdUKOWBe7d6nP45zz1T9pUVq5RcLunLUJf
+02:10:50
+$
+💳 Filling card details in Stripe checkout...
+02:10:50
+~
+Frames (18): https://checkout.stripe.com/c/pay/cs_live_a1ofMRdP | https://js.stripe.com/v3/link-login-inner-2ede40a7 | https://js.stripe.com/v3/checkout-inner-origin-fra | https://js.stripe.com/v3/controller-871e0520cde23f | https://js.stripe.com/v3/checkout-inner-address-au | https://js.stripe.com/v3/elements-inner-express-ch | https://js.stripe.com/v3/hcaptcha-invisible-74a63b | https://js.stripe.com/v3/human-security-544ed3db46 | https://js.stripe.com/v3/m-outer-3437aaddcdf6922d6 | https://b.stripecdn.com/stripethirdparty-srv/asset | https://js.stripe.com/v3/elements-inner-express-ch | https://b.stripecdn.com/stripethirdparty-srv/asset | https://b.stripecdn.com/stripethirdparty-srv/asset | https://m.stripe.network/inner-preview.html#url=ht | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8
+02:10:51
+$
+Filled "cardNumber" in frame: https://checkout.stripe.com/c/pay/cs_live_a1ofMRdP
+02:10:52
+$
+Filled "cardExpiry" in frame: https://checkout.stripe.com/c/pay/cs_live_a1ofMRdP
+02:10:53
+$
+Filled "cvc" in frame: https://checkout.stripe.com/c/pay/cs_live_a1ofMRdP
+02:10:54
+$
+Filled "name" in frame: https://checkout.stripe.com/c/pay/cs_live_a1ofMRdP
+02:10:55
+·
+Billing: 15 Connaught Place, New Delhi, Delhi 110001
+02:10:55
+·
+Filled billing field: 15 Connaught Place
+02:10:55
+·
+Filled billing field: New Delhi
+02:10:56
+·
+Filled billing field: 110001
+02:10:57
+~
+🤖 Pre-solving hCaptcha (no rqdata)...
+02:14:06
+·
+💳 Clicking Subscribe...
+02:14:06
+·
+Subscribe clicked at 2026-03-22T20:44:06.832Z
+02:14:11
+~
+🔒 hCaptcha detected (5 frame(s)) — injecting token...
+02:14:16
+·
+rqdata: not found
+02:15:09
++
+✅ hCaptcha solved (len=2292) — injecting into all frames...
+02:15:17
+·
+Bank ACS not yet — re-clicking Subscribe...
+02:15:17
+·
+Re-clicked Subscribe
+02:16:02
+·
+📬 Waiting for 3DS OTP email...
+02:16:02
+!
+IMAP error: Command failed
+02:16:07
+!
+IMAP error: Command failed
+02:16:12
+!
+IMAP error: Command failed
+02:16:18
+!
+IMAP error: Command failed
+02:16:23
+!
+IMAP error: Command failed
+02:16:28
+!
+IMAP error: Command failed
+02:16:33
+!
+IMAP error: Command failed
+02:16:39
+!
+IMAP error: Command failed
