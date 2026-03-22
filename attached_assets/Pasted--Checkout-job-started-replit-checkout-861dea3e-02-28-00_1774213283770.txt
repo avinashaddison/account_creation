@@ -1,0 +1,94 @@
+🎟️ Checkout job started [replit-checkout-861dea3e]
+02:28:00
+·
+🔐 Logging in to Replit as truszrtrachom@hotmail.com...
+02:28:17
++
+✅ Logged in — URL: https://replit.com/~
+02:28:17
+>
+🔗 Navigating to checkout URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=AGENT42246484BB1C5...
+02:28:26
+>
+📍 Post-navigation URL: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGdhV23kh5vQXaKbNr6qIoxZwCwqUXwQNH5FxvGshqhaL1tJGdOA9
+02:28:26
+$
+💳 Filling card details in Stripe checkout...
+02:28:26
+~
+Frames (18): https://checkout.stripe.com/c/pay/cs_live_a1tU9XGd | https://js.stripe.com/v3/link-login-inner-2ede40a7 | https://js.stripe.com/v3/checkout-inner-origin-fra | https://js.stripe.com/v3/controller-fb696ba5d44dd6 | https://js.stripe.com/v3/checkout-inner-address-au | https://js.stripe.com/v3/elements-inner-express-ch | https://js.stripe.com/v3/hcaptcha-invisible-74a63b | https://js.stripe.com/v3/human-security-544ed3db46 | https://b.stripecdn.com/stripethirdparty-srv/asset | https://js.stripe.com/v3/elements-inner-express-ch | https://b.stripecdn.com/stripethirdparty-srv/asset | https://b.stripecdn.com/stripethirdparty-srv/asset | https://js.stripe.com/v3/m-outer-3437aaddcdf6922d6 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://newassets.hcaptcha.com/captcha/v1/6ae4a3c8 | https://m.stripe.network/inner-preview.html#url=ht
+02:28:27
+$
+Filled "cardNumber" in frame: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGd
+02:28:28
+$
+Filled "cardExpiry" in frame: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGd
+02:28:29
+$
+Filled "cvc" in frame: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGd
+02:28:31
+$
+Filled "name" in frame: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGd
+02:28:31
+·
+Billing: 15 Connaught Place, New Delhi, Delhi 110001
+02:28:31
+·
+Filled billing field: 15 Connaught Place
+02:28:32
+·
+Filled billing field: New Delhi
+02:28:32
+·
+Filled billing field: 110001
+02:28:33
+~
+🤖 Pre-solving hCaptcha (no rqdata)...
+02:29:05
++
+✅ Pre-solved hCaptcha token (len=2364)
+02:29:05
+·
+💳 Clicking Subscribe...
+02:29:05
+·
+Subscribe clicked at 2026-03-22T20:59:05.542Z
+02:29:10
+~
+🔒 hCaptcha detected (5 frame(s)) — injecting token...
+02:29:15
+·
+rqdata: not found
+02:29:52
++
+✅ hCaptcha solved (len=2276) — injecting into all frames...
+02:30:00
+·
+Bank ACS not yet — re-clicking Subscribe...
+02:30:00
+·
+Re-clicked Subscribe
+02:30:45
+·
+📬 Waiting for 3DS OTP email...
+02:30:47
+$
+📬 OTP found: 000000
+02:30:47
+$
+🔢 Entering OTP 000000 in 3DS frame...
+02:30:47
+$
+OTP entered via input[type="tel"] in frame: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGdhV23kh5vQX
+02:30:48
+$
+Clicked OTP submit
+02:30:58
+$
+📍 Final URL after OTP: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGdhV23kh5vQXaKbNr6qIoxZwCwqUXwQNH5FxvGshqhaL1tJGdOA9
+02:30:58
++
+⚠️ Checkout may be incomplete — URL: https://checkout.stripe.com/c/pay/cs_live_a1tU9XGdhV23kh5vQXaKbNr6qIoxZwCwqUXwQN
+02:30:58
++
+✅ Checkout finished (verify status manually)

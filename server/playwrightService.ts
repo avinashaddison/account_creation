@@ -15796,7 +15796,18 @@ export async function checkoutExistingReplitAccount(
 
     // ── Handle 3DS OTP ──
     if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
+      // Only attempt OTP if bank ACS frame actually appeared
+      const bankAcsVisible = page.frames().some((f: any) =>
+        f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth") || f.url().includes("federalbank")
+      );
+      if (!bankAcsVisible) {
+        log(`⚠️ Bank ACS frame not present — skipping OTP phase (3DS was not triggered by bank)`);
+        log(`   This usually means Stripe did not submit the payment to the bank yet.`);
+      } else {
       log(`📬 Waiting for 3DS OTP email...`);
+
+      const BANK_SENDER = "fedmail@federalbank.co.in";
+      const BANK_DOMAIN = "federalbank.co.in";
 
       function resolveImapHost(email: string): string {
         const domain = (email.split("@")[1] || "").toLowerCase();
@@ -15816,27 +15827,61 @@ export async function checkoutExistingReplitAccount(
           client = new ImapFlow({ host: imapHost, port: 993, secure: true, auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword }, logger: false, connectionTimeout: 15000 });
           await client.connect();
           await client.mailboxOpen("INBOX");
-          const searchSince = new Date(paymentSubmitTime.getTime() - 2 * 60 * 1000);
-          const uids = await client.search({ since: searchSince }).catch(() => [] as number[]);
+          // Only search emails from Federal Bank sender, since payment submit time (no lookback)
+          let uids: number[] = [];
+          try {
+            uids = await client.search({ from: BANK_SENDER, since: paymentSubmitTime }) as number[];
+            log(`   IMAP: ${uids.length} email(s) from ${BANK_SENDER} since payment time`);
+          } catch {
+            // Fallback if server doesn't support FROM search
+            const searchSince = new Date(paymentSubmitTime.getTime() - 60000);
+            uids = await client.search({ since: searchSince }).catch(() => [] as number[]);
+            log(`   IMAP fallback: ${uids.length} emails since ${searchSince.toISOString()}`);
+          }
           for (const uid of (uids as number[]).slice(-5).reverse()) {
             const msg = await client.fetchOne(String(uid), { source: true }).catch(() => null);
             if (!msg) continue;
             const raw = msg.source?.toString() || "";
-            if (!raw.toLowerCase().includes("federal") && !raw.toLowerCase().includes("otp") && !raw.toLowerCase().includes("verify")) continue;
-            const match = raw.match(/\b(\d{6})\b/);
-            if (match) { otp = match[1]; log(`📬 OTP found: ${otp}`); break; }
+            // Strict sender check
+            const fromBank = raw.toLowerCase().includes(BANK_DOMAIN) ||
+              raw.toLowerCase().includes("fedmail@federalbank");
+            if (!fromBank) { log(`   Skipping email uid=${uid} — not from bank`); continue; }
+            // Extract OTP — prefer keyword context match, then last 6-digit number
+            let extracted: string | null = null;
+            const kwMatch = raw.match(/(?:OTP|One.?Time.?Password|verification code|passcode)[^0-9]*([0-9]{6})/i);
+            if (kwMatch) { extracted = kwMatch[1]; }
+            if (!extracted) {
+              // Take the LAST 6-digit block (OTP is at the end of bank emails)
+              const all6 = raw.match(/\b([0-9]{6})\b/g);
+              if (all6 && all6.length > 0) extracted = all6[all6.length - 1];
+            }
+            if (extracted && extracted !== "000000") {
+              otp = extracted;
+              log(`📬 OTP found: ${otp} (uid=${uid})`);
+              try { await client.messageFlagsAdd({ uid }, ["\\Seen"]); } catch {}
+              break;
+            } else if (extracted === "000000") {
+              log(`   Skipping uid=${uid} — extracted OTP is 000000 (likely template/stale email)`);
+            }
           }
-        } catch (e: any) { log(`  IMAP error: ${e.message?.substring(0, 60)}`); }
+        } catch (e: any) { log(`  IMAP error: ${e.message?.substring(0, 80)}`); }
         finally { try { await client?.logout(); } catch {} }
-        if (!otp) await page.waitForTimeout(5000);
+        if (!otp) {
+          const remaining = Math.round((deadline - Date.now()) / 1000);
+          log(`   No OTP yet — polling again in 5s (${remaining}s remaining)...`);
+          await page.waitForTimeout(5000);
+        }
       }
 
       if (otp) {
         log(`🔢 Entering OTP ${otp} in 3DS frame...`);
         const allFrames = page.frames();
         const otpSelectors = ['input[name="challengeDataEntry"]', 'input[name="otp"]', 'input[autocomplete="one-time-code"]', 'input[type="tel"]', 'input[type="number"]', 'input[type="text"]'];
-        const bankFrames = allFrames.filter((f: any) => f.url().includes("m2pSecAuth") || f.url().includes("m2pfintech.com"));
-        const framesToTry = bankFrames.length > 0 ? bankFrames : allFrames;
+        const bankFrames = allFrames.filter((f: any) => f.url().includes("m2pSecAuth") || f.url().includes("m2pfintech.com") || f.url().includes("federalbank"));
+        if (bankFrames.length === 0) {
+          log(`⚠️ No bank ACS frames found to enter OTP — skipping`);
+        } else {
+        const framesToTry = bankFrames;
         let entered = false;
         for (const frame of framesToTry) {
           if (entered) break;
@@ -15867,9 +15912,11 @@ export async function checkoutExistingReplitAccount(
           log(`✅ Checkout complete!`);
           return { success: true, checkoutComplete: true };
         }
+        } // close bankFrames.length > 0 else
       } else {
         log(`⚠️ OTP not received within 90s`);
       }
+      } // close bankAcsVisible else
     }
 
     // Check final URL
