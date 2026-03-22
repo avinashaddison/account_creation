@@ -14930,261 +14930,231 @@ export async function registerV0Account(
   log: (msg: string) => void
 ): Promise<{ success: boolean; email?: string; password?: string; promoRedeemed?: string; error?: string }> {
   const PROMO_CODE = "FARZA-V0";
-  const REFERRAL_URL = "https://v0.app/ref/97Y16O";
 
   let browser: any = null;
   let page: any = null;
   let owaBrowser: any = null;
 
+  // ── OWA helper: login and get initial email count ─────────────────────────
+  async function loginOwa(): Promise<{ owaPage: any; initialCount: number }> {
+    const { chromium: localChrm } = await import("playwright");
+    owaBrowser = await localChrm.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+    });
+    const owaCtx = await owaBrowser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      viewport: { width: 1366, height: 768 }, locale: "en-US",
+    });
+    await owaCtx.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      (window as any).chrome = { runtime: {} };
+    });
+    const owaPage = await owaCtx.newPage();
+    owaPage.setDefaultTimeout(30000);
+
+    log("Logging into Outlook Web...");
+    await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await owaPage.waitForTimeout(2000);
+
+    const emailInp = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+    if (emailInp) {
+      await emailInp.fill(outlookEmail);
+      await owaPage.keyboard.press("Enter");
+      await owaPage.waitForTimeout(3000);
+    }
+    const passInp = await owaPage.$('input[type="password"], input[name="passwd"]');
+    if (passInp) {
+      await passInp.fill(outlookPassword);
+      await owaPage.keyboard.press("Enter");
+      await owaPage.waitForTimeout(5000);
+    }
+
+    const owaUrl = owaPage.url();
+    if (owaUrl.includes("account.live.com/proofs") || owaUrl.includes("account.microsoft.com")) {
+      log("Security proofs page — going directly to inbox...");
+      await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.waitForTimeout(4000);
+    } else if (!owaPage.url().includes("outlook.live.com")) {
+      await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.waitForTimeout(4000);
+    }
+
+    log(`OWA inbox URL: ${owaPage.url().substring(0, 80)}`);
+    await owaPage.waitForTimeout(2000);
+
+    const allItems = await owaPage.$$('[role="option"], [data-convid]');
+    const initialCount = allItems.length;
+    log(`OWA initial inbox count: ${initialCount} email(s)`);
+    return { owaPage, initialCount };
+  }
+
+  // ── OWA helper: poll for new email and extract OTP ──────────────────────────
+  async function waitForOtpEmail(owaPage: any, initialCount: number, maxWaitMs = 180000): Promise<string | null> {
+    const startTime = Date.now();
+    log(`Watching for new email (currently ${initialCount}, need ${initialCount + 1})...`);
+
+    while (Date.now() - startTime < maxWaitMs) {
+      await owaPage.waitForTimeout(10000);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      try {
+        // Refresh inbox view by pressing F5 or navigating
+        await owaPage.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        await owaPage.waitForTimeout(3000);
+
+        const allItems = await owaPage.$$('[role="option"], [data-convid]');
+        const currentCount = allItems.length;
+        log(`OWA email count: ${currentCount} (waiting for >${initialCount}) [${elapsed}s]`);
+
+        if (currentCount > initialCount) {
+          log(`New email arrived! Opening it...`);
+          // Click the first (newest) email
+          await allItems[0].click();
+          await owaPage.waitForTimeout(3000);
+
+          const bodyText = await owaPage.evaluate(() => document.body.innerText);
+          log(`Email body snippet: ${bodyText.substring(0, 300)}`);
+
+          const otpMatch = bodyText.match(/\b(\d{6})\b/);
+          if (otpMatch) {
+            log(`✅ Extracted OTP: ${otpMatch[1]}`);
+            return otpMatch[1];
+          }
+          // OTP not found in inbox, check junk
+          log("6-digit code not in body — checking Junk folder...");
+        }
+
+        // Check Junk folder too (every 30s)
+        if (elapsed % 30 < 12) {
+          try {
+            const junkLink = await owaPage.$('a[href*="junkemail"], [aria-label*="Junk" i], [title*="Junk" i]');
+            if (junkLink) {
+              await junkLink.click();
+              await owaPage.waitForTimeout(3000);
+              const junkItems = await owaPage.$$('[role="option"], [data-convid]');
+              for (const item of junkItems.slice(0, 5)) {
+                const itemText = (await item.textContent() || "").toLowerCase();
+                if (itemText.includes("vercel") || itemText.includes("v0") || itemText.includes("code") || itemText.includes("sign")) {
+                  await item.click();
+                  await owaPage.waitForTimeout(2000);
+                  const body = await owaPage.evaluate(() => document.body.innerText);
+                  const m = body.match(/\b(\d{6})\b/);
+                  if (m) { log(`✅ OTP from Junk: ${m[1]}`); return m[1]; }
+                }
+              }
+              // Go back to inbox
+              const inboxLink = await owaPage.$('a[href*="/mail/0/inbox"], [aria-label*="Inbox" i]');
+              if (inboxLink) await inboxLink.click().catch(() => {});
+              await owaPage.waitForTimeout(2000);
+            }
+          } catch {}
+        }
+      } catch (e: any) {
+        log(`OWA poll error: ${(e.message || "").substring(0, 80)}`);
+      }
+    }
+    return null;
+  }
+
   try {
-    log("Launching stealth browser for v0.dev...");
-    const { chromium: chrm } = await import("playwright");
-    browser = await chrm.launch({
+    // ── Step 1: Open OWA to get baseline email count ──────────────────────────
+    const { owaPage, initialCount } = await loginOwa();
+
+    // ── Step 2: Launch stealth browser with BRD residential proxy ────────────
+    log("Launching stealth browser with BRD residential proxy for v0.dev...");
+    const { chromium: stealthChrm } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    stealthChrm.use(StealthPlugin());
+
+    browser = await stealthChrm.launch({
       headless: true,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
-        "--disable-web-security",
-        "--allow-running-insecure-content",
+        "--ignore-certificate-errors",
       ],
     });
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
     const context = await browser.newContext({
-      userAgent: ua,
       viewport: { width: 1366, height: 768 },
       locale: "en-US",
       timezoneId: "America/New_York",
-      javaScriptEnabled: true,
-    });
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-      (window as any).chrome = { runtime: {} };
+      ignoreHTTPSErrors: true,
+      proxy: {
+        server: "http://brd.superproxy.io:33335",
+        username: "brd-customer-hl_86b34e68-zone-residential_proxy3-country-us",
+        password: "r74n9xvshrv7",
+      },
     });
     page = await context.newPage();
     page.setDefaultTimeout(45000);
 
-    // ── Step 1: Navigate to referral URL to set the referral cookie ──
-    log(`Navigating to referral URL: ${REFERRAL_URL}`);
-    await page.goto(REFERRAL_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(2000);
-
-    const afterRefUrl = page.url();
-    log(`After referral nav: ${afterRefUrl.substring(0, 120)}`);
-
-    // If not already on login/signup page, navigate there explicitly
-    if (!afterRefUrl.includes("v0.dev") && !afterRefUrl.includes("clerk") && !afterRefUrl.includes("accounts.")) {
-      log("Navigating to v0.dev login page...");
-      await page.goto("https://v0.dev/login?action=signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+    // ── Step 3: Navigate to Vercel signup ─────────────────────────────────────
+    log("Navigating to v0 referral URL...");
+    try {
+      await page.goto("https://v0.app/ref/97Y16O", { waitUntil: "domcontentloaded", timeout: 60000 });
       await page.waitForTimeout(2000);
-    }
+      log(`After referral nav: ${page.url().substring(0, 100)}`);
+    } catch {}
 
-    let currentUrl = page.url();
-    log(`Current URL: ${currentUrl.substring(0, 120)}`);
+    log("Navigating to Vercel signup page...");
+    await page.goto("https://vercel.com/signup/v0", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(3000);
+    log(`Signup page URL: ${page.url().substring(0, 100)}`);
 
-    // ── Step 2: Fill in email on Clerk signup form ──
+    // ── Step 4: Fill in email and submit ─────────────────────────────────────
     log("Looking for email input field...");
-    const emailSelectors = [
-      'input[name="emailAddress"]',
-      'input[type="email"]',
-      'input[placeholder*="email" i]',
-      'input[autocomplete="email"]',
-    ];
     let emailInput: any = null;
-    for (const sel of emailSelectors) {
+    for (const sel of ['input[type="email"]', 'input[name="email"]', 'input[placeholder*="email" i]']) {
       try {
         emailInput = await page.waitForSelector(sel, { timeout: 10000 });
         if (emailInput) { log(`Found email input: ${sel}`); break; }
       } catch {}
     }
     if (!emailInput) {
-      const pageContent = await page.content();
-      log(`Page content snippet: ${pageContent.substring(0, 500)}`);
-      return { success: false, error: "Could not find email input on v0.dev signup page" };
+      const pageText = await page.evaluate(() => document.body.innerText).catch(() => "");
+      log(`Page text: ${pageText.substring(0, 400)}`);
+      return { success: false, error: "Email input not found on Vercel signup page" };
     }
 
     await emailInput.click();
     await page.waitForTimeout(500);
     await emailInput.fill(outlookEmail);
-    log(`Entered email: ${outlookEmail}`);
     await page.waitForTimeout(800);
+    log(`Entered email: ${outlookEmail}`);
 
-    // Click continue / submit button
-    const continueSelectors = [
-      'button[type="submit"]',
-      'button:has-text("Continue")',
-      'button:has-text("Sign up")',
-      'button:has-text("Sign in")',
-      'button:has-text("Next")',
-      'button:has-text("Send")',
-    ];
+    // Click "Continue with Email"
     let continueBtn: any = null;
-    for (const sel of continueSelectors) {
-      try {
-        continueBtn = await page.$(sel);
-        if (continueBtn) { log(`Found continue button: ${sel}`); break; }
-      } catch {}
+    for (const sel of ['button[type="submit"]', 'button:has-text("Continue with Email")', 'button:has-text("Continue")', 'button:has-text("Sign up")']) {
+      try { continueBtn = await page.$(sel); if (continueBtn) { log(`Found button: ${sel}`); break; } } catch {}
     }
     if (continueBtn) {
       await continueBtn.click();
-      log("Clicked continue button");
+      log("Clicked Continue with Email");
     } else {
       await page.keyboard.press("Enter");
-      log("Pressed Enter to continue");
+      log("Pressed Enter to submit");
     }
 
-    await page.waitForTimeout(3000);
-    log(`URL after continue: ${page.url().substring(0, 120)}`);
+    await page.waitForTimeout(5000);
+    const afterSubmitText = await page.evaluate(() => document.body.innerText).catch(() => "");
+    log(`After-submit page text (200 chars): ${afterSubmitText.substring(0, 200)}`);
 
-    // ── Step 3: Read OTP from Outlook via OWA ──
-    log("Opening Outlook Web Access to read verification OTP...");
-    let otp: string | null = null;
-
-    owaBrowser = await chrm.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-    });
-    const owaContext = await owaBrowser.newContext({
-      userAgent: ua,
-      viewport: { width: 1366, height: 768 },
-      locale: "en-US",
-    });
-    await owaContext.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-      (window as any).chrome = { runtime: {} };
-    });
-    const owaPage = await owaContext.newPage();
-    owaPage.setDefaultTimeout(30000);
-
-    log("Logging into Outlook Web...");
-    await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await owaPage.waitForTimeout(2000);
-
-    const owaEmailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
-    if (owaEmailInput) {
-      await owaEmailInput.fill(outlookEmail);
-      const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-      if (nextBtn) await nextBtn.click(); else await owaPage.keyboard.press("Enter");
-      try { await owaPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 12000 }); } catch {}
-    }
-    const owaPassInput = await owaPage.$('input[type="password"], input[name="passwd"]');
-    if (owaPassInput) {
-      await owaPassInput.fill(outlookPassword);
-      const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-      if (signInBtn) await signInBtn.click(); else await owaPage.keyboard.press("Enter");
-      await owaPage.waitForTimeout(5000);
-    } else {
-      log("⚠️ OWA password field not found");
+    if (afterSubmitText.toLowerCase().includes("please try again") || afterSubmitText.toLowerCase().includes("try a different sign up")) {
+      return { success: false, error: "Vercel signup blocked by bot detection — try a different Outlook account or retry later" };
     }
 
-    let owaLoginUrl = owaPage.url();
-    log(`OWA post-login URL: ${owaLoginUrl.substring(0, 100)}`);
-
-    // Handle Microsoft security proofs page
-    if (owaLoginUrl.includes("account.live.com/proofs") || owaLoginUrl.includes("account.live.com/proof") || owaLoginUrl.includes("account.microsoft.com")) {
-      log("Microsoft security proofs page — navigating directly to Outlook inbox...");
-      await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await owaPage.waitForTimeout(3000);
-      owaLoginUrl = owaPage.url();
-    }
-
-    let isOnOutlook = false;
-    try {
-      const parsedOwa = new URL(owaLoginUrl);
-      isOnOutlook = parsedOwa.hostname.includes("outlook.live.com") || parsedOwa.hostname.includes("outlook.office");
-    } catch {}
-
-    if (!isOnOutlook) {
-      // Try navigating directly
-      await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await owaPage.waitForTimeout(3000);
-      owaLoginUrl = owaPage.url();
-    }
-
-    log(`Inbox URL: ${owaLoginUrl.substring(0, 100)}`);
-
-    // Poll inbox for v0/Vercel OTP email (up to 3 minutes)
-    log("Searching inbox for v0.dev/Vercel verification email (up to 3 min)...");
-    let foundEmail = false;
-    for (let attempt = 1; attempt <= 9 && !foundEmail; attempt++) {
-      await owaPage.waitForTimeout(attempt === 1 ? 5000 : 20000);
-      log(`Inbox check attempt ${attempt}/9...`);
-
-      try {
-        // Click refresh / look for emails matching v0 or Vercel
-        const allItems = await owaPage.$$('[role="option"], [data-convid], .customScrollBar [role="listitem"]');
-        log(`Found ${allItems.length} email items`);
-
-        for (const item of allItems.slice(0, 15)) {
-          try {
-            const itemText = (await item.textContent() || "").toLowerCase();
-            if (itemText.includes("v0") || itemText.includes("vercel") || itemText.includes("verification") || itemText.includes("sign in") || itemText.includes("code") || itemText.includes("otp")) {
-              log(`Found relevant email: ${itemText.substring(0, 100)}`);
-              await item.click();
-              await owaPage.waitForTimeout(2000);
-              foundEmail = true;
-
-              // Extract 6-digit OTP from email body
-              const bodyText = await owaPage.evaluate(() => document.body.innerText);
-              const otpMatch = bodyText.match(/\b(\d{6})\b/);
-              if (otpMatch) {
-                otp = otpMatch[1];
-                log(`✅ Extracted OTP: ${otp}`);
-              } else {
-                log(`Email body snippet: ${bodyText.substring(0, 300)}`);
-                log("⚠️ Could not extract 6-digit OTP from email body");
-              }
-              break;
-            }
-          } catch {}
-        }
-
-        if (!foundEmail && attempt < 9) {
-          log(`No v0/Vercel email yet — waiting 20s... (attempt ${attempt}/9)`);
-        }
-      } catch (listErr: any) {
-        log(`Inbox scan error: ${listErr.message.substring(0, 100)}`);
-      }
-    }
-
-    // Also check Junk/Spam
-    if (!foundEmail || !otp) {
-      log("Checking Junk/Spam folder for v0 email...");
-      try {
-        const junkLinks = await owaPage.$$('a[href*="junkemail"], [title*="Junk"], [aria-label*="Junk"], [aria-label*="Spam"]');
-        if (junkLinks.length > 0) {
-          await junkLinks[0].click();
-          await owaPage.waitForTimeout(3000);
-          const allJunk = await owaPage.$$('[role="option"], [data-convid]');
-          for (const item of allJunk.slice(0, 10)) {
-            try {
-              const itemText = (await item.textContent() || "").toLowerCase();
-              if (itemText.includes("v0") || itemText.includes("vercel") || itemText.includes("verification") || itemText.includes("code")) {
-                log(`Found v0 email in Junk: ${itemText.substring(0, 100)}`);
-                await item.click();
-                await owaPage.waitForTimeout(2000);
-                foundEmail = true;
-                const bodyText = await owaPage.evaluate(() => document.body.innerText);
-                const otpMatch = bodyText.match(/\b(\d{6})\b/);
-                if (otpMatch) { otp = otpMatch[1]; log(`✅ OTP from Junk: ${otp}`); }
-                break;
-              }
-            } catch {}
-          }
-        }
-      } catch (junkErr: any) {
-        log(`Junk check error: ${junkErr.message.substring(0, 80)}`);
-      }
-    }
+    // ── Step 5: Wait for OTP email in OWA ────────────────────────────────────
+    const otp = await waitForOtpEmail(owaPage, initialCount, 180000);
 
     try { await owaPage.close(); } catch {}
     try { await owaBrowser.close(); } catch {}
     owaBrowser = null;
 
     if (!otp) {
-      return { success: false, error: "Could not retrieve OTP from Outlook inbox — email not received or parsing failed" };
+      return { success: false, error: "Vercel OTP email not received within 3 minutes" };
     }
 
     // ── Step 4: Enter OTP on the v0 page ──
