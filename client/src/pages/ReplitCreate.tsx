@@ -188,7 +188,7 @@ export default function ReplitCreate() {
 
   const isBulk = count > 1;
   const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
-  const maxCount = Math.min(20, availableOutlookAccounts.length || 1);
+  const maxCount = Math.min(1000, availableOutlookAccounts.length || 1);
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
 
   return (

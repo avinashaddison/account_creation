@@ -3162,7 +3162,7 @@ export async function registerRoutes(
   app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
       const { count = 1, couponCode, cardId } = req.body;
-      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 20);
+      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
       const allOutlook = await storage.getAllPrivateOutlooks();
