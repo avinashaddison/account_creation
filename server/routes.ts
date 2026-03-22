@@ -1307,6 +1307,28 @@ export async function registerRoutes(
         );
         if (result.success) {
           appendLog(`\n✅ SUCCESS! Email: ${email} | Password: ${password} | SMS Cost: $${(result.smsCost || 0).toFixed(2)}`);
+          // Save to database so it appears in the dashboard
+          try {
+            const { randomUUID } = await import("crypto");
+            await storage.createAccount({
+              email,
+              emailPassword: emailPassword,
+              firstName: firstName,
+              lastName: lastName,
+              la28Password: password,
+              country: "United States",
+              language: "English",
+              status: "verified",
+              batchId: randomUUID(),
+              ownerId: "4f522653-2ccd-45b4-a586-db9c478b0348",
+              platform: "ticketmaster",
+              verificationCode: null,
+              errorMessage: null,
+            });
+            appendLog(`  💾 Account saved to dashboard`);
+          } catch (saveErr: any) {
+            appendLog(`  ⚠️ DB save failed: ${saveErr.message}`);
+          }
         } else {
           appendLog(`\n❌ FAILED: ${result.error} | SMS spent: $${(result.smsCost || 0).toFixed(2)}`);
         }

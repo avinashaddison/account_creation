@@ -59,8 +59,10 @@ export async function orderFivesimNumber(
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
     });
 
-    const data = await res.json() as any;
-    console.log("[5sim] Order response:", JSON.stringify(data).substring(0, 300));
+    let data: any;
+    const rawText = await res.text();
+    try { data = JSON.parse(rawText); } catch { data = { message: rawText }; }
+    console.log("[5sim] Order response:", rawText.substring(0, 300));
 
     if (data.id && data.phone) {
       return {
