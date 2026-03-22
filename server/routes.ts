@@ -1242,6 +1242,94 @@ export async function registerRoutes(
     }
   });
 
+  // Internal trigger: POST /api/internal/run-shakira with header x-internal-key: shakira2026
+  app.post("/api/internal/run-shakira", async (req, res) => {
+    if (req.headers["x-internal-key"] !== "shakira2026") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    const ZENROWS_WSS = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
+    const SOAX_BASE = "http://package-339420-country-us-sessionid-8flWFEEtSvKGBGsZ-sessionlength-300-opt-wb:Ld1VO4v28tYnfrpT@proxy.soax.com:5000";
+    const sessionId = Math.random().toString(36).substring(2, 14);
+    const tmProxy = SOAX_BASE.replace(/sessionid-[^-]+/, `sessionid-${sessionId}`);
+    const FIRST_NAMES = ["James","John","Robert","Michael","William","David","Richard","Joseph","Thomas","Charles"];
+    const LAST_NAMES = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Rodriguez","Martinez"];
+    const randomFrom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+    const runId = Date.now();
+    res.json({ started: true, runId });
+    // Run asynchronously in server background (no shell backgrounding issues)
+    setImmediate(async () => {
+      const logLines: string[] = [`[${new Date().toISOString()}] Run ${runId} started`];
+      const fs = await import("fs");
+      const logPath = `/tmp/shakira_internal_${runId}.log`;
+      const appendLog = (line: string) => {
+        logLines.push(line);
+        fs.appendFileSync(logPath, line + "\n");
+      };
+      try {
+        // Email creation with retry
+        let email = "", emailPassword = "TempPass123!", provider: any;
+        for (let att = 1; att <= 5; att++) {
+          try {
+            const domain = await getAvailableDomain(true); // prefer mail.gw to avoid mail.tm rate limits
+            const username = generateRandomUsername();
+            email = `${username}@${domain}`;
+            appendLog(`📧 Email attempt ${att}: ${email}`);
+            const r = await createTempEmail(email, emailPassword);
+            provider = r.provider;
+            appendLog(`✅ Email created: ${email} (${provider})`);
+            break;
+          } catch (e: any) {
+            appendLog(`⚠️ Email fail ${att}/5: ${e.message}`);
+            await new Promise(r => setTimeout(r, att * 8000));
+            if (att === 5) throw e;
+          }
+        }
+        const firstName = randomFrom(FIRST_NAMES);
+        const lastName = randomFrom(LAST_NAMES);
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%";
+        let pw = "Ab1!";
+        for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+        const password = pw.split("").sort(() => Math.random() - 0.5).join("");
+        appendLog(`👤 ${firstName} ${lastName} | 🔑 ${password}`);
+        appendLog(`🌐 TM Proxy: ${tmProxy.substring(0, 50)}...`);
+        const result = await tmFullRegistrationFlow(
+          email, firstName, lastName, password,
+          (status) => appendLog(`  [STATUS] ${status}`),
+          async () => {
+            appendLog("  [EMAIL] Polling for verification code...");
+            const code = await pollForVerificationCode(email, emailPassword, provider, 70, 3000);
+            appendLog(`  [EMAIL] Code: ${code || "NOT FOUND"}`);
+            return code;
+          },
+          (msg) => appendLog(`  ${msg}`),
+          tmProxy,
+          false, true, ZENROWS_WSS
+        );
+        if (result.success) {
+          appendLog(`\n✅ SUCCESS! Email: ${email} | Password: ${password} | SMS Cost: $${(result.smsCost || 0).toFixed(2)}`);
+        } else {
+          appendLog(`\n❌ FAILED: ${result.error} | SMS spent: $${(result.smsCost || 0).toFixed(2)}`);
+        }
+      } catch (err: any) {
+        appendLog(`💥 Fatal error: ${err.message}`);
+      }
+    });
+  });
+
+  app.get("/api/internal/run-shakira/:runId", async (req, res) => {
+    if (req.headers["x-internal-key"] !== "shakira2026") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    const fs = await import("fs");
+    const logPath = `/tmp/shakira_internal_${req.params.runId}.log`;
+    try {
+      const content = fs.readFileSync(logPath, "utf8");
+      res.json({ log: content });
+    } catch {
+      res.status(404).json({ error: "Log not found" });
+    }
+  });
+
   app.get("/api/wallet", requireAuth, async (req, res) => {
     const user = await storage.getUser(req.session.userId!);
     if (!user) return res.status(401).json({ error: "User not found" });

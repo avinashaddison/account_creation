@@ -268,14 +268,15 @@ async function handlePhoneVerification(
   onStatusUpdate: (status: string) => void,
   log: (message: string) => void
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
-  const MAX_PHONE_RETRIES = 3;
+  const MAX_PHONE_RETRIES = 5;
   let totalSmsCost = 0;
   let lastError = "";
+  const triedNumbers = new Set<string>(); // avoid retrying same VoIP number
 
   for (let attempt = 1; attempt <= MAX_PHONE_RETRIES; attempt++) {
     log(`📱 Phone verification attempt ${attempt}/${MAX_PHONE_RETRIES}`);
     console.log(`[TM-Playwright] Phone verification attempt ${attempt}/${MAX_PHONE_RETRIES}`);
-    const result = await attemptPhoneVerification(page, onStatusUpdate, attempt, log);
+    const result = await attemptPhoneVerification(page, onStatusUpdate, attempt, log, triedNumbers);
     totalSmsCost += result.smsCost;
 
     if (result.success) {
@@ -288,7 +289,7 @@ async function handlePhoneVerification(
     console.log(`[TM-Playwright] Phone attempt ${attempt}/${MAX_PHONE_RETRIES} failed: ${lastError}`);
 
     if (attempt < MAX_PHONE_RETRIES) {
-      const isNonRetryable = lastError.includes("Phone input field not found") || lastError.includes("Challenge") || lastError.includes("browser closed");
+      const isNonRetryable = lastError.includes("Challenge") || lastError.includes("browser closed");
       if (isNonRetryable) {
         log(`❌ Non-retryable phone error, stopping`);
         console.log("[TM-Playwright] Non-retryable phone error, stopping retries");
@@ -297,9 +298,19 @@ async function handlePhoneVerification(
 
       log(`🔄 Retrying with new phone number...`);
       onStatusUpdate("verifying");
-      console.log("[TM-Playwright] Dismissing phone OTP dialog before retry...");
-      await dismissPhoneDialog(page);
-      await page.waitForTimeout(2000);
+
+      // If phone input wasn't found, the page state may have changed — try reloading
+      if (lastError.includes("Phone input field not found")) {
+        console.log("[TM-Playwright] Phone input not found — reloading page to recover state...");
+        try {
+          await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 });
+          await page.waitForTimeout(3000);
+        } catch {}
+      } else {
+        console.log("[TM-Playwright] Dismissing phone OTP dialog before retry...");
+        await dismissPhoneDialog(page);
+        await page.waitForTimeout(2000);
+      }
     }
   }
 
@@ -352,13 +363,15 @@ async function attemptPhoneVerification(
   page: Page,
   onStatusUpdate: (status: string) => void,
   attemptNum: number,
-  log: (message: string) => void
+  log: (message: string) => void,
+  triedNumbers?: Set<string>
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
   let smsCost = 0;
   // Provider-agnostic cancel / poll helpers — set below based on which service wins
   let cancelOrder: () => Promise<void> = async () => {};
   let pollCode: () => Promise<string | null> = async () => null;
   let phoneNumber = "";
+  let lastSmsOrder: any = null; // tracks the successful SMSPool order for cc/country info
 
   try {
     // --- Acquire phone number: try 5sim first, fall back to SMSPool ---
@@ -382,9 +395,28 @@ async function attemptPhoneVerification(
     }
 
     // Fall back to SMSPool if 5sim not used
+    // Country priority: 22=US Virtual, 2=UK, 3=Netherlands, 6=Sweden
+    // Country 1 (US physical) is blocked for Ticketmaster by SMSPool
     if (!phoneNumber) {
-      log(`📲 Ordering SMS number from SMSPool...`);
-      const smsOrder = await orderSMSNumber(1, "Ticketmaster");
+      // US-only: country 22 = US Virtual, country 1 = US Physical
+      const smsCountries = [22, 1];
+      let smsOrder: any = { success: false, error: "No countries tried" };
+      for (const countryId of smsCountries) {
+        log(`📲 Ordering SMS from SMSPool (country ${countryId})...`);
+        smsOrder = await orderSMSNumber(countryId, "Ticketmaster");
+        if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
+          console.log(`[TM-Playwright] SMSPool country ${countryId} failed: ${smsOrder.error} — trying next`);
+          continue;
+        }
+        // Skip if this exact number was already tried (same VoIP range assigned repeatedly)
+        const numStr = String(smsOrder.number);
+        if (triedNumbers && triedNumbers.has(numStr)) {
+          console.log(`[TM-Playwright] Skipping already-tried number ${numStr} (country ${countryId}) — trying next country`);
+          await cancelSMSOrder(smsOrder.orderId).catch(() => {});
+          continue;
+        }
+        break; // found a fresh number
+      }
       if (!smsOrder.success || !smsOrder.number || !smsOrder.orderId) {
         log(`❌ SMSPool order failed: ${smsOrder.error}`);
         return { success: false, error: `SMS order failed: ${smsOrder.error}`, smsCost: 0 };
@@ -392,13 +424,23 @@ async function attemptPhoneVerification(
       const orderId = smsOrder.orderId;
       smsCost = 0.36;
       phoneNumber = String(smsOrder.number);
+      if (triedNumbers) triedNumbers.add(phoneNumber); // mark as tried
+      // Format: include country code prefix
       if (!phoneNumber.startsWith("+")) {
-        phoneNumber = phoneNumber.startsWith("1") ? `+${phoneNumber}` : `+1${phoneNumber}`;
+        const cc = smsOrder.cc ? String(smsOrder.cc) : "";
+        if (cc && !phoneNumber.startsWith(cc)) {
+          phoneNumber = `+${cc}${phoneNumber.startsWith("0") ? phoneNumber.substring(1) : phoneNumber}`;
+        } else if (phoneNumber.startsWith("1") && phoneNumber.length === 11) {
+          phoneNumber = `+${phoneNumber}`;
+        } else {
+          phoneNumber = `+1${phoneNumber}`;
+        }
       }
-      log(`📱 Got SMSPool number: ${phoneNumber.replace(/(\d{3})\d{4}(\d{3})/, '$1****$2')}`);
-      console.log(`[TM-Playwright] SMSPool ordered (attempt ${attemptNum}): $${smsCost} (order: ${orderId})`);
+      lastSmsOrder = smsOrder; // save for country code lookup in phone entry
+      log(`📱 Got SMSPool number: ${phoneNumber.substring(0, 6)}****${phoneNumber.slice(-3)} (cc:+${smsOrder.cc || "??"})`);
+      console.log(`[TM-Playwright] SMSPool ordered (attempt ${attemptNum}): $${smsCost} phone=${phoneNumber} (order: ${orderId})`);
       cancelOrder = async () => { await cancelSMSOrder(orderId); };
-      pollCode = async () => { return await pollForSMSCode(orderId, 60, 3000); };
+      pollCode = async () => { return await pollForSMSCode(orderId, 120, 3000); }; // 6 min timeout
     }
 
     const phoneClickResult = await page.evaluate(`(() => {
@@ -529,8 +571,185 @@ async function attemptPhoneVerification(
     })()`);
     console.log("[TM-Playwright] Phone page inputs:", JSON.stringify(phoneInputs));
 
+    // Extract the country code and local number properly
+    const phoneCC = lastSmsOrder?.cc ? String(lastSmsOrder.cc) : "1";
     const rawDigits = phoneNumber.replace(/\D/g, '');
-    const localNumber = rawDigits.startsWith("1") ? rawDigits.substring(1) : rawDigits;
+    // Strip the country code prefix to get local digits
+    const localNumber = rawDigits.startsWith(phoneCC)
+      ? rawDigits.substring(phoneCC.length)
+      : rawDigits.startsWith("1") ? rawDigits.substring(1) : rawDigits;
+    console.log(`[TM-Playwright] Phone CC: +${phoneCC}, local: ${localNumber}, full: ${phoneNumber}`);
+
+    // For non-US numbers, change TM's country picker from +1 (US) to the correct country
+    if (phoneCC !== "1") {
+      console.log(`[TM-Playwright] Non-US phone (+${phoneCC}), attempting country picker change...`);
+
+      // Dump the full HTML of the phone form area before clicking picker
+      const phoneFormHtml = await page.evaluate(`(() => {
+        var tel = document.querySelector('input[type="tel"]');
+        return tel ? (tel.closest('form') || tel.closest('div[class*="Form"]') || tel.parentElement?.parentElement || tel.parentElement)?.outerHTML?.substring(0, 2000) : 'no-tel-input';
+      })()`);
+      console.log(`[TM-Playwright] Phone form HTML (before picker): ${phoneFormHtml}`);
+
+      // Try Playwright-native click on country picker (by aria-label)
+      let pickerOpened = false;
+      for (const pickerSel of [
+        '[aria-label="Open country picker"]',
+        '[aria-label*="country picker" i]',
+        '[aria-label*="country" i]',
+        'button[aria-label*="flag" i]',
+      ]) {
+        try {
+          const el = page.locator(pickerSel).first();
+          if (await el.isVisible({ timeout: 1000 })) {
+            await el.click();
+            console.log(`[TM-Playwright] Country picker clicked via: ${pickerSel}`);
+            pickerOpened = true;
+            break;
+          }
+        } catch {}
+      }
+
+      // JS fallback if native click didn't work
+      if (!pickerOpened) {
+        const pickerResult = await page.evaluate(`(() => {
+          var btns = document.querySelectorAll('button, [role="button"]');
+          for (var i = 0; i < btns.length; i++) {
+            var el = btns[i];
+            var label = (el.getAttribute('aria-label') || el.textContent || '').toLowerCase();
+            if (label.includes('country') || label.includes('flag') || label.includes('picker')) {
+              el.click();
+              return 'js-picker-clicked: ' + label.substring(0, 40);
+            }
+          }
+          var telInput = document.querySelector('input[type="tel"]');
+          if (telInput) {
+            var parent = telInput.parentElement;
+            if (parent) {
+              var firstBtn = parent.querySelector('button');
+              if (firstBtn) { firstBtn.click(); return 'first-btn-in-parent'; }
+              var firstChild = parent.firstElementChild;
+              if (firstChild && firstChild !== telInput) { firstChild.click(); return 'first-child: ' + firstChild.tagName; }
+            }
+          }
+          return 'picker-not-found';
+        })()`);
+        console.log(`[TM-Playwright] Country picker JS result: ${pickerResult}`);
+      }
+      await page.waitForTimeout(1200);
+
+      // Dump page state after picker click (see what dropdown opened)
+      const afterPickerHtml = await page.evaluate(`(() => {
+        var lists = document.querySelectorAll('[role="listbox"], [role="dialog"], ul, [class*="dropdown" i], [class*="modal" i]');
+        var result = [];
+        for (var i = 0; i < Math.min(lists.length, 3); i++) {
+          result.push(lists[i].outerHTML.substring(0, 500));
+        }
+        return result.join('\\n---\\n');
+      })()`);
+      console.log(`[TM-Playwright] After picker click HTML: ${afterPickerHtml?.substring(0, 1000)}`);
+
+      // Find and type in the search box
+      const ccMap: Record<string, string> = { '44': 'United Kingdom', '31': 'Netherlands', '46': 'Sweden', '371': 'Latvia', '61': 'Australia' };
+      const countryName = ccMap[phoneCC] || '';
+      const searchTerm = countryName || `+${phoneCC}`;
+
+      let searchFilled = false;
+      for (const searchSel of [
+        'input[placeholder*="Search" i]',
+        'input[placeholder*="country" i]',
+        'input[type="search"]',
+        '[role="dialog"] input',
+        '[role="listbox"] input',
+      ]) {
+        try {
+          const el = page.locator(searchSel).first();
+          if (await el.isVisible({ timeout: 1000 })) {
+            await el.fill(countryName || phoneCC);
+            console.log(`[TM-Playwright] Country search typed "${countryName || phoneCC}" via: ${searchSel}`);
+            searchFilled = true;
+            break;
+          }
+        } catch {}
+      }
+      if (!searchFilled) {
+        await page.evaluate(`((term) => {
+          var inputs = document.querySelectorAll('input');
+          for (var i = 0; i < inputs.length; i++) {
+            var rect = inputs[i].getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0 && inputs[i].type !== 'tel' && inputs[i].type !== 'checkbox') {
+              inputs[i].focus();
+              var nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+              if (nativeInputSetter) nativeInputSetter.call(inputs[i], term);
+              inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+              return;
+            }
+          }
+        })("${countryName || phoneCC}")`);
+        console.log(`[TM-Playwright] Country search typed via JS fallback`);
+      }
+      await page.waitForTimeout(1200); // wait for search filter to apply
+
+      // Dump list items after search for debugging
+      const listHtml = await page.evaluate(`(() => {
+        var items = document.querySelectorAll('[role="option"], li[id*="dialCode"]');
+        var result = [];
+        for (var i = 0; i < Math.min(items.length, 5); i++) result.push(items[i].textContent?.trim()?.substring(0, 60));
+        return JSON.stringify(result);
+      })()`);
+      console.log(`[TM-Playwright] Country list items after search: ${listHtml}`);
+
+      // Click the matching country list item
+      let countryClicked = false;
+
+      // Strategy 1: text-match on +CC or country name
+      for (const listSel of ['[role="option"]', 'li[id*="dialCode"]', 'li']) {
+        try {
+          const items = page.locator(listSel);
+          const count = await items.count();
+          for (let i = 0; i < count; i++) {
+            const text = await items.nth(i).textContent().catch(() => '');
+            if (text && (text.includes(`+${phoneCC}`) || (countryName && text.toLowerCase().includes(countryName.toLowerCase())))) {
+              await items.nth(i).click({ force: true });
+              console.log(`[TM-Playwright] Country selected (text-match): ${text.trim().substring(0, 60)}`);
+              countryClicked = true;
+              break;
+            }
+          }
+          if (countryClicked) break;
+        } catch {}
+      }
+
+      // Strategy 2: if text-match fails, click the first visible option (search should have filtered to right country)
+      if (!countryClicked) {
+        console.log(`[TM-Playwright] Text-match failed — clicking first visible option after search...`);
+        try {
+          const firstOption = page.locator('[role="option"]').first();
+          if (await firstOption.isVisible({ timeout: 1000 })) {
+            const txt = await firstOption.textContent().catch(() => '');
+            await firstOption.click({ force: true });
+            console.log(`[TM-Playwright] First option clicked: ${txt?.trim().substring(0, 60)}`);
+            countryClicked = true;
+          }
+        } catch {}
+      }
+
+      // Strategy 3: JS click on first list item
+      if (!countryClicked) {
+        const jsResult = await page.evaluate(`(() => {
+          var options = document.querySelectorAll('[role="option"], li[id*="dialCode"]');
+          if (options.length > 0) { options[0].click(); return 'js-first-option: ' + options[0].textContent?.trim()?.substring(0, 40); }
+          return 'no-options-found';
+        })()`);
+        console.log(`[TM-Playwright] JS country click: ${jsResult}`);
+        if (!String(jsResult).includes('no-options')) countryClicked = true;
+      }
+
+      if (!countryClicked) {
+        console.log(`[TM-Playwright] Country selection failed — number may be entered with US format`);
+      }
+      await page.waitForTimeout(600);
+    }
 
     const phoneSelectors = [
       'input[type="tel"]',
@@ -554,7 +773,7 @@ async function attemptPhoneVerification(
             await exists.click();
             await page.waitForTimeout(300);
             await exists.fill(localNumber);
-            console.log(`[TM-Playwright] Phone filled via ${sel}: ${localNumber}`);
+            console.log(`[TM-Playwright] Phone filled via ${sel}: ${localNumber} (local, cc was +${phoneCC})`);
             phoneFilled = true;
             break;
           }
@@ -643,6 +862,16 @@ async function attemptPhoneVerification(
       var hasPhoneDialog = lower.includes('add your phone') || lower.includes('verify your phone');
       return {hasPhoneOTP: hasPhoneOTP, hasPhoneDialog: hasPhoneDialog};
     })()`);
+    // Check for validation error (e.g., "Please enter a valid" number — country picker not changed)
+    const validationError = await page.evaluate(`(() => {
+      var text = (document.body ? document.body.innerText : '').toLowerCase();
+      return text.includes('please enter a valid') || text.includes('invalid phone') || text.includes('not a valid phone');
+    })()`);
+    if (validationError) {
+      console.log("[TM-Playwright] Phone validation error detected — number rejected by TM (wrong format/country)");
+      await cancelOrder();
+      return { success: false, error: "Phone number rejected: TM validation error (country picker may not have changed)", smsCost };
+    }
     console.log("[TM-Playwright] After send code - OTP visible:", afterSendState.hasPhoneOTP, "dialog open:", afterSendState.hasPhoneDialog);
 
     if (!afterSendState.hasPhoneOTP && afterSendState.hasPhoneDialog) {

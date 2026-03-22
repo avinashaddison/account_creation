@@ -41,25 +41,25 @@ export async function getSMSPoolBalance(): Promise<{ balance: string; configured
 export async function orderSMSNumber(
   country: number = 1,
   service: string = "Ticketmaster",
-  pool: string = "1"
+  pool: string = ""
 ): Promise<OrderSMSResponse> {
   if (!SMSPOOL_API_KEY) {
     return { success: false, error: "SMSPOOL_API_KEY not configured" };
   }
 
   try {
-    console.log(`[SMSPool] Ordering SMS number for ${service} in country ${country} (pool ${pool})...`);
-    const params = new URLSearchParams({
+    console.log(`[SMSPool] Ordering SMS number for ${service} in country ${country}${pool ? ` (pool ${pool})` : " (auto pool)"}...`);
+    const params: Record<string, string> = {
       key: SMSPOOL_API_KEY,
       country: String(country),
       service: service,
-      pool: pool,
-    });
+    };
+    if (pool) params.pool = pool;
 
     const res = await fetch(`${SMSPOOL_BASE_URL}/purchase/sms`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
+      body: new URLSearchParams(params).toString(),
     });
 
     const data = await res.json() as any;

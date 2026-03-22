@@ -19,7 +19,7 @@ async function testTMSignup() {
   const firstName = "John";
   const lastName = "Smith";
 
-  const proxyUrl = "http://package-339278-country-us-sessionid-diag001test-sessionlength-300-opt-wb:ejOmfeLuOA4CLYRh@proxy.soax.com:5000";
+  const proxyUrl = "http://package-339420-country-us-sessionid-diag001test-sessionlength-300-opt-wb:Ld1VO4v28tYnfrpT@proxy.soax.com:5000";
 
   console.log(`\n=== TM Signup Diagnostic Test ===`);
   console.log(`Email: ${email}`);
@@ -39,8 +39,8 @@ async function testTMSignup() {
     ignoreHTTPSErrors: true,
     proxy: {
       server: "http://proxy.soax.com:5000",
-      username: "package-339278-country-us-sessionid-diag001test-sessionlength-300-opt-wb",
-      password: "ejOmfeLuOA4CLYRh"
+      username: "package-339420-country-us-sessionid-diag001test-sessionlength-300-opt-wb",
+      password: "Ld1VO4v28tYnfrpT"
     }
   });
   const page = await context.newPage();

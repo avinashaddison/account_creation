@@ -380,9 +380,15 @@ export async function pollForVerificationCode(
   maxAttempts: number = 70,
   intervalMs: number = 3000
 ): Promise<string | null> {
-  let token = await getAuthToken(address, password, provider).catch(() => null);
+  let token: string | null = null;
+  for (let t = 1; t <= 5; t++) {
+    token = await getAuthToken(address, password, provider).catch(() => null);
+    if (token) break;
+    console.log(`[Mail] Token fetch failed for ${address}, retry ${t}/5 in 5s...`);
+    await new Promise(r => setTimeout(r, 5000));
+  }
   if (!token) {
-    console.log(`[Mail] Failed to get initial token for ${address}, aborting poll`);
+    console.log(`[Mail] Failed to get initial token for ${address} after 5 retries, aborting poll`);
     return null;
   }
 

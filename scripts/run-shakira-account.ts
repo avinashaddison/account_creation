@@ -18,7 +18,7 @@ function generatePassword(): string {
 
 // Presale: ZenRows WSS, TM Registration: SOAX residential proxy
 const ZENROWS_WSS = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
-const SOAX_BASE   = "http://package-339278-country-us-sessionid-kfLq8QIZ0wGMrrtc-sessionlength-300-opt-wb:ejOmfeLuOA4CLYRh@proxy.soax.com:5000";
+const SOAX_BASE   = "http://package-339420-country-us-sessionid-8flWFEEtSvKGBGsZ-sessionlength-300-opt-wb:Ld1VO4v28tYnfrpT@proxy.soax.com:5000";
 
 // Generate a fresh SOAX session ID each run to avoid Akamai flagged IPs
 function freshSoaxProxy(base: string): string {
@@ -27,18 +27,34 @@ function freshSoaxProxy(base: string): string {
 }
 const TM_PROXY = freshSoaxProxy(SOAX_BASE);
 
+// Create temp email with retry using fresh usernames/domains on each attempt
+async function createEmailWithRetry(maxAttempts = 5): Promise<{ email: string; emailPassword: string; provider: any }> {
+  const emailPassword = "TempPass123!";
+  let lastErr: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const domain = await getMailTmOnlyDomain();
+      const username = generateRandomUsername();
+      const email = `${username}@${domain}`;
+      console.log(`📧 Email attempt ${attempt}: ${email}`);
+      const { provider } = await createTempEmail(email, emailPassword);
+      console.log(`✅ Temp email created via: ${provider}`);
+      return { email, emailPassword, provider };
+    } catch (err: any) {
+      lastErr = err;
+      const waitMs = attempt * 8000; // 8s, 16s, 24s, 32s, 40s between retries
+      console.log(`⚠️ Email creation failed (attempt ${attempt}/${maxAttempts}): ${err.message} — retrying in ${waitMs/1000}s with fresh address...`);
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+  }
+  throw new Error(`Email creation failed after ${maxAttempts} attempts: ${lastErr?.message}`);
+}
+
 async function main() {
   console.log("=== Shakira Presale + TM Account Creation ===\n");
 
-  // 1. Create temp email
-  const domain = await getMailTmOnlyDomain();
-  const username = generateRandomUsername();
-  const email = `${username}@${domain}`;
-  const emailPassword = "TempPass123!";
-
-  console.log(`📧 Email: ${email}`);
-  const { provider } = await createTempEmail(email, emailPassword);
-  console.log(`✅ Temp email created via: ${provider}`);
+  // 1. Create temp email with resilient retry
+  const { email, emailPassword, provider } = await createEmailWithRetry(5);
 
   // 2. Account details
   const firstName = randomFrom(FIRST_NAMES);
