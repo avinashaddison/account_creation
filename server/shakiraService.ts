@@ -203,7 +203,7 @@ export async function doShakiraPresaleStep(
     for (let i = 0; i < 20; i++) {
       await page.waitForTimeout(2000);
       const url = page.url();
-      console.log(`[Shakira] URL after wait ${i + 1}: ${url.substring(0, 120)}`);
+      console.log(`[Shakira] URL after wait ${i + 1}: ${url}`);
 
       // Confirmed on TM auth / registration page
       if (
@@ -215,8 +215,9 @@ export async function doShakiraPresaleStep(
         url.includes("ticketmaster.es/login")
       ) {
         log(`🔗 Redirected to TM registration: ${url.substring(0, 80)}`);
+        console.log(`[Shakira] FULL redirect URL: ${url}`);
         redirected = true;
-        break;
+        return { success: true, redirectUrl: url };
       }
 
       // Confirmation page
@@ -229,8 +230,9 @@ export async function doShakiraPresaleStep(
       // Still on Shakira page — check if the URL changed at all
       if (!url.includes("shakira") && url.includes("ticketmaster")) {
         log(`🔗 Left Shakira page → now at: ${url.substring(0, 80)}`);
+        console.log(`[Shakira] FULL redirect URL: ${url}`);
         redirected = true;
-        break;
+        return { success: true, redirectUrl: url };
       }
     }
 
@@ -239,7 +241,7 @@ export async function doShakiraPresaleStep(
       log(`📍 Still at: ${finalUrl.substring(0, 80)} — TM registration will navigate directly`);
     }
 
-    return { success: true };
+    return { success: true, redirectUrl: undefined };
   } catch (err: any) {
     console.log("[Shakira] Presale step error:", err.message);
     return { success: false, error: err.message };

@@ -268,7 +268,7 @@ async function handlePhoneVerification(
   onStatusUpdate: (status: string) => void,
   log: (message: string) => void
 ): Promise<{ success: boolean; error?: string; smsCost: number }> {
-  const MAX_PHONE_RETRIES = 5;
+  const MAX_PHONE_RETRIES = 1;
   let totalSmsCost = 0;
   let lastError = "";
   const triedNumbers = new Set<string>(); // avoid retrying same VoIP number
@@ -580,9 +580,10 @@ async function attemptPhoneVerification(
       : rawDigits.startsWith("1") ? rawDigits.substring(1) : rawDigits;
     console.log(`[TM-Playwright] Phone CC: +${phoneCC}, local: ${localNumber}, full: ${phoneNumber}`);
 
-    // For non-US numbers, change TM's country picker from +1 (US) to the correct country
-    if (phoneCC !== "1") {
-      console.log(`[TM-Playwright] Non-US phone (+${phoneCC}), attempting country picker change...`);
+    // Always set the country picker to match the phone's CC
+    // (TM.es defaults to Spain +34, so even US numbers need the picker changed)
+    {
+      console.log(`[TM-Playwright] Setting country picker to +${phoneCC}...`);
 
       // Dump the full HTML of the phone form area before clicking picker
       const phoneFormHtml = await page.evaluate(`(() => {
@@ -650,7 +651,7 @@ async function attemptPhoneVerification(
       console.log(`[TM-Playwright] After picker click HTML: ${afterPickerHtml?.substring(0, 1000)}`);
 
       // Find and type in the search box
-      const ccMap: Record<string, string> = { '44': 'United Kingdom', '31': 'Netherlands', '46': 'Sweden', '371': 'Latvia', '61': 'Australia' };
+      const ccMap: Record<string, string> = { '1': 'United States', '44': 'United Kingdom', '31': 'Netherlands', '46': 'Sweden', '371': 'Latvia', '61': 'Australia', '34': 'Spain' };
       const countryName = ccMap[phoneCC] || '';
       const searchTerm = countryName || `+${phoneCC}`;
 
@@ -1102,16 +1103,19 @@ async function doTMRegistration(
   console.log(`[TM-Playwright] proxyUrl received: ${proxyUrl ? proxyUrl.substring(0, 60) + '...' : 'NONE'}`);
   console.log(`[TM-Playwright] presaleProxyUrl: ${presaleProxyUrl ? presaleProxyUrl.substring(0, 60) + '...' : 'NONE'}`);
 
-  // --- Split-session hybrid: ZenRows WSS for presale, SOAX for TM account ---
+  // --- Single ZenRows session: presale + TM account creation in same browser ---
   // When presaleProxyUrl (ZenRows WSS) is provided AND shakiraPresale is enabled,
-  // run the presale form in a separate ZenRows browser then close it before opening
-  // the SOAX-proxied local browser for TM account creation.
+  // run the presale form in a ZenRows browser. After the presale redirect, the page
+  // is already at the TM auth URL — reuse that same page for TM registration.
   const useHybridProxy = !!(shakiraPresale && presaleProxyUrl && presaleProxyUrl.startsWith('wss://'));
   let hybridPresaleDone = false;
+  let presaleCapturedRedirectUrl: string | undefined;
+  let hybridTMBrowser: Browser | null = null;
+  let hybridTMPage: Page | null = null;
 
   if (useHybridProxy) {
     log(`🌐 Opening ZenRows browser for Shakira presale...`);
-    console.log(`[TM-Playwright] Hybrid mode: ZenRows WSS for presale, SOAX for TM account`);
+    console.log(`[TM-Playwright] Hybrid mode: ZenRows WSS for presale + TM account (same session)`);
     let presaleRemote: Browser | null = null;
     try {
       presaleRemote = await chromium.connectOverCDP(presaleProxyUrl!, { timeout: 60000 });
@@ -1135,7 +1139,12 @@ async function doTMRegistration(
       if (!presaleResult.success) {
         log(`⚠️ Shakira presale step failed — ${presaleResult.error}`);
       }
+      if (presaleResult.redirectUrl) {
+        presaleCapturedRedirectUrl = presaleResult.redirectUrl;
+        console.log(`[TM-Playwright] Captured presale redirect URL: ${presaleCapturedRedirectUrl}`);
+      }
       hybridPresaleDone = true;
+      log(`✅ ZenRows presale done — closing presale browser, TM registration uses BRD browser`);
     } catch (err: any) {
       log(`⚠️ Presale ZenRows browser error: ${err.message?.substring(0, 80)} — continuing with TM account...`);
       console.log(`[TM-Playwright] Presale ZenRows error:`, err.message);
@@ -1144,11 +1153,10 @@ async function doTMRegistration(
         try { await presaleRemote.close(); } catch {}
         presaleRemote = null;
       }
-      log(`🔒 ZenRows presale browser closed. Opening SOAX browser for TM account...`);
     }
   }
 
-  const isBrowserAPI = !useHybridProxy && proxyUrl && proxyUrl.startsWith('wss://');
+  const isBrowserAPI = !!(proxyUrl && proxyUrl.startsWith('wss://'));
   console.log(`[TM-Playwright] isBrowserAPI: ${isBrowserAPI}`);
   let remoteBrowser: Browser | null = null;
   let page: Page;
@@ -1187,15 +1195,19 @@ async function doTMRegistration(
       if (proxyUrl && proxyUrl.startsWith("http")) {
         try {
           const parsed = new URL(proxyUrl);
+          // Strip SOAX web-bypass flag (-opt-wb) from username — it blocks Playwright's CONNECT tunnel
+          const cleanUsername = (parsed.username ? decodeURIComponent(parsed.username) : "")
+            .replace(/-opt-wb$/i, "")
+            .replace(/-opt-[a-z0-9]+$/i, "");
           contextOptions.proxy = {
             server: `${parsed.protocol}//${parsed.hostname}:${parsed.port}`,
-            username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+            username: cleanUsername || undefined,
             password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
           };
           // ZenRows superproxy (and some residential proxies) do SSL interception;
           // ignore certificate errors so HTTPS sites load through the proxy tunnel
           contextOptions.ignoreHTTPSErrors = true;
-          console.log(`[TM-Playwright] Using proxy server: ${parsed.hostname}:${parsed.port}`);
+          console.log(`[TM-Playwright] Using proxy server: ${parsed.hostname}:${parsed.port} username: ${cleanUsername.substring(0, 40)}...`);
         } catch (e: any) {
           console.log(`[TM-Playwright] Could not parse proxy URL: ${e.message}`);
         }
@@ -1288,21 +1300,24 @@ async function doTMRegistration(
         skipDirectTMNav = true;
       }
     } else if (shakiraPresale && hybridPresaleDone) {
-      // Hybrid mode: presale was already done in ZenRows browser, proceed directly to TM
-      log(`🎤 Presale already completed via ZenRows — navigating to TM account creation...`);
-      console.log("[TM-Playwright] Hybrid: presale done, skipping presale step in SOAX browser");
+      // Hybrid mode: presale done in ZenRows, BRD browser opened fresh — navigate to captured redirect URL
+      log(`🎤 Presale done via ZenRows — navigating BRD browser to TM auth page...`);
+      console.log("[TM-Playwright] Hybrid: BRD browser will navigate to presale redirect URL");
     }
 
     if (!skipDirectTMNav) {
       log(`🔗 Navigating to Ticketmaster sign-up page...`);
       console.log("[TM-Playwright] Navigating to TM create_account...");
+      const tmNavUrl = presaleCapturedRedirectUrl ||
+        "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=860a437ea065.web.ticketmaster.es&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=es-es&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-es";
+      console.log("[TM-Playwright] TM nav URL:", tmNavUrl.substring(0, 200));
       try {
-        await page.goto("https://www.ticketmaster.com/member/create_account", { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.goto(tmNavUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       } catch (navErr: any) {
         if (navErr.message && (navErr.message.includes("robots.txt") || navErr.message.includes("brob") || navErr.message.includes("restricted"))) {
           console.log("[TM-Playwright] robots.txt restriction, navigating directly to auth URL...");
           try {
-            await page.goto("https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf7204a7e97.web.ticketmaster.us&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-us", { waitUntil: "domcontentloaded", timeout: 60000 });
+            await page.goto("https://auth.ticketmaster.com/as/authorization.oauth2?client_id=860a437ea065.web.ticketmaster.es&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=es-es&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-es", { waitUntil: "domcontentloaded", timeout: 60000 });
           } catch (authNavErr: any) {
             console.log("[TM-Playwright] Auth URL navigation failed:", authNavErr.message?.substring(0, 150));
             throw new Error("Proxy connection failed - could not navigate to Ticketmaster auth page");
@@ -1416,7 +1431,7 @@ async function doTMRegistration(
       }
     }
 
-    const signupUrl = "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=8bf7204a7e97.web.ticketmaster.us&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=en-us&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-us";
+    const signupUrl = "https://auth.ticketmaster.com/as/authorization.oauth2?client_id=860a437ea065.web.ticketmaster.es&response_type=code&scope=openid%20profile%20phone%20email%20tm&redirect_uri=https://identity.ticketmaster.com/exchange&visualPresets=tm&lang=es-es&placementId=tmolMyAccount&showHeader=true&hideLeftPanel=false&integratorId=prd116.tmol&intSiteToken=tm-es";
     if (isError(pageLower)) {
       console.log("[TM-Playwright] TM server error, reloading...");
       for (let reload = 0; reload < 3; reload++) {
@@ -1914,8 +1929,8 @@ async function doTMRegistration(
       }
     }
 
-    const usZips = ["90001","90012","90024","90034","90045","90056","90067","90210","90291","90301","90401","91001","91101","91201","91301","91401","91501","91601","91701","91801","92101","92201"];
-    const randomZip = usZips[Math.floor(Math.random() * usZips.length)];
+    const esZips = ["28001","28002","28004","28010","28013","28020","28045","28080","08001","08010","08020","08030","41001","41003","46001","46002","46010","48001","48003","50001","18001","29001"];
+    const randomZip = esZips[Math.floor(Math.random() * esZips.length)];
 
     // Set country FIRST — React onChange on countryCode re-renders form and clears postalCode
     // So we must set country before filling zip
@@ -1923,7 +1938,7 @@ async function doTMRegistration(
       var sel = document.querySelector('select[name="countryCode"]') || document.querySelector('select[id*="countryCode"]') || document.querySelector('select[id*="country"]');
       if (!sel) return false;
       var nativeSet = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
-      if (nativeSet && nativeSet.set) nativeSet.set.call(sel, 'US'); else sel.value = 'US';
+      if (nativeSet && nativeSet.set) nativeSet.set.call(sel, 'ES'); else sel.value = 'ES';
       sel.dispatchEvent(new Event('change', { bubbles: true }));
       sel.dispatchEvent(new Event('blur', { bubbles: true }));
       var reactKey = Object.keys(sel).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
@@ -2677,7 +2692,7 @@ async function doTMRegistration(
       if (!doneClicked) {
         try {
           console.log("[TM-Playwright] No button found, trying to navigate to TM account page directly...");
-          await page.goto("https://www.ticketmaster.com/member/edit_account", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await page.goto("https://www.ticketmaster.es/member/account", { waitUntil: "domcontentloaded", timeout: 30000 });
           await page.waitForTimeout(3000);
           pageText = await getPageText(page);
         } catch (navErr: any) {
@@ -2704,8 +2719,11 @@ async function doTMRegistration(
       return { success: false, error: "Still on sign-up form - registration was not submitted successfully", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
     }
 
-    const redirectedToAccount = currentUrl.includes("ticketmaster.com/member") ||
+    const redirectedToAccount = currentUrl.includes("ticketmaster.es/member") ||
+                      currentUrl.includes("ticketmaster.es/user") ||
+                      currentUrl.includes("ticketmaster.com/member") ||
                       currentUrl.includes("ticketmaster.com/user") ||
+                      (currentUrl.includes("ticketmaster.es") && !currentUrl.includes("authorization.oauth2") && !currentUrl.includes("auth.ticketmaster")) ||
                       (currentUrl.includes("ticketmaster.com") && !currentUrl.includes("authorization.oauth2") && !currentUrl.includes("auth.ticketmaster"));
     const textIndicatesSuccess = finalLower.includes("account created") ||
                       finalLower.includes("my account") ||
@@ -2803,7 +2821,9 @@ async function doTMRegistration(
     {
       const reText = (await getPageText(page).catch(() => finalText)).toLowerCase();
       const reUrl = page.url();
-      const reRedirected = reUrl.includes("ticketmaster.com/member") || reUrl.includes("ticketmaster.com/user") ||
+      const reRedirected = reUrl.includes("ticketmaster.es/member") || reUrl.includes("ticketmaster.es/user") ||
+                           reUrl.includes("ticketmaster.com/member") || reUrl.includes("ticketmaster.com/user") ||
+                           (reUrl.includes("ticketmaster.es") && !reUrl.includes("authorization.oauth2") && !reUrl.includes("auth.ticketmaster")) ||
                            (reUrl.includes("ticketmaster.com") && !reUrl.includes("authorization.oauth2") && !reUrl.includes("auth.ticketmaster"));
       const reSuccess = reText.includes("account created") || reText.includes("my account") ||
                         reText.includes("you're in") || reText.includes("welcome back") ||
@@ -2849,6 +2869,11 @@ async function doTMRegistration(
           await context.close();
         }
       } catch {}
+      // Safety: close hybrid browser if it was never transferred to remoteBrowser
+      if (hybridTMBrowser) {
+        try { await hybridTMBrowser.close(); } catch {}
+        hybridTMBrowser = null;
+      }
     }
   }
 }

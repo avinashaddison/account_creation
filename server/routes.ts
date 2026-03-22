@@ -1248,9 +1248,9 @@ export async function registerRoutes(
       return res.status(403).json({ error: "Forbidden" });
     }
     const ZENROWS_WSS = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
-    const SOAX_BASE = "http://package-339420-country-us-sessionid-8flWFEEtSvKGBGsZ-sessionlength-300-opt-wb:Ld1VO4v28tYnfrpT@proxy.soax.com:5000";
-    const sessionId = Math.random().toString(36).substring(2, 14);
-    const tmProxy = SOAX_BASE.replace(/sessionid-[^-]+/, `sessionid-${sessionId}`);
+    // Use BRD scraping browser for TM account creation (SOAX proxy is broken: ERR_TUNNEL_CONNECTION_FAILED)
+    const BRD_BROWSER = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
+    const tmProxy = BRD_BROWSER;
     const FIRST_NAMES = ["James","John","Robert","Michael","William","David","Richard","Joseph","Thomas","Charles"];
     const LAST_NAMES = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Rodriguez","Martinez"];
     const randomFrom = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
