@@ -44,6 +44,7 @@ type ReplitAccount = {
   password: string;
   outlookEmail: string | null;
   status: string;
+  credits: string | null;
   createdAt: string;
 };
 
@@ -1536,84 +1537,93 @@ export default function PrivateAccount() {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-violet-500/8 hover:bg-transparent">
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Username</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Email</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Password</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Via Outlook</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Created</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8 text-right">Actions</TableHead>
+                      <TableHead className="text-[10px] font-mono uppercase tracking-wider h-9 bg-red-600/80 text-white">E-Mail Address</TableHead>
+                      <TableHead className="text-[10px] font-mono uppercase tracking-wider h-9 bg-orange-500/80 text-white">PASSWORD</TableHead>
+                      <TableHead className="text-[10px] font-mono uppercase tracking-wider h-9 bg-blue-600/80 text-white">CREDITS</TableHead>
+                      <TableHead className="text-[10px] font-mono uppercase tracking-wider h-9 bg-green-700/80 text-white">Status</TableHead>
+                      <TableHead className="text-[10px] font-mono uppercase tracking-wider h-9 text-zinc-500 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {replitAccounts.map((acct) => (
-                      <TableRow key={acct.id} className="border-violet-500/5 hover:bg-violet-500/[0.02]" data-testid={`row-replit-private-${acct.id}`}>
-                        <TableCell className="py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            <Code2 className="w-3 h-3 text-violet-400/50 flex-shrink-0" />
-                            <span className="text-xs font-mono text-violet-300 font-bold">@{acct.username}</span>
-                          </div>
-                          <Badge variant="outline" className={`text-[9px] font-mono mt-1 ${acct.status === "created" ? "border-emerald-500/20 text-emerald-400" : "border-red-500/20 text-red-400"}`}>
-                            {acct.status.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-mono text-zinc-300 truncate max-w-[150px]" data-testid={`text-replit-email-${acct.id}`}>{acct.email}</span>
-                            <button onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)} className="text-zinc-600 hover:text-violet-400 transition-colors flex-shrink-0" data-testid={`button-copy-replit-email-${acct.id}`}>
-                              {copied === `re-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                            </button>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-mono text-zinc-400" data-testid={`text-replit-pw-${acct.id}`}>
-                              {replitShowPasswords[acct.id] ? acct.password : acct.password.substring(0, 4) + "••••••••"}
+                    {replitAccounts.map((acct) => {
+                      const isStockOut = acct.status !== "created";
+                      return (
+                        <TableRow key={acct.id} className="border-violet-500/5 hover:bg-violet-500/[0.02]" data-testid={`row-replit-private-${acct.id}`}>
+                          <TableCell className="py-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-mono text-zinc-200 truncate max-w-[200px]" data-testid={`text-replit-email-${acct.id}`}>{acct.email}</span>
+                              <button onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)} className="text-zinc-600 hover:text-violet-400 transition-colors flex-shrink-0" data-testid={`button-copy-replit-email-${acct.id}`}>
+                                {copied === `re-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <Code2 className="w-2.5 h-2.5 text-violet-400/40" />
+                              <span className="text-[10px] font-mono text-violet-400/50">@{acct.username}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-mono text-zinc-400" data-testid={`text-replit-pw-${acct.id}`}>
+                                {replitShowPasswords[acct.id] ? acct.password : acct.password.substring(0, 3) + "•••••••••"}
+                              </span>
+                              <button onClick={() => setReplitShowPasswords((p) => ({ ...p, [acct.id]: !p[acct.id] }))} className="text-zinc-600 hover:text-violet-400 transition-colors" data-testid={`button-toggle-replit-pw-${acct.id}`}>
+                                {replitShowPasswords[acct.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                              </button>
+                              <button onClick={() => copyToClipboard(acct.password, `rp-${acct.id}`)} className="text-zinc-600 hover:text-violet-400 transition-colors" data-testid={`button-copy-replit-pw-${acct.id}`}>
+                                {copied === `rp-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5">
+                            <span
+                              className="text-sm font-mono font-bold"
+                              style={{ color: acct.credits ? "#f97316" : "rgba(255,255,255,0.2)" }}
+                              data-testid={`text-replit-credits-${acct.id}`}
+                            >
+                              {acct.credits || "—"}
                             </span>
-                            <button onClick={() => setReplitShowPasswords((p) => ({ ...p, [acct.id]: !p[acct.id] }))} className="text-zinc-600 hover:text-violet-400 transition-colors" data-testid={`button-toggle-replit-pw-${acct.id}`}>
-                              {replitShowPasswords[acct.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                            </button>
-                            <button onClick={() => copyToClipboard(acct.password, `rp-${acct.id}`)} className="text-zinc-600 hover:text-violet-400 transition-colors" data-testid={`button-copy-replit-pw-${acct.id}`}>
-                              {copied === `rp-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                            </button>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[120px] block">{acct.outlookEmail || "—"}</span>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <span className="text-[10px] text-zinc-600 font-mono">{formatDate(acct.createdAt)}</span>
-                        </TableCell>
-                        <TableCell className="py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-zinc-500 hover:text-violet-400 hover:bg-violet-500/10"
-                              onClick={() => copyToClipboard(`Username: ${acct.username}\nEmail: ${acct.email}\nPassword: ${acct.password}`, `rall-${acct.id}`)}
-                              title="Copy all credentials"
-                              data-testid={`button-copy-replit-all-${acct.id}`}
+                          </TableCell>
+                          <TableCell className="py-2.5">
+                            <span
+                              className="text-[11px] font-mono font-bold uppercase"
+                              style={{ color: isStockOut ? "#ef4444" : "#22c55e" }}
+                              data-testid={`text-replit-status-${acct.id}`}
                             >
-                              {copied === `rall-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10"
-                              onClick={async () => {
-                                try {
-                                  await fetch(`/api/replit-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
-                                  fetchReplit();
-                                  toast({ title: "Deleted", description: "Replit account removed" });
-                                } catch {}
-                              }}
-                              data-testid={`button-delete-replit-${acct.id}`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                              {isStockOut ? "STOCK OUT" : "AVAILABLE"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-2.5 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-zinc-500 hover:text-violet-400 hover:bg-violet-500/10"
+                                onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password}\nUsername: @${acct.username}`, `rall-${acct.id}`)}
+                                title="Copy all credentials"
+                                data-testid={`button-copy-replit-all-${acct.id}`}
+                              >
+                                {copied === `rall-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10"
+                                onClick={async () => {
+                                  try {
+                                    await fetch(`/api/replit-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
+                                    fetchReplit();
+                                    toast({ title: "Deleted", description: "Replit account removed" });
+                                  } catch {}
+                                }}
+                                data-testid={`button-delete-replit-${acct.id}`}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

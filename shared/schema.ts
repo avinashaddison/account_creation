@@ -172,6 +172,7 @@ export const replitAccounts = pgTable("replit_accounts", {
   password: text("password").notNull(),
   outlookEmail: text("outlook_email"),
   status: text("status").notNull().default("created"),
+  credits: text("credits"),
   error: text("error"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
