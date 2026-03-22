@@ -398,8 +398,8 @@ async function attemptPhoneVerification(
     // Country priority: 22=US Virtual, 2=UK, 3=Netherlands, 6=Sweden
     // Country 1 (US physical) is blocked for Ticketmaster by SMSPool
     if (!phoneNumber) {
-      // US-only: country 22 = US Virtual, country 1 = US Physical
-      const smsCountries = [22, 1];
+      // Spain (55, cc:34) — TM.es defaults picker to Spain so no picker change needed
+      const smsCountries = [55];
       let smsOrder: any = { success: false, error: "No countries tried" };
       for (const countryId of smsCountries) {
         log(`📲 Ordering SMS from SMSPool (country ${countryId})...`);
@@ -422,7 +422,7 @@ async function attemptPhoneVerification(
         return { success: false, error: `SMS order failed: ${smsOrder.error}`, smsCost: 0 };
       }
       const orderId = smsOrder.orderId;
-      smsCost = 0.36;
+      smsCost = 0.19; // Spain +34 numbers cost ~$0.19
       phoneNumber = String(smsOrder.number);
       if (triedNumbers) triedNumbers.add(phoneNumber); // mark as tried
       // Format: include country code prefix
@@ -440,7 +440,7 @@ async function attemptPhoneVerification(
       log(`📱 Got SMSPool number: ${phoneNumber.substring(0, 6)}****${phoneNumber.slice(-3)} (cc:+${smsOrder.cc || "??"})`);
       console.log(`[TM-Playwright] SMSPool ordered (attempt ${attemptNum}): $${smsCost} phone=${phoneNumber} (order: ${orderId})`);
       cancelOrder = async () => { await cancelSMSOrder(orderId); };
-      pollCode = async () => { return await pollForSMSCode(orderId, 120, 3000); }; // 6 min timeout
+      pollCode = async () => { return await pollForSMSCode(orderId, 300, 3000); }; // 15 min timeout (Spain numbers valid 20 min)
     }
 
     const phoneClickResult = await page.evaluate(`(() => {
@@ -580,9 +580,8 @@ async function attemptPhoneVerification(
       : rawDigits.startsWith("1") ? rawDigits.substring(1) : rawDigits;
     console.log(`[TM-Playwright] Phone CC: +${phoneCC}, local: ${localNumber}, full: ${phoneNumber}`);
 
-    // Always set the country picker to match the phone's CC
-    // (TM.es defaults to Spain +34, so even US numbers need the picker changed)
-    {
+    // Set country picker only if NOT already Spain (+34 is TM.es default — no change needed)
+    if (phoneCC !== "34") {
       console.log(`[TM-Playwright] Setting country picker to +${phoneCC}...`);
 
       // Dump the full HTML of the phone form area before clicking picker
