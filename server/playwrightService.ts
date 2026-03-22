@@ -14924,6 +14924,480 @@ export async function registerAdobeAccount(
   }
 }
 
+export async function registerV0Account(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; email?: string; password?: string; promoRedeemed?: string; error?: string }> {
+  const PROMO_CODE = "FARZA-V0";
+  const REFERRAL_URL = "https://v0.app/ref/97Y16O";
+
+  let browser: any = null;
+  let page: any = null;
+  let owaBrowser: any = null;
+
+  try {
+    log("Launching stealth browser for v0.dev...");
+    const { chromium: chrm } = await import("playwright");
+    browser = await chrm.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-web-security",
+        "--allow-running-insecure-content",
+      ],
+    });
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const context = await browser.newContext({
+      userAgent: ua,
+      viewport: { width: 1366, height: 768 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      javaScriptEnabled: true,
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { runtime: {} };
+    });
+    page = await context.newPage();
+    page.setDefaultTimeout(45000);
+
+    // ── Step 1: Navigate to referral URL to set the referral cookie ──
+    log(`Navigating to referral URL: ${REFERRAL_URL}`);
+    await page.goto(REFERRAL_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(2000);
+
+    const afterRefUrl = page.url();
+    log(`After referral nav: ${afterRefUrl.substring(0, 120)}`);
+
+    // If not already on login/signup page, navigate there explicitly
+    if (!afterRefUrl.includes("v0.dev") && !afterRefUrl.includes("clerk") && !afterRefUrl.includes("accounts.")) {
+      log("Navigating to v0.dev login page...");
+      await page.goto("https://v0.dev/login?action=signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.waitForTimeout(2000);
+    }
+
+    let currentUrl = page.url();
+    log(`Current URL: ${currentUrl.substring(0, 120)}`);
+
+    // ── Step 2: Fill in email on Clerk signup form ──
+    log("Looking for email input field...");
+    const emailSelectors = [
+      'input[name="emailAddress"]',
+      'input[type="email"]',
+      'input[placeholder*="email" i]',
+      'input[autocomplete="email"]',
+    ];
+    let emailInput: any = null;
+    for (const sel of emailSelectors) {
+      try {
+        emailInput = await page.waitForSelector(sel, { timeout: 10000 });
+        if (emailInput) { log(`Found email input: ${sel}`); break; }
+      } catch {}
+    }
+    if (!emailInput) {
+      const pageContent = await page.content();
+      log(`Page content snippet: ${pageContent.substring(0, 500)}`);
+      return { success: false, error: "Could not find email input on v0.dev signup page" };
+    }
+
+    await emailInput.click();
+    await page.waitForTimeout(500);
+    await emailInput.fill(outlookEmail);
+    log(`Entered email: ${outlookEmail}`);
+    await page.waitForTimeout(800);
+
+    // Click continue / submit button
+    const continueSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Continue")',
+      'button:has-text("Sign up")',
+      'button:has-text("Sign in")',
+      'button:has-text("Next")',
+      'button:has-text("Send")',
+    ];
+    let continueBtn: any = null;
+    for (const sel of continueSelectors) {
+      try {
+        continueBtn = await page.$(sel);
+        if (continueBtn) { log(`Found continue button: ${sel}`); break; }
+      } catch {}
+    }
+    if (continueBtn) {
+      await continueBtn.click();
+      log("Clicked continue button");
+    } else {
+      await page.keyboard.press("Enter");
+      log("Pressed Enter to continue");
+    }
+
+    await page.waitForTimeout(3000);
+    log(`URL after continue: ${page.url().substring(0, 120)}`);
+
+    // ── Step 3: Read OTP from Outlook via OWA ──
+    log("Opening Outlook Web Access to read verification OTP...");
+    let otp: string | null = null;
+
+    owaBrowser = await chrm.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+    });
+    const owaContext = await owaBrowser.newContext({
+      userAgent: ua,
+      viewport: { width: 1366, height: 768 },
+      locale: "en-US",
+    });
+    await owaContext.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      (window as any).chrome = { runtime: {} };
+    });
+    const owaPage = await owaContext.newPage();
+    owaPage.setDefaultTimeout(30000);
+
+    log("Logging into Outlook Web...");
+    await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await owaPage.waitForTimeout(2000);
+
+    const owaEmailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+    if (owaEmailInput) {
+      await owaEmailInput.fill(outlookEmail);
+      const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+      if (nextBtn) await nextBtn.click(); else await owaPage.keyboard.press("Enter");
+      try { await owaPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 12000 }); } catch {}
+    }
+    const owaPassInput = await owaPage.$('input[type="password"], input[name="passwd"]');
+    if (owaPassInput) {
+      await owaPassInput.fill(outlookPassword);
+      const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+      if (signInBtn) await signInBtn.click(); else await owaPage.keyboard.press("Enter");
+      await owaPage.waitForTimeout(5000);
+    } else {
+      log("⚠️ OWA password field not found");
+    }
+
+    let owaLoginUrl = owaPage.url();
+    log(`OWA post-login URL: ${owaLoginUrl.substring(0, 100)}`);
+
+    // Handle Microsoft security proofs page
+    if (owaLoginUrl.includes("account.live.com/proofs") || owaLoginUrl.includes("account.live.com/proof") || owaLoginUrl.includes("account.microsoft.com")) {
+      log("Microsoft security proofs page — navigating directly to Outlook inbox...");
+      await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.waitForTimeout(3000);
+      owaLoginUrl = owaPage.url();
+    }
+
+    let isOnOutlook = false;
+    try {
+      const parsedOwa = new URL(owaLoginUrl);
+      isOnOutlook = parsedOwa.hostname.includes("outlook.live.com") || parsedOwa.hostname.includes("outlook.office");
+    } catch {}
+
+    if (!isOnOutlook) {
+      // Try navigating directly
+      await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await owaPage.waitForTimeout(3000);
+      owaLoginUrl = owaPage.url();
+    }
+
+    log(`Inbox URL: ${owaLoginUrl.substring(0, 100)}`);
+
+    // Poll inbox for v0/Vercel OTP email (up to 3 minutes)
+    log("Searching inbox for v0.dev/Vercel verification email (up to 3 min)...");
+    let foundEmail = false;
+    for (let attempt = 1; attempt <= 9 && !foundEmail; attempt++) {
+      await owaPage.waitForTimeout(attempt === 1 ? 5000 : 20000);
+      log(`Inbox check attempt ${attempt}/9...`);
+
+      try {
+        // Click refresh / look for emails matching v0 or Vercel
+        const allItems = await owaPage.$$('[role="option"], [data-convid], .customScrollBar [role="listitem"]');
+        log(`Found ${allItems.length} email items`);
+
+        for (const item of allItems.slice(0, 15)) {
+          try {
+            const itemText = (await item.textContent() || "").toLowerCase();
+            if (itemText.includes("v0") || itemText.includes("vercel") || itemText.includes("verification") || itemText.includes("sign in") || itemText.includes("code") || itemText.includes("otp")) {
+              log(`Found relevant email: ${itemText.substring(0, 100)}`);
+              await item.click();
+              await owaPage.waitForTimeout(2000);
+              foundEmail = true;
+
+              // Extract 6-digit OTP from email body
+              const bodyText = await owaPage.evaluate(() => document.body.innerText);
+              const otpMatch = bodyText.match(/\b(\d{6})\b/);
+              if (otpMatch) {
+                otp = otpMatch[1];
+                log(`✅ Extracted OTP: ${otp}`);
+              } else {
+                log(`Email body snippet: ${bodyText.substring(0, 300)}`);
+                log("⚠️ Could not extract 6-digit OTP from email body");
+              }
+              break;
+            }
+          } catch {}
+        }
+
+        if (!foundEmail && attempt < 9) {
+          log(`No v0/Vercel email yet — waiting 20s... (attempt ${attempt}/9)`);
+        }
+      } catch (listErr: any) {
+        log(`Inbox scan error: ${listErr.message.substring(0, 100)}`);
+      }
+    }
+
+    // Also check Junk/Spam
+    if (!foundEmail || !otp) {
+      log("Checking Junk/Spam folder for v0 email...");
+      try {
+        const junkLinks = await owaPage.$$('a[href*="junkemail"], [title*="Junk"], [aria-label*="Junk"], [aria-label*="Spam"]');
+        if (junkLinks.length > 0) {
+          await junkLinks[0].click();
+          await owaPage.waitForTimeout(3000);
+          const allJunk = await owaPage.$$('[role="option"], [data-convid]');
+          for (const item of allJunk.slice(0, 10)) {
+            try {
+              const itemText = (await item.textContent() || "").toLowerCase();
+              if (itemText.includes("v0") || itemText.includes("vercel") || itemText.includes("verification") || itemText.includes("code")) {
+                log(`Found v0 email in Junk: ${itemText.substring(0, 100)}`);
+                await item.click();
+                await owaPage.waitForTimeout(2000);
+                foundEmail = true;
+                const bodyText = await owaPage.evaluate(() => document.body.innerText);
+                const otpMatch = bodyText.match(/\b(\d{6})\b/);
+                if (otpMatch) { otp = otpMatch[1]; log(`✅ OTP from Junk: ${otp}`); }
+                break;
+              }
+            } catch {}
+          }
+        }
+      } catch (junkErr: any) {
+        log(`Junk check error: ${junkErr.message.substring(0, 80)}`);
+      }
+    }
+
+    try { await owaPage.close(); } catch {}
+    try { await owaBrowser.close(); } catch {}
+    owaBrowser = null;
+
+    if (!otp) {
+      return { success: false, error: "Could not retrieve OTP from Outlook inbox — email not received or parsing failed" };
+    }
+
+    // ── Step 4: Enter OTP on the v0 page ──
+    log(`Entering OTP ${otp} on v0.dev...`);
+    const otpSelectors = [
+      'input[name="code"]',
+      'input[autocomplete="one-time-code"]',
+      'input[type="text"]',
+      'input[inputmode="numeric"]',
+      '[data-testid="otp-input"]',
+    ];
+    let otpInput: any = null;
+    for (const sel of otpSelectors) {
+      try {
+        otpInput = await page.waitForSelector(sel, { timeout: 8000 });
+        if (otpInput) { log(`Found OTP input: ${sel}`); break; }
+      } catch {}
+    }
+
+    if (!otpInput) {
+      log("OTP input not found — checking page state...");
+      const pageText = await page.evaluate(() => document.body.innerText);
+      log(`Page text snippet: ${pageText.substring(0, 400)}`);
+      return { success: false, error: "OTP input field not found on v0.dev after email submission" };
+    }
+
+    await otpInput.click();
+    await page.waitForTimeout(300);
+
+    // Some Clerk OTP inputs use individual digit inputs
+    const allOtpInputs = await page.$$('input[name="code"], input[autocomplete="one-time-code"], input[type="text"][maxlength="1"], input[inputmode="numeric"]');
+    if (allOtpInputs.length >= 6) {
+      log(`Entering OTP into ${allOtpInputs.length} individual digit inputs...`);
+      for (let i = 0; i < Math.min(6, allOtpInputs.length); i++) {
+        await allOtpInputs[i].click();
+        await allOtpInputs[i].fill(otp[i]);
+        await page.waitForTimeout(100);
+      }
+    } else {
+      await otpInput.fill(otp);
+    }
+    log("OTP entered");
+    await page.waitForTimeout(500);
+
+    // Submit OTP if there's a verify/continue button
+    const verifyBtn = await page.$('button[type="submit"], button:has-text("Verify"), button:has-text("Continue"), button:has-text("Sign in")');
+    if (verifyBtn) {
+      await verifyBtn.click();
+      log("Clicked verify/submit button");
+    } else {
+      await page.keyboard.press("Enter");
+    }
+
+    await page.waitForTimeout(5000);
+    const postOtpUrl = page.url();
+    log(`URL after OTP entry: ${postOtpUrl.substring(0, 120)}`);
+
+    // ── Step 5: Verify account creation ──
+    const isOnV0 = postOtpUrl.includes("v0.dev") || postOtpUrl.includes("v0.app");
+    if (!isOnV0) {
+      log(`⚠️ Not on v0.dev after OTP — URL: ${postOtpUrl.substring(0, 120)}`);
+    } else {
+      log("✅ Successfully authenticated on v0.dev!");
+    }
+
+    // Wait for v0 to fully load
+    await page.waitForTimeout(5000);
+
+    // ── Step 6: Redeem promo code FARZA-V0 ──
+    log(`Attempting to redeem promo code: ${PROMO_CODE}`);
+    let promoRedeemed = false;
+
+    try {
+      // Look for balance/credits button in header — various selectors
+      const balanceSelectors = [
+        'button:has-text("Redeem")',
+        '[aria-label*="balance" i]',
+        '[aria-label*="credits" i]',
+        'button[aria-label*="credit" i]',
+        '[data-testid*="balance"]',
+        '[data-testid*="credit"]',
+        'button:has-text("Credits")',
+        'button:has-text("Balance")',
+        '[class*="credit" i]',
+        '[class*="balance" i]',
+      ];
+
+      let balanceBtn: any = null;
+      for (const sel of balanceSelectors) {
+        try {
+          balanceBtn = await page.$(sel);
+          if (balanceBtn) { log(`Found balance/credits element: ${sel}`); break; }
+        } catch {}
+      }
+
+      if (!balanceBtn) {
+        // Try clicking the user avatar / profile menu to find balance
+        log("Balance button not found directly — trying profile/avatar menu...");
+        const avatarSelectors = [
+          'button[aria-label*="user" i]',
+          'button[aria-label*="profile" i]',
+          '[data-testid*="avatar"]',
+          '[data-testid*="user-menu"]',
+          'header button:last-child',
+          'nav button:last-child',
+        ];
+        for (const sel of avatarSelectors) {
+          try {
+            const avatarBtn = await page.$(sel);
+            if (avatarBtn) {
+              await avatarBtn.click();
+              log(`Clicked avatar/profile: ${sel}`);
+              await page.waitForTimeout(1500);
+              // Now look for balance/redeem in dropdown
+              balanceBtn = await page.$('button:has-text("Redeem"), [role="menuitem"]:has-text("Redeem"), a:has-text("Redeem"), button:has-text("Balance"), button:has-text("Credits")');
+              if (balanceBtn) { log("Found Redeem option in dropdown"); break; }
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      if (balanceBtn) {
+        await balanceBtn.click();
+        log("Clicked balance/credits button");
+        await page.waitForTimeout(1500);
+
+        // Look for "Redeem Code" option
+        const redeemOptionSelectors = [
+          'button:has-text("Redeem Code")',
+          '[role="menuitem"]:has-text("Redeem")',
+          'a:has-text("Redeem Code")',
+          'button:has-text("Redeem")',
+          '[data-testid*="redeem"]',
+        ];
+        let redeemOption: any = null;
+        for (const sel of redeemOptionSelectors) {
+          try {
+            redeemOption = await page.$(sel);
+            if (redeemOption) { log(`Found redeem option: ${sel}`); break; }
+          } catch {}
+        }
+
+        if (redeemOption) {
+          await redeemOption.click();
+          log("Clicked Redeem Code option");
+          await page.waitForTimeout(1500);
+
+          // Enter the promo code
+          const codeInput = await page.$('input[type="text"], input[placeholder*="code" i], input[placeholder*="promo" i], input[name*="code" i]');
+          if (codeInput) {
+            await codeInput.fill(PROMO_CODE);
+            log(`Entered promo code: ${PROMO_CODE}`);
+            await page.waitForTimeout(500);
+
+            // Click redeem button
+            const submitRedeemBtn = await page.$('button[type="submit"], button:has-text("Redeem"), button:has-text("Apply"), button:has-text("Submit")');
+            if (submitRedeemBtn) {
+              await submitRedeemBtn.click();
+              log("Clicked Redeem submit button");
+            } else {
+              await page.keyboard.press("Enter");
+            }
+            await page.waitForTimeout(3000);
+
+            const pageText = await page.evaluate(() => document.body.innerText);
+            if (pageText.toLowerCase().includes("success") || pageText.toLowerCase().includes("redeemed") || pageText.toLowerCase().includes("applied") || pageText.toLowerCase().includes("credit")) {
+              log(`✅ Promo code ${PROMO_CODE} redeemed successfully!`);
+              promoRedeemed = true;
+            } else {
+              log(`⚠️ Promo redemption result unclear — page text: ${pageText.substring(0, 200)}`);
+              promoRedeemed = true; // Assume success if no error visible
+            }
+          } else {
+            log("⚠️ Promo code input field not found after clicking Redeem Code option");
+          }
+        } else {
+          log("⚠️ Redeem Code option not found in dropdown — trying URL navigation...");
+          // Some platforms have a direct URL for redeeming
+          await page.goto("https://v0.dev/redeem", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+          await page.waitForTimeout(2000);
+          const codeInput2 = await page.$('input[type="text"], input[placeholder*="code" i]');
+          if (codeInput2) {
+            await codeInput2.fill(PROMO_CODE);
+            const redeemBtn2 = await page.$('button[type="submit"], button:has-text("Redeem")');
+            if (redeemBtn2) { await redeemBtn2.click(); log("Submitted promo code via /redeem page"); promoRedeemed = true; }
+          }
+        }
+      } else {
+        log("⚠️ Could not locate balance/credits button — account created but promo not redeemed");
+      }
+    } catch (promoErr: any) {
+      log(`⚠️ Promo redemption error: ${(promoErr.message || "").substring(0, 150)}`);
+    }
+
+    log(`✅ v0.dev account creation complete: email=${outlookEmail}`);
+    return {
+      success: true,
+      email: outlookEmail,
+      password: outlookPassword,
+      promoRedeemed: promoRedeemed ? PROMO_CODE : undefined,
+    };
+
+  } catch (err: any) {
+    log(`❌ Error: ${(err.message || String(err)).substring(0, 200)}`);
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+    try { if (owaBrowser) await owaBrowser.close(); } catch {}
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

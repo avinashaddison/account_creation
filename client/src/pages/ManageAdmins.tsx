@@ -21,6 +21,7 @@ const ALL_SERVICES = [
   { id: "zenrows", label: "Addison Proxy", color: "text-green-400" },
   { id: "replit", label: "Replit Create", color: "text-violet-400" },
   { id: "lovable", label: "Lovable Create", color: "text-pink-400" },
+  { id: "v0", label: "v0.dev Create", color: "text-indigo-400" },
 ];
 
 type AdminUser = {

@@ -7,7 +7,7 @@ export const roleEnum = pgEnum("role", ["superadmin", "admin", "user"]);
 export const accountStatusEnum = pgEnum("account_status", ["pending", "registering", "waiting_code", "verifying", "verified", "profile_saving", "draw_registering", "completed", "failed", "filling_form", "selecting_events", "submitting", "presale_loading", "presale_filling", "presale_events", "presale_submitting"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["pending", "approved", "rejected"]);
 
-export const ALL_SERVICES = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows", "replit", "lovable"] as const;
+export const ALL_SERVICES = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows", "replit", "lovable", "v0"] as const;
 export type ServiceId = typeof ALL_SERVICES[number];
 
 export const users = pgTable("users", {
@@ -195,6 +195,22 @@ export const lovableAccounts = pgTable("lovable_accounts", {
 export const insertLovableAccountSchema = createInsertSchema(lovableAccounts).omit({ id: true, createdAt: true });
 export type LovableAccount = typeof lovableAccounts.$inferSelect;
 export type InsertLovableAccount = z.infer<typeof insertLovableAccountSchema>;
+
+export const v0Accounts = pgTable("v0_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  password: text("password"),
+  outlookEmail: text("outlook_email"),
+  promoRedeemed: text("promo_redeemed"),
+  status: text("status").notNull().default("created"),
+  error: text("error"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertV0AccountSchema = createInsertSchema(v0Accounts).omit({ id: true, createdAt: true });
+export type V0Account = typeof v0Accounts.$inferSelect;
+export type InsertV0Account = z.infer<typeof insertV0AccountSchema>;
 
 export const adobeAccounts = pgTable("adobe_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

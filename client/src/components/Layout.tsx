@@ -64,7 +64,8 @@ function NavItem({ item, location }: { item: { href: string; label: string; icon
     location === "/admin/uefa-create" || location === "/admin/brunomars-create" ||
     location === "/admin/outlook-login" || location === "/admin/outlook-create" ||
     location === "/admin/zenrows-register" || location === "/admin/replit-create" ||
-    location === "/admin/lovable-create" || location === "/admin/card-generator"
+    location === "/admin/lovable-create" || location === "/admin/v0-create" ||
+    location === "/admin/card-generator"
   ));
   const tag = TAG_STYLES[item.tag] || TAG_STYLES.SYS;
 

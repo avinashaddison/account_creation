@@ -25,6 +25,7 @@ import OutlookCreate from "@/pages/OutlookCreate";
 import ZenRowsRegister from "@/pages/ZenRowsRegister";
 import ReplitCreate from "@/pages/ReplitCreate";
 import LovableCreate from "@/pages/LovableCreate";
+import V0Create from "@/pages/V0Create";
 import AdobeCreate from "@/pages/AdobeCreate";
 import CardGenerator from "@/pages/CardGenerator";
 import MyCards from "@/pages/MyCards";
@@ -66,6 +67,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/zenrows-register" component={ZenRowsRegister} />
         <Route path="/admin/replit-create" component={ReplitCreate} />
         <Route path="/admin/lovable-create" component={LovableCreate} />
+        <Route path="/admin/v0-create" component={V0Create} />
         <Route path="/admin/adobe-create" component={AdobeCreate} />
         <Route path="/admin/card-generator" component={CardGenerator} />
         <Route path="/admin/my-cards" component={MyCards} />

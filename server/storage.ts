@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, savedCards, adobeAccounts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount } from "@shared/schema";
 import { eq, desc, sql, count, and, or } from "drizzle-orm";
 import pg from "pg";
 
@@ -69,6 +69,10 @@ export interface IStorage {
   getAllLovableAccounts(): Promise<LovableAccount[]>;
   getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]>;
   deleteLovableAccount(id: string): Promise<void>;
+  createV0Account(data: InsertV0Account): Promise<V0Account>;
+  getAllV0Accounts(): Promise<V0Account[]>;
+  getV0AccountsByOwner(ownerId: string): Promise<V0Account[]>;
+  deleteV0Account(id: string): Promise<void>;
   createSavedCard(data: InsertSavedCard): Promise<SavedCard>;
   getSavedCardsByOwner(ownerId: string): Promise<SavedCard[]>;
   getSavedCard(id: string): Promise<SavedCard | undefined>;
@@ -452,6 +456,23 @@ export class DatabaseStorage implements IStorage {
 
   async deleteLovableAccount(id: string): Promise<void> {
     await db.delete(lovableAccounts).where(eq(lovableAccounts.id, id));
+  }
+
+  async createV0Account(data: InsertV0Account): Promise<V0Account> {
+    const [row] = await db.insert(v0Accounts).values(data).returning();
+    return row;
+  }
+
+  async getAllV0Accounts(): Promise<V0Account[]> {
+    return db.select().from(v0Accounts).orderBy(desc(v0Accounts.createdAt));
+  }
+
+  async getV0AccountsByOwner(ownerId: string): Promise<V0Account[]> {
+    return db.select().from(v0Accounts).where(eq(v0Accounts.createdBy, ownerId)).orderBy(desc(v0Accounts.createdAt));
+  }
+
+  async deleteV0Account(id: string): Promise<void> {
+    await db.delete(v0Accounts).where(eq(v0Accounts.id, id));
   }
 
   async createSavedCard(data: InsertSavedCard): Promise<SavedCard> {

@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, registerLovableAccount, registerAdobeAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -781,7 +781,7 @@ export async function registerRoutes(
       if (!Array.isArray(allowedServices)) {
         return res.status(400).json({ error: "allowedServices must be an array" });
       }
-      const validServices = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows", "replit", "lovable"];
+      const validServices = ["la28", "ticketmaster", "uefa", "brunomars", "outlook", "zenrows", "replit", "lovable", "v0"];
       const filtered = allowedServices.filter((s: string) => validServices.includes(s));
       const user = await storage.getUser(req.params.id);
       if (!user) return res.status(404).json({ error: "User not found" });
@@ -3499,6 +3499,171 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Forbidden: not your account" });
       }
       await storage.deleteLovableAccount(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/v0-create/bulk", requireAuth, requireServiceAccess("v0"), async (req: Request, res: Response) => {
+    try {
+      const { count = 1 } = req.body;
+      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 10);
+      const userId = req.session.userId;
+
+      const allOutlook = await storage.getAllPrivateOutlooks();
+      const v0Accts = await storage.getAllV0Accounts();
+      const usedEmails = new Set(v0Accts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+
+      if (available.length === 0) {
+        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for v0.dev" });
+      }
+
+      const shuffled = [...available].sort(() => Math.random() - 0.5);
+      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
+
+      const bulkId = randomUUID().substring(0, 8);
+      const batchId = `v0-bulk-${bulkId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} v0.dev account(s)` });
+
+      (async () => {
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} v0.dev account(s) queued`, userId);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < toUse.length; i++) {
+          const acc = toUse[i];
+          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
+          try {
+            const result = await registerV0Account(
+              acc.email,
+              acc.password,
+              (msg) => broadcastLog(batchId, bulkId, msg, userId)
+            );
+            if (result.success) {
+              try {
+                await storage.createV0Account({
+                  email: result.email!,
+                  password: result.password || null,
+                  outlookEmail: acc.email,
+                  promoRedeemed: result.promoRedeemed || null,
+                  status: "created",
+                  createdBy: userId,
+                });
+                successCount++;
+                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — ${result.email}`, userId);
+              } catch (dbErr: any) {
+                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+              }
+              broadcast({ type: "v0_create_result", bulkId, batchId, success: true, email: result.email, promoRedeemed: result.promoRedeemed, index: i + 1, total: toUse.length }, userId);
+            } else {
+              failCount++;
+              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
+              broadcast({ type: "v0_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: toUse.length }, userId);
+            }
+          } catch (err: any) {
+            failCount++;
+            broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Error: ${(err.message || "").substring(0, 100)}`, userId);
+            broadcast({ type: "v0_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: toUse.length }, userId);
+          }
+        }
+
+        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/v0-create", requireAuth, requireServiceAccess("v0"), async (req: Request, res: Response) => {
+    try {
+      const { outlookEmail, outlookPassword } = req.body;
+      if (!outlookEmail || !outlookPassword) {
+        return res.status(400).json({ error: "Outlook email and password are required" });
+      }
+
+      const existingAccts = await storage.getAllV0Accounts();
+      const alreadyUsed = existingAccts.some(
+        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
+      );
+      if (alreadyUsed) {
+        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a v0.dev account` });
+      }
+
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `v0-create-${createId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "v0.dev account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, `Starting v0.dev account creation for ${outlookEmail}...`, userId);
+        try {
+          const result = await registerV0Account(
+            outlookEmail,
+            outlookPassword,
+            (msg) => broadcastLog(batchId, createId, msg, userId)
+          );
+
+          if (result.success) {
+            try {
+              await storage.createV0Account({
+                email: result.email!,
+                password: result.password || null,
+                outlookEmail,
+                promoRedeemed: result.promoRedeemed || null,
+                status: "created",
+                createdBy: userId,
+              });
+              broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
+            } catch (dbErr: any) {
+              broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
+            }
+            broadcast({ type: "v0_create_result", createId, batchId, success: true, email: result.email, promoRedeemed: result.promoRedeemed }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ v0.dev creation failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "v0_create_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "v0_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/v0-accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin"
+        ? await storage.getAllV0Accounts()
+        : await storage.getV0AccountsByOwner(userId);
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/v0-accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const allAccts = await storage.getAllV0Accounts();
+      const acct = allAccts.find((a) => a.id === req.params.id);
+      if (!acct) return res.status(404).json({ error: "Account not found" });
+      if (role !== "superadmin" && acct.createdBy !== userId) {
+        return res.status(403).json({ error: "Forbidden: not your account" });
+      }
+      await storage.deleteV0Account(req.params.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

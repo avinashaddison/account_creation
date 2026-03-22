@@ -130,6 +130,19 @@ const platforms: Platform[] = [
     stats: [{ label: "Auto Create", icon: Shield }, { label: "Magic Link", icon: Mail }, { label: "OWA Verify", icon: Zap }],
   },
   {
+    id: "v0",
+    name: "Create v0.dev Account",
+    description: "Auto-create v0.dev accounts via Clerk OTP email verification · promo FARZA-V0 auto-redeemed",
+    href: "/admin/v0-create",
+    accentColor: "#6366f1",
+    accentGlow: "rgba(99,102,241,0.28)",
+    gradientFrom: "rgba(99,102,241,0.18)",
+    gradientTo: "rgba(49,46,129,0.06)",
+    badge: "ACTIVE",
+    badgeActive: true,
+    stats: [{ label: "Auto Create", icon: Shield }, { label: "OTP Verify", icon: Mail }, { label: "FARZA-V0", icon: Zap }],
+  },
+  {
     id: "adobe",
     name: "Create Adobe Account",
     description: "Auto-create Adobe accounts with email verification via Outlook OWA",
@@ -197,6 +210,11 @@ function PlatformIcon({ id, accentColor }: { id: string; accentColor: string }) 
   if (id === "lovable") return (
     <div className={`${base} bg-black overflow-hidden`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
       <img src={lovableLogo} alt="Lovable" className="w-full h-full object-cover object-center scale-110" />
+    </div>
+  );
+  if (id === "v0") return (
+    <div className={`${base} bg-gradient-to-br from-indigo-500 to-violet-700`} style={{ boxShadow: `0 0 18px ${accentColor}55` }}>
+      <Zap className="w-5 h-5 text-white" />
     </div>
   );
   if (id === "adobe") return (
