@@ -2370,7 +2370,7 @@ async function doTMRegistration(
     const finalLower = finalText.toLowerCase();
 
     console.log("[TM-Playwright] Final URL:", currentUrl);
-    console.log("[TM-Playwright] Final text (first 500):", finalText.substring(0, 500));
+    console.log("[TM-Playwright] Final text (first 2000):", finalText.substring(0, 2000));
 
     if (finalLower.includes("please enter a valid password") || finalLower.includes("password is required")) {
       return { success: false, error: "Password validation failed on TM form - password field was not accepted", pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
@@ -2416,14 +2416,23 @@ async function doTMRegistration(
     })()`) as any;
     console.log("[TM-Playwright] DOM verify state:", JSON.stringify(domVerifyState));
 
-    const phoneVerified = domVerifyState.phoneVerified;
-    const emailVerifiedOnPage = domVerifyState.emailVerified;
+    // Also detect verify page and email/phone state from finalLower (more reliable than DOM eval during SPA re-render)
+    const finalHasVerifyPage = finalLower.includes("almost there") ||
+                               finalLower.includes("verify your account") ||
+                               finalLower.includes("confirm your account");
+    const finalEmailVerified = finalLower.includes("email verified") || finalLower.includes("email address verified");
+    const finalPhoneVerified = finalLower.includes("phone verified") || finalLower.includes("phone number verified") || finalLower.includes("phone number added");
 
-    const emailVerifiedPhonePending = domVerifyState.hasVerifyPage && emailVerifiedOnPage && !phoneVerified;
+    const hasVerifyPage = domVerifyState.hasVerifyPage || finalHasVerifyPage;
+    const phoneVerified = domVerifyState.phoneVerified || finalPhoneVerified;
+    const emailVerifiedOnPage = domVerifyState.emailVerified || finalEmailVerified;
+
+    const emailVerifiedPhonePending = hasVerifyPage && emailVerifiedOnPage && !phoneVerified;
     const bothVerified = emailVerifiedOnPage && phoneVerified;
-    const verifyPageCompleted = domVerifyState.hasVerifyPage && !domVerifyState.stillNeedsEmail && !domVerifyState.stillNeedsPhone;
+    const verifyPageCompleted = hasVerifyPage && !domVerifyState.stillNeedsEmail && !domVerifyState.stillNeedsPhone && (emailVerifiedOnPage || bothVerified);
 
-    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted || bothVerified;
+    const isSuccess = redirectedToAccount || textIndicatesSuccess || verifyPageCompleted || bothVerified ||
+                      (finalHasVerifyPage && finalEmailVerified);
 
     console.log("[TM-Playwright] Success checks - redirected:", redirectedToAccount, "textSuccess:", textIndicatesSuccess, "phoneVerified:", phoneVerified, "emailVerified:", emailVerifiedOnPage, "emailOnlyDone:", emailVerifiedPhonePending, "verifyComplete:", verifyPageCompleted, "result:", isSuccess);
 
@@ -2446,6 +2455,59 @@ async function doTMRegistration(
 
     if (finalLower.includes("error") || finalLower.includes("failed") || finalLower.includes("invalid")) {
       return { success: false, error: "Registration failed: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };
+    }
+
+    // TM SPA may still be transitioning — wait 25 more seconds and re-check before giving up
+    console.log("[TM-Playwright] Status unclear - waiting 25s for SPA transition...");
+    for (let w = 0; w < 5; w++) {
+      await page.waitForTimeout(5000);
+      try {
+        const recheckText = (await getPageText(page)).toLowerCase();
+        console.log(`[TM-Playwright] SPA recheck [${(w+1)*5}s]: ${recheckText.substring(0, 120).replace(/\n/g,' ')}`);
+        if (recheckText.includes("verify") || recheckText.includes("almost there") ||
+            recheckText.includes("check your email") || recheckText.includes("add a passkey") ||
+            recheckText.includes("my account") || recheckText.includes("account created") ||
+            recheckText.includes("confirm your account") || recheckText.includes("welcome back")) {
+          console.log("[TM-Playwright] Page transitioned after extended wait!");
+          pageText = await getPageText(page);
+          break;
+        }
+      } catch {}
+    }
+
+    // Re-evaluate after extended wait
+    {
+      const reText = (await getPageText(page).catch(() => finalText)).toLowerCase();
+      const reUrl = page.url();
+      const reRedirected = reUrl.includes("ticketmaster.com/member") || reUrl.includes("ticketmaster.com/user") ||
+                           (reUrl.includes("ticketmaster.com") && !reUrl.includes("authorization.oauth2") && !reUrl.includes("auth.ticketmaster"));
+      const reSuccess = reText.includes("account created") || reText.includes("my account") ||
+                        reText.includes("you're in") || reText.includes("welcome back") ||
+                        reText.includes("account settings") || reText.includes("add a passkey") ||
+                        reText.includes("confirm your account");
+      const reVerify = reText.includes("almost there") || reText.includes("verify your account") ||
+                       reText.includes("verify my email") || reText.includes("check your email") ||
+                       (reText.includes("verify") && reText.includes("email"));
+      console.log(`[TM-Playwright] Re-eval: redirected=${reRedirected} success=${reSuccess} verify=${reVerify}`);
+      if (reRedirected || reSuccess) {
+        return { success: true, pageContent: reText.substring(0, 500), smsCost: totalSmsCost };
+      }
+      if (reVerify) {
+        console.log("[TM-Playwright] Verification page detected after extended wait — polling inbox...");
+        const codeFromVerify = await getVerificationCode();
+        if (codeFromVerify) {
+          return { success: true, pageContent: "Account created. Email verification code received after extended wait.", smsCost: totalSmsCost };
+        }
+        return { success: false, error: "Verify page appeared but could not get email code", pageContent: reText.substring(0, 500), smsCost: totalSmsCost };
+      }
+    }
+
+    // Last resort: poll inbox — TM may have created account and sent email even without showing verify page
+    console.log("[TM-Playwright] Last resort: polling inbox to check if TM sent verification email...");
+    const lastResortCode = await getVerificationCode();
+    if (lastResortCode) {
+      console.log(`[TM-Playwright] Got code ${lastResortCode} from inbox! Account was created. Treating as success.`);
+      return { success: true, pageContent: "Account created. Verification code received from inbox: " + lastResortCode, smsCost: totalSmsCost };
     }
 
     return { success: false, error: "Registration status unclear: " + finalText.substring(0, 200), pageContent: finalText.substring(0, 500), smsCost: totalSmsCost };

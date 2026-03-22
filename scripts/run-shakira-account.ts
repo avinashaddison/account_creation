@@ -18,7 +18,7 @@ function generatePassword(): string {
 
 // Presale: ZenRows WSS, TM Registration: SOAX residential proxy
 const ZENROWS_WSS = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
-const TM_PROXY    = "http://package-338826-country-us-sessionid-vtlJLgeIZpYM6fuQ-sessionlength-300-opt-wb:6g6qsAZePu4pTdy8@proxy.soax.com:5000";
+const TM_PROXY    = "http://package-339278-country-us-sessionid-kfLq8QIZ0wGMrrtc-sessionlength-300-opt-wb:ejOmfeLuOA4CLYRh@proxy.soax.com:5000";
 
 async function main() {
   console.log("=== Shakira Presale + TM Account Creation ===\n");

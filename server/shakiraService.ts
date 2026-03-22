@@ -23,7 +23,7 @@ export async function doShakiraPresaleStep(
       console.log("[Shakira] Network idle timeout, continuing...");
     }
 
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(6000);
 
     const pageTitle = await page.title().catch(() => "");
     console.log("[Shakira] Page title:", pageTitle);
