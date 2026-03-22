@@ -1534,7 +1534,8 @@ export default function PrivateAccount() {
             ) : (
               <div className="rounded-xl overflow-hidden border border-white/5 shadow-xl">
                 {/* Google-Sheets-style header row */}
-                <div className="grid font-mono font-bold text-white text-xs uppercase tracking-wide" style={{ gridTemplateColumns: "2fr 1.4fr 0.7fr 1fr 0.5fr" }}>
+                <div className="grid font-mono font-bold text-white text-xs uppercase tracking-wide" style={{ gridTemplateColumns: "36px 2fr 1.4fr 0.7fr 1fr 0.5fr" }}>
+                  <div className="px-2 py-3 text-center" style={{ background: "#111" }}>#</div>
                   <div className="px-4 py-3" style={{ background: "#c0392b" }}>E-Mail Address</div>
                   <div className="px-4 py-3" style={{ background: "#e67e22" }}>Password</div>
                   <div className="px-4 py-3" style={{ background: "#2980b9" }}>Credits</div>
@@ -1556,9 +1557,14 @@ export default function PrivateAccount() {
                     <div
                       key={acct.id}
                       className="grid items-center border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors"
-                      style={{ gridTemplateColumns: "2fr 1.4fr 0.7fr 1fr 0.5fr", background: rowBg }}
+                      style={{ gridTemplateColumns: "36px 2fr 1.4fr 0.7fr 1fr 0.5fr", background: rowBg }}
                       data-testid={`row-replit-private-${acct.id}`}
                     >
+                      {/* Row number */}
+                      <div className="px-2 py-3.5 text-center">
+                        <span className="text-xs font-mono text-zinc-600">{idx + 1}</span>
+                      </div>
+
                       {/* Email — click to copy */}
                       <div className="px-4 py-3.5 flex flex-col gap-0.5">
                         <button
