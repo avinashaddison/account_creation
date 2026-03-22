@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { CreditCard, Plus, Trash2, Eye, EyeOff, Copy, Check, Mail, Key, Shield } from "lucide-react";
+import { CreditCard, Plus, Trash2, Eye, EyeOff, Copy, Check, Shield } from "lucide-react";
 import type { SavedCard } from "@shared/schema";
 
 const G = "#00ff41";
@@ -90,36 +90,23 @@ function CardPreview({ card, onDelete }: { card: SavedCard; onDelete: () => void
         </div>
       </div>
 
-      {/* OTP email strip */}
-      <div className="px-4 py-2.5 space-y-1" style={{ background: "rgba(0,0,0,0.55)", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      {/* Bottom strip */}
+      <div className="px-4 py-2 flex items-center justify-between" style={{ background: "rgba(0,0,0,0.55)", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
         <div className="flex items-center gap-1.5">
-          <Mail className="w-3 h-3" style={{ color: card.otpEmail ? G : "rgba(255,255,255,0.2)" }} />
-          <span className="text-[9px] font-mono" style={{ color: card.otpEmail ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.2)" }}>
-            {card.otpEmail || "No OTP email set"}
+          <Shield className="w-3 h-3" style={{ color: "rgba(0,255,65,0.35)" }} />
+          <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.22)" }}>
+            3DS OTP via Settings
           </span>
-          {card.otpEmail && (
-            <span className="ml-auto text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: GA(0.1), border: `1px solid ${GA(0.25)}`, color: G }}>
-              OTP READY
-            </span>
-          )}
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Shield className="w-3 h-3" style={{ color: "rgba(255,255,255,0.18)" }} />
-            <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.2)" }}>
-              {card.otpEmailPassword ? "App password set ✓" : "No app password"}
-            </span>
-          </div>
-          <button
-            onClick={() => { sounds.click(); onDelete(); }}
-            className="flex items-center gap-1 text-[9px] font-mono px-2 py-0.5 rounded transition-all"
-            style={{ color: "rgba(255,69,58,0.7)", border: "1px solid rgba(255,69,58,0.2)", background: "rgba(255,69,58,0.05)" }}
-            data-testid={`button-delete-card-${card.id}`}
-          >
-            <Trash2 className="w-2.5 h-2.5" />
-            Delete
-          </button>
-        </div>
+        <button
+          onClick={() => { sounds.click(); onDelete(); }}
+          className="flex items-center gap-1 text-[9px] font-mono px-2 py-0.5 rounded transition-all"
+          style={{ color: "rgba(255,69,58,0.7)", border: "1px solid rgba(255,69,58,0.2)", background: "rgba(255,69,58,0.05)" }}
+          data-testid={`button-delete-card-${card.id}`}
+        >
+          <Trash2 className="w-2.5 h-2.5" />
+          Delete
+        </button>
       </div>
     </div>
   );
@@ -128,8 +115,7 @@ function CardPreview({ card, onDelete }: { card: SavedCard; onDelete: () => void
 function AddCardForm({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const [form, setForm] = useState({
-    label: "", cardholderName: "", cardNumber: "", expiryMonth: "", expiryYear: "",
-    cvv: "", otpEmail: "", otpEmailPassword: "",
+    label: "", cardholderName: "", cardNumber: "", expiryMonth: "", expiryYear: "", cvv: "",
   });
 
   const mutation = useMutation({
@@ -143,8 +129,8 @@ function AddCardForm({ onClose }: { onClose: () => void }) {
         expiryYear: form.expiryYear,
         cvv: form.cvv,
         cardType,
-        otpEmail: form.otpEmail || null,
-        otpEmailPassword: form.otpEmailPassword || null,
+        otpEmail: null,
+        otpEmailPassword: null,
       });
       return res.json();
     },
@@ -164,10 +150,9 @@ function AddCardForm({ onClose }: { onClose: () => void }) {
     setForm((p) => ({ ...p, [k]: v }));
   }
 
-  const field = (label: string, key: string, type = "text", placeholder = "", icon?: any) => (
+  const field = (label: string, key: string, type = "text", placeholder = "") => (
     <div>
       <label className="block text-[10px] font-mono uppercase tracking-widest mb-1.5" style={{ color: GA(0.4) }}>
-        {icon && <span className="inline-block w-3 h-3 mr-1 align-middle">{icon}</span>}
         {label}
       </label>
       <input
@@ -175,6 +160,8 @@ function AddCardForm({ onClose }: { onClose: () => void }) {
         value={(form as any)[key]}
         onChange={(e) => { sounds.keypress(); set(key, key === "cardNumber" ? formatCardNumber(e.target.value) : e.target.value); }}
         placeholder={placeholder}
+        autoComplete="off"
+        data-1p-ignore
         className="w-full rounded-lg px-3 py-2 text-xs font-mono focus:outline-none"
         style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}`, color: "rgba(255,255,255,0.85)", caretColor: G }}
       />
@@ -201,17 +188,10 @@ function AddCardForm({ onClose }: { onClose: () => void }) {
         {field("CVV", "cvv", "password", "•••")}
       </div>
 
-      <div className="pt-2 border-t" style={{ borderColor: GA(0.1) }}>
-        <div className="flex items-center gap-2 mb-3">
-          <Mail className="w-3 h-3" style={{ color: "rgba(0,191,255,0.7)" }} />
-          <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: "rgba(0,191,255,0.5)" }}>OTP Email (for 3D Secure)</span>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          {field("Bank OTP Email", "otpEmail", "email", "yourbank@gmail.com")}
-          {field("App Password", "otpEmailPassword", "password", "Google app password")}
-        </div>
-        <p className="text-[9px] font-mono mt-2" style={{ color: "rgba(255,255,255,0.2)" }}>
-          Used to auto-fetch OTP from your bank email for 3DS verification. Use a Gmail App Password.
+      <div className="pt-2 border-t flex items-center gap-2" style={{ borderColor: GA(0.1) }}>
+        <Shield className="w-3 h-3 flex-shrink-0" style={{ color: "rgba(0,191,255,0.4)" }} />
+        <p className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.25)" }}>
+          3DS OTP email &amp; app password are read from <span style={{ color: "rgba(0,255,65,0.5)" }}>Settings</span>
         </p>
       </div>
 
