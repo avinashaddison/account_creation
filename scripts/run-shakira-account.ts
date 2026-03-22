@@ -18,7 +18,14 @@ function generatePassword(): string {
 
 // Presale: ZenRows WSS, TM Registration: SOAX residential proxy
 const ZENROWS_WSS = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
-const TM_PROXY    = "http://package-339278-country-us-sessionid-kfLq8QIZ0wGMrrtc-sessionlength-300-opt-wb:ejOmfeLuOA4CLYRh@proxy.soax.com:5000";
+const SOAX_BASE   = "http://package-339278-country-us-sessionid-kfLq8QIZ0wGMrrtc-sessionlength-300-opt-wb:ejOmfeLuOA4CLYRh@proxy.soax.com:5000";
+
+// Generate a fresh SOAX session ID each run to avoid Akamai flagged IPs
+function freshSoaxProxy(base: string): string {
+  const sessionId = Math.random().toString(36).substring(2, 14);
+  return base.replace(/sessionid-[^-]+/, `sessionid-${sessionId}`);
+}
+const TM_PROXY = freshSoaxProxy(SOAX_BASE);
 
 async function main() {
   console.log("=== Shakira Presale + TM Account Creation ===\n");

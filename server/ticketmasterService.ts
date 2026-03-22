@@ -7,6 +7,15 @@ import { doShakiraPresaleStep } from "./shakiraService";
 
 chromium.use(StealthPlugin());
 
+function rotateSoaxSession(proxyUrl: string): string {
+  if (!proxyUrl || !proxyUrl.includes("soax.com")) return proxyUrl;
+  const sessionId = Math.random().toString(36).substring(2, 14) + Math.random().toString(36).substring(2, 8);
+  if (proxyUrl.includes("sessionid-")) {
+    return proxyUrl.replace(/sessionid-[^-]+/, `sessionid-${sessionId}`);
+  }
+  return proxyUrl;
+}
+
 function tmIsChallenge(text: string): boolean {
   if (text.includes("don't refresh") || text.includes("one moment") || text.includes("please wait") || text.includes("checking your browser")) return true;
   if (text.includes("almost there") && !text.includes("verify your account") && !text.includes("verify my email") && !text.includes("one more step")) return true;
@@ -210,7 +219,12 @@ export async function tmFullRegistrationFlow(
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     }
 
-    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, proxyUrl, keepBrowserOpen, shakiraPresale, presaleProxyUrl);
+    // Rotate SOAX session ID on every attempt to get a fresh residential IP (avoids Akamai blocklisted IPs)
+    const attemptProxyUrl = attempt === 0 ? proxyUrl : rotateSoaxSession(proxyUrl || "");
+    if (attempt > 0 && attemptProxyUrl !== proxyUrl) {
+      console.log(`[TM-Playwright] Rotated SOAX session for retry ${attempt + 1}: ${attemptProxyUrl?.substring(0, 70)}...`);
+    }
+    const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, attemptProxyUrl, keepBrowserOpen, shakiraPresale, presaleProxyUrl);
     totalSmsCost += result.smsCost || 0;
 
     const closeBrowserIfKept = () => {
@@ -1673,12 +1687,40 @@ async function doTMRegistration(
 
     const usZips = ["90001","90012","90024","90034","90045","90056","90067","90210","90291","90301","90401","91001","91101","91201","91301","91401","91501","91601","91701","91801","92101","92201"];
     const randomZip = usZips[Math.floor(Math.random() * usZips.length)];
+
+    // Set country FIRST — React onChange on countryCode re-renders form and clears postalCode
+    // So we must set country before filling zip
+    const countrySet = await page.evaluate(`(() => {
+      var sel = document.querySelector('select[name="countryCode"]') || document.querySelector('select[id*="countryCode"]') || document.querySelector('select[id*="country"]');
+      if (!sel) return false;
+      var nativeSet = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+      if (nativeSet && nativeSet.set) nativeSet.set.call(sel, 'US'); else sel.value = 'US';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      sel.dispatchEvent(new Event('blur', { bubbles: true }));
+      var reactKey = Object.keys(sel).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
+      if (reactKey && sel[reactKey]) {
+        var fiber = sel[reactKey];
+        while (fiber) {
+          if (fiber.memoizedProps && typeof fiber.memoizedProps.onChange === 'function') {
+            fiber.memoizedProps.onChange({ target: sel, currentTarget: sel, type: 'change' });
+            break;
+          }
+          fiber = fiber.return;
+        }
+      }
+      return sel.value;
+    })()`);
+    console.log(`[TM-Playwright] Country code set: ${countrySet}`);
+
+    // Wait for React to re-render after country change, then fill zip
+    await page.waitForTimeout(600);
+
     const zipFilled = await fillInput(page, [
       'input[name="postalCode"]', 'input[id*="postalCode"]', 'input[id*="postal"]',
       'input[id*="zip"]', 'input[name="zipCode"]', 'input[placeholder*="zip" i]',
       'input[placeholder*="postal" i]',
     ], randomZip);
-    console.log(`[TM-Playwright] PostalCode filled: ${zipFilled} (${randomZip})`);
+    console.log(`[TM-Playwright] PostalCode filled (after country): ${zipFilled} (${randomZip})`);
 
     if (!zipFilled) {
       const zipFilledJS = await page.evaluate(`((val) => {
@@ -1697,8 +1739,10 @@ async function doTMRegistration(
         }
         return false;
       })` + `(${JSON.stringify(randomZip)})`) as boolean;
-      console.log(`[TM-Playwright] PostalCode JS fallback: ${zipFilledJS}`);
+      console.log(`[TM-Playwright] PostalCode JS fallback (after country): ${zipFilledJS}`);
     }
+
+    await page.waitForTimeout(400);
 
     const cbChecked = await page.evaluate(`(() => {
       var checked = 0;
@@ -1728,6 +1772,40 @@ async function doTMRegistration(
 
     await page.waitForTimeout(1000);
 
+    // Monitor network calls during form submit to detect silent API rejections
+    const submitNetworkLog: string[] = [];
+    const submitNetHandler = (resp: any) => {
+      const url = resp.url();
+      if (url.includes("ticketmaster") || url.includes("pingone") || url.includes("identity")) {
+        resp.text().then((body: string) => {
+          submitNetworkLog.push(`${resp.status()} ${url.substring(0, 80)} → ${body.substring(0, 100).replace(/\n/g, ' ')}`);
+        }).catch(() => {});
+      }
+    };
+    page.on('response', submitNetHandler);
+
+    // Verify pre-submit: check button state and re-log field values
+    const preSubmitCheck = await page.evaluate(`(() => {
+      var btn = Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').toLowerCase().includes('next') || (b.textContent || '').toLowerCase().includes('create'));
+      var pw = document.querySelector('input[name="password"]') || document.querySelector('input[type="password"]');
+      var fn = document.querySelector('input[name="firstName"]');
+      var ln = document.querySelector('input[name="lastName"]');
+      var cc = document.querySelector('select[name="countryCode"]');
+      var zip = document.querySelector('input[name="postalCode"]');
+      var cb = document.querySelector('input[name="privacyPolicyCheckbox"]') || document.querySelector('input[type="checkbox"]');
+      return {
+        btnText: btn ? btn.textContent?.trim() : 'not-found',
+        btnDisabled: btn ? btn.disabled : 'no-btn',
+        pw: pw ? pw.value.length : -1,
+        fn: fn ? fn.value : '',
+        ln: ln ? ln.value : '',
+        cc: cc ? cc.value : '',
+        zip: zip ? zip.value : '',
+        cbChecked: cb ? cb.checked : false
+      };
+    })()`);
+    console.log("[TM-Playwright] Pre-submit check:", JSON.stringify(preSubmitCheck));
+
     log(`🔘 Step 4: Submitting registration form...`);
     console.log("[TM-Playwright] Submitting registration...");
     let submitted = await clickButton(page, "next");
@@ -1747,12 +1825,27 @@ async function doTMRegistration(
 
     const postSubmitText = await getPageText(page);
     const postSubmitLower = postSubmitText.toLowerCase();
-    if (postSubmitLower.includes("please enter a valid password") ||
-        postSubmitLower.includes("password is required") ||
-        postSubmitLower.includes("first name is required") ||
-        postSubmitLower.includes("last name is required")) {
-      console.log("[TM-Playwright] Form validation errors after submit:", postSubmitText.substring(0, 300));
-      return { success: false, error: "Form validation errors: " + postSubmitText.substring(0, 200), pageContent: postSubmitText.substring(0, 500), smsCost: totalSmsCost };
+    console.log("[TM-Playwright] POST-SUBMIT page (first 600):", postSubmitText.substring(0, 600).replace(/\n/g, ' | '));
+    console.log("[TM-Playwright] POST-SUBMIT URL:", page.url().substring(0, 200));
+    page.off('response', submitNetHandler);
+    await new Promise(r => setTimeout(r, 200)); // allow promises to settle
+    console.log("[TM-Playwright] Submit network log:", JSON.stringify(submitNetworkLog));
+
+    // Check for any validation/rejection errors from TM
+    const tmRejectionErrors = [
+      "please enter a valid password", "password is required",
+      "first name is required", "last name is required",
+      "invalid email", "email address is not valid", "email is not valid",
+      "this email", "not a valid email", "disposable", "temporary email",
+      "enter a valid email", "email already", "already have an account",
+      "country is required", "postal code is required", "zip code is required",
+      "publicly exposed", "been publicly exposed", "exposed by another website", "unsafe password",
+      "unable to create account", "an error has occurred"
+    ];
+    const rejectionFound = tmRejectionErrors.find(e => postSubmitLower.includes(e));
+    if (rejectionFound) {
+      console.log(`[TM-Playwright] Form rejection detected: "${rejectionFound}"`);
+      return { success: false, error: "Form validation/rejection: " + postSubmitText.substring(0, 300), pageContent: postSubmitText.substring(0, 500), smsCost: totalSmsCost };
     }
 
     await page.waitForTimeout(5000);
@@ -1867,7 +1960,9 @@ async function doTMRegistration(
           break;
         }
         if (pageLower.includes("please enter a valid password") || pageLower.includes("password is required") ||
-            pageLower.includes("first name is required") || pageLower.includes("last name is required")) {
+            pageLower.includes("first name is required") || pageLower.includes("last name is required") ||
+            pageLower.includes("publicly exposed") || pageLower.includes("unable to create account") ||
+            pageLower.includes("unsafe password")) {
           console.log("[TM-Playwright] Form validation errors detected during wait");
           return { success: false, error: "Form validation errors after delayed submit: " + pageText.substring(0, 200), pageContent: pageText.substring(0, 500), smsCost: totalSmsCost };
         }
