@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -27,11 +27,13 @@ type LogLine = { text: string; ts: number; time: string };
 
 const G = "#00ff41";
 const GA = (a: number) => `rgba(0,255,65,${a})`;
+const B = "rgba(100,210,255,1)";
+const BA = (a: number) => `rgba(100,210,255,${a})`;
 
 function getLogStyle(text: string): { color: string; prefix: string } {
   if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
   if (text.startsWith("🚀") || text.startsWith("🏁")) return { color: G, prefix: ">" };
-  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("created"))
+  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("created") || text.toLowerCase().includes("complete"))
     return { color: G, prefix: "+" };
   if (text.includes("❌") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("error"))
     return { color: "#ff4141", prefix: "!" };
@@ -43,12 +45,19 @@ function getLogStyle(text: string): { color: string; prefix: string } {
     return { color: GA(0.9), prefix: "»" };
   if (text.toLowerCase().includes("email") || text.toLowerCase().includes("inbox") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("owa"))
     return { color: "rgba(0,200,255,0.7)", prefix: "·" };
+  if (text.toLowerCase().includes("captcha") || text.toLowerCase().includes("hcap") || text.toLowerCase().includes("token"))
+    return { color: "rgba(255,200,50,0.8)", prefix: "~" };
+  if (text.toLowerCase().includes("card") || text.toLowerCase().includes("stripe") || text.toLowerCase().includes("checkout") || text.toLowerCase().includes("otp"))
+    return { color: BA(0.8), prefix: "$" };
   return { color: GA(0.45), prefix: "·" };
 }
 
 export default function ReplitCreate() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [mode, setMode] = useState<"create" | "checkout">("create");
+
+  // ── CREATE mode state ──
   const [outlookEmail, setOutlookEmail] = useState("");
   const [outlookPassword, setOutlookPassword] = useState("");
   const [selectedOutlookId, setSelectedOutlookId] = useState("");
@@ -56,6 +65,16 @@ export default function ReplitCreate() {
   const [couponCode, setCouponCode] = useState("");
   const [selectedCardId, setSelectedCardId] = useState("");
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+
+  // ── CHECKOUT mode state ──
+  const [selectedReplitId, setSelectedReplitId] = useState("");
+  const [promoUrl, setPromoUrl] = useState("https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=");
+  const [checkoutCardId, setCheckoutCardId] = useState("");
+  const [nopeKey, setNopeKey] = useState("");
+  const [nopeKeyDirty, setNopeKeyDirty] = useState(false);
+  const [nopeKeySaving, setNopeKeySaving] = useState(false);
+
+  // ── Shared ──
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
@@ -71,28 +90,27 @@ export default function ReplitCreate() {
   const { data: outlookAccounts = [] } = useQuery<OutlookAccount[]>({
     queryKey: ["/api/private/outlook"],
   });
-
   const { data: replitAccounts = [] } = useQuery<ReplitAccount[]>({
     queryKey: ["/api/replit-accounts"],
     refetchInterval: running ? 4000 : false,
   });
+  const { data: nopeKeyData } = useQuery<{ key: string }>({
+    queryKey: ["/api/settings/nopecha-api-key"],
+  });
+
+  useEffect(() => {
+    if (nopeKeyData?.key && !nopeKeyDirty) setNopeKey(nopeKeyData.key);
+  }, [nopeKeyData]);
 
   const usedEmails = new Set(replitAccounts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
   const availableOutlookAccounts = outlookAccounts.filter((a) => !usedEmails.has(a.email.toLowerCase()));
 
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
-  useEffect(() => {
-    const t = setInterval(() => setTick((p) => !p), 600);
-    return () => clearInterval(t);
-  }, []);
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+  useEffect(() => { const t = setInterval(() => setTick((p) => !p), 600); return () => clearInterval(t); }, []);
 
   function nowTime() {
     return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
-
   function addLog(text: string) {
     setLogs((prev) => [...prev, { text, ts: Date.now(), time: nowTime() }]);
   }
@@ -118,10 +136,16 @@ export default function ReplitCreate() {
               setCompletedCount((p) => p + 1);
               sounds.success();
               if (data.checkoutUrl) setCheckoutUrl(data.checkoutUrl);
-              toast({ title: "✅ Account Created", description: `@${data.username}` });
+              if (data.checkoutComplete) {
+                toast({ title: "✅ Checkout Complete!", description: "Payment processed successfully" });
+              } else if (data.username) {
+                toast({ title: "✅ Account Created", description: `@${data.username}` });
+              } else {
+                toast({ title: "✅ Checkout Done", description: "Finished" });
+              }
             } else {
               sounds.error();
-              toast({ title: "❌ Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
+              toast({ title: "❌ Failed", description: data.error || "Unknown error", variant: "destructive" });
             }
           }
         }
@@ -135,10 +159,7 @@ export default function ReplitCreate() {
     sounds.click();
     setSelectedOutlookId(id);
     const acct = availableOutlookAccounts.find((a) => a.id === id);
-    if (acct) {
-      setOutlookEmail(acct.email);
-      setOutlookPassword(acct.password);
-    }
+    if (acct) { setOutlookEmail(acct.email); setOutlookPassword(acct.password); }
   };
 
   const handleCreate = async () => {
@@ -186,10 +207,61 @@ export default function ReplitCreate() {
     }
   };
 
+  const handleCheckout = async () => {
+    if (!selectedReplitId) {
+      toast({ title: "Missing account", description: "Select a Replit account", variant: "destructive" });
+      return;
+    }
+    if (!promoUrl.trim() || !promoUrl.includes("replit.com")) {
+      toast({ title: "Invalid URL", description: "Paste the full Replit checkout URL", variant: "destructive" });
+      return;
+    }
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+    setTotalCount(1);
+
+    try {
+      const res = await apiRequest("POST", "/api/replit-checkout", {
+        replitAccountId: selectedReplitId,
+        checkoutUrl: promoUrl.trim(),
+        cardId: checkoutCardId || undefined,
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to start checkout");
+      activeBatchId.current = data.batchId;
+      addLog(`🎟️ Checkout job started [${data.batchId}]`);
+    } catch (err: any) {
+      sounds.error();
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setRunning(false);
+    }
+  };
+
+  const saveNopeKey = async () => {
+    setNopeKeySaving(true);
+    try {
+      await apiRequest("PUT", "/api/admin/nopecha-api-key", { key: nopeKey.trim() });
+      setNopeKeyDirty(false);
+      qc.invalidateQueries({ queryKey: ["/api/settings/nopecha-api-key"] });
+      toast({ title: "✅ NopeCHA key saved" });
+    } catch (err: any) {
+      toast({ title: "Error saving key", description: err.message, variant: "destructive" });
+    } finally {
+      setNopeKeySaving(false);
+    }
+  };
+
   const isBulk = count > 1;
   const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
   const maxCount = Math.min(1000, availableOutlookAccounts.length || 1);
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
+  const selectedReplitAccount = replitAccounts.find((a) => a.id === selectedReplitId);
+
+  // Extract coupon from promo URL for display
+  let urlCoupon = "";
+  try { urlCoupon = new URL(promoUrl).searchParams.get("coupon") || ""; } catch {}
 
   return (
     <div className="space-y-6 animate-float-up">
@@ -204,7 +276,7 @@ export default function ReplitCreate() {
             </h1>
           </div>
           <p className="text-[11px] font-mono mt-0.5 pl-8" style={{ color: GA(0.32) }}>
-            automate account creation via stored outlook credentials
+            automate account creation & checkout via stored credentials
           </p>
         </div>
         <div className="flex items-center gap-2.5 text-[10px] font-mono">
@@ -220,319 +292,380 @@ export default function ReplitCreate() {
         </div>
       </div>
 
+      {/* Mode Toggle */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => { sounds.toggle(); setMode("create"); setLogs([]); setRunning(false); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-bold tracking-widest uppercase transition-all"
+          style={{
+            background: mode === "create" ? GA(0.12) : "rgba(0,0,0,0.3)",
+            border: `1px solid ${mode === "create" ? GA(0.5) : GA(0.1)}`,
+            color: mode === "create" ? G : GA(0.3),
+            textShadow: mode === "create" ? `0 0 10px ${G}` : "none",
+            boxShadow: mode === "create" ? `0 0 16px ${GA(0.08)}` : "none",
+          }}
+          data-testid="button-mode-create"
+        >
+          <Play className="w-3.5 h-3.5" />
+          Create Account
+        </button>
+        <button
+          onClick={() => { sounds.toggle(); setMode("checkout"); setLogs([]); setRunning(false); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-bold tracking-widest uppercase transition-all"
+          style={{
+            background: mode === "checkout" ? BA(0.1) : "rgba(0,0,0,0.3)",
+            border: `1px solid ${mode === "checkout" ? BA(0.5) : BA(0.08)}`,
+            color: mode === "checkout" ? B : BA(0.3),
+            textShadow: mode === "checkout" ? `0 0 10px ${B}` : "none",
+            boxShadow: mode === "checkout" ? `0 0 16px ${BA(0.06)}` : "none",
+          }}
+          data-testid="button-mode-checkout"
+        >
+          <ShoppingCart className="w-3.5 h-3.5" />
+          Checkout Existing
+        </button>
+      </div>
+
       <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
 
-        {/* Config panel */}
+        {/* Config Panel */}
         <div
           className="rounded-xl p-5 space-y-5 relative overflow-hidden"
-          style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.14)}`, boxShadow: `0 0 40px ${GA(0.04)} inset` }}
+          style={{
+            background: "rgba(0,0,0,0.55)",
+            border: `1px solid ${mode === "checkout" ? BA(0.2) : GA(0.14)}`,
+            boxShadow: `0 0 40px ${mode === "checkout" ? BA(0.03) : GA(0.04)} inset`,
+          }}
         >
-          {/* scanline overlay */}
           <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.012) 2px, rgba(0,255,65,0.012) 4px)", borderRadius: "inherit" }} />
 
-          {/* section label */}
           <div className="flex items-center gap-2">
-            <ChevronRight className="w-3.5 h-3.5" style={{ color: G }} />
-            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: GA(0.55) }}>Configuration</span>
-            <div className="flex-1 h-px" style={{ background: GA(0.1) }} />
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: mode === "checkout" ? B : G }} />
+            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.55) : GA(0.55) }}>
+              {mode === "checkout" ? "Checkout Configuration" : "Configuration"}
+            </span>
+            <div className="flex-1 h-px" style={{ background: mode === "checkout" ? BA(0.1) : GA(0.1) }} />
           </div>
 
-          {/* Count slider */}
-          <div>
-            <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
-              <Hash className="w-3 h-3" />
-              Accounts to Create
-            </label>
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <input
-                  type="range"
-                  min={1}
-                  max={maxCount}
-                  value={count}
-                  onChange={(e) => { sounds.toggle(); setCount(parseInt(e.target.value)); }}
-                  className="w-full h-1.5 rounded-full cursor-pointer appearance-none"
-                  style={{
-                    background: `linear-gradient(to right, ${GA(0.7)} ${pct}%, rgba(255,255,255,0.07) ${pct}%)`,
-                    accentColor: G,
-                  }}
-                  data-testid="input-count-slider"
-                />
-              </div>
-              <div
-                className="w-11 h-8 rounded-lg flex items-center justify-center text-base font-mono font-bold flex-shrink-0"
-                style={{ background: GA(0.08), border: `1px solid ${GA(0.35)}`, color: G, textShadow: `0 0 10px ${G}`, boxShadow: `0 0 12px ${GA(0.1)} inset` }}
-              >
-                {count}
-              </div>
-            </div>
-            {isBulk && (
-              <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: GA(0.32) }}>
-                <Layers className="w-3 h-3" />
-                bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
-              </p>
-            )}
-          </div>
-
-          {!isBulk && (
+          {/* ══ CREATE MODE ══ */}
+          {mode === "create" && (
             <>
-              {availableOutlookAccounts.length > 0 && (
+              {/* Count slider */}
+              <div>
+                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
+                  <Hash className="w-3 h-3" />
+                  Accounts to Create
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="range"
+                      min={1}
+                      max={maxCount}
+                      value={count}
+                      onChange={(e) => { sounds.toggle(); setCount(parseInt(e.target.value)); }}
+                      className="w-full h-1.5 rounded-full cursor-pointer appearance-none"
+                      style={{ background: `linear-gradient(to right, ${GA(0.7)} ${pct}%, rgba(255,255,255,0.07) ${pct}%)`, accentColor: G }}
+                      data-testid="input-count-slider"
+                    />
+                  </div>
+                  <div className="w-11 h-8 rounded-lg flex items-center justify-center text-base font-mono font-bold flex-shrink-0" style={{ background: GA(0.08), border: `1px solid ${GA(0.35)}`, color: G, textShadow: `0 0 10px ${G}`, boxShadow: `0 0 12px ${GA(0.1)} inset` }}>
+                    {count}
+                  </div>
+                </div>
+                {isBulk && (
+                  <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: GA(0.32) }}>
+                    <Layers className="w-3 h-3" />
+                    bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
+                  </p>
+                )}
+              </div>
+
+              {!isBulk && (
+                <>
+                  {availableOutlookAccounts.length > 0 && (
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>Stored Outlook Account</label>
+                      <select value={selectedOutlookId} onChange={(e) => handleOutlookSelect(e.target.value)} className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.18)}`, color: "rgba(255,255,255,0.75)" }} data-testid="select-outlook-account">
+                        <option value="">— Select account —</option>
+                        {availableOutlookAccounts.map((a) => (<option key={a.id} value={a.id}>{a.email}</option>))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
+                      <Mail className="w-2.5 h-2.5 inline mr-1" />Outlook Email
+                    </label>
+                    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}>
+                      <Mail className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
+                      <input type="email" value={outlookEmail} onChange={(e) => setOutlookEmail(e.target.value)} onKeyDown={() => sounds.keypress()} placeholder="yourname@outlook.com" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: "rgba(255,255,255,0.8)", caretColor: G }} data-testid="input-outlook-email" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
+                      <Key className="w-2.5 h-2.5 inline mr-1" />Outlook Password
+                    </label>
+                    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}>
+                      <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
+                      <input type="password" value={outlookPassword} onChange={(e) => setOutlookPassword(e.target.value)} onKeyDown={() => sounds.keypress()} placeholder="••••••••" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: "rgba(255,255,255,0.8)", caretColor: G }} data-testid="input-outlook-password" />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Coupon Code */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
+                  <Tag className="w-2.5 h-2.5 inline mr-1" />Coupon Code <span style={{ color: GA(0.22) }}>(optional)</span>
+                </label>
+                <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${couponCode.trim() ? GA(0.4) : GA(0.14)}` }}>
+                  <Tag className="w-3.5 h-3.5 flex-shrink-0" style={{ color: couponCode.trim() ? G : GA(0.3) }} />
+                  <input type="text" value={couponCode} onChange={(e) => { sounds.keypress(); setCouponCode(e.target.value.toUpperCase()); }} placeholder="PROMO2025 (leave blank to skip)" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: couponCode.trim() ? G : "rgba(255,255,255,0.5)", caretColor: G, letterSpacing: couponCode ? "0.12em" : undefined }} data-testid="input-coupon-code" />
+                  {couponCode.trim() && (<span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: GA(0.1), border: `1px solid ${GA(0.28)}`, color: G }}>WILL APPLY</span>)}
+                </div>
+              </div>
+
+              {/* Card */}
+              {savedCards.length > 0 && (
                 <div>
-                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
-                    Stored Outlook Account
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: BA(0.4) }}>
+                    <CreditCard className="w-2.5 h-2.5 inline mr-1" />Payment Card <span style={{ color: BA(0.2) }}>(optional)</span>
                   </label>
-                  <select
-                    value={selectedOutlookId}
-                    onChange={(e) => handleOutlookSelect(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
-                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.18)}`, color: "rgba(255,255,255,0.75)" }}
-                    data-testid="select-outlook-account"
-                  >
-                    <option value="">— Select account —</option>
-                    {availableOutlookAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.email}</option>
-                    ))}
+                  <select value={selectedCardId} onChange={(e) => { sounds.keypress(); setSelectedCardId(e.target.value); }} className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${selectedCardId ? BA(0.4) : BA(0.14)}`, color: selectedCardId ? BA(0.9) : "rgba(255,255,255,0.35)" }} data-testid="select-checkout-card">
+                    <option value="">— Skip auto checkout —</option>
+                    {savedCards.map((c) => (<option key={c.id} value={c.id}>{c.label} (•••• {c.cardNumber.replace(/\D/g, "").slice(-4)})</option>))}
                   </select>
                 </div>
               )}
 
-              <div>
-                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
-                  <Mail className="w-2.5 h-2.5 inline mr-1" />
-                  Outlook Email
-                </label>
-                <div
-                  className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
-                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}
-                >
-                  <Mail className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
-                  <input
-                    type="email"
-                    value={outlookEmail}
-                    onChange={(e) => setOutlookEmail(e.target.value)}
-                    onKeyDown={() => sounds.keypress()}
-                    placeholder="yourname@outlook.com"
-                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
-                    style={{ color: "rgba(255,255,255,0.8)", caretColor: G }}
-                    data-testid="input-outlook-email"
-                  />
+              {/* Checkout URL result */}
+              {checkoutUrl && (
+                <div className="rounded-lg p-3 space-y-1.5" style={{ background: GA(0.04), border: `1px solid ${GA(0.25)}` }}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
+                    <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: GA(0.55) }}>Checkout URL (coupon applied)</span>
+                  </div>
+                  <a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1.5" onClick={() => sounds.click()}>
+                    <ExternalLink className="w-3 h-3 flex-shrink-0 mt-0.5" style={{ color: GA(0.45) }} />
+                    <span className="text-[9px] font-mono break-all" style={{ color: G }}>{checkoutUrl.length > 120 ? checkoutUrl.substring(0, 120) + "..." : checkoutUrl}</span>
+                  </a>
+                  <button onClick={() => { navigator.clipboard.writeText(checkoutUrl); sounds.click(); toast({ title: "Copied!" }); }} className="text-[8px] font-mono px-2 py-0.5 rounded" style={{ background: GA(0.08), border: `1px solid ${GA(0.22)}`, color: GA(0.6) }} data-testid="button-copy-checkout-url">copy url</button>
                 </div>
-              </div>
+              )}
 
-              <div>
-                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
-                  <Key className="w-2.5 h-2.5 inline mr-1" />
-                  Outlook Password
-                </label>
-                <div
-                  className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
-                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}
-                >
-                  <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
-                  <input
-                    type="password"
-                    value={outlookPassword}
-                    onChange={(e) => setOutlookPassword(e.target.value)}
-                    onKeyDown={() => sounds.keypress()}
-                    placeholder="••••••••"
-                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
-                    style={{ color: "rgba(255,255,255,0.8)", caretColor: G }}
-                    data-testid="input-outlook-password"
-                  />
+              {/* Create button */}
+              <button
+                onClick={handleCreate}
+                disabled={running || !canCreate}
+                className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+                style={{
+                  background: running || !canCreate ? GA(0.04) : `linear-gradient(135deg, ${GA(0.2)}, ${GA(0.08)})`,
+                  border: `1px solid ${running || !canCreate ? GA(0.08) : GA(0.5)}`,
+                  color: running || !canCreate ? GA(0.25) : G,
+                  textShadow: running || !canCreate ? "none" : `0 0 14px ${G}`,
+                  cursor: running || !canCreate ? "not-allowed" : "pointer",
+                }}
+                data-testid="button-create-replit"
+              >
+                {!(running || !canCreate) && (<div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.025) 2px, rgba(0,255,65,0.025) 4px)" }} />)}
+                <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                <span className="relative z-10">
+                  {running ? (totalCount > 1 ? `creating ${completedCount}/${totalCount}...` : "creating account...") : isBulk ? `bulk_create ${count} account${count > 1 ? "s" : ""}` : "create_replit_account"}
+                </span>
+              </button>
+
+              {running && totalCount > 1 && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] font-mono" style={{ color: GA(0.38) }}>
+                    <span>progress</span>
+                    <span style={{ color: G }}>{completedCount}/{totalCount}</span>
+                  </div>
+                  <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(completedCount / totalCount) * 100}%`, background: `linear-gradient(90deg, ${G}, rgba(0,200,50,0.7))`, boxShadow: `0 0 10px ${GA(0.7)}` }} />
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
 
-          {/* Coupon Code field */}
-          <div>
-            <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
-              <Tag className="w-2.5 h-2.5 inline mr-1" />
-              Coupon Code <span style={{ color: GA(0.22) }}>(optional)</span>
-            </label>
-            <div
-              className="flex items-center gap-2.5 rounded-lg px-3 py-2.5"
-              style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${couponCode.trim() ? GA(0.4) : GA(0.14)}` }}
-            >
-              <Tag className="w-3.5 h-3.5 flex-shrink-0" style={{ color: couponCode.trim() ? G : GA(0.3) }} />
-              <input
-                type="text"
-                value={couponCode}
-                onChange={(e) => { sounds.keypress(); setCouponCode(e.target.value.toUpperCase()); }}
-                placeholder="PROMO2025 (leave blank to skip)"
-                className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
-                style={{ color: couponCode.trim() ? G : "rgba(255,255,255,0.5)", caretColor: G, letterSpacing: couponCode ? "0.12em" : undefined }}
-                data-testid="input-coupon-code"
-              />
-              {couponCode.trim() && (
-                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded" style={{ background: GA(0.1), border: `1px solid ${GA(0.28)}`, color: G }}>
-                  WILL APPLY
-                </span>
-              )}
-            </div>
-            {couponCode.trim() && (
-              <p className="text-[9px] font-mono mt-1.5" style={{ color: GA(0.32) }}>
-                After account creation, logs into Replit → opens Stripe checkout → applies coupon → logs checkout URL
-              </p>
-            )}
-          </div>
-
-          {/* Checkout Card selector */}
-          {savedCards.length > 0 && (
-            <div>
-              <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: "rgba(100,210,255,0.4)" }}>
-                <CreditCard className="w-2.5 h-2.5 inline mr-1" />
-                Payment Card <span style={{ color: "rgba(100,210,255,0.2)" }}>(optional — for auto checkout)</span>
-              </label>
-              <select
-                value={selectedCardId}
-                onChange={(e) => { sounds.keypress(); setSelectedCardId(e.target.value); }}
-                className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
-                style={{
-                  background: "rgba(0,0,0,0.5)",
-                  border: `1px solid ${selectedCardId ? "rgba(100,210,255,0.4)" : "rgba(100,210,255,0.14)"}`,
-                  color: selectedCardId ? "rgba(100,210,255,0.9)" : "rgba(255,255,255,0.35)",
-                }}
-                data-testid="select-checkout-card"
-              >
-                <option value="">— Skip auto checkout —</option>
-                {savedCards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label} (•••• {c.cardNumber.replace(/\D/g, "").slice(-4)})
-                  </option>
-                ))}
-              </select>
-              {selectedCardId && (
-                <p className="text-[9px] font-mono mt-1.5" style={{ color: "rgba(100,210,255,0.3)" }}>
-                  After coupon applied → fills card in Stripe iframe → submits → handles 3DS OTP automatically
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Checkout URL result */}
-          {checkoutUrl && (
-            <div
-              className="rounded-lg p-3 space-y-1.5"
-              style={{ background: GA(0.04), border: `1px solid ${GA(0.25)}`, boxShadow: `0 0 16px ${GA(0.06)} inset` }}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
-                <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: GA(0.55) }}>Checkout URL (coupon applied)</span>
-              </div>
-              <a
-                href={checkoutUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start gap-1.5 group"
-                onClick={() => sounds.click()}
-              >
-                <ExternalLink className="w-3 h-3 flex-shrink-0 mt-0.5 group-hover:opacity-100" style={{ color: GA(0.45) }} />
-                <span
-                  className="text-[9px] font-mono break-all leading-relaxed"
-                  style={{ color: G, textShadow: `0 0 8px ${GA(0.3)}` }}
+          {/* ══ CHECKOUT MODE ══ */}
+          {mode === "checkout" && (
+            <>
+              {/* Replit Account Selector */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: BA(0.5) }}>
+                  <User className="w-2.5 h-2.5 inline mr-1" />Replit Account
+                </label>
+                <select
+                  value={selectedReplitId}
+                  onChange={(e) => { sounds.keypress(); setSelectedReplitId(e.target.value); }}
+                  className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${selectedReplitId ? BA(0.45) : BA(0.15)}`, color: selectedReplitId ? BA(0.9) : "rgba(255,255,255,0.4)" }}
+                  data-testid="select-replit-account"
                 >
-                  {checkoutUrl.length > 120 ? checkoutUrl.substring(0, 120) + "..." : checkoutUrl}
-                </span>
-              </a>
+                  <option value="">— Select Replit account —</option>
+                  {replitAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>@{a.username} ({a.email})</option>
+                  ))}
+                </select>
+                {selectedReplitAccount && (
+                  <p className="text-[9px] font-mono mt-1 flex gap-2" style={{ color: BA(0.4) }}>
+                    <span>email: {selectedReplitAccount.email}</span>
+                    <span style={{ color: BA(0.2) }}>|</span>
+                    <span>status: {selectedReplitAccount.status}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Promotional Checkout URL */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: BA(0.5) }}>
+                  <Link2 className="w-2.5 h-2.5 inline mr-1" />Promotional Checkout URL
+                </label>
+                <div className="space-y-1.5">
+                  <div
+                    className="flex items-start gap-2.5 rounded-lg px-3 py-2.5"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${promoUrl.includes("replit.com") ? BA(0.4) : BA(0.14)}` }}
+                  >
+                    <Link2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: promoUrl.includes("replit.com") ? B : BA(0.3) }} />
+                    <textarea
+                      value={promoUrl}
+                      onChange={(e) => { sounds.keypress(); setPromoUrl(e.target.value); }}
+                      rows={3}
+                      placeholder="https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=YOUR_CODE"
+                      className="bg-transparent flex-1 text-[10px] font-mono focus:outline-none resize-none"
+                      style={{ color: promoUrl.includes("replit.com") ? B : "rgba(255,255,255,0.5)", caretColor: B }}
+                      data-testid="input-promo-url"
+                    />
+                  </div>
+                  {urlCoupon && (
+                    <div className="flex items-center gap-1.5">
+                      <Tag className="w-3 h-3" style={{ color: BA(0.5) }} />
+                      <span className="text-[9px] font-mono" style={{ color: BA(0.4) }}>Coupon detected:</span>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: BA(0.08), border: `1px solid ${BA(0.3)}`, color: B, letterSpacing: "0.1em" }}>{urlCoupon}</span>
+                    </div>
+                  )}
+                  <p className="text-[9px] font-mono" style={{ color: BA(0.25) }}>
+                    Paste the full URL — coupon in the URL is auto-applied by Stripe
+                  </p>
+                </div>
+              </div>
+
+              {/* Card Selector */}
+              {savedCards.length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: BA(0.5) }}>
+                    <CreditCard className="w-2.5 h-2.5 inline mr-1" />Payment Card
+                  </label>
+                  <select
+                    value={checkoutCardId}
+                    onChange={(e) => { sounds.keypress(); setCheckoutCardId(e.target.value); }}
+                    className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${checkoutCardId ? BA(0.45) : BA(0.15)}`, color: checkoutCardId ? BA(0.9) : "rgba(255,255,255,0.4)" }}
+                    data-testid="select-checkout-card-co"
+                  >
+                    <option value="">— No card (navigate only) —</option>
+                    {savedCards.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label} (•••• {c.cardNumber.replace(/\D/g, "").slice(-4)})</option>
+                    ))}
+                  </select>
+                  {checkoutCardId && (
+                    <p className="text-[9px] font-mono mt-1" style={{ color: BA(0.3) }}>
+                      Will fill card → solve hCaptcha → submit → handle 3DS OTP
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* NopeCHA Key */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: BA(0.5) }}>
+                  <Key className="w-2.5 h-2.5 inline mr-1" />NopeCHA API Key
+                  <span className="ml-1.5" style={{ color: BA(0.25) }}>(for hCaptcha solving)</span>
+                </label>
+                <div className="flex gap-2">
+                  <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 flex-1" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${nopeKey.trim() ? BA(0.4) : BA(0.14)}` }}>
+                    <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: nopeKey.trim() ? B : BA(0.3) }} />
+                    <input
+                      type="text"
+                      value={nopeKey}
+                      onChange={(e) => { sounds.keypress(); setNopeKey(e.target.value); setNopeKeyDirty(true); }}
+                      placeholder="nopecha_key_..."
+                      className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                      style={{ color: nopeKey.trim() ? B : "rgba(255,255,255,0.5)", caretColor: B }}
+                      data-testid="input-nopecha-key"
+                    />
+                  </div>
+                  <button
+                    onClick={saveNopeKey}
+                    disabled={!nopeKey.trim() || nopeKeySaving}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-mono font-bold transition-all"
+                    style={{
+                      background: nopeKey.trim() && !nopeKeySaving ? BA(0.1) : "rgba(0,0,0,0.3)",
+                      border: `1px solid ${nopeKey.trim() ? BA(0.4) : BA(0.1)}`,
+                      color: nopeKey.trim() ? B : BA(0.2),
+                      cursor: nopeKey.trim() && !nopeKeySaving ? "pointer" : "not-allowed",
+                    }}
+                    data-testid="button-save-nopecha"
+                  >
+                    <Save className="w-3 h-3" />
+                    {nopeKeySaving ? "..." : "Save"}
+                  </button>
+                </div>
+                {nopeKey.trim() && !nopeKeyDirty && (
+                  <p className="text-[9px] font-mono mt-1 flex items-center gap-1" style={{ color: BA(0.3) }}>
+                    <span className="w-1 h-1 rounded-full inline-block" style={{ background: B }} />
+                    Key configured — will be used as primary hCaptcha solver
+                  </p>
+                )}
+              </div>
+
+              {/* Run Checkout Button */}
               <button
-                onClick={() => { navigator.clipboard.writeText(checkoutUrl); sounds.click(); toast({ title: "Copied!", description: "Checkout URL copied to clipboard" }); }}
-                className="text-[8px] font-mono px-2 py-0.5 rounded transition-all"
-                style={{ background: GA(0.08), border: `1px solid ${GA(0.22)}`, color: GA(0.6) }}
-                data-testid="button-copy-checkout-url"
+                onClick={handleCheckout}
+                disabled={running || !selectedReplitId || !promoUrl.includes("replit.com")}
+                className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+                style={{
+                  background: running || !selectedReplitId ? BA(0.03) : `linear-gradient(135deg, ${BA(0.15)}, ${BA(0.06)})`,
+                  border: `1px solid ${running || !selectedReplitId ? BA(0.08) : BA(0.55)}`,
+                  color: running || !selectedReplitId ? BA(0.2) : B,
+                  textShadow: running || !selectedReplitId ? "none" : `0 0 14px ${B}`,
+                  boxShadow: running || !selectedReplitId ? "none" : `0 0 25px ${BA(0.08)}`,
+                  cursor: running || !selectedReplitId ? "not-allowed" : "pointer",
+                }}
+                data-testid="button-run-checkout"
               >
-                copy url
+                <ShoppingCart className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                <span className="relative z-10">
+                  {running ? "running checkout..." : "run_checkout"}
+                </span>
               </button>
-            </div>
-          )}
-
-          {/* Create button */}
-          <button
-            onClick={handleCreate}
-            disabled={running || !canCreate}
-            className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
-            style={{
-              background: running || !canCreate
-                ? GA(0.04)
-                : `linear-gradient(135deg, ${GA(0.2)}, ${GA(0.08)})`,
-              border: `1px solid ${running || !canCreate ? GA(0.08) : GA(0.5)}`,
-              color: running || !canCreate ? GA(0.25) : G,
-              textShadow: running || !canCreate ? "none" : `0 0 14px ${G}`,
-              boxShadow: running || !canCreate ? "none" : `0 0 25px ${GA(0.1)}, inset 0 1px 0 ${GA(0.12)}`,
-              cursor: running || !canCreate ? "not-allowed" : "pointer",
-            }}
-            data-testid="button-create-replit"
-          >
-            {!(running || !canCreate) && (
-              <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.025) 2px, rgba(0,255,65,0.025) 4px)" }} />
-            )}
-            <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
-            <span className="relative z-10">
-              {running
-                ? totalCount > 1
-                  ? `creating ${completedCount}/${totalCount}...`
-                  : "creating account..."
-                : isBulk
-                ? `bulk_create ${count} account${count > 1 ? "s" : ""}`
-                : "create_replit_account"}
-            </span>
-          </button>
-
-          {/* Progress bar */}
-          {running && totalCount > 1 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[10px] font-mono" style={{ color: GA(0.38) }}>
-                <span>progress</span>
-                <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{completedCount}/{totalCount}</span>
-              </div>
-              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${(completedCount / totalCount) * 100}%`,
-                    background: `linear-gradient(90deg, ${G}, rgba(0,200,50,0.7))`,
-                    boxShadow: `0 0 10px ${GA(0.7)}`,
-                  }}
-                />
-              </div>
-            </div>
+            </>
           )}
         </div>
 
         {/* Terminal panel */}
         <div className="min-w-0">
-          <div
-            className="rounded-xl overflow-hidden flex flex-col"
-            style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${GA(0.12)}`, boxShadow: `0 0 40px ${GA(0.03)}` }}
-          >
-            {/* Terminal title bar */}
-            <div
-              className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
-              style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.08)}` }}
-            >
+          <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${mode === "checkout" ? BA(0.1) : GA(0.12)}` }}>
+            <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0" style={{ background: mode === "checkout" ? BA(0.03) : GA(0.03), borderBottom: `1px solid ${mode === "checkout" ? BA(0.08) : GA(0.08)}` }}>
               <div className="flex items-center gap-2.5">
-                <Radio className="w-3 h-3" style={{ color: running ? G : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${G})` : "none" }} />
-                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.45) }}>live_output</span>
+                <Radio className="w-3 h-3" style={{ color: running ? (mode === "checkout" ? B : G) : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${mode === "checkout" ? B : G})` : "none" }} />
+                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.45) : GA(0.45) }}>live_output</span>
                 {running && (
                   <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
-                    <span className="text-[9px] font-mono font-bold" style={{ color: GA(0.65) }}>RUNNING</span>
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: mode === "checkout" ? B : G, boxShadow: `0 0 6px ${mode === "checkout" ? B : G}` }} />
+                    <span className="text-[9px] font-mono font-bold" style={{ color: mode === "checkout" ? BA(0.65) : GA(0.65) }}>RUNNING</span>
                   </div>
                 )}
               </div>
               <div className="flex gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,59,48,0.55)" }} />
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,149,0,0.55)" }} />
-                <span className="w-2.5 h-2.5 rounded-full" style={{ background: GA(0.55) }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: mode === "checkout" ? BA(0.55) : GA(0.55) }} />
               </div>
             </div>
 
-            {/* Log body */}
-            <div
-              className="overflow-y-auto overflow-x-hidden p-4 space-y-0.5 font-mono"
-              style={{ height: "420px", wordBreak: "break-all", overflowWrap: "anywhere" }}
-              data-testid="container-logs"
-            >
+            <div className="overflow-y-auto overflow-x-hidden p-4 space-y-0.5 font-mono" style={{ height: "420px", wordBreak: "break-all", overflowWrap: "anywhere" }} data-testid="container-logs">
               {logs.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center gap-3">
                   <div className="text-center space-y-1.5">
@@ -545,18 +678,10 @@ export default function ReplitCreate() {
                   const { color, prefix } = getLogStyle(line.text);
                   const isSeparator = line.text.startsWith("━━━") || line.text.startsWith("---");
                   return (
-                    <div
-                      key={i}
-                      className={`flex items-start gap-2 min-w-0 ${isSeparator ? "mt-2 mb-1 opacity-30" : "py-px"}`}
-                    >
+                    <div key={i} className={`flex items-start gap-2 min-w-0 ${isSeparator ? "mt-2 mb-1 opacity-30" : "py-px"}`}>
                       <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: GA(0.22) }}>{line.time}</span>
                       <span className="text-[10px] flex-shrink-0 mt-0.5 w-3 text-center font-bold" style={{ color }}>{prefix}</span>
-                      <span
-                        className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden"
-                        style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}
-                      >
-                        {line.text}
-                      </span>
+                      <span className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden" style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}>{line.text}</span>
                     </div>
                   );
                 })
@@ -564,22 +689,12 @@ export default function ReplitCreate() {
               <div ref={logsEndRef} />
             </div>
 
-            {/* Terminal footer */}
-            <div
-              className="px-4 py-2 flex items-center gap-2"
-              style={{ background: GA(0.02), borderTop: `1px solid ${GA(0.07)}` }}
-            >
+            <div className="px-4 py-2 flex items-center gap-2" style={{ background: mode === "checkout" ? BA(0.02) : GA(0.02), borderTop: `1px solid ${mode === "checkout" ? BA(0.07) : GA(0.07)}` }}>
               <span className="text-[9px] font-mono" style={{ color: GA(0.25) }}>addison@panel:~$</span>
-              <span className="text-[9px] font-mono" style={{ color: GA(0.4) }}>
-                {running ? "executing replit_create..." : "ready"}
+              <span className="text-[9px] font-mono" style={{ color: mode === "checkout" ? BA(0.4) : GA(0.4) }}>
+                {running ? (mode === "checkout" ? "executing replit_checkout..." : "executing replit_create...") : "ready"}
               </span>
-              <span
-                className="w-1.5 h-3 ml-px"
-                style={{
-                  background: tick && !running ? G : "transparent",
-                  boxShadow: tick && !running ? `0 0 6px ${G}` : "none",
-                }}
-              />
+              <span className="w-1.5 h-3 ml-px" style={{ background: tick && !running ? (mode === "checkout" ? B : G) : "transparent", boxShadow: tick && !running ? `0 0 6px ${mode === "checkout" ? B : G}` : "none" }} />
             </div>
           </div>
         </div>

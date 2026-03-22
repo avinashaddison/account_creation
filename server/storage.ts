@@ -62,6 +62,7 @@ export interface IStorage {
   deleteTmAlertsOlderThan(days: number): Promise<void>;
   createReplitAccount(data: InsertReplitAccount): Promise<ReplitAccount>;
   getAllReplitAccounts(): Promise<ReplitAccount[]>;
+  getReplitAccount(id: string): Promise<ReplitAccount | undefined>;
   getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]>;
   deleteReplitAccount(id: string): Promise<void>;
   createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount>;
@@ -426,6 +427,11 @@ export class DatabaseStorage implements IStorage {
 
   async getAllReplitAccounts(): Promise<ReplitAccount[]> {
     return db.select().from(replitAccounts).orderBy(desc(replitAccounts.createdAt));
+  }
+
+  async getReplitAccount(id: string): Promise<ReplitAccount | undefined> {
+    const [row] = await db.select().from(replitAccounts).where(eq(replitAccounts.id, id));
+    return row;
   }
 
   async getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]> {

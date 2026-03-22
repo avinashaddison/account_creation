@@ -15368,6 +15368,525 @@ export async function registerV0Account(
   }
 }
 
+export async function checkoutExistingReplitAccount(
+  replitEmail: string,
+  replitPassword: string,
+  checkoutUrl: string,
+  cardDetails: CardDetails | undefined,
+  log: (msg: string) => void
+): Promise<{ success: boolean; checkoutComplete?: boolean; error?: string }> {
+  let browser: any = null;
+  let page: any = null;
+
+  try {
+    log(`🚀 Launching stealth browser for Replit checkout...`);
+    const { chromium } = await import("playwright");
+
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage", "--disable-web-security",
+        "--allow-running-insecure-content",
+        "--disable-features=IsolateOrigins,site-per-process",
+      ],
+    });
+
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      viewport: { width: 1366, height: 768 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      javaScriptEnabled: true,
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+      },
+    });
+
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+      (window as any).chrome = { app: { isInstalled: false }, runtime: { id: undefined } };
+      // hCaptcha invisible intercept — respond to inject-hcap-token broadcasts
+      window.addEventListener("message", (e: MessageEvent) => {
+        try {
+          const d = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+          if (d && d.type === "inject-hcap-token" && d.token) {
+            (window as any).__hcapToken = d.token;
+          }
+        } catch {}
+      });
+    });
+
+    page = await context.newPage();
+
+    // ── Step 1: Login to Replit ──
+    log(`🔐 Logging in to Replit as ${replitEmail}...`);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(3000);
+
+    const identSel = 'input[name="username"], input[name="email"], input[type="email"], input[placeholder*="email" i]';
+    const identField = await page.$(identSel).catch(() => null);
+    if (identField) {
+      await identField.click({ clickCount: 3 });
+      await identField.type(replitEmail, { delay: 40 });
+      await page.waitForTimeout(600);
+      const clicked = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll("button, input[type='submit']")) as HTMLElement[];
+        const btn = btns.find(b => {
+          const t = (b.textContent || "").trim().toLowerCase();
+          return t === "continue" || t === "next" || t === "log in" || t === "login";
+        });
+        if (btn) { btn.click(); return true; }
+        return false;
+      });
+      if (!clicked) await page.keyboard.press("Enter");
+      await page.waitForTimeout(3000);
+
+      const pwdField = await page.$('input[name="password"], input[type="password"]').catch(() => null);
+      if (pwdField) {
+        await pwdField.click({ clickCount: 3 });
+        await pwdField.type(replitPassword, { delay: 40 });
+        await page.waitForTimeout(500);
+        const clicked2 = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll("button, input[type='submit']")) as HTMLElement[];
+          const btn = btns.find(b => {
+            const t = (b.textContent || "").trim().toLowerCase();
+            return t === "log in" || t === "login" || t === "continue";
+          });
+          if (btn) { btn.click(); return true; }
+          return false;
+        });
+        if (!clicked2) await page.keyboard.press("Enter");
+        await page.waitForTimeout(7000);
+      }
+    }
+
+    const afterLoginUrl = page.url();
+    if (afterLoginUrl.includes("/login") || afterLoginUrl.includes("/signup")) {
+      log(`⚠️ Login may have failed — URL: ${afterLoginUrl.substring(0, 80)}`);
+    } else {
+      log(`✅ Logged in — URL: ${afterLoginUrl.substring(0, 80)}`);
+    }
+
+    // ── Step 2: Navigate to checkout URL ──
+    log(`🔗 Navigating to checkout URL: ${checkoutUrl.substring(0, 100)}...`);
+    await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(8000);
+
+    const postNavUrl = page.url();
+    log(`📍 Post-navigation URL: ${postNavUrl.substring(0, 100)}`);
+
+    // Handle /verify gate
+    if (postNavUrl.includes("/verify") || postNavUrl.includes("/login") || postNavUrl.includes("/signup")) {
+      log(`⚠️ Redirected to gate: ${postNavUrl.substring(0, 80)} — attempting to re-login...`);
+      await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(3000);
+      const ei = await page.$('input[type="email"], input[name="username"]').catch(() => null);
+      if (ei) {
+        await ei.fill(replitEmail);
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(3000);
+        const pi = await page.$('input[type="password"]').catch(() => null);
+        if (pi) {
+          await pi.fill(replitPassword);
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(5000);
+        }
+      }
+      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(8000);
+      log(`📍 URL after re-login: ${page.url().substring(0, 100)}`);
+    }
+
+    // Check coupon auto-applied
+    const couponText = await page.evaluate(() => document.body.innerText.toLowerCase()).catch(() => "");
+    if (couponText.includes("discount") || couponText.includes("% off") || couponText.includes("applied")) {
+      log(`✅ Coupon auto-applied! Discount reflected on page`);
+    }
+
+    if (!cardDetails) {
+      log(`ℹ️ No card provided — stopping after checkout URL navigation`);
+      return { success: true, checkoutComplete: false };
+    }
+
+    log(`💳 Filling card details in Stripe checkout...`);
+
+    // ── Helper: fill Stripe iframe input ──
+    async function fillStripeField(names: string[], value: string): Promise<boolean> {
+      for (const frame of page.frames()) {
+        for (const name of names) {
+          try {
+            const selectors = [`input[name="${name}"]`, `input[data-elements-stable-field-name="${name}"]`, `input[placeholder*="${name}" i]`];
+            for (const sel of selectors) {
+              const el = frame.locator(sel).first();
+              if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+                await el.click({ timeout: 3000 }).catch(() => {});
+                await el.evaluate((i: HTMLInputElement) => { i.value = ""; });
+                await el.type(value, { delay: 50 });
+                await frame.locator("body").press("Tab").catch(() => {});
+                log(`  Filled "${name}" in frame: ${frame.url().substring(0, 50)}`);
+                return true;
+              }
+            }
+          } catch {}
+        }
+      }
+      // main page fallback
+      for (const name of names) {
+        try {
+          const el = page.locator(`input[name="${name}"], input[placeholder*="${name}" i]`).first();
+          if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+            await el.fill(value);
+            log(`  Filled "${name}" (main page)`);
+            return true;
+          }
+        } catch {}
+      }
+      return false;
+    }
+
+    // Wait for Stripe iframes
+    for (let w = 0; w < 15; w++) {
+      const hasStripe = page.frames().some((f: any) => f.url().includes("js.stripe.com") || (f.url().includes("stripe.com") && f.url() !== page.url()));
+      if (hasStripe) break;
+      log(`  Waiting for Stripe iframes... (${w + 1}/15)`);
+      await page.waitForTimeout(2000);
+    }
+    log(`  Frames (${page.frames().length}): ${page.frames().map((f: any) => f.url().substring(0, 50)).join(" | ")}`);
+
+    const cardNum = cardDetails.cardNumber.replace(/\D/g, "");
+    const expiryMonth = cardDetails.expiryMonth.padStart(2, "0");
+    const expiryYear = cardDetails.expiryYear.length === 4 ? cardDetails.expiryYear.slice(-2) : cardDetails.expiryYear.padStart(2, "0");
+    const expiry = `${expiryMonth}${expiryYear}`;
+
+    const cardFilled = await fillStripeField(["cardnumber", "cardNumber", "card-number", "number"], cardNum);
+    if (!cardFilled) log(`⚠️ Card number field not found`);
+    await page.waitForTimeout(800);
+    const expiryFilled = await fillStripeField(["exp-date", "expiry", "expiration", "exp", "cardExpiry", "card-expiry"], expiry);
+    if (!expiryFilled) log(`⚠️ Expiry field not found`);
+    await page.waitForTimeout(600);
+    const cvvFilled = await fillStripeField(["cvc", "cvv", "cv2", "cardCvc", "card-cvc", "securityCode"], cardDetails.cvv);
+    if (!cvvFilled) log(`⚠️ CVV field not found`);
+    await page.waitForTimeout(600);
+    if (cardDetails.cardholderName) {
+      await fillStripeField(["cardholder", "name", "cardholderName", "card-name"], cardDetails.cardholderName);
+      await page.waitForTimeout(400);
+    }
+
+    // Billing address (India)
+    const addr = INDIAN_ADDRESSES[Math.floor(Math.random() * INDIAN_ADDRESSES.length)];
+    log(`  Billing: ${addr.line1}, ${addr.city}, ${addr.state} ${addr.zip}`);
+    const addrSelectors = [
+      ['input[placeholder*="address" i], input[name*="address" i], input[autocomplete*="address-line1"]', addr.line1],
+      ['input[placeholder*="city" i], input[name*="city" i], input[autocomplete="address-level2"]', addr.city],
+      ['input[placeholder*="zip" i], input[placeholder*="postal" i], input[name*="postal" i]', addr.zip],
+    ];
+    for (const [sel, val] of addrSelectors) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await el.fill(val);
+          log(`  Filled billing field: ${val}`);
+        }
+      } catch {}
+      await page.waitForTimeout(300);
+    }
+    await page.waitForTimeout(1000);
+
+    // ── hCaptcha pre-solve ──
+    const HCAP_SITE_KEY = "a9b5fb07-92ff-493f-86fe-352a2803b3df";
+    const HCAP_URL = "https://checkout.stripe.com";
+    let preSolvedToken: string | null = null;
+    let capturedRqdata: string | null = null;
+
+    // Set up rqdata listener on main page
+    try {
+      await page.evaluate(() => {
+        (window as any).__capturedRqdata = null;
+        window.addEventListener("message", (e: MessageEvent) => {
+          try {
+            const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
+            const m = str.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
+            if (m) {
+              (window as any).__capturedRqdata = m[1];
+              if (typeof (window as any).__onHcapRqdataReady === "function") {
+                try { (window as any).__onHcapRqdataReady(m[1]); } catch {}
+              }
+            }
+          } catch {}
+        }, true);
+      });
+    } catch {}
+
+    // Broadcast helper
+    const broadcastToken = async (token: string) => {
+      try {
+        await page.evaluate((tok: string) => {
+          document.querySelectorAll("iframe").forEach((iframe: HTMLIFrameElement) => {
+            try { iframe.contentWindow?.postMessage({ type: "inject-hcap-token", token: tok }, "*"); } catch {}
+          });
+          (window as any).__hcapToken = tok;
+        }, token);
+      } catch {}
+    };
+
+    // Expose rqdata-aware reactive solve
+    let rqdataSolveDone = false;
+    try {
+      await page.exposeFunction("__onHcapRqdataReady", async (rqdata: string) => {
+        if (rqdataSolveDone) return;
+        rqdataSolveDone = true;
+        log(`📦 rqdata arrived — solving hCaptcha reactively...`);
+        try {
+          const r = await solveHCaptchaWith2Captcha(HCAP_URL, HCAP_SITE_KEY, rqdata);
+          const tok = r.success ? r : await solveHCaptcha(HCAP_URL, HCAP_SITE_KEY, undefined, rqdata);
+          if (tok.success && tok.token) {
+            preSolvedToken = tok.token;
+            log(`✅ rqdata-aware solve complete (len=${tok.token.length})`);
+            await broadcastToken(tok.token);
+          }
+        } catch (e: any) { log(`⚠️ rqdata solve error: ${e.message}`); }
+      });
+    } catch {}
+
+    // Pre-solve without rqdata
+    log(`🤖 Pre-solving hCaptcha (no rqdata)...`);
+    try {
+      const pre = await solveHCaptchaWith2Captcha(HCAP_URL, HCAP_SITE_KEY);
+      const pre2 = pre.success ? pre : await solveHCaptcha(HCAP_URL, HCAP_SITE_KEY);
+      if (pre2.success && pre2.token) {
+        preSolvedToken = pre2.token;
+        log(`✅ Pre-solved hCaptcha token (len=${pre2.token.length})`);
+      }
+    } catch (e: any) { log(`⚠️ Pre-solve failed: ${e.message}`); }
+
+    // ── Click Subscribe ──
+    log(`💳 Clicking Subscribe...`);
+    let paymentSubmitTime = new Date();
+    try {
+      const subBtn = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
+      if (await subBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await subBtn.click({ timeout: 8000 });
+        paymentSubmitTime = new Date();
+        log(`  Subscribe clicked at ${paymentSubmitTime.toISOString()}`);
+      } else {
+        const clicked = await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll("button")).find(b => b.type === "submit" || b.textContent?.toLowerCase().includes("subscribe") || b.textContent?.toLowerCase().includes("pay"));
+          if (btn) { btn.click(); return true; }
+          return false;
+        });
+        if (clicked) paymentSubmitTime = new Date();
+        log(`  Subscribe clicked via JS eval`);
+      }
+    } catch (e: any) { log(`⚠️ Subscribe click failed: ${e.message}`); }
+
+    await page.waitForTimeout(5000);
+
+    // ── Handle hCaptcha if it appears ──
+    const hcapFrames = page.frames().filter((f: any) => f.url().includes("hcaptcha.com") || f.url().includes("HCaptcha.html") || f.url().includes("HCaptchaInvisible.html"));
+    if (hcapFrames.length > 0) {
+      log(`🔒 hCaptcha detected (${hcapFrames.length} frame(s)) — injecting token...`);
+
+      // Wait 5s for rqdata-aware solve to complete
+      await page.waitForTimeout(5000);
+
+      // Get rqdata from frames
+      if (!capturedRqdata) {
+        for (const fr of page.frames()) {
+          if (fr.url().includes("hcaptcha-invisible") || fr.url().includes("newassets.hcaptcha.com")) {
+            const rd = await fr.evaluate(() => {
+              if ((window as any).__capturedRqdata) return (window as any).__capturedRqdata;
+              const el = document.querySelector("[data-rqdata]");
+              if (el) return el.getAttribute("data-rqdata");
+              return null;
+            }).catch(() => null);
+            if (rd) { capturedRqdata = rd; break; }
+          }
+        }
+      }
+      log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found"}`);
+
+      const solveResult = await solveHCaptchaWith2Captcha(HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined);
+      const finalResult = solveResult.success ? solveResult : await solveHCaptcha(HCAP_URL, HCAP_SITE_KEY, undefined, capturedRqdata || undefined);
+
+      if (finalResult.success && finalResult.token) {
+        const token = finalResult.token;
+        log(`✅ hCaptcha solved (len=${token.length}) — injecting into all frames...`);
+        await broadcastToken(token);
+
+        // Inject into each frame type
+        for (const frame of page.frames()) {
+          try {
+            await frame.evaluate((tok: string) => {
+              document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("textarea[name='h-captcha-response'], input[name='h-captcha-response']")
+                .forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
+              const w = window as any;
+              if (w.hcaptcha?.execute) { try { w.hcaptcha.execute(); } catch {} }
+              document.dispatchEvent(new CustomEvent("hCaptchaCallback", { detail: tok }));
+              // HCaptcha.html and HCaptchaInvisible.html formats
+              const formats = [
+                JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
+                JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+                JSON.stringify({ event: "challenge-passed", response: tok }),
+              ];
+              formats.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
+            }, token).catch(() => {});
+          } catch {}
+        }
+
+        // Fire on main page
+        try {
+          await page.mainFrame().evaluate((tok: string) => {
+            const w = window as any;
+            if (w.__stripeHcaptchaCallback) { try { w.__stripeHcaptchaCallback(tok); } catch {} }
+            const origins = ["https://js.stripe.com", "https://b.stripecdn.com", "https://newassets.hcaptcha.com"];
+            const formats = [
+              JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
+              JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+            ];
+            origins.forEach(origin => {
+              formats.forEach(data => {
+                try { window.dispatchEvent(new MessageEvent("message", { data, origin, bubbles: false })); } catch {}
+              });
+            });
+          }, token).catch(() => {});
+        } catch {}
+
+        await page.waitForTimeout(8000);
+      } else {
+        log(`⚠️ hCaptcha solving failed: ${finalResult.error || "unknown"} — using pre-solved token if available`);
+        if (preSolvedToken) {
+          await broadcastToken(preSolvedToken);
+          log(`  Using pre-solved token (len=${preSolvedToken.length})`);
+          await page.waitForTimeout(5000);
+        }
+      }
+
+      // Re-click Subscribe after hCaptcha injection
+      let bankAcsNow = page.frames().some((f: any) => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+      if (!bankAcsNow) {
+        log(`  Bank ACS not yet — re-clicking Subscribe...`);
+        try {
+          const resubBtn = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
+          if (await resubBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await resubBtn.click({ timeout: 5000, force: true });
+            log(`  Re-clicked Subscribe`);
+          }
+        } catch {}
+        const acsDeadline = Date.now() + 45000;
+        while (!bankAcsNow && Date.now() < acsDeadline) {
+          await page.waitForTimeout(3000);
+          bankAcsNow = page.frames().some((f: any) => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+          const curUrl = page.url();
+          if (curUrl.includes("replit.com") && !curUrl.includes("stripe")) {
+            log(`✅ Payment succeeded (redirected): ${curUrl.substring(0, 80)}`);
+            return { success: true, checkoutComplete: true };
+          }
+          if (bankAcsNow) { log(`✅ Bank ACS frame appeared`); break; }
+        }
+      }
+    }
+
+    // ── Handle 3DS OTP ──
+    if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
+      log(`📬 Waiting for 3DS OTP email...`);
+
+      function resolveImapHost(email: string): string {
+        const domain = (email.split("@")[1] || "").toLowerCase();
+        if (domain === "gmail.com") return "imap.gmail.com";
+        if (["outlook.com", "hotmail.com", "live.com"].includes(domain)) return "outlook.office365.com";
+        return `imap.${domain}`;
+      }
+
+      const imapHost = resolveImapHost(cardDetails.otpEmail);
+      const { ImapFlow } = await import("imapflow");
+      const deadline = Date.now() + 90000;
+      let otp: string | null = null;
+
+      while (Date.now() < deadline && !otp) {
+        let client: any;
+        try {
+          client = new ImapFlow({ host: imapHost, port: 993, secure: true, auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword }, logger: false, connectionTimeout: 15000 });
+          await client.connect();
+          await client.mailboxOpen("INBOX");
+          const searchSince = new Date(paymentSubmitTime.getTime() - 2 * 60 * 1000);
+          const uids = await client.search({ since: searchSince }).catch(() => [] as number[]);
+          for (const uid of (uids as number[]).slice(-5).reverse()) {
+            const msg = await client.fetchOne(String(uid), { source: true }).catch(() => null);
+            if (!msg) continue;
+            const raw = msg.source?.toString() || "";
+            if (!raw.toLowerCase().includes("federal") && !raw.toLowerCase().includes("otp") && !raw.toLowerCase().includes("verify")) continue;
+            const match = raw.match(/\b(\d{6})\b/);
+            if (match) { otp = match[1]; log(`📬 OTP found: ${otp}`); break; }
+          }
+        } catch (e: any) { log(`  IMAP error: ${e.message?.substring(0, 60)}`); }
+        finally { try { await client?.logout(); } catch {} }
+        if (!otp) await page.waitForTimeout(5000);
+      }
+
+      if (otp) {
+        log(`🔢 Entering OTP ${otp} in 3DS frame...`);
+        const allFrames = page.frames();
+        const otpSelectors = ['input[name="challengeDataEntry"]', 'input[name="otp"]', 'input[autocomplete="one-time-code"]', 'input[type="tel"]', 'input[type="number"]', 'input[type="text"]'];
+        const bankFrames = allFrames.filter((f: any) => f.url().includes("m2pSecAuth") || f.url().includes("m2pfintech.com"));
+        const framesToTry = bankFrames.length > 0 ? bankFrames : allFrames;
+        let entered = false;
+        for (const frame of framesToTry) {
+          if (entered) break;
+          for (const sel of otpSelectors) {
+            try {
+              const el = frame.locator(sel).first();
+              if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+                await el.click().catch(() => {});
+                await el.fill(otp);
+                log(`  OTP entered via ${sel} in frame: ${frame.url().substring(0, 60)}`);
+                await page.waitForTimeout(1000);
+                const submitBtn = frame.locator('button[type="submit"], button:has-text("Submit"), button:has-text("Verify"), input[type="submit"]').first();
+                if (await submitBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+                  await submitBtn.click({ timeout: 5000 });
+                  log(`  Clicked OTP submit`);
+                }
+                entered = true;
+                break;
+              }
+            } catch {}
+          }
+        }
+        if (!entered) log(`⚠️ OTP field not found in any frame`);
+        await page.waitForTimeout(10000);
+        const finalUrl = page.url();
+        log(`📍 Final URL after OTP: ${finalUrl.substring(0, 100)}`);
+        if (finalUrl.includes("replit.com") && !finalUrl.includes("stripe")) {
+          log(`✅ Checkout complete!`);
+          return { success: true, checkoutComplete: true };
+        }
+      } else {
+        log(`⚠️ OTP not received within 90s`);
+      }
+    }
+
+    // Check final URL
+    const finalUrl = page.url();
+    const checkoutComplete = finalUrl.includes("replit.com") && !finalUrl.includes("stripe");
+    log(checkoutComplete ? `✅ Checkout complete! URL: ${finalUrl.substring(0, 80)}` : `⚠️ Checkout may be incomplete — URL: ${finalUrl.substring(0, 80)}`);
+    return { success: true, checkoutComplete };
+
+  } catch (err: any) {
+    log(`❌ Checkout error: ${(err.message || String(err)).substring(0, 200)}`);
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

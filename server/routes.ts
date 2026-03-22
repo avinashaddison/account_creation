@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3312,6 +3312,64 @@ export async function registerRoutes(
         } catch (err: any) {
           broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "replit_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/replit-checkout", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const { replitAccountId, checkoutUrl, cardId } = req.body;
+      if (!replitAccountId || !checkoutUrl) {
+        return res.status(400).json({ error: "replitAccountId and checkoutUrl are required" });
+      }
+
+      const account = await storage.getReplitAccount(replitAccountId);
+      if (!account) return res.status(404).json({ error: "Replit account not found" });
+
+      const userId = req.session.userId;
+      const jobId = randomUUID().substring(0, 8);
+      const batchId = `replit-checkout-${jobId}`;
+
+      let cardDetails: import("./playwrightService").CardDetails | undefined;
+      if (cardId) {
+        const card = await storage.getSavedCard(cardId);
+        if (card) {
+          const sysOtpEmail = await storage.getSetting("card_otp_gmail");
+          const sysOtpPass = await storage.getSetting("card_otp_gmail_password");
+          cardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail || sysOtpEmail || null, otpEmailPassword: card.otpEmailPassword || sysOtpPass || null };
+        }
+      }
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId, message: "Replit checkout started" });
+
+      (async () => {
+        broadcastLog(batchId, jobId, `🎟️ Starting checkout for ${account.email} (${account.username})...`, userId);
+        broadcastLog(batchId, jobId, `🔗 URL: ${checkoutUrl.substring(0, 100)}`, userId);
+        try {
+          const result = await checkoutExistingReplitAccount(
+            account.email,
+            account.password,
+            checkoutUrl,
+            cardDetails,
+            (msg) => broadcastLog(batchId, jobId, msg, userId)
+          );
+          if (result.success) {
+            broadcastLog(batchId, jobId, result.checkoutComplete ? `✅ Checkout complete!` : `✅ Checkout finished (verify status manually)`, userId);
+            if (result.checkoutComplete) {
+              try { await storage.updateReplitAccountStatus(replitAccountId, "created"); } catch {}
+            }
+          } else {
+            broadcastLog(batchId, jobId, `❌ Checkout failed: ${result.error || "unknown"}`, userId);
+          }
+          broadcast({ type: "replit_create_result", jobId, batchId, success: result.success, checkoutComplete: result.checkoutComplete, error: result.error }, userId);
+        } catch (err: any) {
+          broadcastLog(batchId, jobId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "replit_create_result", jobId, batchId, success: false, error: err.message }, userId);
         }
         broadcastBatchComplete(batchId, userId);
       })();
