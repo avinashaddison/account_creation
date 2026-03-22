@@ -15083,9 +15083,9 @@ export async function registerV0Account(
       timezoneId: "America/New_York",
       ignoreHTTPSErrors: true,
       proxy: {
-        server: "http://brd.superproxy.io:33335",
-        username: "brd-customer-hl_86b34e68-zone-residential_proxy3-country-us",
-        password: "r74n9xvshrv7",
+        server: "http://proxy.soax.com:5000",
+        username: "package-339450-sessionid-gAnRlzTJavAjPDD9-sessionlength-300-opt-wb",
+        password: "G7AI0bmAwNwoiniW",
       },
     });
     page = await context.newPage();
