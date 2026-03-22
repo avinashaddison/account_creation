@@ -3217,7 +3217,7 @@ export async function registerRoutes(
                   email: result.email!,
                   password: result.password!,
                   outlookEmail: acc.email,
-                  status: "created",
+                  status: "processing",
                   createdBy: userId,
                 });
                 successCount++;
@@ -3297,7 +3297,7 @@ export async function registerRoutes(
                 email: result.email!,
                 password: result.password!,
                 outlookEmail,
-                status: "created",
+                status: "processing",
                 createdBy: userId,
               });
               broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
