@@ -15718,48 +15718,82 @@ export async function checkoutExistingReplitAccount(
 
       if (finalResult.success && finalResult.token) {
         const token = finalResult.token;
-        log(`✅ hCaptcha solved (len=${token.length}) — injecting into all frames...`);
-        await broadcastToken(token);
+        log(`✅ hCaptcha solved (len=${token.length}) — injecting via Stripe hcaptcha-invisible frame...`);
 
-        // Inject into each frame type
-        for (const frame of page.frames()) {
+        // Step 1: Find the Stripe hcaptcha-invisible wrapper frame and send token FROM it to its parent
+        // This simulates what the hCaptcha widget itself would do when solved
+        const stripeHcapFrames = page.frames().filter((f: any) => f.url().includes("hcaptcha-invisible"));
+        log(`  Found ${stripeHcapFrames.length} hcaptcha-invisible frame(s)`);
+        for (const hcFrame of stripeHcapFrames) {
           try {
-            await frame.evaluate((tok: string) => {
-              document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("textarea[name='h-captcha-response'], input[name='h-captcha-response']")
-                .forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
-              const w = window as any;
-              if (w.hcaptcha?.execute) { try { w.hcaptcha.execute(); } catch {} }
-              document.dispatchEvent(new CustomEvent("hCaptchaCallback", { detail: tok }));
-              // HCaptcha.html and HCaptchaInvisible.html formats
+            const frameUrl = hcFrame.url();
+            // Extract widget ID from URL params (e.g. ?id=xxx)
+            const widgetId = new URL(frameUrl).searchParams.get("id") || "hcaptcha-invisible";
+            log(`  Injecting into hcaptcha-invisible frame (widgetId=${widgetId})...`);
+            await hcFrame.evaluate(([tok, wid]: [string, string]) => {
+              // Set h-captcha-response textarea (used by older hCaptcha)
+              const ta = document.querySelector<HTMLTextAreaElement>("textarea[name='h-captcha-response']");
+              if (ta) { ta.value = tok; ta.dispatchEvent(new Event("change", { bubbles: true })); }
+              // The key: send token to parent (the Stripe checkout frame) in the format Stripe expects
               const formats = [
-                JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
-                JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
-                JSON.stringify({ event: "challenge-passed", response: tok }),
+                JSON.stringify({ id: wid, type: "challenge.passed", response: tok }),
+                JSON.stringify({ id: wid, type: "success", token: tok }),
+                JSON.stringify({ source: "hcaptcha", type: "challenge.passed", data: { response: tok } }),
               ];
               formats.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
-            }, token).catch(() => {});
+              // Also try calling hCaptcha's own callback if present
+              const w = window as any;
+              if (w.hcaptcha?.getRespKey) {
+                try {
+                  const widgetIds = Object.keys(w.hcaptcha.store || {});
+                  widgetIds.forEach(id => { try { w.hcaptcha.store[id]?.successCallback?.(tok); } catch {} });
+                } catch {}
+              }
+            }, [token, widgetId]).catch(() => {});
           } catch {}
         }
 
-        // Fire on main page
+        // Step 2: Also dispatch the MessageEvent directly on the Stripe checkout frame
+        // (as if the hcaptcha-invisible iframe sent it)
         try {
           await page.mainFrame().evaluate((tok: string) => {
             const w = window as any;
+            // Try any exposed Stripe hcaptcha callback
             if (w.__stripeHcaptchaCallback) { try { w.__stripeHcaptchaCallback(tok); } catch {} }
-            const origins = ["https://js.stripe.com", "https://b.stripecdn.com", "https://newassets.hcaptcha.com"];
-            const formats = [
-              JSON.stringify({ id: "hcaptcha", type: "success", token: tok }),
-              JSON.stringify({ id: "hcaptcha", type: "challenge.passed", response: tok }),
+            if (w.__hcaptchaSuccessCallback) { try { w.__hcaptchaSuccessCallback(tok); } catch {} }
+            // Dispatch MessageEvents from js.stripe.com origin (simulating hcaptcha-invisible postMessage)
+            const msgs = [
+              JSON.stringify({ id: "hcaptcha-invisible", type: "challenge.passed", response: tok }),
+              JSON.stringify({ id: "hcaptcha-invisible", type: "success", token: tok }),
+              JSON.stringify({ source: "hcaptcha", type: "challenge.passed", data: { response: tok } }),
             ];
-            origins.forEach(origin => {
-              formats.forEach(data => {
-                try { window.dispatchEvent(new MessageEvent("message", { data, origin, bubbles: false })); } catch {}
-              });
+            msgs.forEach(data => {
+              try { window.dispatchEvent(new MessageEvent("message", { data, origin: "https://js.stripe.com", bubbles: false })); } catch {}
+              try { window.dispatchEvent(new MessageEvent("message", { data, origin: "https://newassets.hcaptcha.com", bubbles: false })); } catch {}
             });
           }, token).catch(() => {});
         } catch {}
 
+        // Step 3: Set h-captcha-response in ALL frames (belt-and-suspenders)
+        for (const frame of page.frames()) {
+          try {
+            await frame.evaluate((tok: string) => {
+              document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], input[name='h-captcha-response']")
+                .forEach(el => { el.value = tok; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); });
+            }, token).catch(() => {});
+          } catch {}
+        }
+
         await page.waitForTimeout(8000);
+
+        // Step 4: Check if there's an error message on Stripe (card declined etc)
+        try {
+          const stripeError = await page.mainFrame().evaluate(() => {
+            const errEl = document.querySelector('[class*="error"], [data-testid*="error"], .StripeCheckoutError, [role="alert"]');
+            return errEl?.textContent?.trim() || null;
+          }).catch(() => null);
+          if (stripeError) log(`⚠️ Stripe page error: ${stripeError.substring(0, 120)}`);
+        } catch {}
       } else {
         log(`⚠️ hCaptcha solving failed: ${finalResult.error || "unknown"} — using pre-solved token if available`);
         if (preSolvedToken) {
@@ -15790,6 +15824,18 @@ export async function checkoutExistingReplitAccount(
             return { success: true, checkoutComplete: true };
           }
           if (bankAcsNow) { log(`✅ Bank ACS frame appeared`); break; }
+          // Log any Stripe error message visible on the page
+          try {
+            const errMsg = await page.evaluate(() => {
+              const selectors = ['[class*="Error"]', '[class*="error-message"]', '[role="alert"]', '[data-testid*="error"]', '.StripeElement--invalid + *', 'p[class*="warning"]'];
+              for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && el.textContent?.trim()) return el.textContent.trim();
+              }
+              return null;
+            }).catch(() => null);
+            if (errMsg) log(`⚠️ Stripe UI error: ${errMsg.substring(0, 150)}`);
+          } catch {}
         }
       }
     }
