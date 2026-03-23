@@ -31,6 +31,8 @@ const B = "rgba(100,210,255,1)";
 const BA = (a: number) => `rgba(100,210,255,${a})`;
 const P = "rgba(190,120,255,1)";
 const PA = (a: number) => `rgba(190,120,255,${a})`;
+const L = "rgba(255,185,50,1)";
+const LA = (a: number) => `rgba(255,185,50,${a})`;
 
 function getLogStyle(text: string): { color: string; prefix: string } {
   if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
@@ -57,7 +59,12 @@ function getLogStyle(text: string): { color: string; prefix: string } {
 export default function ReplitCreate() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [mode, setMode] = useState<"create" | "checkout" | "onboarding">("create");
+  const [mode, setMode] = useState<"create" | "checkout" | "onboarding" | "links">("create");
+
+  // ── BULK LINKS mode state ──
+  const [linksCoupon, setLinksCoupon] = useState("AGENT4BC4974559665");
+  const [linksCount, setLinksCount] = useState(4);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   // ── ONBOARDING mode state ──
   const [onbEmail, setOnbEmail] = useState("");
@@ -296,6 +303,40 @@ export default function ReplitCreate() {
     }
   };
 
+  const handleBulkLinks = async () => {
+    if (!linksCoupon.trim()) {
+      toast({ title: "Missing coupon", description: "Enter a coupon code", variant: "destructive" });
+      return;
+    }
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+    setTotalCount(linksCount);
+    try {
+      const res = await apiRequest("POST", "/api/replit-bulk-checkout-links", {
+        coupon: linksCoupon.trim(),
+        count: linksCount,
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to start");
+      activeBatchId.current = data.batchId;
+      addLog(`🔗 Bulk checkout link job started [${data.batchId}]`);
+      addLog(`🎟️ Coupon: ${linksCoupon.trim()} · Count: ${linksCount}`);
+    } catch (err: any) {
+      sounds.error();
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setRunning(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedUrl(text);
+      setTimeout(() => setCopiedUrl(null), 2000);
+    });
+  };
+
   const saveNopeKey = async () => {
     setNopeKeySaving(true);
     try {
@@ -396,6 +437,21 @@ export default function ReplitCreate() {
           <User className="w-3.5 h-3.5" />
           Onboarding + Core
         </button>
+        <button
+          onClick={() => { sounds.toggle(); setMode("links"); setLogs([]); setRunning(false); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-bold tracking-widest uppercase transition-all"
+          style={{
+            background: mode === "links" ? LA(0.1) : "rgba(0,0,0,0.3)",
+            border: `1px solid ${mode === "links" ? LA(0.5) : LA(0.08)}`,
+            color: mode === "links" ? L : LA(0.3),
+            textShadow: mode === "links" ? `0 0 10px ${L}` : "none",
+            boxShadow: mode === "links" ? `0 0 16px ${LA(0.06)}` : "none",
+          }}
+          data-testid="button-mode-links"
+        >
+          <Link2 className="w-3.5 h-3.5" />
+          Bulk Links
+        </button>
       </div>
 
       <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
@@ -405,18 +461,18 @@ export default function ReplitCreate() {
           className="rounded-xl p-5 space-y-5 relative overflow-hidden"
           style={{
             background: "rgba(0,0,0,0.55)",
-            border: `1px solid ${mode === "checkout" ? BA(0.2) : mode === "onboarding" ? PA(0.2) : GA(0.14)}`,
-            boxShadow: `0 0 40px ${mode === "checkout" ? BA(0.03) : mode === "onboarding" ? PA(0.03) : GA(0.04)} inset`,
+            border: `1px solid ${mode === "checkout" ? BA(0.2) : mode === "onboarding" ? PA(0.2) : mode === "links" ? LA(0.2) : GA(0.14)}`,
+            boxShadow: `0 0 40px ${mode === "checkout" ? BA(0.03) : mode === "onboarding" ? PA(0.03) : mode === "links" ? LA(0.03) : GA(0.04)} inset`,
           }}
         >
           <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.012) 2px, rgba(0,255,65,0.012) 4px)", borderRadius: "inherit" }} />
 
           <div className="flex items-center gap-2">
-            <ChevronRight className="w-3.5 h-3.5" style={{ color: mode === "checkout" ? B : mode === "onboarding" ? P : G }} />
-            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.55) : mode === "onboarding" ? PA(0.55) : GA(0.55) }}>
-              {mode === "checkout" ? "Checkout Configuration" : mode === "onboarding" ? "Onboarding + Core Configuration" : "Configuration"}
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: mode === "checkout" ? B : mode === "onboarding" ? P : mode === "links" ? L : G }} />
+            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.55) : mode === "onboarding" ? PA(0.55) : mode === "links" ? LA(0.55) : GA(0.55) }}>
+              {mode === "checkout" ? "Checkout Configuration" : mode === "onboarding" ? "Onboarding + Core Configuration" : mode === "links" ? "Bulk Links Configuration" : "Configuration"}
             </span>
-            <div className="flex-1 h-px" style={{ background: mode === "checkout" ? BA(0.1) : mode === "onboarding" ? PA(0.1) : GA(0.1) }} />
+            <div className="flex-1 h-px" style={{ background: mode === "checkout" ? BA(0.1) : mode === "onboarding" ? PA(0.1) : mode === "links" ? LA(0.1) : GA(0.1) }} />
           </div>
 
           {/* ══ CREATE MODE ══ */}
@@ -669,6 +725,74 @@ export default function ReplitCreate() {
             </>
           )}
 
+          {/* ══ BULK LINKS MODE ══ */}
+          {mode === "links" && (
+            <>
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                  <Tag className="w-2.5 h-2.5 inline mr-1" />Coupon Code
+                </label>
+                <input
+                  value={linksCoupon}
+                  onChange={(e) => { sounds.keypress(); setLinksCoupon(e.target.value); }}
+                  placeholder="AGENT4BC4974559665"
+                  className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${linksCoupon ? LA(0.45) : LA(0.15)}`, color: LA(0.9) }}
+                  data-testid="input-links-coupon"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                  <Layers className="w-2.5 h-2.5 inline mr-1" />Number of Links
+                </label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5, 6].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => { sounds.keypress(); setLinksCount(n); }}
+                      className="flex-1 rounded-lg py-2 text-xs font-mono font-bold transition-all"
+                      style={{
+                        background: linksCount === n ? LA(0.15) : "rgba(0,0,0,0.4)",
+                        border: `1px solid ${linksCount === n ? LA(0.55) : LA(0.1)}`,
+                        color: linksCount === n ? L : LA(0.35),
+                      }}
+                    >{n}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.15)}` }}>
+                <p className="text-[9px] font-mono" style={{ color: LA(0.55) }}>
+                  Picks {linksCount} available account(s) → logs into each → generates Stripe checkout URL → shows copyable links
+                </p>
+                <p className="text-[9px] font-mono" style={{ color: LA(0.35) }}>
+                  Account status: available → processing → available
+                </p>
+              </div>
+
+              <button
+                onClick={handleBulkLinks}
+                disabled={running || !linksCoupon.trim()}
+                className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+                style={{
+                  background: running || !linksCoupon.trim() ? LA(0.03) : `linear-gradient(135deg, ${LA(0.18)}, ${LA(0.07)})`,
+                  border: `1px solid ${running || !linksCoupon.trim() ? LA(0.08) : LA(0.55)}`,
+                  color: running || !linksCoupon.trim() ? LA(0.2) : L,
+                  textShadow: running || !linksCoupon.trim() ? "none" : `0 0 14px ${L}`,
+                  boxShadow: running || !linksCoupon.trim() ? "none" : `0 0 25px ${LA(0.08)}`,
+                  cursor: running || !linksCoupon.trim() ? "not-allowed" : "pointer",
+                }}
+                data-testid="button-run-links"
+              >
+                <Link2 className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                <span className="relative z-10">
+                  {running ? `generating ${linksCount} link(s)...` : `generate_checkout_links`}
+                </span>
+              </button>
+            </>
+          )}
+
           {/* ══ CHECKOUT MODE ══ */}
           {mode === "checkout" && (
             <>
@@ -827,22 +951,22 @@ export default function ReplitCreate() {
 
         {/* Terminal panel */}
         <div className="min-w-0">
-          <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${mode === "checkout" ? BA(0.1) : mode === "onboarding" ? PA(0.1) : GA(0.12)}` }}>
-            <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0" style={{ background: mode === "checkout" ? BA(0.03) : mode === "onboarding" ? PA(0.03) : GA(0.03), borderBottom: `1px solid ${mode === "checkout" ? BA(0.08) : mode === "onboarding" ? PA(0.08) : GA(0.08)}` }}>
+          <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${mode === "checkout" ? BA(0.1) : mode === "onboarding" ? PA(0.1) : mode === "links" ? LA(0.1) : GA(0.12)}` }}>
+            <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0" style={{ background: mode === "checkout" ? BA(0.03) : mode === "onboarding" ? PA(0.03) : mode === "links" ? LA(0.03) : GA(0.03), borderBottom: `1px solid ${mode === "checkout" ? BA(0.08) : mode === "onboarding" ? PA(0.08) : mode === "links" ? LA(0.08) : GA(0.08)}` }}>
               <div className="flex items-center gap-2.5">
-                <Radio className="w-3 h-3" style={{ color: running ? (mode === "checkout" ? B : mode === "onboarding" ? P : G) : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${mode === "checkout" ? B : mode === "onboarding" ? P : G})` : "none" }} />
-                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.45) : mode === "onboarding" ? PA(0.45) : GA(0.45) }}>live_output</span>
+                <Radio className="w-3 h-3" style={{ color: running ? (mode === "checkout" ? B : mode === "onboarding" ? P : mode === "links" ? L : G) : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${mode === "checkout" ? B : mode === "onboarding" ? P : mode === "links" ? L : G})` : "none" }} />
+                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.45) : mode === "onboarding" ? PA(0.45) : mode === "links" ? LA(0.45) : GA(0.45) }}>live_output</span>
                 {running && (
                   <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: mode === "checkout" ? B : mode === "onboarding" ? P : G, boxShadow: `0 0 6px ${mode === "checkout" ? B : mode === "onboarding" ? P : G}` }} />
-                    <span className="text-[9px] font-mono font-bold" style={{ color: mode === "checkout" ? BA(0.65) : mode === "onboarding" ? PA(0.65) : GA(0.65) }}>RUNNING</span>
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: mode === "checkout" ? B : mode === "onboarding" ? P : mode === "links" ? L : G, boxShadow: `0 0 6px ${mode === "checkout" ? B : mode === "onboarding" ? P : mode === "links" ? L : G}` }} />
+                    <span className="text-[9px] font-mono font-bold" style={{ color: mode === "checkout" ? BA(0.65) : mode === "onboarding" ? PA(0.65) : mode === "links" ? LA(0.65) : GA(0.65) }}>RUNNING</span>
                   </div>
                 )}
               </div>
               <div className="flex gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,59,48,0.55)" }} />
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,149,0,0.55)" }} />
-                <span className="w-2.5 h-2.5 rounded-full" style={{ background: mode === "checkout" ? BA(0.55) : GA(0.55) }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: mode === "checkout" ? BA(0.55) : mode === "links" ? LA(0.55) : GA(0.55) }} />
               </div>
             </div>
 
@@ -856,8 +980,31 @@ export default function ReplitCreate() {
                 </div>
               ) : (
                 logs.map((line, i) => {
+                  // Special rendering for checkout URLs
+                  if (line.text.startsWith("CHECKOUT_URL|")) {
+                    const parts = line.text.split("|");
+                    const email = parts[1] || "";
+                    const url = parts.slice(2).join("|");
+                    const isCopied = copiedUrl === url;
+                    return (
+                      <div key={i} className="flex flex-col gap-1 my-2 rounded-lg p-2.5" style={{ background: LA(0.06), border: `1px solid ${LA(0.25)}` }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-mono" style={{ color: LA(0.7) }}>🔗 {email}</span>
+                          <button
+                            onClick={() => copyToClipboard(url)}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all flex-shrink-0"
+                            style={{ background: isCopied ? LA(0.25) : LA(0.1), border: `1px solid ${LA(0.4)}`, color: isCopied ? L : LA(0.7) }}
+                            data-testid={`button-copy-url-${i}`}
+                          >
+                            {isCopied ? "✓ copied!" : "copy link"}
+                          </button>
+                        </div>
+                        <span className="text-[10px] font-mono break-all" style={{ color: LA(0.5) }}>{url.substring(0, 80)}...</span>
+                      </div>
+                    );
+                  }
                   const { color, prefix } = getLogStyle(line.text);
-                  const isSeparator = line.text.startsWith("━━━") || line.text.startsWith("---");
+                  const isSeparator = line.text.startsWith("━━━") || line.text.startsWith("---") || line.text.startsWith("─");
                   return (
                     <div key={i} className={`flex items-start gap-2 min-w-0 ${isSeparator ? "mt-2 mb-1 opacity-30" : "py-px"}`}>
                       <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: GA(0.22) }}>{line.time}</span>
@@ -870,12 +1017,12 @@ export default function ReplitCreate() {
               <div ref={logsEndRef} />
             </div>
 
-            <div className="px-4 py-2 flex items-center gap-2" style={{ background: mode === "checkout" ? BA(0.02) : GA(0.02), borderTop: `1px solid ${mode === "checkout" ? BA(0.07) : GA(0.07)}` }}>
+            <div className="px-4 py-2 flex items-center gap-2" style={{ background: mode === "checkout" ? BA(0.02) : mode === "links" ? LA(0.02) : GA(0.02), borderTop: `1px solid ${mode === "checkout" ? BA(0.07) : mode === "links" ? LA(0.07) : GA(0.07)}` }}>
               <span className="text-[9px] font-mono" style={{ color: GA(0.25) }}>addison@panel:~$</span>
-              <span className="text-[9px] font-mono" style={{ color: mode === "checkout" ? BA(0.4) : GA(0.4) }}>
-                {running ? (mode === "checkout" ? "executing replit_checkout..." : "executing replit_create...") : "ready"}
+              <span className="text-[9px] font-mono" style={{ color: mode === "checkout" ? BA(0.4) : mode === "links" ? LA(0.4) : GA(0.4) }}>
+                {running ? (mode === "checkout" ? "executing replit_checkout..." : mode === "links" ? "generating checkout links..." : "executing replit_create...") : "ready"}
               </span>
-              <span className="w-1.5 h-3 ml-px" style={{ background: tick && !running ? (mode === "checkout" ? B : G) : "transparent", boxShadow: tick && !running ? `0 0 6px ${mode === "checkout" ? B : G}` : "none" }} />
+              <span className="w-1.5 h-3 ml-px" style={{ background: tick && !running ? (mode === "checkout" ? B : mode === "links" ? L : G) : "transparent", boxShadow: tick && !running ? `0 0 6px ${mode === "checkout" ? B : mode === "links" ? L : G}` : "none" }} />
             </div>
           </div>
 

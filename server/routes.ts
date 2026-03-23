@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3435,6 +3435,75 @@ export async function registerRoutes(
           broadcastLog(batchId, jobId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "replit_create_result", jobId, batchId, success: false, error: err.message }, userId);
         }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Bulk checkout link generator — picks N available accounts, generates Stripe checkout URLs
+  app.post("/api/replit-bulk-checkout-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const { coupon, count = 4 } = req.body;
+      if (!coupon) return res.status(400).json({ error: "coupon is required" });
+      const userId = req.session.userId;
+      const role = req.session.role;
+
+      const jobId = randomUUID().substring(0, 8);
+      const batchId = `replit-links-${jobId}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId });
+
+      (async () => {
+        const allAccounts = role === "superadmin"
+          ? await storage.getAllReplitAccounts()
+          : await storage.getReplitAccountsByOwner(userId);
+        // Accept "created" or "available" accounts — anything that has credentials and isn't failed/active
+        const available = allAccounts.filter(a =>
+          a.email && a.password &&
+          (a.status === "available" || a.status === "created" || a.status === "completed")
+        );
+        const toProcess = available.slice(0, Math.min(Number(count) || 4, 10));
+
+        if (toProcess.length === 0) {
+          broadcastLog(batchId, jobId, `❌ No usable Replit accounts found (need status "created" or "available" with email+password)`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) — coupon: ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+
+        const generatedLinks: { email: string; url: string }[] = [];
+
+        for (let i = 0; i < toProcess.length; i++) {
+          const acct = toProcess[i];
+          broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
+
+          // Mark as processing
+          await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
+
+          const result = await generateSingleCheckoutLink(
+            acct.email,
+            acct.password,
+            coupon,
+            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+          );
+
+          if (result.success && result.stripeUrl) {
+            generatedLinks.push({ email: acct.email, url: result.stripeUrl });
+            // Broadcast as special copyable format
+            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
+          } else {
+            broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
+            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
+          }
+        }
+
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {

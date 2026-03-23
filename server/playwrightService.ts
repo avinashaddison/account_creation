@@ -17700,6 +17700,76 @@ async function _clickNextOrContinue(page: any, log: (msg: string) => void, stepL
   log(`  ⚠️  No Next/Continue button found for ${stepLabel}`);
 }
 
+// ── Lightweight checkout link generator (login + get Stripe URL, no payment) ──
+export async function generateSingleCheckoutLink(
+  email: string,
+  password: string,
+  couponCode: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
+  const { chromium } = await import("playwright");
+  let browser: any = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage", "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+      ],
+    });
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const context = await browser.newContext({
+      userAgent: ua, viewport: { width: 1366, height: 768 }, locale: "en-US",
+      timezoneId: "America/New_York", javaScriptEnabled: true,
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { app: {}, runtime: { id: undefined, connect: () => {}, sendMessage: () => {} }, loadTimes: () => ({}), csi: () => ({}) };
+    });
+    const page = await context.newPage();
+
+    // ── Login ──
+    log(`🔐 Logging into Replit as ${email}...`);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForSelector('input[name="username"], input[type="email"], input[name="email"]', { timeout: 15000 });
+    const emailInput = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
+    await emailInput.fill(email);
+    const passInput = page.locator('input[type="password"]').first();
+    await passInput.fill(password);
+    await passInput.press("Enter");
+    await page.waitForURL((u: URL) => u.href.includes("replit.com/~") || u.href.includes("replit.com/home") || !u.href.includes("/login"), { timeout: 30000 });
+    if (page.url().includes("/login")) throw new Error("Login failed — still on login page");
+    log(`✅ Logged in`);
+
+    // ── Navigate to direct checkout URL ──
+    const checkoutUrl = couponCode
+      ? `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=${encodeURIComponent(couponCode)}`
+      : `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26`;
+    log(`💰 Navigating to checkout URL...`);
+    await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+
+    // ── Wait for Stripe redirect ──
+    log(`⏳ Waiting for Stripe redirect...`);
+    await page.waitForURL(
+      (u: URL) => u.href.includes("checkout.stripe.com") || u.href.includes("billing.stripe.com"),
+      { timeout: 45000 }
+    );
+    await page.waitForTimeout(2000);
+    const stripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
+    log(`✅ Checkout link ready: ${stripeUrl.substring(0, 80)}...`);
+    return { success: true, stripeUrl };
+  } catch (err: any) {
+    log(`❌ Error: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();
