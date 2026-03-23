@@ -1,0 +1,214 @@
+🚀 Onboarding job started [replit-onboarding-6a30f035]
+11:53:24
+·
+🎟️ Coupon: AGENT4246EFA558AE0
+11:53:24
+~
+💳 Auto-checkout enabled — will fill card, solve hCaptcha, submit
+11:53:24
+>
+🔐 Navigating to Replit login...
+11:53:29
+·
+📄 Page title: Log In - Replit
+11:53:29
+·
+⏳ Waiting for login form fields...
+11:53:29
++
+✅ Login form fields detected
+11:53:35
+>
+⏳ Waiting for post-login navigation...
+11:53:42
++
+✅ Logged in — https://replit.com/~
+11:53:42
+·
+📋 Checking for onboarding overlay...
+11:53:42
+·
+ℹ️ No onboarding — account already set up
+11:53:42
+>
+💰 Navigating to direct checkout URL...
+11:53:42
+$
+🔗 https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=AGENT4246EFA558AE0
+11:53:42
+$
+⏳ Waiting for Stripe checkout redirect (max 45s)...
+11:53:45
++
+✅ Stripe redirect: https://checkout.stripe.com/c/pay/cs_live_a15KfVDEOx7yU15kz7bveAB58BZpom8tDLaFrgFqwpcoV9QLHqk4QKeY5d#fidnandhYHdWcXxpYCc%2FJ2FgY2RwaXEnKSd2cGd2ZndsdXFsamtQa2x0cGBrYHZ2QGtkZ2lgYSc%2FY2RpdmApJ2R1bE5gfCc%2FJ3VuWmlsc2BaMDQwXHVLdk9EaGtcU0pzY2t2R3RXYURRUlYzVn9nS0R2aUp%2FNH83cXBvYU5wc1dIQURyUkhgQ111M2FPSTRcTld3VG9HNVJEdTVQQUJyaUNcSTJtfXIyQ2Y1NVRuY31HQ3ZJJyknY3dqaFZgd3Ngdyc%2FcXdwYCknZ2RmbmJ3anBrYUZqaWp3Jz8nJjc2NzA3YycpJ2lkfGpwcVF8dWAnPyd2bGtiaWBabHFgaCcpJ2BrZGdpYFVpZGZgbWppYWB3dic%2FcXdwYHgl
+11:54:05
+~
+⚠️ networkidle timeout — proceeding anyway
+11:54:08
+·
+🎟️ Verifying coupon pre-applied: AGENT4246EFA558AE0
+11:54:08
++
+✅ Coupon pre-applied! Discount shown: "AGENT4246EFA558AE0-$20.00$20.00 off for a month"
+11:54:08
+·
+───────────────────────────────────────────────────────
+11:54:08
++
+✅ Stripe checkout reached and promo code applied.
+11:54:08
+$
+💳 Card details provided — proceeding with auto-checkout...
+11:54:09
++
+✅ Filled card number via "input[placeholder*="1234" i]"
+11:54:11
++
+✅ Filled expiry via "input[placeholder="MM / YY"]"
+11:54:12
++
+✅ Filled CVC via "input[placeholder="CVC"]"
+11:54:14
++
+✅ Filled cardholder name via "input[placeholder*="Name on card" i]"
+11:54:14
+·
+Billing: 1523 Elizabeth Ave, Charlotte, NC 28204
+11:54:15
+·
+Selected country: United States
+11:54:15
+·
+Filled billing field: 1523 Elizabeth Ave
+11:54:15
+·
+Filled billing field: Charlotte
+11:54:16
+·
+Filled billing field: 28204
+11:54:16
+·
+Selected state: North Carolina
+11:54:17
+~
+🤖 Pre-solving hCaptcha x2 (parallel)...
+11:54:48
++
+✅ Pre-solved token A (len=2302)
+11:54:48
+~
+📌 Pre-injected token A into hcaptcha-invisible frame
+11:54:48
+·
+💳 Clicking Subscribe...
+11:54:48
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:48
+$
+🔌 POST→Stripe: https://api.stripe.com/v1/payment_methods
+11:54:48
+~
+✏️ Injecting captcha_token into https://api.stripe.com/v1/payment_methods...
+11:54:48
+·
+Subscribe clicked
+11:54:48
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:48
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:49
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:49
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:49
+!
+🔌 POST→Stripe: https://errors.stripe.com/api/211/store/?sentry_key=69608671eeaf4dc7a53ba2b2d1adceff&sentry_version=
+11:54:49
+!
+🔌 POST→Stripe: https://errors.stripe.com/api/211/store/?sentry_key=69608671eeaf4dc7a53ba2b2d1adceff&sentry_version=
+11:54:49
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:50
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:54:53
++
+✅ Pre-solved token B (len=2276)
+11:54:53
+~
+🔒 hCaptcha detected (5 frame(s)) — solving...
+11:54:58
+·
+rqdata: not found
+11:54:58
+·
+🔄 Starting fresh NopeCHA solve (90s)...
+11:55:03
++
+✅ Fresh solve succeeded (len=2272)
+11:55:03
++
+✅ hCaptcha solved (len=2272) — injecting...
+11:55:39
+·
+Bank ACS not yet — re-clicking Subscribe...
+11:55:39
+·
+Re-clicked Subscribe
+11:55:40
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:40
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:40
+$
+🔌 POST→Stripe: https://api.stripe.com/v1/payment_methods
+11:55:40
+~
+✏️ Injecting captcha_token into https://api.stripe.com/v1/payment_methods...
+11:55:40
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:40
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:41
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:41
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:41
+!
+🔌 POST→Stripe: https://errors.stripe.com/api/211/store/?sentry_key=69608671eeaf4dc7a53ba2b2d1adceff&sentry_version=
+11:55:41
+!
+🔌 POST→Stripe: https://errors.stripe.com/api/211/store/?sentry_key=69608671eeaf4dc7a53ba2b2d1adceff&sentry_version=
+11:55:42
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:55:42
+$
+🔌 POST→Stripe: https://r.stripe.com/b
+11:56:39
+~
+⚠️ Bank ACS frame not present — skipping OTP phase
+11:56:39
++
+⚠️ Checkout may be incomplete — URL: https://checkout.stripe.com/c/pay/cs_live_a15KfVDEOx7yU15kz7bveAB58BZpom8tDLaFrg
+11:56:39
+>
+🔒 Browser closed.
+11:56:39
++
+✅ Stripe reached with coupon applied (manual payment needed)
+11:56:39
+$
+🔗 Stripe URL: https://checkout.stripe.com/c/pay/cs_live_a15KfVDEOx7yU15kz7bveAB58BZpom8tDLaFrgFqwpcoV9QLHqk4QKeY5d#fidnandhYHdWcXxpYCc%2FJ2FgY2RwaXEnKSd2cGd2ZndsdXFsamtQa2x0cGBrYHZ2QGtkZ2lgYSc%2FY2RpdmApJ2R1bE5gfCc%2FJ3VuWmlsc2BaMDQwXHVLdk9EaGtcU0pzY2t2R3RXYURRUlYzVn9nS0R2aUp%2FNH83cXBvYU5wc1dIQURyUkhgQ111M2FPSTRcTld3VG9HNVJEdTVQQUJyaUNcSTJtfXIyQ2Y1NVRuY31HQ3ZJJyknY3dqaFZgd3Ngdyc%2FcXdwYCknZ2RmbmJ3anBrYUZqaWp3Jz8nJjc2NzA3YycpJ2lkfGpwcVF8dWAnPyd2bGtiaWBabHFgaCcpJ2BrZGdpYFVpZGZgbWppYWB3dic%2FcXdwYHgl

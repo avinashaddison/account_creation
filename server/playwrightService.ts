@@ -17360,28 +17360,122 @@ export async function onboardingCheckoutReplitAccount(
             }, token2).catch(() => {});
           } catch {}
         }
-        // Click hCaptcha checkbox with real mouse
+        // Step 3b: Inject token into newassets.hcaptcha.com widget frames to trigger internal callback chain
+        const preClickFrames2 = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
+        for (const wf of preClickFrames2) {
+          try {
+            await wf.evaluate((tok: string) => {
+              const w = window as any;
+              document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[id='h-captcha-response']")
+                .forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
+              if (w.hcaptcha) {
+                try { w.hcaptcha.setResponse?.(tok); } catch {}
+                const widgets = w.hcaptcha._widgets || {};
+                Object.values(widgets).forEach((widget: any) => {
+                  try { widget?.g?.responseField?.value && (widget.g.responseField.value = tok); } catch {}
+                  try { widget?.successCallback?.(tok); } catch {}
+                });
+              }
+              if (w.onHCaptchaSuccess) try { w.onHCaptchaSuccess(tok); } catch {}
+              if (w.hcaptchaCallback) try { w.hcaptchaCallback(tok); } catch {}
+              const msgs = [
+                JSON.stringify({ type: "challenge.passed", response: tok }),
+                JSON.stringify({ type: "success", token: tok }),
+                JSON.stringify({ id: "hcaptcha-invisible", type: "challenge.passed", response: tok }),
+                JSON.stringify({ source: "hcaptcha", type: "challenge.passed", data: { response: tok } }),
+              ];
+              msgs.forEach(msg => {
+                try { window.parent.postMessage(msg, "*"); } catch {}
+                try { window.top?.postMessage(msg, "*"); } catch {}
+              });
+            }, token2).catch(() => {});
+          } catch {}
+        }
+
+        // Step 4: Click the "I am human" checkbox with real mouse coordinates
         await page.waitForTimeout(1200);
         const hcapWidgetFrames2 = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
+        log(`  Found ${hcapWidgetFrames2.length} hCaptcha widget frame(s) — clicking with real mouse coords...`);
         let checkboxClicked2 = false;
         for (const wFrame of hcapWidgetFrames2) {
           if (checkboxClicked2) break;
-          for (const sel of ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"]) {
+          try {
+            const checkboxSels2 = ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"];
+            for (const sel of checkboxSels2) {
+              try {
+                const box = await wFrame.locator(sel).first().boundingBox({ timeout: 1500 }).catch(() => null);
+                if (box && box.width > 0 && box.height > 0) {
+                  const cx = box.x + box.width / 2;
+                  const cy = box.y + box.height / 2;
+                  log(`    Clicking ${sel} via page.mouse at (${cx.toFixed(0)},${cy.toFixed(0)})`);
+                  await page.mouse.move(cx - 5, cy - 3);
+                  await page.waitForTimeout(80);
+                  await page.mouse.move(cx, cy);
+                  await page.waitForTimeout(60);
+                  await page.mouse.click(cx, cy);
+                  log(`    ✅ Real mouse click done on hCaptcha checkbox`);
+                  checkboxClicked2 = true;
+                  await page.waitForTimeout(800);
+                  break;
+                }
+              } catch {}
+            }
+          } catch {}
+        }
+
+        // Fallback: JS evaluate click if real mouse didn't work
+        if (!checkboxClicked2) {
+          log(`    ⚠️ Real mouse click failed — trying JS fallback click...`);
+          for (const wFrame of hcapWidgetFrames2) {
             try {
-              const box = await wFrame.locator(sel).first().boundingBox({ timeout: 1500 }).catch(() => null);
-              if (box && box.width > 0) {
-                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-                await page.waitForTimeout(60);
-                await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-                log(`    ✅ hCaptcha checkbox clicked`);
+              const clicked2 = await wFrame.evaluate(() => {
+                const sels = ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"];
+                for (const s of sels) {
+                  const el = document.querySelector<HTMLElement>(s);
+                  if (el) {
+                    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+                    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+                    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+                    return s;
+                  }
+                }
+                return null;
+              }).catch(() => null);
+              if (clicked2) {
+                log(`    ✅ Fallback JS click on "${clicked2}"`);
                 checkboxClicked2 = true;
-                await page.waitForTimeout(800);
+                await page.waitForTimeout(600);
                 break;
               }
             } catch {}
           }
         }
         await page.waitForTimeout(1000);
+
+        // Step 5: Poll for Bank ACS right after checkbox click (may appear quickly)
+        let acsFoundEarly2 = false;
+        for (let i = 0; i < 6; i++) {
+          for (const f of page.frames()) {
+            const u = f.url();
+            if (u.includes("m2pfintech") || u.includes("m2pSecAuth") || u.includes("federalbank") || u.includes("3ds") || u.includes("acs") || u.includes("securecheckout")) {
+              log(`✅ Bank ACS frame appeared early after checkbox click: ${u.substring(0, 80)}`);
+              acsFoundEarly2 = true;
+              break;
+            }
+          }
+          if (acsFoundEarly2) break;
+          await page.waitForTimeout(1500);
+        }
+        await page.waitForTimeout(acsFoundEarly2 ? 0 : 3000);
+
+        // Step 6: Log any Stripe error visible on page
+        try {
+          const stripeErr2 = await page.mainFrame().evaluate(() => {
+            const errEl = document.querySelector('[class*="error"], [data-testid*="error"], [role="alert"]');
+            return errEl?.textContent?.trim() || null;
+          }).catch(() => null);
+          if (stripeErr2) log(`⚠️ Stripe page error: ${stripeErr2.substring(0, 120)}`);
+        } catch {}
       } else {
         log(`⚠️ hCaptcha solving failed: ${finalResult2.error || "unknown"}`);
       }
