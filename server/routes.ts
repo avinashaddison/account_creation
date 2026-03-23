@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3372,6 +3372,50 @@ export async function registerRoutes(
             broadcastLog(batchId, jobId, `❌ Checkout failed: ${result.error || "unknown"}`, userId);
           }
           broadcast({ type: "replit_create_result", jobId, batchId, success: result.success, checkoutComplete: result.checkoutComplete, error: result.error }, userId);
+        } catch (err: any) {
+          broadcastLog(batchId, jobId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "replit_create_result", jobId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/replit-onboarding-checkout", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const { email, password, couponCode, username, fullname } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "email and password are required" });
+      }
+      const userId = req.session.userId;
+      const jobId = randomUUID().substring(0, 8);
+      const batchId = `replit-onboarding-${jobId}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId, message: "Replit onboarding & checkout started" });
+
+      (async () => {
+        broadcastLog(batchId, jobId, `🚀 Starting onboarding+checkout for ${email}...`, userId);
+        try {
+          const result = await onboardingCheckoutReplitAccount(
+            email,
+            password,
+            couponCode || "AGENT4BC4974559665",
+            username || "",
+            fullname || "",
+            (msg) => broadcastLog(batchId, jobId, msg, userId)
+          );
+          if (result.success) {
+            const label = result.couponConfirmed
+              ? `✅ Onboarding & checkout complete — coupon applied!`
+              : `⚠️  Stripe reached but coupon confirmation unconfirmed`;
+            broadcastLog(batchId, jobId, label, userId);
+            if (result.stripeUrl) broadcastLog(batchId, jobId, `🔗 Stripe URL: ${result.stripeUrl.substring(0, 100)}`, userId);
+          } else {
+            broadcastLog(batchId, jobId, `❌ Failed: ${result.error || "unknown error"}`, userId);
+          }
+          broadcast({ type: "replit_create_result", jobId, batchId, success: result.success, couponConfirmed: result.couponConfirmed, error: result.error }, userId);
         } catch (err: any) {
           broadcastLog(batchId, jobId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "replit_create_result", jobId, batchId, success: false, error: err.message }, userId);

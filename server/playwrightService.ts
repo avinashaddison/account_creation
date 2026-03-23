@@ -16751,6 +16751,260 @@ export async function runReplitOnboardingCheckout(
   }
 }
 
+export async function onboardingCheckoutReplitAccount(
+  email: string,
+  password: string,
+  couponCode: string,
+  username: string,
+  fullname: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; couponConfirmed: boolean; stripeUrl?: string; error?: string }> {
+  const { chromium } = await import("playwright");
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+  const humanDelay = (min = 800, max = 1800) => sleep(min + Math.floor(Math.random() * (max - min)));
+
+  async function humanType(locator: any, text: string) {
+    await locator.focus();
+    await locator.fill("");
+    await locator.pressSequentially(text, { delay: 50 + Math.floor(Math.random() * 80) });
+  }
+
+  async function clickNextButton(page: any) {
+    const nextBtn = page
+      .getByRole("button", { name: /^next$|^continue$|^next step$/i })
+      .or(page.locator('[data-cy*="next" i], [data-testid*="next" i]'))
+      .first();
+    if (await nextBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
+      await nextBtn.click();
+      log("    🖱️  Clicked Next");
+    } else {
+      log("    ⚠️  Next button not found — trying generic submit...");
+      await page.locator('button[type="submit"]').first().click().catch(() => {});
+    }
+  }
+
+  const userDataDir = `/tmp/replit-onboarding-${Date.now()}`;
+  let ctx: any = null;
+
+  try {
+    log("═".repeat(55));
+    log(`🚀 Replit Onboarding & Stripe Promo Automation`);
+    log(`   Email  : ${email}`);
+    log(`   Coupon : ${couponCode}`);
+    log("═".repeat(55));
+
+    log(`🌐 Launching headful browser...`);
+    ctx = await chromium.launchPersistentContext(userDataDir, {
+      headless: false,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+        "--window-size=1280,900", "--lang=en-US,en;q=0.9",
+      ],
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 900 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+    });
+
+    await ctx.addInitScript(() => {
+      Object.defineProperty(window.navigator, "webdriver", { get: () => undefined });
+    });
+
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(30000);
+
+    // ── Login ──
+    log("🔐 Navigating to Replit login...");
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded" });
+    await humanDelay(1500, 2500);
+
+    const emailField = page.getByRole("textbox", { name: /email/i })
+      .or(page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i]')).first();
+    await emailField.waitFor({ state: "visible" });
+    await humanType(emailField, email);
+    await humanDelay();
+
+    const passField = page.getByRole("textbox", { name: /password/i })
+      .or(page.locator('input[type="password"]')).first();
+    await humanType(passField, password);
+    await humanDelay(600, 1200);
+
+    const loginBtn = page.getByRole("button", { name: /log in|sign in|continue/i }).first();
+    await loginBtn.click();
+
+    log("  ⏳ Waiting for post-login navigation...");
+    await page.waitForURL(
+      (url: URL) => !url.href.includes("/login") && !url.href.includes("/signup"),
+      { timeout: 30000 }
+    );
+    await humanDelay(2000, 3000);
+    log(`  ✅ Logged in — ${page.url()}`);
+
+    // ── Onboarding ──
+    log("📋 Checking for onboarding overlay...");
+    const isOnboarding = page.url().includes("/onboarding") ||
+      await page.locator('[data-cy="onboarding"], [class*="onboarding" i], [id*="onboarding" i]')
+        .first().isVisible({ timeout: 4000 }).catch(() => false);
+
+    if (isOnboarding) {
+      log("  📋 Onboarding detected — starting steps...");
+
+      log("  Step 1: Username & Full name");
+      const usernameInput = page.getByRole("textbox", { name: /username/i })
+        .or(page.locator('input[name="username"], input[placeholder*="username" i]')).first();
+      if (await usernameInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const uname = username || email.split("@")[0].replace(/[^a-z0-9]/gi, "").slice(0, 20);
+        log(`    username → ${uname}`);
+        await humanType(usernameInput, uname);
+        await humanDelay(500, 900);
+      }
+
+      const fullNameInput = page.getByRole("textbox", { name: /full.?name|display.?name|name/i })
+        .or(page.locator('input[name="fullName"], input[placeholder*="name" i]')).first();
+      if (await fullNameInput.isVisible({ timeout: 4000 }).catch(() => false)) {
+        const fname = fullname || "Alex Taylor";
+        log(`    full name → ${fname}`);
+        await humanType(fullNameInput, fname);
+        await humanDelay(500, 900);
+      }
+
+      await clickNextButton(page);
+      await humanDelay(1200, 2000);
+
+      log("  Step 2: Select role → Developer");
+      const developerOption = page.getByRole("radio", { name: /developer/i })
+        .or(page.getByText("Developer", { exact: false }))
+        .or(page.locator('[data-value*="developer" i], [value*="developer" i]')).first();
+      if (await developerOption.isVisible({ timeout: 6000 }).catch(() => false)) {
+        await developerOption.click();
+        log("    ✅ Developer selected");
+      } else {
+        await page.locator("text=Developer").first().click().catch(() => {});
+      }
+      await humanDelay(800, 1400);
+      await clickNextButton(page);
+      await humanDelay(1200, 2000);
+
+      log('  Step 3: "How did you hear about us" → Google search');
+      const googleOption = page.getByRole("radio", { name: /google/i })
+        .or(page.getByText(/google search/i))
+        .or(page.locator('[data-value*="google" i], [value*="google" i]')).first();
+      if (await googleOption.isVisible({ timeout: 6000 }).catch(() => false)) {
+        await googleOption.click();
+        log("    ✅ Google search selected");
+      } else {
+        await page.locator("text=Google").first().click().catch(() => {});
+      }
+      await humanDelay(800, 1400);
+      await clickNextButton(page);
+      await humanDelay(1200, 2000);
+
+      log("  Step 4: Referral — Skip");
+      const skipBtn = page.getByRole("button", { name: /skip|later|no thanks|continue/i }).first();
+      if (await skipBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await skipBtn.click();
+        log("    ✅ Referral step skipped");
+      } else {
+        await clickNextButton(page).catch(() => {});
+      }
+      await humanDelay(1500, 2500);
+      log("  ✅ Onboarding complete");
+    } else {
+      log("  ℹ️  No onboarding — account already set up");
+    }
+
+    // ── Pricing → Core ──
+    log("💰 Navigating to Replit pricing page...");
+    await page.goto("https://replit.com/pricing", { waitUntil: "domcontentloaded" });
+    await humanDelay(2500, 3500);
+
+    const coreBtn = page.getByRole("button", { name: /continue with core/i })
+      .or(page.getByRole("link", { name: /continue with core/i }))
+      .or(page.locator("text=Continue with Core")).first();
+    await coreBtn.waitFor({ state: "visible", timeout: 15000 });
+    log('  🖱️  Clicking "Continue with Core"...');
+    await coreBtn.click();
+
+    // ── Wait for Stripe redirect ──
+    log("⏳ Waiting for Stripe checkout redirect (max 45s)...");
+    await page.waitForURL(
+      (url: URL) =>
+        url.href.includes("checkout.stripe.com") ||
+        url.href.includes("billing.stripe.com") ||
+        url.href.includes("stripe.com/checkout"),
+      { timeout: 45000 }
+    );
+    const stripeUrl = page.url();
+    log(`  ✅ Stripe redirect: ${stripeUrl.substring(0, 80)}...`);
+
+    await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {
+      log("  ⚠️  networkidle timeout — proceeding anyway");
+    });
+    await humanDelay(2000, 3000);
+
+    // ── Apply promo code ──
+    log(`🎟️  Applying promo code: ${couponCode}`);
+    const addPromoBtn = page.getByRole("button", { name: /add promotion code/i })
+      .or(page.getByRole("link", { name: /add promotion code/i }))
+      .or(page.locator("text=Add promotion code")).first();
+    await addPromoBtn.waitFor({ state: "visible", timeout: 20000 });
+    await humanDelay(800, 1400);
+    await addPromoBtn.click();
+    log('  🖱️  Clicked "Add promotion code"');
+    await humanDelay(1000, 1800);
+
+    const promoInput = page.getByRole("textbox", { name: /promotion code|coupon|promo/i })
+      .or(page.locator('input[name="promotionCode"], input[id*="promo" i], input[placeholder*="code" i]')).first();
+    await promoInput.waitFor({ state: "visible", timeout: 10000 });
+    log(`  ✏️  Typing coupon: ${couponCode}`);
+    await humanType(promoInput, couponCode);
+    await humanDelay(800, 1200);
+
+    const applyBtn = page.getByRole("button", { name: /apply/i }).first();
+    await applyBtn.waitFor({ state: "visible", timeout: 8000 });
+    await applyBtn.click();
+    log("  🖱️  Clicked Apply");
+
+    log("  ⏳ Waiting for coupon validation...");
+    await humanDelay(3000, 4000);
+
+    const discountLine = page.locator('[class*="discount" i], [class*="coupon" i], [data-testid*="discount"]').first();
+    const bodyText = await page.locator("body").textContent().catch(() => "");
+    const bodyHasDiscount = /discount|coupon applied|promo applied|\$0\.00|100%/i.test(bodyText || "");
+    const discountLineVisible = await discountLine.isVisible({ timeout: 8000 }).catch(() => false);
+    let couponConfirmed = discountLineVisible || bodyHasDiscount;
+
+    if (discountLineVisible) {
+      const discountText = await discountLine.textContent().catch(() => "");
+      log(`  ✅ Coupon confirmed! Discount element: "${discountText?.trim()}"`);
+    } else if (bodyHasDiscount) {
+      log("  ✅ Coupon confirmed via page text (discount keyword detected)");
+    } else {
+      log("  ⚠️  Coupon validation unconfirmed — no discount indicator found");
+      couponConfirmed = false;
+    }
+
+    log("─".repeat(55));
+    if (couponConfirmed) {
+      log("✅ SUCCESS — Stripe checkout reached and promo code applied.");
+    } else {
+      log("⚠️  PARTIAL — Stripe checkout reached but coupon unconfirmed.");
+    }
+
+    await sleep(3000);
+    return { success: true, couponConfirmed, stripeUrl };
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`❌ FATAL ERROR: ${msg}`);
+    return { success: false, couponConfirmed: false, error: msg };
+  } finally {
+    try { if (ctx) await ctx.close(); } catch {}
+    log("🔒 Browser closed.");
+  }
+}
+
 // Helper: click Next / Continue / Submit — whichever is visible
 async function _clickNextOrContinue(page: any, log: (msg: string) => void, stepLabel: string): Promise<void> {
   const selectors = [

@@ -29,6 +29,8 @@ const G = "#00ff41";
 const GA = (a: number) => `rgba(0,255,65,${a})`;
 const B = "rgba(100,210,255,1)";
 const BA = (a: number) => `rgba(100,210,255,${a})`;
+const P = "rgba(190,120,255,1)";
+const PA = (a: number) => `rgba(190,120,255,${a})`;
 
 function getLogStyle(text: string): { color: string; prefix: string } {
   if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
@@ -55,7 +57,14 @@ function getLogStyle(text: string): { color: string; prefix: string } {
 export default function ReplitCreate() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [mode, setMode] = useState<"create" | "checkout">("create");
+  const [mode, setMode] = useState<"create" | "checkout" | "onboarding">("create");
+
+  // ── ONBOARDING mode state ──
+  const [onbEmail, setOnbEmail] = useState("");
+  const [onbPassword, setOnbPassword] = useState("");
+  const [onbCoupon, setOnbCoupon] = useState("AGENT4BC4974559665");
+  const [onbUsername, setOnbUsername] = useState("");
+  const [onbFullname, setOnbFullname] = useState("");
 
   // ── CREATE mode state ──
   const [outlookEmail, setOutlookEmail] = useState("");
@@ -254,6 +263,36 @@ export default function ReplitCreate() {
     }
   };
 
+  const handleOnboarding = async () => {
+    if (!onbEmail || !onbPassword) {
+      toast({ title: "Missing fields", description: "Email and password are required", variant: "destructive" });
+      return;
+    }
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+    setTotalCount(1);
+    try {
+      const res = await apiRequest("POST", "/api/replit-onboarding-checkout", {
+        email: onbEmail.trim(),
+        password: onbPassword,
+        couponCode: onbCoupon.trim() || "AGENT4BC4974559665",
+        username: onbUsername.trim() || undefined,
+        fullname: onbFullname.trim() || undefined,
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to start");
+      activeBatchId.current = data.batchId;
+      addLog(`🚀 Onboarding job started [${data.batchId}]`);
+      addLog(`🎟️ Coupon: ${onbCoupon.trim() || "AGENT4BC4974559665"}`);
+    } catch (err: any) {
+      sounds.error();
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setRunning(false);
+    }
+  };
+
   const saveNopeKey = async () => {
     setNopeKeySaving(true);
     try {
@@ -339,6 +378,21 @@ export default function ReplitCreate() {
           <ShoppingCart className="w-3.5 h-3.5" />
           Checkout Existing
         </button>
+        <button
+          onClick={() => { sounds.toggle(); setMode("onboarding"); setLogs([]); setRunning(false); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-bold tracking-widest uppercase transition-all"
+          style={{
+            background: mode === "onboarding" ? PA(0.1) : "rgba(0,0,0,0.3)",
+            border: `1px solid ${mode === "onboarding" ? PA(0.5) : PA(0.08)}`,
+            color: mode === "onboarding" ? P : PA(0.3),
+            textShadow: mode === "onboarding" ? `0 0 10px ${P}` : "none",
+            boxShadow: mode === "onboarding" ? `0 0 16px ${PA(0.06)}` : "none",
+          }}
+          data-testid="button-mode-onboarding"
+        >
+          <User className="w-3.5 h-3.5" />
+          Onboarding + Core
+        </button>
       </div>
 
       <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
@@ -348,18 +402,18 @@ export default function ReplitCreate() {
           className="rounded-xl p-5 space-y-5 relative overflow-hidden"
           style={{
             background: "rgba(0,0,0,0.55)",
-            border: `1px solid ${mode === "checkout" ? BA(0.2) : GA(0.14)}`,
-            boxShadow: `0 0 40px ${mode === "checkout" ? BA(0.03) : GA(0.04)} inset`,
+            border: `1px solid ${mode === "checkout" ? BA(0.2) : mode === "onboarding" ? PA(0.2) : GA(0.14)}`,
+            boxShadow: `0 0 40px ${mode === "checkout" ? BA(0.03) : mode === "onboarding" ? PA(0.03) : GA(0.04)} inset`,
           }}
         >
           <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.012) 2px, rgba(0,255,65,0.012) 4px)", borderRadius: "inherit" }} />
 
           <div className="flex items-center gap-2">
-            <ChevronRight className="w-3.5 h-3.5" style={{ color: mode === "checkout" ? B : G }} />
-            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.55) : GA(0.55) }}>
-              {mode === "checkout" ? "Checkout Configuration" : "Configuration"}
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: mode === "checkout" ? B : mode === "onboarding" ? P : G }} />
+            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.55) : mode === "onboarding" ? PA(0.55) : GA(0.55) }}>
+              {mode === "checkout" ? "Checkout Configuration" : mode === "onboarding" ? "Onboarding + Core Configuration" : "Configuration"}
             </span>
-            <div className="flex-1 h-px" style={{ background: mode === "checkout" ? BA(0.1) : GA(0.1) }} />
+            <div className="flex-1 h-px" style={{ background: mode === "checkout" ? BA(0.1) : mode === "onboarding" ? PA(0.1) : GA(0.1) }} />
           </div>
 
           {/* ══ CREATE MODE ══ */}
@@ -500,6 +554,85 @@ export default function ReplitCreate() {
                   </div>
                 </div>
               )}
+            </>
+          )}
+
+          {/* ══ ONBOARDING MODE ══ */}
+          {mode === "onboarding" && (
+            <>
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.5) }}>
+                  <Mail className="w-2.5 h-2.5 inline mr-1" />Replit Email
+                </label>
+                <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${onbEmail ? PA(0.45) : PA(0.15)}` }}>
+                  <Mail className="w-3.5 h-3.5 flex-shrink-0" style={{ color: onbEmail ? P : PA(0.3) }} />
+                  <input type="email" value={onbEmail} onChange={(e) => { sounds.keypress(); setOnbEmail(e.target.value); }} placeholder="you@outlook.com" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: onbEmail ? P : "rgba(255,255,255,0.5)", caretColor: P }} data-testid="input-onb-email" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.5) }}>
+                  <Key className="w-2.5 h-2.5 inline mr-1" />Replit Password
+                </label>
+                <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${onbPassword ? PA(0.45) : PA(0.15)}` }}>
+                  <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: onbPassword ? P : PA(0.3) }} />
+                  <input type="password" value={onbPassword} onChange={(e) => { sounds.keypress(); setOnbPassword(e.target.value); }} placeholder="••••••••" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: "rgba(255,255,255,0.8)", caretColor: P }} data-testid="input-onb-password" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.5) }}>
+                  <Tag className="w-2.5 h-2.5 inline mr-1" />Promo Code
+                </label>
+                <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${onbCoupon.trim() ? PA(0.45) : PA(0.15)}` }}>
+                  <Tag className="w-3.5 h-3.5 flex-shrink-0" style={{ color: onbCoupon.trim() ? P : PA(0.3) }} />
+                  <input type="text" value={onbCoupon} onChange={(e) => { sounds.keypress(); setOnbCoupon(e.target.value.toUpperCase()); }} placeholder="AGENT4BC4974559665" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: onbCoupon.trim() ? P : "rgba(255,255,255,0.5)", caretColor: P, letterSpacing: "0.1em" }} data-testid="input-onb-coupon" />
+                </div>
+                <p className="text-[9px] font-mono mt-1" style={{ color: PA(0.3) }}>Applied on Stripe checkout — leave blank to use default</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.35) }}>
+                    <User className="w-2.5 h-2.5 inline mr-1" />Username <span style={{ color: PA(0.2) }}>(opt)</span>
+                  </label>
+                  <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${onbUsername ? PA(0.35) : PA(0.1)}` }}>
+                    <input type="text" value={onbUsername} onChange={(e) => { sounds.keypress(); setOnbUsername(e.target.value); }} placeholder="auto-generated" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: onbUsername ? P : "rgba(255,255,255,0.35)", caretColor: P }} data-testid="input-onb-username" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.35) }}>
+                    Full Name <span style={{ color: PA(0.2) }}>(opt)</span>
+                  </label>
+                  <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${onbFullname ? PA(0.35) : PA(0.1)}` }}>
+                    <input type="text" value={onbFullname} onChange={(e) => { sounds.keypress(); setOnbFullname(e.target.value); }} placeholder="Alex Taylor" className="bg-transparent flex-1 text-xs font-mono focus:outline-none" style={{ color: onbFullname ? P : "rgba(255,255,255,0.35)", caretColor: P }} data-testid="input-onb-fullname" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 space-y-1" style={{ background: PA(0.04), border: `1px solid ${PA(0.15)}` }}>
+                <p className="text-[9px] font-mono" style={{ color: PA(0.55) }}>Flow: Login → Onboarding (if needed) → Pricing → Continue with Core → Stripe → Apply promo</p>
+              </div>
+
+              <button
+                onClick={handleOnboarding}
+                disabled={running || !onbEmail || !onbPassword}
+                className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+                style={{
+                  background: running || !onbEmail || !onbPassword ? PA(0.03) : `linear-gradient(135deg, ${PA(0.18)}, ${PA(0.07)})`,
+                  border: `1px solid ${running || !onbEmail || !onbPassword ? PA(0.08) : PA(0.55)}`,
+                  color: running || !onbEmail || !onbPassword ? PA(0.2) : P,
+                  textShadow: running || !onbEmail || !onbPassword ? "none" : `0 0 14px ${P}`,
+                  boxShadow: running || !onbEmail || !onbPassword ? "none" : `0 0 25px ${PA(0.08)}`,
+                  cursor: running || !onbEmail || !onbPassword ? "not-allowed" : "pointer",
+                }}
+                data-testid="button-run-onboarding"
+              >
+                <User className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                <span className="relative z-10">
+                  {running ? "running onboarding..." : "run_onboarding_checkout"}
+                </span>
+              </button>
             </>
           )}
 
@@ -661,15 +794,15 @@ export default function ReplitCreate() {
 
         {/* Terminal panel */}
         <div className="min-w-0">
-          <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${mode === "checkout" ? BA(0.1) : GA(0.12)}` }}>
-            <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0" style={{ background: mode === "checkout" ? BA(0.03) : GA(0.03), borderBottom: `1px solid ${mode === "checkout" ? BA(0.08) : GA(0.08)}` }}>
+          <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${mode === "checkout" ? BA(0.1) : mode === "onboarding" ? PA(0.1) : GA(0.12)}` }}>
+            <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0" style={{ background: mode === "checkout" ? BA(0.03) : mode === "onboarding" ? PA(0.03) : GA(0.03), borderBottom: `1px solid ${mode === "checkout" ? BA(0.08) : mode === "onboarding" ? PA(0.08) : GA(0.08)}` }}>
               <div className="flex items-center gap-2.5">
-                <Radio className="w-3 h-3" style={{ color: running ? (mode === "checkout" ? B : G) : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${mode === "checkout" ? B : G})` : "none" }} />
-                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.45) : GA(0.45) }}>live_output</span>
+                <Radio className="w-3 h-3" style={{ color: running ? (mode === "checkout" ? B : mode === "onboarding" ? P : G) : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${mode === "checkout" ? B : mode === "onboarding" ? P : G})` : "none" }} />
+                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: mode === "checkout" ? BA(0.45) : mode === "onboarding" ? PA(0.45) : GA(0.45) }}>live_output</span>
                 {running && (
                   <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: mode === "checkout" ? B : G, boxShadow: `0 0 6px ${mode === "checkout" ? B : G}` }} />
-                    <span className="text-[9px] font-mono font-bold" style={{ color: mode === "checkout" ? BA(0.65) : GA(0.65) }}>RUNNING</span>
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: mode === "checkout" ? B : mode === "onboarding" ? P : G, boxShadow: `0 0 6px ${mode === "checkout" ? B : mode === "onboarding" ? P : G}` }} />
+                    <span className="text-[9px] font-mono font-bold" style={{ color: mode === "checkout" ? BA(0.65) : mode === "onboarding" ? PA(0.65) : GA(0.65) }}>RUNNING</span>
                   </div>
                 )}
               </div>
