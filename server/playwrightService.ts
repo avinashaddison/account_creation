@@ -13333,6 +13333,35 @@ export async function registerLovableAccount(
         async function extractLink(p: any): Promise<boolean> {
           const body = await p.evaluate(() => document.body?.innerText || "");
           const html = await p.evaluate(() => document.body?.innerHTML || "");
+
+          // Priority 0: Microsoft Safelinks — Outlook wraps all junk URLs with safelinks.protection.outlook.com
+          // Extract and decode the real URL from inside the safelink wrapper
+          const safelinkRe = /safelinks\.protection\.outlook\.com\/\?url=([^&"'\s>]+)/gi;
+          let slm: RegExpExecArray | null;
+          while ((slm = safelinkRe.exec(html)) !== null) {
+            try {
+              const decoded = decodeURIComponent(slm[1]);
+              if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
+                verificationLink = decoded.replace(/["'<>)]/g, "").trim();
+                log(`Extracted Lovable link via Safelinks decode: ${verificationLink.substring(0, 120)}`);
+                return true;
+              }
+            } catch {}
+          }
+          // Also check body text for safelinks-encoded lovable URLs
+          const safelinkBodyRe = /safelinks\.protection\.outlook\.com\/\?url=([^\s&]+)/gi;
+          let slb: RegExpExecArray | null;
+          while ((slb = safelinkBodyRe.exec(body)) !== null) {
+            try {
+              const decoded = decodeURIComponent(slb[1]);
+              if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
+                verificationLink = decoded.replace(/["'<>)]/g, "").trim();
+                log(`Extracted Lovable link via Safelinks (body text): ${verificationLink.substring(0, 120)}`);
+                return true;
+              }
+            } catch {}
+          }
+
           // Priority 1: direct lovable.dev verification/auth links
           const lovablePatterns = [
             /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/,
@@ -13351,7 +13380,7 @@ export async function registerLovableAccount(
               }
             }
           }
-          // Priority 2: ONLY Lovable's specific Firebase project (gpt-engineer-390607) — NOT any other Firebase project
+          // Priority 2: ONLY Lovable's specific Firebase project (gpt-engineer-390607)
           const firebasePatterns = [
             /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/,
           ];
@@ -13366,7 +13395,7 @@ export async function registerLovableAccount(
               }
             }
           }
-          // Priority 3: scan hrefs ONLY from lovable.dev or gpt-engineer-390607 domains
+          // Priority 3: scan hrefs from lovable.dev or gpt-engineer-390607 domains
           const hrefMatches = html.match(/href="(https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^"]*)"/gi) || [];
           for (const hm of hrefMatches) {
             const urlMatch = hm.match(/href="(https?:\/\/[^"]+)"/i);
@@ -13393,47 +13422,49 @@ export async function registerLovableAccount(
         async function scanFolder(p: any, folderUrl: string, label: string): Promise<boolean> {
           try {
             await p.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-            await waitMs(6000);
-            const items = await p.$$('[data-convid]');
-            const alt = items.length === 0 ? await p.$$('[role="option"]') : [];
-            const all = items.length > 0 ? items : alt;
-            log(`${label}: ${all.length} emails`);
-            // Keyword-match pass — ONLY open emails that mention Lovable
+            await waitMs(8000);
+
+            // Try multiple selector strategies — Outlook's DOM varies between inbox/junk/folders
+            let all: any[] = await p.$$('[data-convid]');
+            if (all.length === 0) all = await p.$$('[role="option"][tabindex]');
+            if (all.length === 0) all = await p.$$('div[class*="customScrollBar"] [role="option"], div[class*="hcpHN"] [role="option"]');
+            if (all.length === 0) all = await p.$$('[role="listitem"], li[class*="mail"], div[class*="mailList"] div[tabindex]');
+            if (all.length === 0) all = await p.$$('[aria-label][tabindex="0"]:not([aria-label=""])');
+            log(`${label}: ${all.length} emails found`);
+
+            // Keyword-match pass — open emails that mention Lovable
             for (const item of all.slice(0, 20)) {
               const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
-              if (txt.includes("lovable") || txt.includes("noreply@lovable") || txt.includes("lovable.dev")) {
-                log(`Opening in ${label}: "${txt.substring(0, 80)}"`);
+              if (txt.includes("lovable") || txt.includes("noreply@lovable") || txt.includes("lovable.dev") ||
+                  txt.includes("verify your email") || txt.includes("confirm your email")) {
+                log(`Opening in ${label}: "${txt.replace(/\s+/g, " ").substring(0, 80)}"`);
                 try {
                   await item.click({ timeout: 8000 });
                 } catch {
                   try { await p.evaluate((el: any) => el.click(), item); } catch {}
                 }
-                await waitMs(3000);
+                await waitMs(4000);
                 if (await extractLink(p)) return true;
               }
             }
-            // Fallback: open recent emails and log what links are found for debugging
-            for (const item of all.slice(0, 5)) {
+            // Fallback: open ALL recent emails (up to 8) and try link extraction
+            for (const item of all.slice(0, 8)) {
               const txt = ((await item.innerText().catch(() => "")) as string).trim();
               if (txt.length < 5) continue;
-              log(`Fallback opening email: "${txt.replace(/\s+/g, " ").substring(0, 80)}"`);
+              log(`Fallback opening: "${txt.replace(/\s+/g, " ").substring(0, 80)}"`);
               try {
                 await item.click({ timeout: 8000 });
               } catch {
                 try { await p.evaluate((el: any) => el.click(), item); } catch {}
               }
-              await waitMs(2500);
-              // Log all external links found in this email for debugging
+              await waitMs(3000);
               try {
                 const links = await p.$$eval('a[href]', (as: any[]) =>
-                  as.map((a: any) => a.href).filter((h: string) => h && h.startsWith('http') && !h.includes('outlook') && !h.includes('microsoft') && !h.includes('aka.ms'))
+                  as.map((a: any) => a.href).filter((h: string) => h && h.startsWith('http'))
                 );
-                if (links.length > 0) {
-                  log(`Links in email: ${JSON.stringify(links.slice(0, 5))}`);
-                } else {
-                  const bodySnip = await p.evaluate(() => (document.body?.innerText || "").substring(0, 200).replace(/\s+/g, " "));
-                  log(`No external links found. Body: ${bodySnip}`);
-                }
+                const lovableLinks = links.filter((h: string) => h.includes("lovable") || h.includes("gpt-engineer") || h.includes("safelinks"));
+                log(`Links in email: ${JSON.stringify(links.slice(0, 6))}`);
+                if (lovableLinks.length > 0) log(`Lovable/safelinks found: ${JSON.stringify(lovableLinks.slice(0, 3))}`);
               } catch {}
               if (await extractLink(p)) return true;
             }
