@@ -16783,8 +16783,7 @@ export async function onboardingCheckoutReplitAccount(
     }
   }
 
-  const userDataDir = `/tmp/replit-onboarding-${Date.now()}`;
-  let ctx: any = null;
+  let browser: any = null;
 
   try {
     log("═".repeat(55));
@@ -16793,25 +16792,36 @@ export async function onboardingCheckoutReplitAccount(
     log(`   Coupon : ${couponCode}`);
     log("═".repeat(55));
 
-    log(`🌐 Launching headful browser...`);
-    ctx = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
+    log(`🌐 Launching stealth browser...`);
+    browser = await chromium.launch({
+      headless: true,
       args: [
         "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled",
-        "--window-size=1280,900", "--lang=en-US,en;q=0.9",
+        "--disable-web-security", "--allow-running-insecure-content",
+        "--disable-features=IsolateOrigins,site-per-process",
       ],
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      viewport: { width: 1280, height: 900 },
-      locale: "en-US",
-      timezoneId: "America/New_York",
     });
 
-    await ctx.addInitScript(() => {
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      viewport: { width: 1366, height: 768 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      javaScriptEnabled: true,
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Ch-Ua": '"Chromium";v="124", "Not(A:Brand";v="24", "Google Chrome";v="124"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+      },
+    });
+
+    await context.addInitScript(() => {
       Object.defineProperty(window.navigator, "webdriver", { get: () => undefined });
     });
 
-    const page = await ctx.newPage();
+    const page = await context.newPage();
     page.setDefaultTimeout(30000);
 
     // ── Login ──
@@ -17000,7 +17010,7 @@ export async function onboardingCheckoutReplitAccount(
     log(`❌ FATAL ERROR: ${msg}`);
     return { success: false, couponConfirmed: false, error: msg };
   } finally {
-    try { if (ctx) await ctx.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
     log("🔒 Browser closed.");
   }
 }
