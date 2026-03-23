@@ -1113,14 +1113,26 @@ export default function ReplitCreate() {
                       <div key={i} className="flex flex-col gap-1 my-2 rounded-lg p-2.5" style={{ background: LA(0.06), border: `1px solid ${LA(0.25)}` }}>
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[10px] font-mono" style={{ color: LA(0.7) }}>🔗 {email}</span>
-                          <button
-                            onClick={() => copyToClipboard(url)}
-                            className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all flex-shrink-0"
-                            style={{ background: isCopied ? LA(0.25) : LA(0.1), border: `1px solid ${LA(0.4)}`, color: isCopied ? L : LA(0.7) }}
-                            data-testid={`button-copy-url-${i}`}
-                          >
-                            {isCopied ? "✓ copied!" : "copy link"}
-                          </button>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                              style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.4)", color: "rgba(147,197,253,0.9)" }}
+                              data-testid={`link-open-url-${i}`}
+                            >
+                              open link
+                            </a>
+                            <button
+                              onClick={() => copyToClipboard(url)}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                              style={{ background: isCopied ? LA(0.25) : LA(0.1), border: `1px solid ${LA(0.4)}`, color: isCopied ? L : LA(0.7) }}
+                              data-testid={`button-copy-url-${i}`}
+                            >
+                              {isCopied ? "✓ copied!" : "copy link"}
+                            </button>
+                          </div>
                         </div>
                         <span className="text-[10px] font-mono break-all" style={{ color: LA(0.5) }}>{url.substring(0, 80)}...</span>
                       </div>
