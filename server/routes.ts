@@ -3628,6 +3628,29 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/replit-accounts/export-csv", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+      const lines = ["email,password,username,status"];
+      for (const a of accounts) {
+        const row = [a.email, a.password, a.username, a.status]
+          .map(v => `"${(v ?? "").replace(/"/g, '""')}"`)
+          .join(",");
+        lines.push(row);
+      }
+      const csv = lines.join("\n");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="replit_accounts_${Date.now()}.csv"`);
+      res.send(csv);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.patch("/api/replit-accounts/:id/status", requireAuth, async (req: Request, res: Response) => {
     try {
       const { status } = req.body;

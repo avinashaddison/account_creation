@@ -1519,9 +1519,23 @@ export default function PrivateAccount() {
                 Replit Accounts
                 <Badge variant="outline" className="text-[9px] font-mono border-violet-500/15 text-violet-400/60 ml-2">{replitAccounts.length} total</Badge>
               </CardTitle>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-zinc-500 hover:text-zinc-300" onClick={fetchReplit} data-testid="button-refresh-replit">
-                <RefreshCw className="w-3 h-3" />
-              </Button>
+              <div className="flex items-center gap-1">
+                {replitAccounts.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-zinc-400 hover:text-violet-400 hover:bg-violet-500/10 font-mono text-xs"
+                    onClick={() => { const a = document.createElement("a"); a.href = "/api/replit-accounts/export-csv"; a.download = "replit_accounts.csv"; a.click(); }}
+                    data-testid="button-export-replit-csv"
+                  >
+                    <Download className="w-3 h-3 mr-1" />
+                    CSV
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-zinc-500 hover:text-zinc-300" onClick={fetchReplit} data-testid="button-refresh-replit">
+                  <RefreshCw className="w-3 h-3" />
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="pt-0">
