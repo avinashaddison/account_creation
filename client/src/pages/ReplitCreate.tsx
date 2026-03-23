@@ -1125,6 +1125,21 @@ export default function ReplitCreate() {
                               open link
                             </a>
                             <button
+                              onClick={() => {
+                                const blob = new Blob([`${email}\n${url}`], { type: "text/plain" });
+                                const a = document.createElement("a");
+                                a.href = URL.createObjectURL(blob);
+                                a.download = `checkout_${email.split("@")[0]}.txt`;
+                                a.click();
+                                URL.revokeObjectURL(a.href);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                              style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.3)", color: "rgba(134,239,172,0.85)" }}
+                              data-testid={`button-download-url-${i}`}
+                            >
+                              download
+                            </button>
+                            <button
                               onClick={() => copyToClipboard(url)}
                               className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all"
                               style={{ background: isCopied ? LA(0.25) : LA(0.1), border: `1px solid ${LA(0.4)}`, color: isCopied ? L : LA(0.7) }}

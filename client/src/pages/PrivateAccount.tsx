@@ -1525,7 +1525,7 @@ export default function PrivateAccount() {
                     variant="ghost"
                     size="sm"
                     className="h-7 px-2 text-zinc-400 hover:text-violet-400 hover:bg-violet-500/10 font-mono text-xs"
-                    onClick={() => { const a = document.createElement("a"); a.href = "/api/replit-accounts/export-csv"; a.download = "replit_accounts.csv"; a.click(); }}
+                    onClick={() => window.open("/api/replit-accounts/export-csv", "_blank")}
                     data-testid="button-export-replit-csv"
                   >
                     <Download className="w-3 h-3 mr-1" />
