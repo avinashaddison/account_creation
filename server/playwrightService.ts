@@ -17497,21 +17497,25 @@ export async function onboardingCheckoutReplitAccount(
         }
         await page.waitForTimeout(1000);
 
-        // Step 5: Poll for Bank ACS right after checkbox click (may appear quickly)
-        let acsFoundEarly2 = false;
-        for (let i = 0; i < 6; i++) {
-          for (const f of page.frames()) {
-            const u = f.url();
-            if (u.includes("m2pfintech") || u.includes("m2pSecAuth") || u.includes("federalbank") || u.includes("3ds") || u.includes("acs") || u.includes("securecheckout")) {
-              log(`✅ Bank ACS frame appeared early after checkbox click: ${u.substring(0, 80)}`);
-              acsFoundEarly2 = true;
-              break;
-            }
-          }
-          if (acsFoundEarly2) break;
-          await page.waitForTimeout(1500);
+        // Step 5: Also send postMessage from ALL hCaptcha frames (not just invisible)
+        const allHcapFrames2 = page.frames().filter((f: any) => f.url().includes("hcaptcha") || f.url().includes("newassets.hcaptcha.com"));
+        for (const hcf of allHcapFrames2) {
+          try {
+            const wid2 = new URL(hcf.url()).searchParams.get("id") || "hcaptcha-invisible";
+            await hcf.evaluate(([tok, wid]: [string, string]) => {
+              const msgs = [
+                JSON.stringify({ id: wid, type: "challenge.passed", response: tok }),
+                JSON.stringify({ id: wid, type: "success", token: tok }),
+                JSON.stringify({ type: "challenge.passed", response: tok }),
+                JSON.stringify({ source: "hcaptcha", data: { key: wid, token: tok } }),
+              ];
+              msgs.forEach(msg => {
+                try { window.parent.postMessage(msg, "*"); } catch {}
+                try { window.top?.postMessage(msg, "*"); } catch {}
+              });
+            }, [token2, wid2]).catch(() => {});
+          } catch {}
         }
-        await page.waitForTimeout(acsFoundEarly2 ? 0 : 3000);
 
         // Step 6: Log any Stripe error visible on page
         try {
@@ -17521,46 +17525,72 @@ export async function onboardingCheckoutReplitAccount(
           }).catch(() => null);
           if (stripeErr2) log(`⚠️ Stripe page error: ${stripeErr2.substring(0, 120)}`);
         } catch {}
-      } else {
-        log(`⚠️ hCaptcha solving failed: ${finalResult2.error || "unknown"}`);
-      }
 
-      // Re-click Subscribe if bank ACS not visible
-      const isAcsFrame2 = (url: string) =>
-        url.includes("m2pfintech.com") || url.includes("m2pSecAuth") || url.includes("federalbank") ||
-        (url.includes("acs") && !url.includes("hcaptcha") && !url.includes("stripe")) ||
-        (url.includes("3ds") && !url.includes("hcaptcha"));
-      let bankAcsNow2 = page.frames().some((f: any) => isAcsFrame2(f.url()));
-      if (!bankAcsNow2) {
-        log(`  Bank ACS not yet — re-clicking Subscribe...`);
-        try {
-          const resubBtn2 = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
-          if (await resubBtn2.isVisible({ timeout: 3000 }).catch(() => false)) {
-            await resubBtn2.click({ timeout: 5000, force: true });
-            log(`  Re-clicked Subscribe`);
+        // Step 7: Wait patiently for ACS or success — DO NOT re-click Subscribe
+        // After hCaptcha passes, Stripe handles submission automatically; re-clicking breaks the flow
+        const isAcsUrl2 = (u: string) =>
+          u.includes("m2pfintech") || u.includes("m2pSecAuth") || u.includes("federalbank") ||
+          u.includes("3dsecure") || u.includes("3ds2") ||
+          (u.includes("acs") && !u.includes("hcaptcha") && !u.includes("stripe")) ||
+          (u.includes("3ds") && !u.includes("hcaptcha") && !u.includes("stripe"));
+        log(`⏳ Waiting up to 90s for Stripe to process payment post-hCaptcha...`);
+        const postHcapDeadline2 = Date.now() + 90000;
+        let postHcapDone2 = false;
+        while (!postHcapDone2 && Date.now() < postHcapDeadline2) {
+          await page.waitForTimeout(2000);
+          // Check ACS frame
+          const acsFrame2 = page.frames().find((f: any) => isAcsUrl2(f.url()));
+          if (acsFrame2) {
+            log(`✅ Bank ACS frame appeared: ${acsFrame2.url().substring(0, 80)}`);
+            postHcapDone2 = true;
+            break;
           }
-        } catch {}
-        const acsDeadline2 = Date.now() + 60000;
-        while (!bankAcsNow2 && Date.now() < acsDeadline2) {
-          await page.waitForTimeout(3000);
-          bankAcsNow2 = page.frames().some((f: any) => isAcsFrame2(f.url()));
+          // Check success redirect
           const curUrl2 = page.url();
           if (curUrl2.includes("replit.com") && !curUrl2.includes("stripe")) {
-            log(`✅ Payment succeeded (redirected): ${curUrl2.substring(0, 80)}`);
+            log(`✅ Payment succeeded (redirected to Replit): ${curUrl2.substring(0, 80)}`);
             routeInterceptorActive2 = false;
             return { success: true, couponConfirmed, checkoutComplete: true, stripeUrl };
           }
-          if (bankAcsNow2) { log(`✅ Bank ACS frame appeared`); break; }
+          // Log Stripe errors periodically
+          const elapsedSecs2 = Math.round((Date.now() - (postHcapDeadline2 - 90000)) / 1000);
+          if (elapsedSecs2 % 15 === 0) {
+            try {
+              const errMsg2 = await page.mainFrame().evaluate(() => {
+                const el = document.querySelector('[class*="error"], [role="alert"], [data-testid*="error"]');
+                return el?.textContent?.trim() || null;
+              }).catch(() => null);
+              if (errMsg2) log(`⚠️ Stripe page: ${errMsg2.substring(0, 120)}`);
+              else log(`  ⏳ Still waiting... (${elapsedSecs2}s elapsed)`);
+            } catch {}
+          }
         }
+        if (!postHcapDone2) {
+          // Last check for Stripe page error
+          try {
+            const finalErr2 = await page.mainFrame().evaluate(() => {
+              const el = document.querySelector('[class*="error"], [role="alert"], [data-testid*="error"]');
+              return el?.textContent?.trim() || null;
+            }).catch(() => null);
+            if (finalErr2) log(`⚠️ Final Stripe error: ${finalErr2.substring(0, 200)}`);
+            else log(`⚠️ 90s elapsed — no ACS or redirect detected`);
+          } catch {}
+        }
+      } else {
+        log(`⚠️ hCaptcha solving failed: ${finalResult2.error || "unknown"}`);
       }
       routeInterceptorActive2 = false;
     }
 
     // Handle 3DS OTP
     if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
-      const bankAcsVisible2 = page.frames().some((f: any) =>
-        f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth") || f.url().includes("federalbank")
-      );
+      const bankAcsVisible2 = page.frames().some((f: any) => {
+        const u = f.url();
+        return u.includes("m2pfintech.com") || u.includes("m2pSecAuth") || u.includes("federalbank") ||
+          u.includes("3dsecure") || u.includes("3ds2") ||
+          (u.includes("acs") && !u.includes("hcaptcha") && !u.includes("stripe")) ||
+          (u.includes("3ds") && !u.includes("hcaptcha") && !u.includes("stripe"));
+      });
       if (!bankAcsVisible2) {
         log(`⚠️ Bank ACS frame not present — skipping OTP phase`);
       } else {
