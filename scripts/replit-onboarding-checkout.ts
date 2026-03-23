@@ -23,6 +23,9 @@ const REPLIT_PASS     = process.env.REPLIT_PASS     || "yourpassword";
 const REPLIT_USERNAME = process.env.REPLIT_USERNAME || "";     // optional, for onboarding pre-fill
 const REPLIT_FULLNAME = process.env.REPLIT_FULLNAME || "";     // optional
 const COUPON_CODE     = process.env.COUPON_CODE     || "AGENT4BC4974559665";
+// Set USER_DATA_DIR to a stable path for persistent sessions across runs:
+//   USER_DATA_DIR=/tmp/my-replit-profile npx tsx scripts/replit-onboarding-checkout.ts
+const USER_DATA_DIR   = process.env.USER_DATA_DIR   || `/tmp/replit-profile-${Date.now()}`;
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 const LOG_FILE = `/tmp/replit-onboarding-${Date.now()}.log`;
@@ -59,11 +62,9 @@ async function main() {
   log(`   Coupon : ${COUPON_CODE}`);
   log("═".repeat(60));
 
-  const userDataDir = `/tmp/replit-profile-${Date.now()}`;
-
   // ── 1. Launch browser ───────────────────────────────────────────────────────
-  log("🌐 Launching browser (headful, stealth args)...");
-  const ctx = await chromium.launchPersistentContext(userDataDir, {
+  log(`🌐 Launching browser (headful, stealth args) — profile: ${USER_DATA_DIR}`);
+  const ctx = await chromium.launchPersistentContext(USER_DATA_DIR, {
     headless: false,
     args: [
       "--no-sandbox",
@@ -311,34 +312,47 @@ async function main() {
     log("  ⏳ Waiting for coupon validation...");
     await humanDelay(3000, 4000);
 
-    // Check for success indicators
+    // Check for a confirmed coupon success indicator:
+    // Stripe typically shows a line item with the discount amount or "Discount" label.
     const discountLine = page.locator(
-      '[class*="discount" i], [class*="coupon" i], [data-testid*="discount"], text=/discount|coupon applied|promo applied/i'
+      '[class*="discount" i], [class*="coupon" i], [data-testid*="discount"]'
     ).first();
 
-    const isApplied = await discountLine.isVisible({ timeout: 8_000 }).catch(() => false);
+    // Also check page body text as a secondary signal
+    const bodyText = await page.locator("body").textContent().catch(() => "");
+    const bodyHasDiscount = /discount|coupon applied|promo applied|\$0\.00|100%/i.test(bodyText || "");
 
-    if (isApplied) {
+    const discountLineVisible = await discountLine.isVisible({ timeout: 8_000 }).catch(() => false);
+    let couponConfirmed = discountLineVisible || bodyHasDiscount;
+
+    if (discountLineVisible) {
       const discountText = await discountLine.textContent().catch(() => "");
-      log(`  ✅ Coupon applied! Stripe shows: "${discountText?.trim()}"`);
+      log(`  ✅ Coupon confirmed! Stripe discount element: "${discountText?.trim()}"`);
+    } else if (bodyHasDiscount) {
+      log("  ✅ Coupon confirmed via page body text (discount/promo keyword detected)");
     } else {
-      // Even if element not found, log the page text for inspection
-      const bodyText = await page.locator("body").textContent().catch(() => "");
-      const hasDiscount = /discount|\$0|free|100%|coupon/i.test(bodyText || "");
-      if (hasDiscount) {
-        log("  ✅ Coupon likely applied (discount text found in page body)");
-      } else {
-        log("  ⚠️  Coupon validation result unclear — inspect the browser window");
-      }
+      log("  ⚠️  Coupon validation unconfirmed — no discount indicator found in DOM");
+      couponConfirmed = false;
     }
 
     log("─".repeat(60));
-    log("✅ DONE — Stripe checkout reached with promo code applied.");
-    log(`   Coupon : ${COUPON_CODE}`);
-    log(`   URL    : ${page.url().substring(0, 100)}`);
-    log("─".repeat(60));
-    log("ℹ️  Browser will remain open for 30 seconds so you can inspect...");
-    await sleep(30_000);
+
+    if (couponConfirmed) {
+      log("✅ SUCCESS — Stripe checkout reached and promo code applied.");
+      log(`   Coupon : ${COUPON_CODE}`);
+      log(`   URL    : ${page.url().substring(0, 100)}`);
+      log("─".repeat(60));
+      log("ℹ️  Browser will remain open for 30 seconds so you can inspect...");
+      await sleep(30_000);
+    } else {
+      log("❌ PARTIAL — Stripe checkout reached but coupon confirmation was not detected.");
+      log(`   Coupon : ${COUPON_CODE}`);
+      log(`   URL    : ${page.url().substring(0, 100)}`);
+      log("─".repeat(60));
+      log("ℹ️  Browser will remain open for 20 seconds so you can inspect...");
+      await sleep(20_000);
+      process.exitCode = 1;
+    }
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
