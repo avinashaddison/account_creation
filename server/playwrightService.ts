@@ -13239,19 +13239,46 @@ export async function registerLovableAccount(
 
     try {
       const { chromium: chrm } = await import("playwright");
-      owaBrowser = await chrm.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-      });
-      const owaCtx = await owaBrowser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        viewport: { width: 1366, height: 768 },
-        locale: "en-US",
-      });
-      await owaCtx.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-        (window as any).chrome = { runtime: {} };
-      });
+
+      let owaCtx: any = null;
+      let zenrowsUrlForOwa = "";
+      try {
+        const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+        if (zrUrlRow.rows.length > 0 && zrUrlRow.rows[0].value) {
+          zenrowsUrlForOwa = zrUrlRow.rows[0].value as string;
+        }
+      } catch {}
+
+      if (zenrowsUrlForOwa) {
+        try {
+          log("OWA: Connecting via ZenRows proxy browser...");
+          owaBrowser = await chrm.connectOverCDP(zenrowsUrlForOwa, { timeout: 60000 });
+          owaCtx = owaBrowser.contexts()[0] || await owaBrowser.newContext();
+          log("OWA: Connected via ZenRows — Outlook login will use proxy browser");
+        } catch (zrOwaErr: any) {
+          log(`⚠️ ZenRows OWA connection failed (${(zrOwaErr.message || "").substring(0, 60)}) — falling back to local browser`);
+          owaBrowser = null;
+          zenrowsUrlForOwa = "";
+        }
+      }
+
+      if (!zenrowsUrlForOwa) {
+        log("OWA: Launching local headless browser for Outlook...");
+        owaBrowser = await chrm.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+        });
+        owaCtx = await owaBrowser.newContext({
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          viewport: { width: 1366, height: 768 },
+          locale: "en-US",
+        });
+        await owaCtx.addInitScript(() => {
+          Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+          (window as any).chrome = { runtime: {} };
+        });
+      }
+
       const owaPage = await owaCtx.newPage();
       owaPage.setDefaultTimeout(30000);
 
