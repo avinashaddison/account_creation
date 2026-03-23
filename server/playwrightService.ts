@@ -16989,6 +16989,33 @@ export async function onboardingCheckoutReplitAccount(
     await page.goto("https://replit.com/pricing", { waitUntil: "domcontentloaded" });
     await humanDelay(2500, 3500);
 
+    // ── Switch to Monthly billing ──────────────────────────────────────────
+    log("  🗓️  Selecting Monthly billing...");
+    const monthlyTab = page.locator(
+      'button:has-text("Monthly"), [role="tab"]:has-text("Monthly"), ' +
+      'label:has-text("Monthly"), span:has-text("Monthly")'
+    ).first();
+    try {
+      await monthlyTab.waitFor({ state: "visible", timeout: 8000 });
+      await monthlyTab.click();
+      log("  ✅ Clicked Monthly tab");
+      await humanDelay(1000, 1500);
+    } catch {
+      // Fallback: JS click on any element containing "Monthly"
+      const clicked = await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll("button, [role='tab'], label, span"));
+        const match = els.find(el => el.textContent?.trim() === "Monthly");
+        if (match) { (match as HTMLElement).click(); return true; }
+        return false;
+      });
+      if (clicked) {
+        log("  ✅ JS-clicked Monthly tab");
+        await humanDelay(1000, 1500);
+      } else {
+        log("  ⚠️  Monthly tab not found — proceeding (may default to yearly)");
+      }
+    }
+
     const coreBtn = page.getByRole("button", { name: /continue with core/i })
       .or(page.getByRole("link", { name: /continue with core/i }))
       .or(page.locator("text=Continue with Core")).first();
