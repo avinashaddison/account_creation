@@ -3459,10 +3459,9 @@ export async function registerRoutes(
         const allAccounts = role === "superadmin"
           ? await storage.getAllReplitAccounts()
           : await storage.getReplitAccountsByOwner(userId);
-        // Accept "created" or "available" accounts — anything that has credentials and isn't failed/active
+        // Accept any account that has credentials and isn't "failed"
         const available = allAccounts.filter(a =>
-          a.email && a.password &&
-          (a.status === "available" || a.status === "created" || a.status === "completed")
+          a.email && a.password && a.status !== "failed"
         );
         const toProcess = available.slice(0, Math.min(Number(count) || 4, 10));
 

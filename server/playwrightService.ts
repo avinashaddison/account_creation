@@ -17734,14 +17734,35 @@ export async function generateSingleCheckoutLink(
 
     // ── Login ──
     log(`🔐 Logging into Replit as ${email}...`);
-    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForSelector('input[name="username"], input[type="email"], input[name="email"]', { timeout: 15000 });
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 45000 });
+    // Wait for and fill email/username field
+    await page.waitForSelector(
+      'input[name="username"], input[type="email"], input[name="email"]',
+      { timeout: 20000 }
+    );
     const emailInput = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
+    await emailInput.click();
     await emailInput.fill(email);
+    await page.waitForTimeout(600);
+    // Wait for password field (may appear after email is entered)
+    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
     const passInput = page.locator('input[type="password"]').first();
+    await passInput.click();
     await passInput.fill(password);
-    await passInput.press("Enter");
-    await page.waitForURL((u: URL) => u.href.includes("replit.com/~") || u.href.includes("replit.com/home") || !u.href.includes("/login"), { timeout: 30000 });
+    await page.waitForTimeout(400);
+    // Try clicking the submit button first, fall back to Enter
+    const submitBtn = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in")').first();
+    const hasBtnVisible = await submitBtn.isVisible().catch(() => false);
+    if (hasBtnVisible) {
+      await submitBtn.click();
+    } else {
+      await passInput.press("Enter");
+    }
+    // Wait for redirect away from /login (up to 60s for slow accounts)
+    await page.waitForURL(
+      (u: URL) => !u.href.includes("replit.com/login"),
+      { timeout: 60000 }
+    );
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page");
     log(`✅ Logged in`);
 
