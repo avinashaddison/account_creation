@@ -3411,7 +3411,7 @@ export async function registerRoutes(
               ? `✅ Onboarding & checkout complete — coupon applied!`
               : `⚠️  Stripe reached but coupon confirmation unconfirmed`;
             broadcastLog(batchId, jobId, label, userId);
-            if (result.stripeUrl) broadcastLog(batchId, jobId, `🔗 Stripe URL: ${result.stripeUrl.substring(0, 100)}`, userId);
+            if (result.stripeUrl) broadcastLog(batchId, jobId, `🔗 Stripe URL: ${result.stripeUrl}`, userId);
           } else {
             broadcastLog(batchId, jobId, `❌ Failed: ${result.error || "unknown error"}`, userId);
           }

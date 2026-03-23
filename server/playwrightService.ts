@@ -17005,8 +17005,10 @@ export async function onboardingCheckoutReplitAccount(
         url.href.includes("stripe.com/checkout"),
       { timeout: 45000 }
     );
-    const stripeUrl = page.url();
-    log(`  ✅ Stripe redirect: ${stripeUrl.substring(0, 80)}...`);
+    // Use evaluate to capture the FULL URL including hash fragment (page.url() can miss it)
+    await page.waitForTimeout(1500);
+    const stripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
+    log(`  ✅ Stripe redirect: ${stripeUrl}`);
 
     await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {
       log("  ⚠️  networkidle timeout — proceeding anyway");
@@ -17062,13 +17064,19 @@ export async function onboardingCheckoutReplitAccount(
     log("  ⏳ Waiting for coupon validation...");
     await humanDelay(3000, 4000);
 
-    const discountLine = page.locator('[class*="discount" i], [class*="coupon" i], [data-testid*="discount"]').first();
     const bodyText = await page.locator("body").textContent().catch(() => "");
-    const bodyHasDiscount = /discount|coupon applied|promo applied|\$0\.00|100%/i.test(bodyText || "");
-    const discountLineVisible = await discountLine.isVisible({ timeout: 8000 }).catch(() => false);
+    const bodyStr = bodyText || "";
+    // First check for explicit failure messages
+    const codeInvalid = /this code is invalid|coupon.*invalid|invalid.*coupon|promotion.*invalid|code.*not.*valid/i.test(bodyStr);
+    const bodyHasDiscount = !codeInvalid && /discount|coupon applied|promo applied|\$0\.00|100% off/i.test(bodyStr);
+    const discountLine = page.locator('[class*="discount" i], [class*="coupon" i], [data-testid*="discount"]').first();
+    const discountLineVisible = !codeInvalid && (await discountLine.isVisible({ timeout: 5000 }).catch(() => false));
     let couponConfirmed = discountLineVisible || bodyHasDiscount;
 
-    if (discountLineVisible) {
+    if (codeInvalid) {
+      log(`  ❌ Coupon rejected by Stripe — "This code is invalid"`);
+      couponConfirmed = false;
+    } else if (discountLineVisible) {
       const discountText = await discountLine.textContent().catch(() => "");
       log(`  ✅ Coupon confirmed! Discount element: "${discountText?.trim()}"`);
     } else if (bodyHasDiscount) {
