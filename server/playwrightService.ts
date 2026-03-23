@@ -15802,36 +15802,87 @@ export async function checkoutExistingReplitAccount(
           } catch {}
         }
 
+        // Step 3b: Inject token directly into newassets.hcaptcha.com widget frames
+        // These are the VISIBLE frames that the user interacts with — must set token here + call internal callback
+        const preClickFrames = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
+        for (const wf of preClickFrames) {
+          try {
+            await wf.evaluate((tok: string) => {
+              const w = window as any;
+              // Set the response textareas
+              document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[id='h-captcha-response']")
+                .forEach(el => { el.value = tok; el.dispatchEvent(new Event("change", { bubbles: true })); });
+              // Call internal hCaptcha success handlers
+              if (w.hcaptcha) {
+                try { w.hcaptcha.setResponse?.(tok); } catch {}
+                // Loop through all widget instances
+                const widgets = w.hcaptcha._widgets || {};
+                Object.values(widgets).forEach((widget: any) => {
+                  try { widget?.g?.responseField?.value && (widget.g.responseField.value = tok); } catch {}
+                  try { widget?.successCallback?.(tok); } catch {}
+                });
+              }
+              // Try the global callback
+              if (w.onHCaptchaSuccess) try { w.onHCaptchaSuccess(tok); } catch {}
+              if (w.hcaptchaCallback) try { w.hcaptchaCallback(tok); } catch {}
+            }, token).catch(() => {});
+          } catch {}
+        }
+
         // Step 4: Physically click the "I am human" checkbox inside the hCaptcha widget frames
-        // This is the visible checkbox the user confirmed appears before the Federal Bank OTP popup
+        // hCaptcha's #checkbox is a styled div — must use force:true or evaluate() to bypass visibility checks
         await page.waitForTimeout(1500);
         const hcapWidgetFrames = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
-        log(`  Found ${hcapWidgetFrames.length} hCaptcha widget frame(s) — clicking #checkbox in each...`);
+        log(`  Found ${hcapWidgetFrames.length} hCaptcha widget frame(s) — force-clicking #checkbox in each...`);
+
+        // Primary: click via evaluate() directly in each frame (no visibility check, bypasses CSS opacity tricks)
+        let checkboxClicked = false;
         for (const wFrame of hcapWidgetFrames) {
           try {
-            const checkboxSels = ["#checkbox", ".checkbox", "[type='checkbox']", "#anchor", ".anchor", "#submit-btn", "button"];
-            for (const sel of checkboxSels) {
-              const el = wFrame.locator(sel).first();
-              const visible = await el.isVisible({ timeout: 1000 }).catch(() => false);
-              if (visible) {
-                log(`    Clicking hCaptcha checkbox: ${sel} in ${wFrame.url().substring(0, 60)}`);
-                await el.click({ timeout: 3000 }).catch(() => {});
-                await page.waitForTimeout(500);
-                break;
+            const clicked = await wFrame.evaluate(() => {
+              // hCaptcha checkbox selectors (it's a div, not an input)
+              const sels = [
+                "#checkbox",
+                "div[role='checkbox']",
+                "[aria-checked]",
+                ".checkbox",
+                "div.check",
+                "#anchor",
+                "div[tabindex='0']",
+              ];
+              for (const s of sels) {
+                const el = document.querySelector<HTMLElement>(s);
+                if (el) {
+                  // Dispatch full mouse event sequence
+                  el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+                  el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+                  el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+                  el.click();
+                  return s;
+                }
               }
+              return null;
+            }).catch(() => null);
+            if (clicked) {
+              log(`    ✅ Clicked hCaptcha element via evaluate: "${clicked}" in ${wFrame.url().substring(0, 70)}`);
+              checkboxClicked = true;
+              await page.waitForTimeout(600);
             }
           } catch {}
         }
-        // Also try clicking from within each widget frame via evaluate (more reliable in cross-origin iframes)
+
+        // Secondary: force-click via Playwright locator (force:true ignores visibility)
         for (const wFrame of hcapWidgetFrames) {
           try {
-            await wFrame.evaluate(() => {
-              const sels = ["#checkbox", ".checkbox", "[type='checkbox']", "#anchor", "#submit-btn", "button"];
-              for (const s of sels) {
-                const el = document.querySelector<HTMLElement>(s);
-                if (el) { el.click(); break; }
-              }
-            }).catch(() => {});
+            const forceSels = ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"];
+            for (const sel of forceSels) {
+              try {
+                await wFrame.locator(sel).first().click({ force: true, timeout: 1500 });
+                log(`    ✅ Force-clicked hCaptcha: ${sel}`);
+                await page.waitForTimeout(400);
+                break;
+              } catch {}
+            }
           } catch {}
         }
         await page.waitForTimeout(1000);
