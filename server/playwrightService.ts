@@ -15538,79 +15538,83 @@ export async function checkoutExistingReplitAccount(
     await captureScreenshot(page, "Stripe checkout loaded — filling card");
 
     // ── Helper: fill Stripe iframe input ──
-    // IMPORTANT: Must use triple-click + type (not el.evaluate/fill) so Stripe's
-    // React event handlers are properly triggered and validate the field state.
-    async function fillStripeField(names: string[], value: string): Promise<boolean> {
-      for (const frame of page.frames()) {
-        for (const name of names) {
-          try {
-            const selectors = [
-              `input[name="${name}"]`,
-              `input[data-elements-stable-field-name="${name}"]`,
-              `input[autocomplete="${name}"]`,
-              `input[placeholder*="card" i]`,
-            ];
-            for (const sel of selectors) {
+    // Fill a Stripe iframe input field. Each field (card, expiry, CVC) lives in its own
+    // sandboxed iframe. We must locate the correct iframe by matching unique selectors;
+    // never use a generic placeholder like "card" for expiry/CVC or the wrong field is filled.
+    async function fillStripeField(selectors: string[], value: string, label: string): Promise<boolean> {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        for (const frame of page.frames()) {
+          for (const sel of selectors) {
+            try {
               const el = frame.locator(sel).first();
-              if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
-                // Triple-click selects all existing content so typing replaces it.
-                // This correctly triggers Stripe's internal input event handlers.
+              if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
                 await el.click({ clickCount: 3, timeout: 3000 }).catch(() => {});
-                await page.waitForTimeout(100);
-                // Also Ctrl+A to ensure full selection
+                await page.waitForTimeout(80);
                 await el.press("Control+a").catch(() => {});
-                await page.waitForTimeout(50);
-                await el.type(value, { delay: 80 });
-                await page.waitForTimeout(100);
+                await page.waitForTimeout(40);
+                await el.type(value, { delay: 75 });
+                await page.waitForTimeout(120);
                 await frame.locator("body").press("Tab").catch(() => {});
-                log(`  Filled "${name}" in frame: ${frame.url().substring(0, 50)}`);
+                log(`  ✅ Filled ${label} via "${sel}" in frame: ${frame.url().substring(0, 60)}`);
                 return true;
               }
-            }
-          } catch {}
-        }
-      }
-      // main page fallback — use keyboard approach here too
-      for (const name of names) {
-        try {
-          const el = page.locator(`input[name="${name}"], input[placeholder*="${name}" i]`).first();
-          if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
-            await el.click({ clickCount: 3 }).catch(() => {});
-            await el.press("Control+a").catch(() => {});
-            await el.type(value, { delay: 80 });
-            log(`  Filled "${name}" (main page)`);
-            return true;
+            } catch {}
           }
-        } catch {}
+        }
+        if (attempt === 0) {
+          log(`  ⚠️ ${label}: not found yet, waiting 2s before retry...`);
+          await page.waitForTimeout(2000);
+        }
       }
       return false;
     }
 
-    // Wait for Stripe iframes
+    // Wait for Stripe iframes (up to 30s)
     for (let w = 0; w < 15; w++) {
       const hasStripe = page.frames().some((f: any) => f.url().includes("js.stripe.com") || (f.url().includes("stripe.com") && f.url() !== page.url()));
       if (hasStripe) break;
       log(`  Waiting for Stripe iframes... (${w + 1}/15)`);
       await page.waitForTimeout(2000);
     }
-    log(`  Frames (${page.frames().length}): ${page.frames().map((f: any) => f.url().substring(0, 50)).join(" | ")}`);
+    log(`  Frames (${page.frames().length}): ${page.frames().map((f: any) => f.url().substring(0, 60)).join(" | ")}`);
 
     const cardNum = cardDetails.cardNumber.replace(/\D/g, "");
     const expiryMonth = cardDetails.expiryMonth.padStart(2, "0");
     const expiryYear = cardDetails.expiryYear.length === 4 ? cardDetails.expiryYear.slice(-2) : cardDetails.expiryYear.padStart(2, "0");
     const expiry = `${expiryMonth}${expiryYear}`;
 
-    const cardFilled = await fillStripeField(["cardnumber", "cardNumber", "card-number", "number"], cardNum);
+    // Card number — unique to card number iframe only
+    const cardFilled = await fillStripeField([
+      `input[name="cardnumber"]`, `input[data-elements-stable-field-name="cardNumber"]`,
+      `input[placeholder*="1234" i]`, `input[autocomplete="cc-number"]`,
+    ], cardNum, "card number");
     if (!cardFilled) log(`⚠️ Card number field not found`);
     await page.waitForTimeout(800);
-    const expiryFilled = await fillStripeField(["exp-date", "expiry", "expiration", "exp", "cardExpiry", "card-expiry"], expiry);
+    await captureScreenshot(page, "After card number fill");
+
+    // Expiry — unique placeholder "MM / YY" so it ONLY matches expiry iframe
+    const expiryFilled = await fillStripeField([
+      `input[name="exp-date"]`, `input[data-elements-stable-field-name="cardExpiry"]`,
+      `input[placeholder="MM / YY"]`, `input[placeholder*="MM"]`, `input[autocomplete="cc-exp"]`,
+    ], expiry, "expiry");
     if (!expiryFilled) log(`⚠️ Expiry field not found`);
     await page.waitForTimeout(600);
-    const cvvFilled = await fillStripeField(["cvc", "cvv", "cv2", "cardCvc", "card-cvc", "securityCode"], cardDetails.cvv);
+    await captureScreenshot(page, "After expiry fill");
+
+    // CVC — unique placeholder "CVC" so it ONLY matches CVC iframe
+    const cvvFilled = await fillStripeField([
+      `input[name="cvc"]`, `input[data-elements-stable-field-name="cardCvc"]`,
+      `input[placeholder="CVC"]`, `input[placeholder*="CVC" i]`, `input[autocomplete="cc-csc"]`,
+    ], cardDetails.cvv, "CVC");
     if (!cvvFilled) log(`⚠️ CVV field not found`);
     await page.waitForTimeout(600);
+    await captureScreenshot(page, "After CVC fill");
+
     if (cardDetails.cardholderName) {
-      await fillStripeField(["cardholder", "name", "cardholderName", "card-name"], cardDetails.cardholderName);
+      await fillStripeField([
+        `input[name="cardholder"]`, `input[name="cardholderName"]`,
+        `input[placeholder*="Name on card" i]`, `input[autocomplete="cc-name"]`,
+      ], cardDetails.cardholderName, "cardholder name");
       await page.waitForTimeout(400);
     }
 
