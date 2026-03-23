@@ -16796,29 +16796,64 @@ export async function onboardingCheckoutReplitAccount(
     browser = await chromium.launch({
       headless: true,
       args: [
-        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+        "--no-sandbox", "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
-        "--disable-web-security", "--allow-running-insecure-content",
+        "--disable-dev-shm-usage", "--disable-web-security",
+        "--allow-running-insecure-content",
         "--disable-features=IsolateOrigins,site-per-process",
+        "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
       ],
     });
 
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
     const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      userAgent: ua,
       viewport: { width: 1366, height: 768 },
       locale: "en-US",
       timezoneId: "America/New_York",
       javaScriptEnabled: true,
+      acceptDownloads: false,
       extraHTTPHeaders: {
         "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Ch-Ua": '"Chromium";v="124", "Not(A:Brand";v="24", "Google Chrome";v="124"',
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
       },
     });
 
     await context.addInitScript(() => {
-      Object.defineProperty(window.navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+      Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+      Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
+      Object.defineProperty(navigator, "connection", { get: () => ({ effectiveType: "4g", downlink: 10, rtt: 50 }) });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+      const pluginData = [
+        { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+        { name: "Native Client", filename: "internal-nacl-plugin", description: "" },
+      ];
+      Object.defineProperty(navigator, "plugins", {
+        get: () => Object.assign(pluginData, { item: (i: number) => pluginData[i], namedItem: (n: string) => pluginData.find(p => p.name === n) || null, length: pluginData.length }),
+      });
+      Object.defineProperty(navigator, "mimeTypes", { get: () => ({ length: 4 }) });
+      (window as any).chrome = {
+        app: { isInstalled: false, InstallState: {}, RunningState: {} },
+        runtime: { id: undefined, connect: () => {}, sendMessage: () => {} },
+        loadTimes: () => ({}),
+        csi: () => ({}),
+      };
+      const origQuery = window.navigator.permissions?.query;
+      if (origQuery) {
+        (window.navigator.permissions as any).query = (params: any) =>
+          params.name === "notifications"
+            ? Promise.resolve({ state: Notification.permission, onchange: null })
+            : origQuery(params);
+      }
+      Object.defineProperty(screen, "colorDepth", { get: () => 24 });
+      Object.defineProperty(screen, "pixelDepth", { get: () => 24 });
     });
 
     const page = await context.newPage();
@@ -16826,17 +16861,42 @@ export async function onboardingCheckoutReplitAccount(
 
     // ── Login ──
     log("🔐 Navigating to Replit login...");
-    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded" });
-    await humanDelay(1500, 2500);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(4000);
 
-    const emailField = page.getByRole("textbox", { name: /email/i })
-      .or(page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i]')).first();
-    await emailField.waitFor({ state: "visible" });
+    // Check for Cloudflare challenge
+    const pageContent = await page.content();
+    if (pageContent.includes("Please enable cookies") || pageContent.includes("Checking your browser") || pageContent.includes("challenge-platform")) {
+      log("  ⚠️  Cloudflare challenge detected — waiting up to 15s...");
+      try {
+        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 });
+        log("  ✅ Cloudflare resolved");
+        await page.waitForTimeout(2000);
+      } catch {
+        log("  ⚠️  Cloudflare did not fully resolve — proceeding anyway");
+      }
+    }
+
+    const pageTitle = await page.title().catch(() => "");
+    log(`  📄 Page title: ${pageTitle}`);
+
+    // Wait for email/password field
+    log("  ⏳ Waiting for login form fields...");
+    const anyInputSel = 'input[name="username"], input[name="email"], input[type="email"], input[type="password"]';
+    try {
+      await page.waitForSelector(anyInputSel, { timeout: 15000, state: "visible" });
+      log("  ✅ Login form fields detected");
+    } catch {
+      log("  ⚠️  Form fields not found within 15s — trying to proceed");
+      const htmlSnippet = await page.evaluate(() => document.body?.innerHTML?.substring(0, 400) || "").catch(() => "");
+      log(`  HTML: ${htmlSnippet.replace(/\s+/g, " ").substring(0, 200)}`);
+    }
+
+    const emailField = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i]').first();
     await humanType(emailField, email);
     await humanDelay();
 
-    const passField = page.getByRole("textbox", { name: /password/i })
-      .or(page.locator('input[type="password"]')).first();
+    const passField = page.locator('input[type="password"]').first();
     await humanType(passField, password);
     await humanDelay(600, 1200);
 
@@ -16846,7 +16906,7 @@ export async function onboardingCheckoutReplitAccount(
     log("  ⏳ Waiting for post-login navigation...");
     await page.waitForURL(
       (url: URL) => !url.href.includes("/login") && !url.href.includes("/signup"),
-      { timeout: 30000 }
+      { timeout: 45000 }
     );
     await humanDelay(2000, 3000);
     log(`  ✅ Logged in — ${page.url()}`);
