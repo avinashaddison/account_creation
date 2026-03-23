@@ -767,7 +767,7 @@ export default function ReplitCreate() {
                   Picks {linksCount} available account(s) → logs into each → generates Stripe checkout URL → shows copyable links
                 </p>
                 <p className="text-[9px] font-mono" style={{ color: LA(0.35) }}>
-                  Account status: available → processing → available
+                  Account status: processing → working (link ready, red badge)
                 </p>
               </div>
 

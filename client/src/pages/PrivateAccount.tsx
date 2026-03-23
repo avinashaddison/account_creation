@@ -1549,9 +1549,11 @@ export default function PrivateAccount() {
                   const statusConfig: Record<string, { label: string; emoji: string; color: string; glow: string; bg: string; border: string }> = {
                     processing: { label: "Processing", emoji: "⏳", color: "#facc15", glow: "rgba(250,204,21,0.25)", bg: "rgba(250,204,21,0.1)", border: "#facc15" },
                     created:    { label: "Available",  emoji: "✅", color: "#22c55e", glow: "rgba(34,197,94,0.25)",  bg: "rgba(34,197,94,0.1)",  border: "#22c55e" },
-                    sold_out:   { label: "Sold Out",   emoji: "🔴", color: "#ef4444", glow: "rgba(239,68,68,0.25)",  bg: "rgba(239,68,68,0.1)",  border: "#ef4444" },
+                    available:  { label: "Available",  emoji: "✅", color: "#22c55e", glow: "rgba(34,197,94,0.25)",  bg: "rgba(34,197,94,0.1)",  border: "#22c55e" },
+                    working:    { label: "Working",    emoji: "🔗", color: "#ef4444", glow: "rgba(239,68,68,0.35)",  bg: "rgba(239,68,68,0.12)", border: "#ef4444" },
+                    sold_out:   { label: "Sold Out",   emoji: "🚫", color: "#71717a", glow: "rgba(113,113,122,0.2)", bg: "rgba(113,113,122,0.08)", border: "#52525b" },
                   };
-                  const cfg = statusConfig[st] ?? statusConfig.created;
+                  const cfg = statusConfig[st] ?? statusConfig.processing;
                   const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.01)";
                   return (
                     <div
@@ -1633,7 +1635,8 @@ export default function PrivateAccount() {
                           >
                             <option value="processing">⏳ Processing</option>
                             <option value="created">✅ Available</option>
-                            <option value="sold_out">🔴 Sold Out</option>
+                            <option value="working">🔗 Working</option>
+                            <option value="sold_out">🚫 Sold Out</option>
                           </select>
                         </div>
                       </div>

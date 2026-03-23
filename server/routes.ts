@@ -3494,10 +3494,11 @@ export async function registerRoutes(
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             // Broadcast as special copyable format
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
-            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
+            // Mark as "working" — link has been generated, ready for checkout
+            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
-            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
+            // Leave as "processing" — still needs a valid link
           }
         }
 

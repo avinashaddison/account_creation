@@ -1,0 +1,114 @@
+13:13:19
+$
+🔗 Bulk checkout link job started [replit-links-31701df6]
+13:13:19
+·
+🎟️ Coupon: AGENT4069301BCABAC · Count: 4
+13:13:20
+$
+🔗 Generating 4 checkout link(s) — coupon: AGENT4069301BCABAC
+13:13:20
+·
+📋 Accounts: albonvclarygcth@hotmail.com, yarisysabajiax@hotmail.com, skaffkgrittoiv@hotmail.com, grupedtoshiwdd@hotmail.com
+13:13:20
+·
+──────────────────────────────────────────────────
+13:13:20
+·
+[1/4] 🚀 albonvclarygcth@hotmail.com
+13:13:20
+·
+🔐 Logging into Replit as albonvclarygcth@hotmail.com...
+13:13:27
++
+✅ Logged in
+13:13:27
+>
+💰 Navigating to checkout URL...
+13:13:29
+$
+⏳ Waiting for Stripe redirect...
+13:14:14
+!
+❌ Error: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/stripe-checkout-error?message=This%20referral%20code%20could%20not%20be%20applied.%20It%20may%20have%20no%20uses%20remaining%2C%20be%20expired%2C%20or%20be%20invalid." navigated to "https://replit.com/stripe-checkout-error" ============================================================
+13:14:14
+!
+❌ Failed for albonvclarygcth@hotmail.com: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/stripe-checkout-error?message=This%20referral%20code%20could%20not%20be%20applied.%20It%20may%20have%20no%20uses%20remaining%2C%20be%20expired%2C%20or%20be%20invalid." navigated to "https://replit.com/stripe-checkout-error" ============================================================
+13:14:14
+·
+──────────────────────────────────────────────────
+13:14:14
+·
+[2/4] 🚀 yarisysabajiax@hotmail.com
+13:14:14
+·
+🔐 Logging into Replit as yarisysabajiax@hotmail.com...
+13:14:21
++
+✅ Logged in
+13:14:21
+>
+💰 Navigating to checkout URL...
+13:14:22
+$
+⏳ Waiting for Stripe redirect...
+13:14:24
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1bJ10XXo4ueaePVdXcO3U6C2LyXlWjKCazpnE...
+🔗 yarisysabajiax@hotmail.com
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1bJ10XXo4ueaePVdXcO3U6C2LyXlWjKCazpnE...
+13:14:24
+·
+──────────────────────────────────────────────────
+13:14:24
+·
+[3/4] 🚀 skaffkgrittoiv@hotmail.com
+13:14:24
+·
+🔐 Logging into Replit as skaffkgrittoiv@hotmail.com...
+13:14:31
++
+✅ Logged in
+13:14:31
+>
+💰 Navigating to checkout URL...
+13:14:32
+$
+⏳ Waiting for Stripe redirect...
+13:14:35
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a122HWUXcQ0xoL3t9HI9nzQ5jD7LSu0JJeKK6L...
+🔗 skaffkgrittoiv@hotmail.com
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a122HWUXcQ0xoL3t9HI9nzQ5jD7LSu0JJeKK6L...
+13:14:35
+·
+──────────────────────────────────────────────────
+13:14:35
+·
+[4/4] 🚀 grupedtoshiwdd@hotmail.com
+13:14:35
+·
+🔐 Logging into Replit as grupedtoshiwdd@hotmail.com...
+13:14:42
++
+✅ Logged in
+13:14:42
+>
+💰 Navigating to checkout URL...
+13:14:43
+$
+⏳ Waiting for Stripe redirect...
+13:14:45
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1b8DkwhL92BOXPAvBgmzAPkMxNT974hYTwOyv...
+🔗 grupedtoshiwdd@hotmail.com
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1b8DkwhL92BOXPAvBgmzAPkMxNT974hYTwOyv...
+13:14:45
+·
+──────────────────────────────────────────────────
+13:14:45
++
+✅ Done — 3/4 links generated

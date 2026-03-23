@@ -17773,13 +17773,22 @@ export async function generateSingleCheckoutLink(
     log(`💰 Navigating to checkout URL...`);
     await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
 
-    // ── Wait for Stripe redirect ──
+    // ── Wait for Stripe redirect (or error page) ──
     log(`⏳ Waiting for Stripe redirect...`);
     await page.waitForURL(
-      (u: URL) => u.href.includes("checkout.stripe.com") || u.href.includes("billing.stripe.com"),
+      (u: URL) =>
+        u.href.includes("checkout.stripe.com") ||
+        u.href.includes("billing.stripe.com") ||
+        u.href.includes("stripe-checkout-error"),
       { timeout: 45000 }
     );
-    await page.waitForTimeout(2000);
+    const finalUrl = page.url();
+    if (finalUrl.includes("stripe-checkout-error")) {
+      let errMsg = "Stripe checkout error";
+      try { errMsg = new URL(finalUrl).searchParams.get("message") || errMsg; } catch {}
+      throw new Error(`Stripe error: ${errMsg}`);
+    }
+    await page.waitForTimeout(1500);
     const stripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
     log(`✅ Checkout link ready: ${stripeUrl.substring(0, 80)}...`);
     return { success: true, stripeUrl };
