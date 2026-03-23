@@ -3385,10 +3385,21 @@ export async function registerRoutes(
 
   app.post("/api/replit-onboarding-checkout", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { email, password, couponCode, username, fullname } = req.body;
+      const { email, password, couponCode, username, fullname, cardId } = req.body;
       if (!email || !password) {
         return res.status(400).json({ error: "email and password are required" });
       }
+
+      let cardDetails: import("./playwrightService").CardDetails | undefined;
+      if (cardId) {
+        const card = await storage.getSavedCard(cardId);
+        if (card) {
+          const sysOtpEmail = await storage.getSetting("card_otp_gmail");
+          const sysOtpPass = await storage.getSetting("card_otp_gmail_password");
+          cardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail || sysOtpEmail || null, otpEmailPassword: card.otpEmailPassword || sysOtpPass || null };
+        }
+      }
+
       const userId = req.session.userId;
       const jobId = randomUUID().substring(0, 8);
       const batchId = `replit-onboarding-${jobId}`;
@@ -3397,6 +3408,7 @@ export async function registerRoutes(
 
       (async () => {
         broadcastLog(batchId, jobId, `🚀 Starting onboarding+checkout for ${email}...`, userId);
+        if (cardDetails) broadcastLog(batchId, jobId, `💳 Card: •••• ${cardDetails.cardNumber.slice(-4)} — auto-checkout enabled`, userId);
         try {
           const result = await onboardingCheckoutReplitAccount(
             email,
@@ -3404,18 +3416,21 @@ export async function registerRoutes(
             couponCode || "AGENT4BC4974559665",
             username || "",
             fullname || "",
+            cardDetails,
             (msg) => broadcastLog(batchId, jobId, msg, userId)
           );
           if (result.success) {
-            const label = result.couponConfirmed
-              ? `✅ Onboarding & checkout complete — coupon applied!`
-              : `⚠️  Stripe reached but coupon confirmation unconfirmed`;
+            const label = result.checkoutComplete
+              ? `✅ Onboarding & checkout complete — subscribed!`
+              : result.couponConfirmed
+              ? `✅ Stripe reached with coupon applied (manual payment needed)`
+              : `⚠️  Stripe reached but coupon and checkout unconfirmed`;
             broadcastLog(batchId, jobId, label, userId);
             if (result.stripeUrl) broadcastLog(batchId, jobId, `🔗 Stripe URL: ${result.stripeUrl}`, userId);
           } else {
             broadcastLog(batchId, jobId, `❌ Failed: ${result.error || "unknown error"}`, userId);
           }
-          broadcast({ type: "replit_create_result", jobId, batchId, success: result.success, couponConfirmed: result.couponConfirmed, error: result.error }, userId);
+          broadcast({ type: "replit_create_result", jobId, batchId, success: result.success, couponConfirmed: result.couponConfirmed, checkoutComplete: result.checkoutComplete, error: result.error }, userId);
         } catch (err: any) {
           broadcastLog(batchId, jobId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "replit_create_result", jobId, batchId, success: false, error: err.message }, userId);

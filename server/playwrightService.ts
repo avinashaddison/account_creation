@@ -16757,8 +16757,9 @@ export async function onboardingCheckoutReplitAccount(
   couponCode: string,
   username: string,
   fullname: string,
+  cardDetails: CardDetails | undefined,
   log: (msg: string) => void
-): Promise<{ success: boolean; couponConfirmed: boolean; stripeUrl?: string; error?: string }> {
+): Promise<{ success: boolean; couponConfirmed: boolean; checkoutComplete?: boolean; stripeUrl?: string; error?: string }> {
   const { chromium } = await import("playwright");
   const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
   const humanDelay = (min = 800, max = 1800) => sleep(min + Math.floor(Math.random() * (max - min)));
@@ -17034,13 +17035,470 @@ export async function onboardingCheckoutReplitAccount(
 
     log("─".repeat(55));
     if (couponConfirmed) {
-      log("✅ SUCCESS — Stripe checkout reached and promo code applied.");
+      log("✅ Stripe checkout reached and promo code applied.");
     } else {
-      log("⚠️  PARTIAL — Stripe checkout reached but coupon unconfirmed.");
+      log("⚠️  Stripe checkout reached (coupon unconfirmed).");
     }
 
-    await page.waitForTimeout(3000);
-    return { success: true, couponConfirmed, stripeUrl };
+    // ── Auto-checkout: fill card, hCaptcha, subscribe, OTP ──────────────────
+    if (!cardDetails) {
+      await page.waitForTimeout(3000);
+      return { success: true, couponConfirmed, stripeUrl };
+    }
+
+    log("💳 Card details provided — proceeding with auto-checkout...");
+
+    // fillStripeField helper
+    async function fillStripeField(selectors: string[], value: string, label: string): Promise<boolean> {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        for (const frame of page.frames()) {
+          for (const sel of selectors) {
+            try {
+              const el = frame.locator(sel).first();
+              if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+                await el.click({ clickCount: 3, timeout: 3000 }).catch(() => {});
+                await page.waitForTimeout(80);
+                await el.press("Control+a").catch(() => {});
+                await page.waitForTimeout(40);
+                await el.type(value, { delay: 75 });
+                await page.waitForTimeout(120);
+                await frame.locator("body").press("Tab").catch(() => {});
+                log(`  ✅ Filled ${label} via "${sel}"`);
+                return true;
+              }
+            } catch {}
+          }
+        }
+        if (attempt === 0) {
+          log(`  ⚠️ ${label}: not found yet, waiting 2s before retry...`);
+          await page.waitForTimeout(2000);
+        }
+      }
+      return false;
+    }
+
+    // Wait for Stripe iframes
+    for (let w = 0; w < 15; w++) {
+      const hasStripe = page.frames().some((f: any) => f.url().includes("js.stripe.com") || (f.url().includes("stripe.com") && f.url() !== page.url()));
+      if (hasStripe) break;
+      log(`  Waiting for Stripe iframes... (${w + 1}/15)`);
+      await page.waitForTimeout(2000);
+    }
+
+    const cardNum = cardDetails.cardNumber.replace(/\D/g, "");
+    const expiryMonth = cardDetails.expiryMonth.padStart(2, "0");
+    const expiryYear = cardDetails.expiryYear.length === 4 ? cardDetails.expiryYear.slice(-2) : cardDetails.expiryYear.padStart(2, "0");
+    const expiry = `${expiryMonth}${expiryYear}`;
+
+    const cardFilled = await fillStripeField([`input[name="cardnumber"]`, `input[data-elements-stable-field-name="cardNumber"]`, `input[placeholder*="1234" i]`, `input[autocomplete="cc-number"]`], cardNum, "card number");
+    if (!cardFilled) log(`⚠️ Card number field not found`);
+    await page.waitForTimeout(800);
+
+    const expiryFilled = await fillStripeField([`input[name="exp-date"]`, `input[data-elements-stable-field-name="cardExpiry"]`, `input[placeholder="MM / YY"]`, `input[placeholder*="MM"]`, `input[autocomplete="cc-exp"]`], expiry, "expiry");
+    if (!expiryFilled) log(`⚠️ Expiry field not found`);
+    await page.waitForTimeout(600);
+
+    const cvvFilled = await fillStripeField([`input[name="cvc"]`, `input[data-elements-stable-field-name="cardCvc"]`, `input[placeholder="CVC"]`, `input[placeholder*="CVC" i]`, `input[autocomplete="cc-csc"]`], cardDetails.cvv, "CVC");
+    if (!cvvFilled) log(`⚠️ CVV field not found`);
+    await page.waitForTimeout(600);
+
+    if (cardDetails.cardholderName) {
+      await fillStripeField([`input[name="cardholder"]`, `input[name="cardholderName"]`, `input[placeholder*="Name on card" i]`, `input[autocomplete="cc-name"]`], cardDetails.cardholderName, "cardholder name");
+      await page.waitForTimeout(400);
+    }
+
+    // Billing address
+    const US_BILLING = { line1: "1523 Elizabeth Ave", city: "Charlotte", state: "NC", stateLabel: "North Carolina", zip: "28204" };
+    log(`  Billing: ${US_BILLING.line1}, ${US_BILLING.city}, ${US_BILLING.state} ${US_BILLING.zip}`);
+    for (const cSel of ['select[name="billingCountry"]', 'select[autocomplete="billing country"]', 'select[name*="country" i]', 'select[id*="country" i]']) {
+      try {
+        const el = page.locator(cSel).first();
+        if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await el.selectOption({ value: "US" }).catch(() => el.selectOption({ label: "United States" }).catch(() => {}));
+          log(`  Selected country: United States`);
+          await page.waitForTimeout(600);
+          break;
+        }
+      } catch {}
+    }
+    const addrSelectors2: [string, string][] = [
+      ['input[placeholder*="address" i], input[name*="address" i], input[autocomplete*="address-line1"], input[name="billingAddressLine1"]', US_BILLING.line1],
+      ['input[placeholder*="city" i], input[name*="city" i], input[autocomplete="address-level2"], input[name="billingLocality"]', US_BILLING.city],
+      ['input[placeholder*="zip" i], input[placeholder*="postal" i], input[name*="postal" i], input[name="billingPostalCode"]', US_BILLING.zip],
+    ];
+    for (const [sel, val] of addrSelectors2) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.isVisible({ timeout: 2000 }).catch(() => false)) { await el.fill(val); log(`  Filled billing field: ${val}`); }
+      } catch {}
+      await page.waitForTimeout(300);
+    }
+    for (const sSel of ['select[autocomplete="billing address-level1"]', 'select[name*="state" i]', 'select[id*="state" i]']) {
+      try {
+        const el = page.locator(sSel).first();
+        if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await el.selectOption({ value: US_BILLING.state }).catch(() => el.selectOption({ label: US_BILLING.stateLabel }).catch(() => {}));
+          log(`  Selected state: ${US_BILLING.stateLabel}`);
+          break;
+        }
+      } catch {}
+    }
+    await page.waitForTimeout(1000);
+
+    // hCaptcha pre-solve
+    const HCAP_SITE_KEY = "a9b5fb07-92ff-493f-86fe-352a2803b3df";
+    const HCAP_URL2 = "https://checkout.stripe.com";
+    let preSolvedToken: string | null = null;
+    let capturedRqdata: string | null = null;
+    try {
+      await page.evaluate(() => {
+        (window as any).__capturedRqdata = null;
+        window.addEventListener("message", (e: MessageEvent) => {
+          try {
+            const str = typeof e.data === "string" ? e.data : JSON.stringify(e.data || "");
+            const m = str.match(/"rqdata"\s*:\s*"([^"]{20,})"/);
+            if (m) {
+              (window as any).__capturedRqdata = m[1];
+              if (typeof (window as any).__onHcapRqdataReady2 === "function") { try { (window as any).__onHcapRqdataReady2(m[1]); } catch {} }
+            }
+          } catch {}
+        }, true);
+      });
+    } catch {}
+
+    const broadcastToken2 = async (token: string) => {
+      try {
+        await page.evaluate((tok: string) => {
+          document.querySelectorAll("iframe").forEach((iframe: HTMLIFrameElement) => { try { iframe.contentWindow?.postMessage({ type: "inject-hcap-token", token: tok }, "*"); } catch {} });
+          (window as any).__hcapToken = tok;
+        }, token);
+      } catch {}
+    };
+
+    let rqdataSolveDone2 = false;
+    try {
+      await page.exposeFunction("__onHcapRqdataReady2", async (rqdata: string) => {
+        if (rqdataSolveDone2) return;
+        rqdataSolveDone2 = true;
+        log(`📦 rqdata arrived — solving hCaptcha reactively...`);
+        try {
+          const r = await solveHCaptchaWith2Captcha(HCAP_URL2, HCAP_SITE_KEY, rqdata);
+          const tok = r.success ? r : await solveHCaptcha(HCAP_URL2, HCAP_SITE_KEY, undefined, rqdata);
+          if (tok.success && tok.token) { preSolvedToken = tok.token; log(`✅ rqdata-aware solve (len=${tok.token.length})`); await broadcastToken2(tok.token); }
+        } catch (e: any) { log(`⚠️ rqdata solve error: ${e.message}`); }
+      });
+    } catch {}
+
+    log(`🤖 Pre-solving hCaptcha x2 (parallel)...`);
+    let preSolvedToken2b: string | null = null;
+    const nopeKeyRowPre2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+    const nopeKeyPre2 = nopeKeyRowPre2.rows.length > 0 ? (nopeKeyRowPre2.rows[0].value as string) : "";
+
+    const solveOneNope2 = async (label: string): Promise<string | null> => {
+      if (!nopeKeyPre2) return null;
+      try {
+        const r = await solveHCaptchaViaNopeCHA(nopeKeyPre2, HCAP_URL2, HCAP_SITE_KEY, undefined, 120);
+        if (r.success && r.token) { log(`✅ Pre-solved token ${label} (len=${r.token.length})`); return r.token; }
+      } catch (e: any) { log(`⚠️ Pre-solve ${label} failed: ${e.message}`); }
+      return null;
+    };
+
+    const solveAPromise2 = solveOneNope2("A");
+    const solveBPromise2 = solveOneNope2("B");
+    const tokA2 = await solveAPromise2;
+    if (tokA2) preSolvedToken = tokA2;
+    solveBPromise2.then(tokB => { if (tokB) { preSolvedToken2b = tokB; if (!preSolvedToken) preSolvedToken = tokB; } }).catch(() => {});
+
+    if (preSolvedToken) {
+      await broadcastToken2(preSolvedToken);
+      for (const fr of page.frames()) {
+        try {
+          await fr.evaluate((tok: string) => {
+            document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], input[name='h-captcha-response']")
+              .forEach(el => { el.value = tok; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); });
+            const w = window as any;
+            if (w.hcaptcha) { try { w.hcaptcha.setResponse?.(tok); } catch {} }
+          }, preSolvedToken).catch(() => {});
+        } catch {}
+      }
+      const hcapInvFrame2 = page.frames().find((f: any) => f.url().includes("hcaptcha-invisible"));
+      if (hcapInvFrame2) {
+        const hcapWidgetId2 = new URL(hcapInvFrame2.url()).searchParams.get("id") || "hcaptcha-invisible";
+        try {
+          await hcapInvFrame2.evaluate(([tok, wid]: [string, string]) => {
+            const msgs = [JSON.stringify({ id: wid, type: "challenge.passed", response: tok }), JSON.stringify({ id: wid, type: "success", token: tok })];
+            msgs.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
+          }, [preSolvedToken, hcapWidgetId2]).catch(() => {});
+        } catch {}
+      }
+      log(`📌 Pre-injected token A into hcaptcha-invisible frame`);
+    }
+
+    // Route interceptor
+    let routeInterceptorActive2 = true;
+    try {
+      await page.route("**/*", async (route: any) => {
+        if (!routeInterceptorActive2) { await route.continue().catch(() => {}); return; }
+        const req = route.request();
+        const url = req.url();
+        const method = req.method();
+        if (method === "POST" && (url.includes("stripe.com") || url.includes("m.stripe") || url.includes("api.stripe"))) {
+          const fullBody = req.postData() || "";
+          const contentType = (req.headers()["content-type"] || "").toLowerCase();
+          log(`  🔌 POST→Stripe: ${url.substring(0, 100)}`);
+          const isFormEncoded = contentType.includes("application/x-www-form-urlencoded");
+          const isPaymentCall = url.includes("confirm") || url.includes("payment_intent") || url.includes("sources") || url.includes("/v1/payment");
+          const tokenToUse = preSolvedToken || preSolvedToken2b;
+          if (isPaymentCall && isFormEncoded && tokenToUse && !fullBody.includes("captcha_token")) {
+            try {
+              const newBody = fullBody + `&captcha_token=${encodeURIComponent(tokenToUse)}&hcaptcha_response=${encodeURIComponent(tokenToUse)}`;
+              log(`  ✏️  Injecting captcha_token into ${url.substring(0, 60)}...`);
+              await route.continue({ postData: newBody }).catch(() => route.continue().catch(() => {}));
+              return;
+            } catch {}
+          }
+        }
+        await route.continue().catch(() => {});
+      });
+    } catch (e: any) { log(`⚠️ Route interceptor error: ${e.message}`); }
+
+    // Click Subscribe
+    log(`💳 Clicking Subscribe...`);
+    let paymentSubmitTime = new Date();
+    try {
+      const subBtn = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
+      if (await subBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await subBtn.click({ timeout: 8000 });
+        paymentSubmitTime = new Date();
+        log(`  Subscribe clicked`);
+      } else {
+        const clicked = await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll("button")).find((b: any) => b.type === "submit" || b.textContent?.toLowerCase().includes("subscribe") || b.textContent?.toLowerCase().includes("pay"));
+          if (btn) { (btn as HTMLElement).click(); return true; }
+          return false;
+        });
+        if (clicked) paymentSubmitTime = new Date();
+        log(`  Subscribe clicked via JS eval`);
+      }
+    } catch (e: any) { log(`⚠️ Subscribe click failed: ${e.message}`); }
+
+    await page.waitForTimeout(5000);
+
+    // Handle hCaptcha if visible
+    const hcapFrames2 = page.frames().filter((f: any) => f.url().includes("hcaptcha.com") || f.url().includes("HCaptcha.html") || f.url().includes("HCaptchaInvisible.html"));
+    if (hcapFrames2.length > 0) {
+      log(`🔒 hCaptcha detected (${hcapFrames2.length} frame(s)) — solving...`);
+      await page.waitForTimeout(5000);
+      if (!capturedRqdata) {
+        for (const fr of page.frames()) {
+          if (fr.url().includes("hcaptcha-invisible") || fr.url().includes("newassets.hcaptcha.com")) {
+            const rd = await fr.evaluate(() => {
+              if ((window as any).__capturedRqdata) return (window as any).__capturedRqdata;
+              const el = document.querySelector("[data-rqdata]");
+              return el ? el.getAttribute("data-rqdata") : null;
+            }).catch(() => null);
+            if (rd) { capturedRqdata = rd; break; }
+          }
+        }
+      }
+      log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found"}`);
+
+      let finalResult2: { success: boolean; token?: string; error?: string };
+      const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+      const nopeKey2 = nopeKeyRow2.rows.length > 0 ? (nopeKeyRow2.rows[0].value as string) : "";
+      const freshSolvePromise2 = nopeKey2
+        ? solveHCaptchaViaNopeCHA(nopeKey2, HCAP_URL2, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
+        : Promise.resolve({ success: false, error: "no NopeCHA key" } as { success: false; error: string });
+      log(`  🔄 Starting fresh NopeCHA solve (90s)...`);
+      const freshResult2 = await freshSolvePromise2;
+      if (freshResult2.success && freshResult2.token) {
+        log(`  ✅ Fresh solve succeeded (len=${freshResult2.token.length})`);
+        finalResult2 = freshResult2;
+      } else {
+        const visibleToken: string | null = preSolvedToken2b || preSolvedToken || null;
+        if (visibleToken) {
+          log(`  ⚡ Using pre-solved token (len=${visibleToken.length})`);
+          finalResult2 = { success: true, token: visibleToken };
+        } else {
+          log(`  Last resort: 2captcha...`);
+          const solveResult2 = await solveHCaptchaWith2Captcha(HCAP_URL2, HCAP_SITE_KEY, capturedRqdata || undefined);
+          finalResult2 = solveResult2.success ? solveResult2 : { success: false, error: "all solvers exhausted" };
+        }
+      }
+
+      if (finalResult2.success && finalResult2.token) {
+        const token2 = finalResult2.token;
+        log(`✅ hCaptcha solved (len=${token2.length}) — injecting...`);
+        const stripeHcapFrames2 = page.frames().filter((f: any) => f.url().includes("hcaptcha-invisible"));
+        for (const hcFrame of stripeHcapFrames2) {
+          try {
+            const widgetId2 = new URL(hcFrame.url()).searchParams.get("id") || "hcaptcha-invisible";
+            await hcFrame.evaluate(([tok, wid]: [string, string]) => {
+              const ta = document.querySelector<HTMLTextAreaElement>("textarea[name='h-captcha-response']");
+              if (ta) { ta.value = tok; ta.dispatchEvent(new Event("change", { bubbles: true })); }
+              const formats = [JSON.stringify({ id: wid, type: "challenge.passed", response: tok }), JSON.stringify({ id: wid, type: "success", token: tok })];
+              formats.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
+            }, [token2, widgetId2]).catch(() => {});
+          } catch {}
+        }
+        try {
+          await page.mainFrame().evaluate((tok: string) => {
+            const w = window as any;
+            if (w.__stripeHcaptchaCallback) { try { w.__stripeHcaptchaCallback(tok); } catch {} }
+            const msgs = [JSON.stringify({ id: "hcaptcha-invisible", type: "challenge.passed", response: tok }), JSON.stringify({ id: "hcaptcha-invisible", type: "success", token: tok })];
+            msgs.forEach(data => {
+              try { window.dispatchEvent(new MessageEvent("message", { data, origin: "https://js.stripe.com", bubbles: false })); } catch {}
+              try { window.dispatchEvent(new MessageEvent("message", { data, origin: "https://newassets.hcaptcha.com", bubbles: false })); } catch {}
+            });
+          }, token2).catch(() => {});
+        } catch {}
+        for (const frame of page.frames()) {
+          try {
+            await frame.evaluate((tok: string) => {
+              document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], input[name='h-captcha-response']")
+                .forEach(el => { el.value = tok; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); });
+            }, token2).catch(() => {});
+          } catch {}
+        }
+        // Click hCaptcha checkbox with real mouse
+        await page.waitForTimeout(1200);
+        const hcapWidgetFrames2 = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
+        let checkboxClicked2 = false;
+        for (const wFrame of hcapWidgetFrames2) {
+          if (checkboxClicked2) break;
+          for (const sel of ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"]) {
+            try {
+              const box = await wFrame.locator(sel).first().boundingBox({ timeout: 1500 }).catch(() => null);
+              if (box && box.width > 0) {
+                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+                await page.waitForTimeout(60);
+                await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+                log(`    ✅ hCaptcha checkbox clicked`);
+                checkboxClicked2 = true;
+                await page.waitForTimeout(800);
+                break;
+              }
+            } catch {}
+          }
+        }
+        await page.waitForTimeout(1000);
+      } else {
+        log(`⚠️ hCaptcha solving failed: ${finalResult2.error || "unknown"}`);
+      }
+
+      // Re-click Subscribe if bank ACS not visible
+      const isAcsFrame2 = (url: string) =>
+        url.includes("m2pfintech.com") || url.includes("m2pSecAuth") || url.includes("federalbank") ||
+        (url.includes("acs") && !url.includes("hcaptcha") && !url.includes("stripe")) ||
+        (url.includes("3ds") && !url.includes("hcaptcha"));
+      let bankAcsNow2 = page.frames().some((f: any) => isAcsFrame2(f.url()));
+      if (!bankAcsNow2) {
+        log(`  Bank ACS not yet — re-clicking Subscribe...`);
+        try {
+          const resubBtn2 = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
+          if (await resubBtn2.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await resubBtn2.click({ timeout: 5000, force: true });
+            log(`  Re-clicked Subscribe`);
+          }
+        } catch {}
+        const acsDeadline2 = Date.now() + 60000;
+        while (!bankAcsNow2 && Date.now() < acsDeadline2) {
+          await page.waitForTimeout(3000);
+          bankAcsNow2 = page.frames().some((f: any) => isAcsFrame2(f.url()));
+          const curUrl2 = page.url();
+          if (curUrl2.includes("replit.com") && !curUrl2.includes("stripe")) {
+            log(`✅ Payment succeeded (redirected): ${curUrl2.substring(0, 80)}`);
+            routeInterceptorActive2 = false;
+            return { success: true, couponConfirmed, checkoutComplete: true, stripeUrl };
+          }
+          if (bankAcsNow2) { log(`✅ Bank ACS frame appeared`); break; }
+        }
+      }
+      routeInterceptorActive2 = false;
+    }
+
+    // Handle 3DS OTP
+    if (cardDetails.otpEmail && cardDetails.otpEmailPassword) {
+      const bankAcsVisible2 = page.frames().some((f: any) =>
+        f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth") || f.url().includes("federalbank")
+      );
+      if (!bankAcsVisible2) {
+        log(`⚠️ Bank ACS frame not present — skipping OTP phase`);
+      } else {
+        log(`📬 Waiting for 3DS OTP email...`);
+        const BANK_SENDER2 = "fedmail@federalbank.co.in";
+        const BANK_DOMAIN2 = "federalbank.co.in";
+        function resolveImapHost2(emailAddr: string): string {
+          const domain = (emailAddr.split("@")[1] || "").toLowerCase();
+          if (domain === "gmail.com") return "imap.gmail.com";
+          if (["outlook.com", "hotmail.com", "live.com"].includes(domain)) return "outlook.office365.com";
+          return `imap.${domain}`;
+        }
+        const imapHost2 = resolveImapHost2(cardDetails.otpEmail);
+        const { ImapFlow } = await import("imapflow");
+        const deadline2 = Date.now() + 90000;
+        let otp2: string | null = null;
+        while (Date.now() < deadline2 && !otp2) {
+          let client2: any;
+          try {
+            client2 = new ImapFlow({ host: imapHost2, port: 993, secure: true, auth: { user: cardDetails.otpEmail, pass: cardDetails.otpEmailPassword }, logger: false, connectionTimeout: 15000 });
+            await client2.connect();
+            await client2.mailboxOpen("INBOX");
+            let uids2: number[] = [];
+            try { uids2 = await client2.search({ from: BANK_SENDER2, since: paymentSubmitTime }) as number[]; log(`   IMAP: ${uids2.length} email(s) from bank`); }
+            catch { uids2 = await client2.search({ since: new Date(paymentSubmitTime.getTime() - 60000) }).catch(() => [] as number[]); }
+            for (const uid2 of (uids2 as number[]).slice(-5).reverse()) {
+              const msg2 = await client2.fetchOne(String(uid2), { source: true }).catch(() => null);
+              if (!msg2) continue;
+              const raw2 = msg2.source?.toString() || "";
+              if (!raw2.toLowerCase().includes(BANK_DOMAIN2) && !raw2.toLowerCase().includes("fedmail@federalbank")) continue;
+              const kwMatch2 = raw2.match(/(?:OTP|One.?Time.?Password|verification code|passcode)[^0-9]*([0-9]{6})/i);
+              let extracted2 = kwMatch2 ? kwMatch2[1] : null;
+              if (!extracted2) { const all6b = raw2.match(/\b([0-9]{6})\b/g); if (all6b) extracted2 = all6b[all6b.length - 1]; }
+              if (extracted2 && extracted2 !== "000000") { otp2 = extracted2; log(`📬 OTP found: ${otp2}`); try { await client2.messageFlagsAdd({ uid: uid2 }, ["\\Seen"]); } catch {} break; }
+            }
+          } catch (e: any) { log(`  IMAP error: ${e.message?.substring(0, 80)}`); }
+          finally { try { await client2?.logout(); } catch {} }
+          if (!otp2) { const rem2 = Math.round((deadline2 - Date.now()) / 1000); log(`   No OTP yet — polling in 5s (${rem2}s remaining)...`); await page.waitForTimeout(5000); }
+        }
+        if (otp2) {
+          log(`🔢 Entering OTP ${otp2} in 3DS frame...`);
+          const bankFrames2 = page.frames().filter((f: any) => f.url().includes("m2pSecAuth") || f.url().includes("m2pfintech.com") || f.url().includes("federalbank"));
+          let entered2 = false;
+          for (const frame of bankFrames2) {
+            if (entered2) break;
+            for (const sel of ['input[name="challengeDataEntry"]', 'input[name="otp"]', 'input[autocomplete="one-time-code"]', 'input[type="tel"]', 'input[type="number"]', 'input[type="text"]']) {
+              try {
+                const el = frame.locator(sel).first();
+                if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+                  await el.click().catch(() => {}); await el.fill(otp2);
+                  log(`  OTP entered via ${sel}`);
+                  await page.waitForTimeout(1000);
+                  const submitBtn2 = frame.locator('button[type="submit"], button:has-text("Submit"), button:has-text("Verify"), input[type="submit"]').first();
+                  if (await submitBtn2.isVisible({ timeout: 2000 }).catch(() => false)) { await submitBtn2.click({ timeout: 5000 }); log(`  Clicked OTP submit`); }
+                  entered2 = true; break;
+                }
+              } catch {}
+            }
+          }
+          if (!entered2) log(`⚠️ OTP field not found`);
+          await page.waitForTimeout(10000);
+          const finalUrl2 = page.url();
+          log(`📍 Final URL after OTP: ${finalUrl2.substring(0, 100)}`);
+          if (finalUrl2.includes("replit.com") && !finalUrl2.includes("stripe")) {
+            log(`✅ Checkout complete!`);
+            return { success: true, couponConfirmed, checkoutComplete: true, stripeUrl };
+          }
+        } else {
+          log(`⚠️ OTP not received within 90s`);
+        }
+      }
+    }
+
+    const finalUrlEnd = page.url();
+    const checkoutComplete = finalUrlEnd.includes("replit.com") && !finalUrlEnd.includes("stripe");
+    log(checkoutComplete ? `✅ Checkout complete! URL: ${finalUrlEnd.substring(0, 80)}` : `⚠️ Checkout may be incomplete — URL: ${finalUrlEnd.substring(0, 80)}`);
+    return { success: true, couponConfirmed, checkoutComplete, stripeUrl };
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -65,6 +65,7 @@ export default function ReplitCreate() {
   const [onbCoupon, setOnbCoupon] = useState("AGENT4BC4974559665");
   const [onbUsername, setOnbUsername] = useState("");
   const [onbFullname, setOnbFullname] = useState("");
+  const [onbCardId, setOnbCardId] = useState("");
 
   // ── CREATE mode state ──
   const [outlookEmail, setOutlookEmail] = useState("");
@@ -280,12 +281,14 @@ export default function ReplitCreate() {
         couponCode: onbCoupon.trim() || "AGENT4BC4974559665",
         username: onbUsername.trim() || undefined,
         fullname: onbFullname.trim() || undefined,
+        cardId: onbCardId || undefined,
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start");
       activeBatchId.current = data.batchId;
       addLog(`🚀 Onboarding job started [${data.batchId}]`);
       addLog(`🎟️ Coupon: ${onbCoupon.trim() || "AGENT4BC4974559665"}`);
+      if (onbCardId) addLog(`💳 Auto-checkout enabled — will fill card, solve hCaptcha, submit`);
     } catch (err: any) {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -610,8 +613,38 @@ export default function ReplitCreate() {
                 </div>
               </div>
 
+              {/* Card Selector for auto-checkout */}
+              {savedCards.length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: PA(0.4) }}>
+                    <CreditCard className="w-2.5 h-2.5 inline mr-1" />Payment Card <span style={{ color: PA(0.2) }}>(auto-checkout)</span>
+                  </label>
+                  <select
+                    value={onbCardId}
+                    onChange={(e) => { sounds.keypress(); setOnbCardId(e.target.value); }}
+                    className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${onbCardId ? PA(0.5) : PA(0.15)}`, color: onbCardId ? P : "rgba(255,255,255,0.4)" }}
+                    data-testid="select-onb-card"
+                  >
+                    <option value="">— Skip (navigate to Stripe only) —</option>
+                    {savedCards.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label} (•••• {c.cardNumber.replace(/\D/g, "").slice(-4)})</option>
+                    ))}
+                  </select>
+                  {onbCardId && (
+                    <p className="text-[9px] font-mono mt-1" style={{ color: PA(0.35) }}>
+                      Will fill card → solve hCaptcha → click Subscribe → handle 3DS OTP
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="rounded-lg p-3 space-y-1" style={{ background: PA(0.04), border: `1px solid ${PA(0.15)}` }}>
-                <p className="text-[9px] font-mono" style={{ color: PA(0.55) }}>Flow: Login → Onboarding (if needed) → Pricing → Continue with Core → Stripe → Apply promo</p>
+                <p className="text-[9px] font-mono" style={{ color: PA(0.55) }}>
+                  {onbCardId
+                    ? "Flow: Login → Onboarding → Stripe (coupon) → Fill card → hCaptcha → Subscribe → 3DS OTP"
+                    : "Flow: Login → Onboarding → Stripe (coupon applied) → stop"}
+                </p>
               </div>
 
               <button
