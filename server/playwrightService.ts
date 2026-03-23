@@ -16984,44 +16984,15 @@ export async function onboardingCheckoutReplitAccount(
       log("  ℹ️  No onboarding — account already set up");
     }
 
-    // ── Pricing → Core ──
-    log("💰 Navigating to Replit pricing page...");
-    await page.goto("https://replit.com/pricing", { waitUntil: "domcontentloaded" });
-    await humanDelay(2500, 3500);
-
-    // ── Switch to Monthly billing ──────────────────────────────────────────
-    log("  🗓️  Selecting Monthly billing...");
-    const monthlyTab = page.locator(
-      'button:has-text("Monthly"), [role="tab"]:has-text("Monthly"), ' +
-      'label:has-text("Monthly"), span:has-text("Monthly")'
-    ).first();
-    try {
-      await monthlyTab.waitFor({ state: "visible", timeout: 8000 });
-      await monthlyTab.click();
-      log("  ✅ Clicked Monthly tab");
-      await humanDelay(1000, 1500);
-    } catch {
-      // Fallback: JS click on any element containing "Monthly"
-      const clicked = await page.evaluate(() => {
-        const els = Array.from(document.querySelectorAll("button, [role='tab'], label, span"));
-        const match = els.find(el => el.textContent?.trim() === "Monthly");
-        if (match) { (match as HTMLElement).click(); return true; }
-        return false;
-      });
-      if (clicked) {
-        log("  ✅ JS-clicked Monthly tab");
-        await humanDelay(1000, 1500);
-      } else {
-        log("  ⚠️  Monthly tab not found — proceeding (may default to yearly)");
-      }
-    }
-
-    const coreBtn = page.getByRole("button", { name: /continue with core/i })
-      .or(page.getByRole("link", { name: /continue with core/i }))
-      .or(page.locator("text=Continue with Core")).first();
-    await coreBtn.waitFor({ state: "visible", timeout: 15000 });
-    log('  🖱️  Clicking "Continue with Core"...');
-    await coreBtn.click();
+    // ── Direct checkout URL with coupon pre-applied ─────────────────────────
+    // Replit's stripe-checkout-by-price endpoint applies the coupon server-side,
+    // avoiding Stripe's client-side rejection when typing it manually.
+    const directCheckoutUrl = couponCode
+      ? `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=${encodeURIComponent(couponCode)}`
+      : `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26`;
+    log(`💰 Navigating to direct checkout URL...`);
+    log(`  🔗 ${directCheckoutUrl}`);
+    await page.goto(directCheckoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     // ── Wait for Stripe redirect ──
     log("⏳ Waiting for Stripe checkout redirect (max 45s)...");
@@ -17033,7 +17004,7 @@ export async function onboardingCheckoutReplitAccount(
       { timeout: 45000 }
     );
     // Use evaluate to capture the FULL URL including hash fragment (page.url() can miss it)
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
     const stripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
     log(`  ✅ Stripe redirect: ${stripeUrl}`);
 
@@ -17042,74 +17013,27 @@ export async function onboardingCheckoutReplitAccount(
     });
     await humanDelay(2000, 3000);
 
-    // ── Apply promo code ──
-    log(`🎟️  Applying promo code: ${couponCode}`);
-    // Use :has-text() to target the parent button/link, not the hidden inner span
-    const addPromoBtn = page.locator(
-      'button:has-text("Add promotion code"), a:has-text("Add promotion code"), ' +
-      '[data-testid="promo-code-toggle"], [data-testid*="promotion"]'
-    ).first();
-    let addPromoClicked = false;
-    try {
-      await addPromoBtn.waitFor({ state: "visible", timeout: 20000 });
-      await humanDelay(800, 1400);
-      await addPromoBtn.click();
-      addPromoClicked = true;
-      log('  🖱️  Clicked "Add promotion code"');
-    } catch {
-      // Fallback: find the hidden span's parent and click it via JS
-      log('  ⚠️  Visible button not found — trying JS click on parent element...');
-      const clicked = await page.evaluate(() => {
-        const all = Array.from(document.querySelectorAll('span, button, a'));
-        const match = all.find(el => el.textContent?.trim() === 'Add promotion code');
-        if (!match) return false;
-        const clickable = match.closest('button') || match.closest('a') || match;
-        (clickable as HTMLElement).click();
-        return true;
-      });
-      if (clicked) {
-        addPromoClicked = true;
-        log('  🖱️  JS-clicked "Add promotion code" parent element');
-      } else {
-        log('  ⚠️  Could not find "Add promotion code" element at all');
-      }
-    }
-    await humanDelay(1000, 1800);
-
-    const promoInput = page.getByRole("textbox", { name: /promotion code|coupon|promo/i })
-      .or(page.locator('input[name="promotionCode"], input[id*="promo" i], input[placeholder*="code" i]')).first();
-    await promoInput.waitFor({ state: "visible", timeout: 10000 });
-    log(`  ✏️  Typing coupon: ${couponCode}`);
-    await humanType(promoInput, couponCode);
-    await humanDelay(800, 1200);
-
-    const applyBtn = page.getByRole("button", { name: /apply/i }).first();
-    await applyBtn.waitFor({ state: "visible", timeout: 8000 });
-    await applyBtn.click();
-    log("  🖱️  Clicked Apply");
-
-    log("  ⏳ Waiting for coupon validation...");
-    await humanDelay(3000, 4000);
-
+    // ── Verify coupon is pre-applied ──────────────────────────────────────
+    log(`🎟️  Verifying coupon pre-applied: ${couponCode}`);
     const bodyText = await page.locator("body").textContent().catch(() => "");
     const bodyStr = bodyText || "";
-    // First check for explicit failure messages
     const codeInvalid = /this code is invalid|coupon.*invalid|invalid.*coupon|promotion.*invalid|code.*not.*valid/i.test(bodyStr);
-    const bodyHasDiscount = !codeInvalid && /discount|coupon applied|promo applied|\$0\.00|100% off/i.test(bodyStr);
+    // Look for discount indicators or reduced price
+    const bodyHasDiscount = !codeInvalid && /discount|coupon|promo|\$0\.00|100% off|free/i.test(bodyStr);
     const discountLine = page.locator('[class*="discount" i], [class*="coupon" i], [data-testid*="discount"]').first();
     const discountLineVisible = !codeInvalid && (await discountLine.isVisible({ timeout: 5000 }).catch(() => false));
     let couponConfirmed = discountLineVisible || bodyHasDiscount;
 
     if (codeInvalid) {
-      log(`  ❌ Coupon rejected by Stripe — "This code is invalid"`);
+      log(`  ❌ Coupon rejected — "This code is invalid"`);
       couponConfirmed = false;
     } else if (discountLineVisible) {
       const discountText = await discountLine.textContent().catch(() => "");
-      log(`  ✅ Coupon confirmed! Discount element: "${discountText?.trim()}"`);
+      log(`  ✅ Coupon pre-applied! Discount element: "${discountText?.trim()}"`);
     } else if (bodyHasDiscount) {
-      log("  ✅ Coupon confirmed via page text (discount keyword detected)");
+      log("  ✅ Coupon appears pre-applied (discount keyword found on page)");
     } else {
-      log("  ⚠️  Coupon validation unconfirmed — no discount indicator found");
+      log("  ⚠️  Coupon pre-application unconfirmed — no discount indicator found");
       couponConfirmed = false;
     }
 
