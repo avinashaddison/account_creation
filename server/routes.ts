@@ -3459,14 +3459,14 @@ export async function registerRoutes(
         const allAccounts = role === "superadmin"
           ? await storage.getAllReplitAccounts()
           : await storage.getReplitAccountsByOwner(userId);
-        // Accept any account that has credentials and isn't "failed"
+        // Only pick accounts with status "processing" — these are the ones needing checkout links
         const available = allAccounts.filter(a =>
-          a.email && a.password && a.status !== "failed"
+          a.email && a.password && a.status === "processing"
         );
         const toProcess = available.slice(0, Math.min(Number(count) || 4, 10));
 
         if (toProcess.length === 0) {
-          broadcastLog(batchId, jobId, `❌ No usable Replit accounts found (need status "created" or "available" with email+password)`, userId);
+          broadcastLog(batchId, jobId, `❌ No "processing" accounts found — only processing-status accounts are eligible for link generation`, userId);
           broadcastBatchComplete(batchId, userId);
           return;
         }
