@@ -3632,9 +3632,10 @@ export async function registerRoutes(
     try {
       const userId = req.session.userId;
       const role = req.session.role;
-      const accounts = role === "superadmin"
+      const allAccounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
+      const accounts = allAccounts.filter(a => a.status === "available");
       const header = "User ID / Email Address,Mobile Number,Password,Activation Date (eg. 01 Jan 2020),First Secret Question,First Secret Answer,Second Secret Question,Second Secret Answer,Third Secret Question,Third Secret Answer,First Name,Last Name,Account Country,Date of Birth (eg. 01 Jan 2020),Remark";
       const lines = [header];
       const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
