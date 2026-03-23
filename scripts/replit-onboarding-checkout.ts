@@ -41,14 +41,14 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const humanDelay = (min = 800, max = 1800) =>
   sleep(min + Math.floor(Math.random() * (max - min)));
 
-/** Type into a field character-by-character to look human. */
+/** Type into a field character-by-character to look human.
+ *  Uses pressSequentially which correctly handles all characters including
+ *  symbols (@, #, !, etc.) common in emails and passwords.
+ */
 async function humanType(locator: import("playwright").Locator, text: string) {
   await locator.focus();
   await locator.fill("");                    // clear first
-  for (const char of text) {
-    await locator.press(char);
-    await sleep(40 + Math.floor(Math.random() * 80));
-  }
+  await locator.pressSequentially(text, { delay: 50 + Math.floor(Math.random() * 80) });
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -82,9 +82,9 @@ async function main() {
     // No route/request interception — pure real browser traffic
   });
 
-  // Hide webdriver property in every frame
+  // Hide webdriver property in every frame (runs in browser context where navigator is available)
   await ctx.addInitScript(() => {
-    Object.defineProperty((window as any).navigator, "webdriver", { get: () => undefined });
+    Object.defineProperty(window.navigator, "webdriver", { get: () => undefined });
   });
 
   const page = await ctx.newPage();
@@ -340,8 +340,9 @@ async function main() {
     log("ℹ️  Browser will remain open for 30 seconds so you can inspect...");
     await sleep(30_000);
 
-  } catch (err: any) {
-    log(`❌ FATAL ERROR: ${err?.message || err}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`❌ FATAL ERROR: ${msg}`);
     log("  Keeping browser open for 20 seconds for inspection...");
     await sleep(20_000);
     throw err;
