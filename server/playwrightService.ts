@@ -15802,9 +15802,59 @@ export async function checkoutExistingReplitAccount(
           } catch {}
         }
 
-        await page.waitForTimeout(8000);
+        // Step 4: Physically click the "I am human" checkbox inside the hCaptcha widget frames
+        // This is the visible checkbox the user confirmed appears before the Federal Bank OTP popup
+        await page.waitForTimeout(1500);
+        const hcapWidgetFrames = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
+        log(`  Found ${hcapWidgetFrames.length} hCaptcha widget frame(s) — clicking #checkbox in each...`);
+        for (const wFrame of hcapWidgetFrames) {
+          try {
+            const checkboxSels = ["#checkbox", ".checkbox", "[type='checkbox']", "#anchor", ".anchor", "#submit-btn", "button"];
+            for (const sel of checkboxSels) {
+              const el = wFrame.locator(sel).first();
+              const visible = await el.isVisible({ timeout: 1000 }).catch(() => false);
+              if (visible) {
+                log(`    Clicking hCaptcha checkbox: ${sel} in ${wFrame.url().substring(0, 60)}`);
+                await el.click({ timeout: 3000 }).catch(() => {});
+                await page.waitForTimeout(500);
+                break;
+              }
+            }
+          } catch {}
+        }
+        // Also try clicking from within each widget frame via evaluate (more reliable in cross-origin iframes)
+        for (const wFrame of hcapWidgetFrames) {
+          try {
+            await wFrame.evaluate(() => {
+              const sels = ["#checkbox", ".checkbox", "[type='checkbox']", "#anchor", "#submit-btn", "button"];
+              for (const s of sels) {
+                const el = document.querySelector<HTMLElement>(s);
+                if (el) { el.click(); break; }
+              }
+            }).catch(() => {});
+          } catch {}
+        }
+        await page.waitForTimeout(1000);
 
-        // Step 4: Check if there's an error message on Stripe (card declined etc)
+        // Step 5: Check for Bank ACS right after checkbox click (it may appear faster now)
+        let acsFoundEarly = false;
+        for (let i = 0; i < 6; i++) {
+          const frames = page.frames();
+          for (const f of frames) {
+            const u = f.url();
+            if (u.includes("m2pfintech") || u.includes("m2pSecAuth") || u.includes("federalbank") || u.includes("3ds") || u.includes("acs") || u.includes("securecheckout")) {
+              log(`✅ Bank ACS frame appeared early after checkbox click: ${u.substring(0, 80)}`);
+              acsFoundEarly = true;
+              break;
+            }
+          }
+          if (acsFoundEarly) break;
+          await page.waitForTimeout(1500);
+        }
+
+        await page.waitForTimeout(acsFoundEarly ? 0 : 3000);
+
+        // Step 6: Check if there's an error message on Stripe (card declined etc)
         try {
           const stripeError = await page.mainFrame().evaluate(() => {
             const errEl = document.querySelector('[class*="error"], [data-testid*="error"], .StripeCheckoutError, [role="alert"]');
