@@ -17015,13 +17015,36 @@ export async function onboardingCheckoutReplitAccount(
 
     // ── Apply promo code ──
     log(`🎟️  Applying promo code: ${couponCode}`);
-    const addPromoBtn = page.getByRole("button", { name: /add promotion code/i })
-      .or(page.getByRole("link", { name: /add promotion code/i }))
-      .or(page.locator("text=Add promotion code")).first();
-    await addPromoBtn.waitFor({ state: "visible", timeout: 20000 });
-    await humanDelay(800, 1400);
-    await addPromoBtn.click();
-    log('  🖱️  Clicked "Add promotion code"');
+    // Use :has-text() to target the parent button/link, not the hidden inner span
+    const addPromoBtn = page.locator(
+      'button:has-text("Add promotion code"), a:has-text("Add promotion code"), ' +
+      '[data-testid="promo-code-toggle"], [data-testid*="promotion"]'
+    ).first();
+    let addPromoClicked = false;
+    try {
+      await addPromoBtn.waitFor({ state: "visible", timeout: 20000 });
+      await humanDelay(800, 1400);
+      await addPromoBtn.click();
+      addPromoClicked = true;
+      log('  🖱️  Clicked "Add promotion code"');
+    } catch {
+      // Fallback: find the hidden span's parent and click it via JS
+      log('  ⚠️  Visible button not found — trying JS click on parent element...');
+      const clicked = await page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('span, button, a'));
+        const match = all.find(el => el.textContent?.trim() === 'Add promotion code');
+        if (!match) return false;
+        const clickable = match.closest('button') || match.closest('a') || match;
+        (clickable as HTMLElement).click();
+        return true;
+      });
+      if (clicked) {
+        addPromoClicked = true;
+        log('  🖱️  JS-clicked "Add promotion code" parent element');
+      } else {
+        log('  ⚠️  Could not find "Add promotion code" element at all');
+      }
+    }
     await humanDelay(1000, 1800);
 
     const promoInput = page.getByRole("textbox", { name: /promotion code|coupon|promo/i })
@@ -17062,7 +17085,7 @@ export async function onboardingCheckoutReplitAccount(
       log("⚠️  PARTIAL — Stripe checkout reached but coupon unconfirmed.");
     }
 
-    await sleep(3000);
+    await page.waitForTimeout(3000);
     return { success: true, couponConfirmed, stripeUrl };
 
   } catch (err: unknown) {
