@@ -13473,6 +13473,48 @@ export async function registerLovableAccount(
           return false;
         }
 
+        // Helper: close current OWA browser and open a fresh one, log in, return new page
+        async function freshOwaPage(label: string): Promise<any> {
+          if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
+          const { chromium: c2 } = await import("playwright");
+          let ctx2: any = null;
+          let zrUrl2 = "";
+          try {
+            const r2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+            if (r2.rows.length > 0 && r2.rows[0].value) zrUrl2 = r2.rows[0].value as string;
+          } catch {}
+          if (zrUrl2) {
+            try {
+              log(`${label}: Opening fresh ZenRows OWA session...`);
+              owaBrowser = await c2.connectOverCDP(zrUrl2, { timeout: 60000 });
+              ctx2 = await owaBrowser.newContext();
+            } catch (e2: any) { log(`${label}: ZenRows failed (${(e2.message||"").substring(0,50)}) — local fallback`); owaBrowser = null; zrUrl2 = ""; }
+          }
+          if (!zrUrl2) {
+            owaBrowser = await c2.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] });
+            ctx2 = await owaBrowser.newContext({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", viewport: { width: 1366, height: 768 }, locale: "en-US" });
+          }
+          const p2 = await ctx2.newPage();
+          p2.setDefaultTimeout(30000);
+          await p2.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await waitMs(2000);
+          const ei2 = await p2.$('input[type="email"], input[name="loginfmt"]');
+          if (ei2) { await ei2.fill(outlookEmail); const nx2 = await p2.$('input[type="submit"], button[type="submit"]'); if (nx2) { await nx2.click(); await waitMs(2500); } }
+          const pi2 = await p2.$('input[type="password"], input[name="passwd"]');
+          if (pi2) { await pi2.fill(outlookPassword); const si2 = await p2.$('input[type="submit"], button[type="submit"]'); if (si2) { await si2.click(); await waitMs(4000); } }
+          const u2 = p2.url();
+          if (u2.includes("account.live.com") || u2.includes("account.microsoft.com")) {
+            await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitMs(3000);
+          }
+          if (!p2.url().includes("outlook.live.com") && !p2.url().includes("outlook.office")) {
+            await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitMs(5000);
+          }
+          log(`${label}: OWA ready — ${p2.url().substring(0, 80)}`);
+          return p2;
+        }
+
         let found = await scanInboxBothTabs(owaPage);
         if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk");
         if (!found) {
@@ -13481,19 +13523,27 @@ export async function registerLovableAccount(
             if (found) break;
           }
         }
+
         if (!found) {
-          log("Email not found yet — waiting 60s more then re-scanning...");
+          log("Email not found yet — closing OWA, waiting 60s, then re-scanning with fresh session...");
+          if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
           await waitMs(60000);
-          found = await scanInboxBothTabs(owaPage);
-          if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
-          if (!found) {
-            for (const f of ["clutter", "other"]) {
-              found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, `${f}-retry`);
-              if (found) break;
+          try {
+            const retryPage = await freshOwaPage("retry-scan");
+            found = await scanInboxBothTabs(retryPage);
+            if (!found) found = await scanFolder(retryPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
+            if (!found) {
+              for (const f of ["clutter", "other"]) {
+                found = await scanFolder(retryPage, `https://outlook.live.com/mail/0/${f}`, `${f}-retry`);
+                if (found) break;
+              }
             }
+          } catch (retryErr: any) {
+            log(`⚠️ Retry scan failed: ${(retryErr.message || "").substring(0, 80)}`);
           }
         }
-        // If email still not found after 2 scans, try resending via Firebase API
+
+        // Firebase resend if still not found
         if (!found && capturedFirebaseIdToken) {
           try {
             log("📤 Resending Lovable verification email via Firebase API...");
@@ -13511,19 +13561,27 @@ export async function registerLovableAccount(
             log(`⚠️ Firebase resend failed: ${resendErr.message || "unknown"}`);
           }
         }
-        // Third retry — wait another 90s (total ~4.5 min from signup)
+
+        // Third retry — close OWA, wait 90s, open fresh session
         if (!found) {
-          log("Email still not found — waiting 90s more then final scan...");
+          log("Email still not found — closing OWA, waiting 90s, then final scan with fresh session...");
+          if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
           await waitMs(90000);
-          found = await scanInboxBothTabs(owaPage);
-          if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk-final");
-          if (!found) {
-            for (const f of ["clutter", "other", "archive"]) {
-              found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, `${f}-final`);
-              if (found) break;
+          try {
+            const finalPage = await freshOwaPage("final-scan");
+            found = await scanInboxBothTabs(finalPage);
+            if (!found) found = await scanFolder(finalPage, "https://outlook.live.com/mail/0/junkemail", "junk-final");
+            if (!found) {
+              for (const f of ["clutter", "other", "archive"]) {
+                found = await scanFolder(finalPage, `https://outlook.live.com/mail/0/${f}`, `${f}-final`);
+                if (found) break;
+              }
             }
+          } catch (finalErr: any) {
+            log(`⚠️ Final scan failed: ${(finalErr.message || "").substring(0, 80)}`);
           }
         }
+
         if (!found) log("⚠️ No Lovable verification email found in any folder");
       }
     } catch (owaErr: any) {
