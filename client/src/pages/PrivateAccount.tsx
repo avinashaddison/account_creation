@@ -329,6 +329,35 @@ export default function PrivateAccount() {
         });
         setCreatingGmail(false);
       }
+
+      if (data.type === "replit_create_result") {
+        fetchReplit();
+      }
+
+      if (data.type === "account_update" && data.account) {
+        const acc = data.account;
+        if (acc.username !== undefined && acc.email !== undefined) {
+          setReplitAccounts((prev) => {
+            const idx = prev.findIndex((a) => a.id === acc.id);
+            if (idx === -1) {
+              fetchReplit();
+              return prev;
+            }
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              status: acc.status ?? updated[idx].status,
+              credits: acc.credits ?? updated[idx].credits,
+              username: acc.username ?? updated[idx].username,
+            };
+            return updated;
+          });
+        }
+      }
+
+      if (data.type === "outlook_login_result" || data.type === "outlook_bulk_login_result") {
+        fetchOutlook();
+      }
     } catch {}
   }, [outlookAccounts, zenrowsRegJobs, toast]);
 
@@ -401,6 +430,20 @@ export default function PrivateAccount() {
     setLoading(true);
     Promise.all([fetchOutlook(), fetchZenrows(), fetchGmail(), fetchReplit(), fetchLovable()]).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    const fetchers: Record<TabType, () => void> = {
+      outlook: fetchOutlook,
+      zenrows: fetchZenrows,
+      gmail: fetchGmail,
+      replit: fetchReplit,
+      lovable: fetchLovable,
+    };
+    const interval = setInterval(() => {
+      fetchers[tab]?.();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [tab]);
 
   function copyToClipboard(text: string, id: string) {
     navigator.clipboard.writeText(text);
