@@ -3660,9 +3660,10 @@ export async function registerRoutes(
     try {
       const { status } = req.body;
       if (!status) return res.status(400).json({ error: "status required" });
+      const normalizedStatus = (status as string).toLowerCase().replace(/\s+/g, "_");
       const role = req.session.role;
       const ownerId = role === "superadmin" ? undefined : req.session.userId;
-      const count = await storage.bulkUpdateReplitAccountStatus(status, ownerId);
+      const count = await storage.bulkUpdateReplitAccountStatus(normalizedStatus, ownerId);
       res.json({ success: true, updated: count });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
