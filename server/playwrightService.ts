@@ -15798,18 +15798,24 @@ export async function checkoutExistingReplitAccount(
         const url = req.url();
         const method = req.method();
 
-        // Log ALL POST requests to stripe/m.stripe/api.stripe so we can see exact endpoints
+        // Log POST requests to Stripe endpoints (diagnostic only)
         if (method === "POST" && (url.includes("stripe.com") || url.includes("m.stripe") || url.includes("api.stripe"))) {
-          const postData = (req.postData() || "").substring(0, 300);
-          log(`  🔌 POST→Stripe: ${url.substring(0, 100)} body=${postData.substring(0, 200)}`);
-          // If it's a payment/confirm call, inject hCaptcha token
+          const fullBody = req.postData() || "";               // FULL body — never truncate for modification
+          const logBody = fullBody.substring(0, 200);          // truncated ONLY for logging
+          const contentType = (req.headers()["content-type"] || "").toLowerCase();
+          log(`  🔌 POST→Stripe: ${url.substring(0, 100)} ct=${contentType.substring(0, 40)} body=${logBody}`);
+
+          // Only inject captcha_token into URL-encoded form submissions (NOT JSON/binary)
+          // Injecting into JSON or binary requests corrupts the body and causes Stripe API errors
+          const isFormEncoded = contentType.includes("application/x-www-form-urlencoded");
           const isPaymentCall = url.includes("confirm") || url.includes("payment_intent") ||
-            url.includes("/pay/") || url.includes("sources") || url.includes("/v1/");
+            url.includes("sources") || url.includes("/v1/payment");
           const tokenToUse = preSolvedToken || (preSolvedToken2 as string | null);
-          if (isPaymentCall && tokenToUse && !postData.includes("captcha_token")) {
+
+          if (isPaymentCall && isFormEncoded && tokenToUse && !fullBody.includes("captcha_token")) {
             try {
-              const newBody = postData + `&captcha_token=${encodeURIComponent(tokenToUse)}&hcaptcha_response=${encodeURIComponent(tokenToUse)}`;
-              log(`  ✏️  Injecting captcha_token into ${url.substring(0, 60)}...`);
+              const newBody = fullBody + `&captcha_token=${encodeURIComponent(tokenToUse)}&hcaptcha_response=${encodeURIComponent(tokenToUse)}`;
+              log(`  ✏️  Injecting captcha_token (form-encoded) into ${url.substring(0, 60)}...`);
               await route.continue({ postData: newBody }).catch(() => route.continue().catch(() => {}));
               return;
             } catch { }
@@ -16300,6 +16306,470 @@ export async function checkoutExistingReplitAccount(
     try { if (page) await page.close(); } catch {}
     try { if (browser) await browser.close(); } catch {}
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Replit Onboarding + Pricing → Stripe Checkout + Coupon Flow
+// Real user flow: login → onboarding → pricing page → Core button → Stripe
+// No Stripe request interception — passes all requests through unmodified.
+// ────────────────────────────────────────────────────────────────────────────
+export async function runReplitOnboardingCheckout(
+  replitEmail: string,
+  replitPassword: string,
+  options: {
+    username?: string;
+    fullName?: string;
+    couponCode?: string;
+  },
+  log: (msg: string) => void
+): Promise<{ success: boolean; checkoutUrl?: string; couponApplied?: boolean; error?: string }> {
+  let browser: any = null;
+  let page: any = null;
+
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const humanDelay = (min = 600, max = 1400) => sleep(min + Math.random() * (max - min));
+
+  try {
+    log(`🚀 Launching headful stealth browser...`);
+    const { chromium } = await import("playwright");
+
+    browser = await chromium.launch({
+      headless: false,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-web-security",
+        "--allow-running-insecure-content",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--window-size=1366,768",
+      ],
+      slowMo: 60,
+    });
+
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      viewport: { width: 1366, height: 768 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      javaScriptEnabled: true,
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+      },
+    });
+
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+      (window as any).chrome = { app: { isInstalled: false }, runtime: {} };
+    });
+
+    page = await context.newPage();
+
+    // ── Step 1: Login ────────────────────────────────────────────────────
+    log(`🔐 Opening Replit login...`);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await humanDelay(1000, 2000);
+
+    // Fill email / username
+    const emailSel = 'input[name="username"], input[name="email"], input[type="email"], input[placeholder*="email" i], input[placeholder*="username" i]';
+    await page.waitForSelector(emailSel, { timeout: 15000 });
+    await page.click(emailSel);
+    await humanDelay(300, 600);
+    await page.fill(emailSel, replitEmail);
+    await humanDelay(500, 900);
+
+    // Some Replit flows require clicking "Continue" before password appears
+    const continueSelectors = ['button:has-text("Continue")', 'button:has-text("Next")'];
+    for (const sel of continueSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 2000 })) {
+          await btn.click();
+          await humanDelay(800, 1400);
+          break;
+        }
+      } catch { }
+    }
+
+    // Fill password
+    const passSel = 'input[name="password"], input[type="password"]';
+    try {
+      await page.waitForSelector(passSel, { timeout: 8000 });
+      await page.click(passSel);
+      await humanDelay(300, 600);
+      await page.fill(passSel, replitPassword);
+      await humanDelay(400, 800);
+    } catch { log(`ℹ️  Password field not found on first attempt — page may have shifted`); }
+
+    // Submit login form
+    const loginBtnSel = 'button:has-text("Log in"), button:has-text("Sign in"), button[type="submit"]';
+    try {
+      const loginBtn = page.locator(loginBtnSel).first();
+      if (await loginBtn.isVisible({ timeout: 5000 })) {
+        await loginBtn.click();
+      } else {
+        await page.keyboard.press("Enter");
+      }
+    } catch { await page.keyboard.press("Enter"); }
+
+    // Wait for redirect away from /login
+    try {
+      await page.waitForURL(u => !u.includes("/login") && !u.includes("/signin") && u.includes("replit.com"), {
+        timeout: 25000,
+      });
+      log(`✅ Logged in — URL: ${page.url().substring(0, 80)}`);
+    } catch {
+      log(`⚠️  Post-login URL: ${page.url().substring(0, 80)}`);
+    }
+
+    await humanDelay(1500, 2500);
+
+    // ── Step 2: Onboarding (if shown) ───────────────────────────────────
+    log(`🔍 Checking for onboarding steps...`);
+
+    const onboardingIndicators = [
+      'input[placeholder*="username" i]',
+      'input[placeholder*="Username" i]',
+      'input[name="username"]',
+      '[class*="onboard" i]',
+      'h1:has-text("Welcome")',
+      'h2:has-text("Get started")',
+    ];
+
+    let isOnboarding = false;
+    for (const sel of onboardingIndicators) {
+      try {
+        if (await page.locator(sel).isVisible({ timeout: 3000 })) {
+          isOnboarding = true;
+          log(`  Onboarding detected via: ${sel}`);
+          break;
+        }
+      } catch { }
+    }
+
+    if (isOnboarding) {
+      log(`🎓 Completing onboarding...`);
+
+      // 2a — Username
+      const usernameLocator = page.locator('input[placeholder*="username" i], input[name="username"]').first();
+      try {
+        if (await usernameLocator.isVisible({ timeout: 5000 })) {
+          const uname = options.username
+            || replitEmail.split("@")[0].replace(/[^a-z0-9]/gi, "").toLowerCase().substring(0, 14);
+          await usernameLocator.click();
+          await humanDelay(300, 600);
+          await usernameLocator.fill(uname);
+          log(`  ✏️  Username → "${uname}"`);
+          await humanDelay(500, 900);
+        }
+      } catch { log(`  ⚠️  Username field not found`); }
+
+      // 2a — Full name (may be on same step)
+      const nameLocator = page.locator(
+        'input[placeholder*="full name" i], input[placeholder*="your name" i], input[name="fullName"], input[name="name"]'
+      ).first();
+      try {
+        if (await nameLocator.isVisible({ timeout: 3000 })) {
+          const fname = options.fullName || "Ajay Kumar";
+          await nameLocator.click();
+          await humanDelay(300, 500);
+          await nameLocator.fill(fname);
+          log(`  ✏️  Full name → "${fname}"`);
+          await humanDelay(400, 700);
+        }
+      } catch { }
+
+      // Next — after username/name
+      await _clickNextOrContinue(page, log, "step 1 (username/name)");
+      await humanDelay(1000, 1800);
+
+      // 2b — Select "Developer" role
+      const devSelectors = [
+        'button:has-text("Developer")',
+        '[role="radio"]:has-text("Developer")',
+        'label:has-text("Developer")',
+        '[data-value="developer"]',
+        '[value="developer"]',
+      ];
+      let devSelected = false;
+      for (const sel of devSelectors) {
+        try {
+          const el = page.locator(sel).first();
+          if (await el.isVisible({ timeout: 4000 })) {
+            await el.click();
+            log(`  ✅ Selected role: Developer`);
+            devSelected = true;
+            await humanDelay(600, 1000);
+            break;
+          }
+        } catch { }
+      }
+      if (!devSelected) log(`  ⚠️  Developer option not visible on this step`);
+
+      await _clickNextOrContinue(page, log, "step 2 (role)");
+      await humanDelay(1000, 1800);
+
+      // 2c — Select "Google search" as referral source
+      const googleSelectors = [
+        'button:has-text("Google search")',
+        '[role="radio"]:has-text("Google search")',
+        'label:has-text("Google search")',
+        'button:has-text("Google Search")',
+        '[data-value*="google" i]',
+      ];
+      let googleSelected = false;
+      for (const sel of googleSelectors) {
+        try {
+          const el = page.locator(sel).first();
+          if (await el.isVisible({ timeout: 4000 })) {
+            await el.click();
+            log(`  ✅ Selected: Google search`);
+            googleSelected = true;
+            await humanDelay(600, 1000);
+            break;
+          }
+        } catch { }
+      }
+      if (!googleSelected) log(`  ⚠️  Google search option not visible on this step`);
+
+      await _clickNextOrContinue(page, log, "step 3 (source)");
+      await humanDelay(1000, 1800);
+
+      // 2d — Skip referral / complete onboarding
+      const skipSelectors = [
+        'button:has-text("Skip")',
+        'a:has-text("Skip")',
+        'button:has-text("Continue")',
+        'button:has-text("Get started")',
+        'button:has-text("Done")',
+        'button[type="submit"]',
+      ];
+      for (const sel of skipSelectors) {
+        try {
+          const el = page.locator(sel).first();
+          if (await el.isVisible({ timeout: 4000 })) {
+            await el.click();
+            log(`  ⏭️  Clicked "${sel}" — referral step done`);
+            await humanDelay(1200, 2200);
+            break;
+          }
+        } catch { }
+      }
+
+      log(`✅ Onboarding completed`);
+    } else {
+      log(`ℹ️  No onboarding shown — proceeding directly`);
+    }
+
+    await humanDelay(1000, 2000);
+
+    // ── Step 3: Navigate to Pricing page ────────────────────────────────
+    log(`💰 Navigating to https://replit.com/pricing ...`);
+    await page.goto("https://replit.com/pricing", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await humanDelay(2000, 3500);
+
+    await captureScreenshot(page, "Pricing page");
+
+    // ── Step 4: Click "Continue with Core" ──────────────────────────────
+    log(`🎯 Looking for "Continue with Core" button...`);
+
+    const coreSelectors = [
+      'button:has-text("Continue with Core")',
+      'a:has-text("Continue with Core")',
+      'button:has-text("Get Core")',
+      'a:has-text("Get Core")',
+      'button:has-text("Upgrade to Core")',
+      'a:has-text("Upgrade to Core")',
+      '[data-cy="core-plan-cta"]',
+      '[data-testid*="core" i]',
+    ];
+
+    let coreClicked = false;
+    for (const sel of coreSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 4000 })) {
+          await btn.scrollIntoViewIfNeeded();
+          await humanDelay(500, 900);
+          await btn.click();
+          log(`  ✅ Clicked Core CTA: "${sel}"`);
+          coreClicked = true;
+          break;
+        }
+      } catch { }
+    }
+
+    if (!coreClicked) {
+      // Fallback: text matching
+      try {
+        await page.locator('text=/Continue.*Core/i').first().click();
+        log(`  ✅ Clicked Core CTA (text match fallback)`);
+        coreClicked = true;
+      } catch { }
+    }
+
+    if (!coreClicked) {
+      const bodyText = (await page.evaluate(() => document.body.innerText)).substring(0, 400);
+      log(`  ❌ "Continue with Core" not found. Page text: ${bodyText}`);
+      return { success: false, error: 'Could not locate "Continue with Core" button on pricing page' };
+    }
+
+    // ── Step 5: Wait for Stripe checkout redirect ────────────────────────
+    log(`⏳ Waiting for Stripe checkout redirect...`);
+    let stripeUrl = "";
+    try {
+      await page.waitForURL(
+        u => u.includes("checkout.stripe.com") || (u.includes("stripe.com") && u.includes("checkout")),
+        { timeout: 30000 }
+      );
+      stripeUrl = page.url();
+      log(`✅ Reached Stripe checkout: ${stripeUrl.substring(0, 120)}`);
+    } catch {
+      // Maybe Replit served its own hosted checkout via iframe
+      stripeUrl = page.url();
+      log(`ℹ️  URL after Core click: ${stripeUrl.substring(0, 120)}`);
+      if (!stripeUrl.includes("stripe")) {
+        return { success: false, error: `Did not reach Stripe checkout. Current URL: ${stripeUrl}` };
+      }
+    }
+
+    // Wait for Stripe page to fully render
+    await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
+    await humanDelay(2000, 3000);
+    await captureScreenshot(page, "Stripe checkout loaded");
+
+    // ── Step 6: Apply promotion code ─────────────────────────────────────
+    const coupon = options.couponCode || "AGENT4BC4974559665";
+    log(`🎟️  Applying promotion code "${coupon}"...`);
+
+    // Click "Add promotion code" link
+    const promoToggleSelectors = [
+      'a:has-text("Add promotion code")',
+      'button:has-text("Add promotion code")',
+      'span:has-text("Add promotion code")',
+      '[data-testid="promo-code-toggle"]',
+      'text="Add promotion code"',
+    ];
+
+    for (const sel of promoToggleSelectors) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.isVisible({ timeout: 6000 })) {
+          await el.click();
+          log(`  ✅ Opened promo code field`);
+          await humanDelay(700, 1200);
+          break;
+        }
+      } catch { }
+    }
+
+    // Type into the promotion code input
+    const promoInputSelectors = [
+      'input[placeholder*="Promotion code" i]',
+      'input[placeholder*="promo" i]',
+      'input[placeholder*="coupon" i]',
+      'input[name*="promo" i]',
+      'input[name*="coupon" i]',
+      'input[id*="promo" i]',
+    ];
+
+    let promoInputFound = false;
+    for (const sel of promoInputSelectors) {
+      try {
+        const input = page.locator(sel).first();
+        if (await input.isVisible({ timeout: 5000 })) {
+          await input.click();
+          await humanDelay(300, 600);
+          await input.fill(coupon);
+          log(`  ✏️  Entered code: "${coupon}"`);
+          promoInputFound = true;
+          await humanDelay(500, 900);
+          break;
+        }
+      } catch { }
+    }
+
+    if (!promoInputFound) {
+      log(`  ⚠️  Promo code input not found — coupon not applied`);
+      return { success: true, checkoutUrl: stripeUrl, couponApplied: false };
+    }
+
+    // Click Apply button (or press Enter)
+    let applied = false;
+    const applySelectors = [
+      'button:has-text("Apply")',
+      '[data-testid="promo-code-submit"]',
+      'button[class*="apply" i]',
+    ];
+    for (const sel of applySelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 4000 })) {
+          await btn.click();
+          log(`  ✅ Clicked Apply`);
+          applied = true;
+          await humanDelay(1500, 2500);
+          break;
+        }
+      } catch { }
+    }
+    if (!applied) {
+      await page.keyboard.press("Enter");
+      log(`  ⌨️  Pressed Enter to apply coupon`);
+      await humanDelay(1500, 2500);
+    }
+
+    // Confirm coupon was accepted
+    const pageText = (await page.evaluate(() => document.body.innerText)).toLowerCase();
+    const couponApplied = pageText.includes("discount") || pageText.includes("% off") ||
+      pageText.includes("applied") || pageText.includes(coupon.toLowerCase());
+
+    log(couponApplied
+      ? `  ✅ Coupon "${coupon}" confirmed applied`
+      : `  ⚠️  Coupon application unconfirmed — page snippet: ${pageText.substring(0, 150)}`
+    );
+
+    await captureScreenshot(page, "Stripe checkout with coupon applied");
+
+    return { success: true, checkoutUrl: stripeUrl, couponApplied };
+
+  } catch (err: any) {
+    const msg = (err.message || String(err)).substring(0, 250);
+    log(`❌ Error in onboarding+checkout flow: ${msg}`);
+    return { success: false, error: msg };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+  }
+}
+
+// Helper: click Next / Continue / Submit — whichever is visible
+async function _clickNextOrContinue(page: any, log: (msg: string) => void, stepLabel: string): Promise<void> {
+  const selectors = [
+    'button:has-text("Next")',
+    'button:has-text("Continue")',
+    'button[type="submit"]',
+    'button:has-text("Done")',
+  ];
+  for (const sel of selectors) {
+    try {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible({ timeout: 3000 })) {
+        await btn.click();
+        log(`  ➡️  Clicked "${sel}" (${stepLabel})`);
+        return;
+      }
+    } catch { }
+  }
+  log(`  ⚠️  No Next/Continue button found for ${stepLabel}`);
 }
 
 process.on("SIGINT", async () => {
