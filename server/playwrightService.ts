@@ -11412,10 +11412,13 @@ export async function registerReplitAccount(
                   const el = frame.locator(sel).first();
                   const visible = await el.isVisible({ timeout: 1500 }).catch(() => false);
                   if (visible) {
-                    await el.click({ timeout: 3000 }).catch(() => {});
-                    // Clear then type char-by-char (Stripe needs key events, not fill)
-                    await el.evaluate((input: HTMLInputElement) => { input.value = ""; });
-                    await el.type(value, { delay: 50 });
+                    // Triple-click to select all, then type replaces — properly triggers Stripe's handlers
+                    await el.click({ clickCount: 3, timeout: 3000 }).catch(() => {});
+                    await page.waitForTimeout(80);
+                    await el.press("Control+a").catch(() => {});
+                    await page.waitForTimeout(50);
+                    await el.type(value, { delay: 80 });
+                    await page.waitForTimeout(100);
                     // Press Tab to trigger Stripe's blur/validation event
                     await frame.locator("body").press("Tab").catch(() => {});
                     log(`  Filled Stripe field "${name}" (frame: ${frame.url().substring(0, 50)})`);
@@ -11437,9 +11440,9 @@ export async function registerReplitAccount(
                 const el = page.locator(sel).first();
                 const visible = await el.isVisible({ timeout: 1500 }).catch(() => false);
                 if (visible) {
-                  await el.click().catch(() => {});
-                  await el.evaluate((input: HTMLInputElement) => { input.value = ""; });
-                  await el.type(value, { delay: 40 });
+                  await el.click({ clickCount: 3 }).catch(() => {});
+                  await el.press("Control+a").catch(() => {});
+                  await el.type(value, { delay: 80 });
                   log(`  Filled field "${name}" (main page)`);
                   return true;
                 }
@@ -15519,17 +15522,30 @@ export async function checkoutExistingReplitAccount(
     log(`💳 Filling card details in Stripe checkout...`);
 
     // ── Helper: fill Stripe iframe input ──
+    // IMPORTANT: Must use triple-click + type (not el.evaluate/fill) so Stripe's
+    // React event handlers are properly triggered and validate the field state.
     async function fillStripeField(names: string[], value: string): Promise<boolean> {
       for (const frame of page.frames()) {
         for (const name of names) {
           try {
-            const selectors = [`input[name="${name}"]`, `input[data-elements-stable-field-name="${name}"]`, `input[placeholder*="${name}" i]`];
+            const selectors = [
+              `input[name="${name}"]`,
+              `input[data-elements-stable-field-name="${name}"]`,
+              `input[autocomplete="${name}"]`,
+              `input[placeholder*="card" i]`,
+            ];
             for (const sel of selectors) {
               const el = frame.locator(sel).first();
               if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
-                await el.click({ timeout: 3000 }).catch(() => {});
-                await el.evaluate((i: HTMLInputElement) => { i.value = ""; });
-                await el.type(value, { delay: 50 });
+                // Triple-click selects all existing content so typing replaces it.
+                // This correctly triggers Stripe's internal input event handlers.
+                await el.click({ clickCount: 3, timeout: 3000 }).catch(() => {});
+                await page.waitForTimeout(100);
+                // Also Ctrl+A to ensure full selection
+                await el.press("Control+a").catch(() => {});
+                await page.waitForTimeout(50);
+                await el.type(value, { delay: 80 });
+                await page.waitForTimeout(100);
                 await frame.locator("body").press("Tab").catch(() => {});
                 log(`  Filled "${name}" in frame: ${frame.url().substring(0, 50)}`);
                 return true;
@@ -15538,12 +15554,14 @@ export async function checkoutExistingReplitAccount(
           } catch {}
         }
       }
-      // main page fallback
+      // main page fallback — use keyboard approach here too
       for (const name of names) {
         try {
           const el = page.locator(`input[name="${name}"], input[placeholder*="${name}" i]`).first();
           if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
-            await el.fill(value);
+            await el.click({ clickCount: 3 }).catch(() => {});
+            await el.press("Control+a").catch(() => {});
+            await el.type(value, { delay: 80 });
             log(`  Filled "${name}" (main page)`);
             return true;
           }
