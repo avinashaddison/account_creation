@@ -17189,6 +17189,23 @@ export async function onboardingCheckoutReplitAccount(
       });
     } catch {}
 
+    // Early rqdata capture — intercept hCaptcha frame URL the instant it navigates
+    try {
+      page.on("framenavigated", (frame: any) => {
+        try {
+          const fUrl = frame.url();
+          if (fUrl.includes("hcaptcha") || fUrl.includes("newassets.hcaptcha.com")) {
+            const rd = new URL(fUrl).searchParams.get("rqdata");
+            if (rd && rd.length > 10 && !capturedRqdata) {
+              capturedRqdata = rd;
+              log(`  📡 rqdata captured from frame navigation: ${rd.substring(0, 40)}...`);
+            }
+            log(`  🖼️ hCaptcha frame loaded: ${fUrl.substring(0, 100)}`);
+          }
+        } catch {}
+      });
+    } catch {}
+
     log(`🤖 Pre-solving hCaptcha x2 (parallel)...`);
     let preSolvedToken2b: string | null = null;
     const nopeKeyRowPre2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
@@ -17247,7 +17264,10 @@ export async function onboardingCheckoutReplitAccount(
           const contentType = (req.headers()["content-type"] || "").toLowerCase();
           log(`  🔌 POST→Stripe: ${url.substring(0, 100)}`);
           const isFormEncoded = contentType.includes("application/x-www-form-urlencoded");
-          const isPaymentCall = url.includes("confirm") || url.includes("payment_intent") || url.includes("sources") || url.includes("/v1/payment");
+          // Exclude /v1/payment_methods (card tokenization) — captcha belongs in confirmation calls only
+          const isPaymentCall = url.includes("confirm") || url.includes("payment_intent") ||
+            (url.includes("sources") && !url.includes("payment_methods")) ||
+            (url.includes("/v1/payment") && !url.includes("payment_methods"));
           const tokenToUse = preSolvedToken || preSolvedToken2b;
           if (isPaymentCall && isFormEncoded && tokenToUse && !fullBody.includes("captcha_token")) {
             try {
@@ -17288,20 +17308,45 @@ export async function onboardingCheckoutReplitAccount(
     const hcapFrames2 = page.frames().filter((f: any) => f.url().includes("hcaptcha.com") || f.url().includes("HCaptcha.html") || f.url().includes("HCaptchaInvisible.html"));
     if (hcapFrames2.length > 0) {
       log(`🔒 hCaptcha detected (${hcapFrames2.length} frame(s)) — solving...`);
+      // Log ALL frame URLs for debugging rqdata
+      page.frames().forEach((f: any, i: number) => {
+        try { const fu = f.url(); if (fu && fu !== "about:blank") log(`  [frame${i}] ${fu.substring(0, 120)}`); } catch {}
+      });
       await page.waitForTimeout(5000);
       if (!capturedRqdata) {
         for (const fr of page.frames()) {
-          if (fr.url().includes("hcaptcha-invisible") || fr.url().includes("newassets.hcaptcha.com")) {
+          const fUrl2 = fr.url();
+          if (fUrl2.includes("hcaptcha") || fUrl2.includes("newassets.hcaptcha.com")) {
+            // 1. Check URL query params — rqdata is often embedded in the iframe src URL
+            try {
+              const rd = new URL(fUrl2).searchParams.get("rqdata");
+              if (rd && rd.length > 10) { capturedRqdata = rd; log(`  rqdata from URL params: ${rd.substring(0, 40)}...`); break; }
+            } catch {}
+            // 2. Check window variable and DOM
             const rd = await fr.evaluate(() => {
               if ((window as any).__capturedRqdata) return (window as any).__capturedRqdata;
               const el = document.querySelector("[data-rqdata]");
-              return el ? el.getAttribute("data-rqdata") : null;
+              if (el) return el.getAttribute("data-rqdata");
+              // Also check hCaptcha internal state
+              const w = window as any;
+              if (w.hcaptcha?._state?.rqdata) return w.hcaptcha._state.rqdata;
+              if (w.__rqdata) return w.__rqdata;
+              return null;
             }).catch(() => null);
             if (rd) { capturedRqdata = rd; break; }
           }
         }
+        // 3. Also scan ALL frame URLs for rqdata param
+        if (!capturedRqdata) {
+          for (const fr of page.frames()) {
+            try {
+              const rd = new URL(fr.url()).searchParams.get("rqdata");
+              if (rd && rd.length > 10) { capturedRqdata = rd; log(`  rqdata from frame URL: ${fr.url().substring(0, 60)}`); break; }
+            } catch {}
+          }
+        }
       }
-      log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found"}`);
+      log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found (will solve without)"}`);
 
       let finalResult2: { success: boolean; token?: string; error?: string };
       const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
