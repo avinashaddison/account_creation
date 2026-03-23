@@ -15815,75 +15815,89 @@ export async function checkoutExistingReplitAccount(
               // Call internal hCaptcha success handlers
               if (w.hcaptcha) {
                 try { w.hcaptcha.setResponse?.(tok); } catch {}
-                // Loop through all widget instances
                 const widgets = w.hcaptcha._widgets || {};
                 Object.values(widgets).forEach((widget: any) => {
                   try { widget?.g?.responseField?.value && (widget.g.responseField.value = tok); } catch {}
                   try { widget?.successCallback?.(tok); } catch {}
                 });
               }
-              // Try the global callback
               if (w.onHCaptchaSuccess) try { w.onHCaptchaSuccess(tok); } catch {}
               if (w.hcaptchaCallback) try { w.hcaptchaCallback(tok); } catch {}
+              // KEY: send postMessage FROM this widget frame TO its parent (the hcaptcha-invisible Stripe wrapper)
+              // This is the direction hCaptcha itself would send the token — widget → Stripe wrapper → checkout
+              const msgs = [
+                JSON.stringify({ type: "challenge.passed", response: tok }),
+                JSON.stringify({ type: "success", token: tok }),
+                JSON.stringify({ id: "hcaptcha-invisible", type: "challenge.passed", response: tok }),
+                JSON.stringify({ source: "hcaptcha", type: "challenge.passed", data: { response: tok } }),
+              ];
+              msgs.forEach(msg => {
+                try { window.parent.postMessage(msg, "*"); } catch {}
+                try { window.top?.postMessage(msg, "*"); } catch {}
+              });
             }, token).catch(() => {});
           } catch {}
         }
 
-        // Step 4: Physically click the "I am human" checkbox inside the hCaptcha widget frames
-        // hCaptcha's #checkbox is a styled div — must use force:true or evaluate() to bypass visibility checks
-        await page.waitForTimeout(1500);
+        // Step 4: Click the "I am human" checkbox using real mouse coordinates (more human-like than JS click)
+        await page.waitForTimeout(1200);
         const hcapWidgetFrames = page.frames().filter((f: any) => f.url().includes("newassets.hcaptcha.com"));
-        log(`  Found ${hcapWidgetFrames.length} hCaptcha widget frame(s) — force-clicking #checkbox in each...`);
+        log(`  Found ${hcapWidgetFrames.length} hCaptcha widget frame(s) — clicking with real mouse coords...`);
 
-        // Primary: click via evaluate() directly in each frame (no visibility check, bypasses CSS opacity tricks)
         let checkboxClicked = false;
         for (const wFrame of hcapWidgetFrames) {
+          if (checkboxClicked) break;
           try {
-            const clicked = await wFrame.evaluate(() => {
-              // hCaptcha checkbox selectors (it's a div, not an input)
-              const sels = [
-                "#checkbox",
-                "div[role='checkbox']",
-                "[aria-checked]",
-                ".checkbox",
-                "div.check",
-                "#anchor",
-                "div[tabindex='0']",
-              ];
-              for (const s of sels) {
-                const el = document.querySelector<HTMLElement>(s);
-                if (el) {
-                  // Dispatch full mouse event sequence
-                  el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-                  el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
-                  el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-                  el.click();
-                  return s;
+            // Get bounding box of the checkbox element for real mouse click via page.mouse
+            const checkboxSels = ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"];
+            for (const sel of checkboxSels) {
+              try {
+                const box = await wFrame.locator(sel).first().boundingBox({ timeout: 1500 }).catch(() => null);
+                if (box && box.width > 0 && box.height > 0) {
+                  const cx = box.x + box.width / 2;
+                  const cy = box.y + box.height / 2;
+                  log(`    Clicking ${sel} via page.mouse at (${cx.toFixed(0)},${cy.toFixed(0)}) in ${wFrame.url().substring(0, 60)}`);
+                  // Real mouse events: move, down, up (simulates actual human click)
+                  await page.mouse.move(cx - 5, cy - 3);
+                  await page.waitForTimeout(80);
+                  await page.mouse.move(cx, cy);
+                  await page.waitForTimeout(60);
+                  await page.mouse.click(cx, cy);
+                  log(`    ✅ Real mouse click done on hCaptcha checkbox`);
+                  checkboxClicked = true;
+                  await page.waitForTimeout(800);
+                  break;
                 }
-              }
-              return null;
-            }).catch(() => null);
-            if (clicked) {
-              log(`    ✅ Clicked hCaptcha element via evaluate: "${clicked}" in ${wFrame.url().substring(0, 70)}`);
-              checkboxClicked = true;
-              await page.waitForTimeout(600);
+              } catch {}
             }
           } catch {}
         }
 
-        // Secondary: force-click via Playwright locator (force:true ignores visibility)
-        for (const wFrame of hcapWidgetFrames) {
-          try {
-            const forceSels = ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"];
-            for (const sel of forceSels) {
-              try {
-                await wFrame.locator(sel).first().click({ force: true, timeout: 1500 });
-                log(`    ✅ Force-clicked hCaptcha: ${sel}`);
-                await page.waitForTimeout(400);
+        // Fallback: JS evaluate click if real mouse didn't work
+        if (!checkboxClicked) {
+          for (const wFrame of hcapWidgetFrames) {
+            try {
+              const clicked = await wFrame.evaluate(() => {
+                const sels = ["#checkbox", "div[role='checkbox']", "[aria-checked]", ".checkbox", "#anchor", "div[tabindex='0']"];
+                for (const s of sels) {
+                  const el = document.querySelector<HTMLElement>(s);
+                  if (el) {
+                    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+                    el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+                    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+                    return s;
+                  }
+                }
+                return null;
+              }).catch(() => null);
+              if (clicked) {
+                log(`    ✅ Fallback JS click on "${clicked}"`);
+                checkboxClicked = true;
+                await page.waitForTimeout(600);
                 break;
-              } catch {}
-            }
-          } catch {}
+              }
+            } catch {}
+          }
         }
         await page.waitForTimeout(1000);
 

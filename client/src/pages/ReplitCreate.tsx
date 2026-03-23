@@ -504,7 +504,7 @@ export default function ReplitCreate() {
                   data-testid="select-replit-account"
                 >
                   <option value="">— Select Replit account —</option>
-                  {replitAccounts.map((a) => (
+                  {replitAccounts.filter((a) => a.status === "processing").map((a) => (
                     <option key={a.id} value={a.id}>@{a.username} ({a.email})</option>
                   ))}
                 </select>
