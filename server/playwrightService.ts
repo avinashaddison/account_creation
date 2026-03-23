@@ -13422,50 +13422,60 @@ export async function registerLovableAccount(
         async function scanFolder(p: any, folderUrl: string, label: string): Promise<boolean> {
           try {
             await p.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-            await waitMs(8000);
+            await waitMs(10000);
 
-            // Try multiple selector strategies — Outlook's DOM varies between inbox/junk/folders
-            let all: any[] = await p.$$('[data-convid]');
-            if (all.length === 0) all = await p.$$('[role="option"][tabindex]');
-            if (all.length === 0) all = await p.$$('div[class*="customScrollBar"] [role="option"], div[class*="hcpHN"] [role="option"]');
-            if (all.length === 0) all = await p.$$('[role="listitem"], li[class*="mail"], div[class*="mailList"] div[tabindex]');
-            if (all.length === 0) all = await p.$$('[aria-label][tabindex="0"]:not([aria-label=""])');
-            log(`${label}: ${all.length} emails found`);
+            // Pass 0: global page scan — catches any Lovable link in list previews or reading pane
+            if (await extractLink(p)) { log(`${label}: found via global page scan`); return true; }
 
-            // Keyword-match pass — open emails that mention Lovable
-            for (const item of all.slice(0, 20)) {
-              const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
-              if (txt.includes("lovable") || txt.includes("noreply@lovable") || txt.includes("lovable.dev") ||
-                  txt.includes("verify your email") || txt.includes("confirm your email")) {
-                log(`Opening in ${label}: "${txt.replace(/\s+/g, " ").substring(0, 80)}"`);
-                try {
-                  await item.click({ timeout: 8000 });
-                } catch {
-                  try { await p.evaluate((el: any) => el.click(), item); } catch {}
+            // Pass 1: navigate directly to each email by href (most reliable — bypasses selector issues)
+            // Extract individual email URLs from the folder page (pattern: /mail/0/<folder>/id/<id>)
+            const emailUrls: string[] = await p.evaluate((base: string) => {
+              const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+              const seen = new Set<string>();
+              const results: string[] = [];
+              for (const a of anchors) {
+                const href = a.href || "";
+                // Match Outlook individual email URLs: /mail/0/<folder>/id/<id>
+                if (/\/mail\/\d+\/[^/]+\/id\/[^?#]+/.test(href) && !seen.has(href)) {
+                  seen.add(href);
+                  results.push(href);
                 }
+              }
+              return results.slice(0, 10);
+            }, folderUrl).catch(() => [] as string[]);
+
+            log(`${label}: ${emailUrls.length} direct email URLs found`);
+            for (const emailUrl of emailUrls) {
+              log(`${label}: navigating to ${emailUrl.substring(0, 80)}`);
+              try {
+                await p.goto(emailUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
                 await waitMs(4000);
                 if (await extractLink(p)) return true;
+              } catch (navErr: any) {
+                log(`${label}: nav error — ${(navErr.message || "").substring(0, 50)}`);
               }
             }
-            // Fallback: open ALL recent emails (up to 8) and try link extraction
-            for (const item of all.slice(0, 8)) {
-              const txt = ((await item.innerText().catch(() => "")) as string).trim();
-              if (txt.length < 5) continue;
-              log(`Fallback opening: "${txt.replace(/\s+/g, " ").substring(0, 80)}"`);
-              try {
-                await item.click({ timeout: 8000 });
-              } catch {
-                try { await p.evaluate((el: any) => el.click(), item); } catch {}
-              }
-              await waitMs(3000);
-              try {
-                const links = await p.$$eval('a[href]', (as: any[]) =>
-                  as.map((a: any) => a.href).filter((h: string) => h && h.startsWith('http'))
-                );
-                const lovableLinks = links.filter((h: string) => h.includes("lovable") || h.includes("gpt-engineer") || h.includes("safelinks"));
-                log(`Links in email: ${JSON.stringify(links.slice(0, 6))}`);
-                if (lovableLinks.length > 0) log(`Lovable/safelinks found: ${JSON.stringify(lovableLinks.slice(0, 3))}`);
-              } catch {}
+
+            // Pass 2: click-based fallback using multiple selectors
+            await p.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+            await waitMs(8000);
+            let all: any[] = await p.$$('[data-convid]');
+            if (all.length === 0) all = await p.$$('[role="option"][tabindex]');
+            if (all.length === 0) all = await p.$$('div[class*="customScrollBar"] [role="option"]');
+            if (all.length === 0) all = await p.$$('[role="listitem"]');
+            if (all.length === 0) all = await p.$$('[aria-label][tabindex="0"]:not([aria-label=""])');
+            log(`${label}: click-pass ${all.length} items`);
+
+            for (const item of all.slice(0, 10)) {
+              const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
+              const isLovable = txt.includes("lovable") || txt.includes("noreply@lovable") ||
+                txt.includes("verify your email") || txt.includes("confirm your email");
+              const label2 = isLovable ? "keyword-match" : "fallback";
+              if (!isLovable && all.indexOf(item) >= 5) continue; // fallback only first 5
+              log(`${label} ${label2}: "${txt.replace(/\s+/g, " ").substring(0, 60)}"`);
+              try { await item.click({ timeout: 8000 }); }
+              catch { try { await p.evaluate((el: any) => el.click(), item); } catch {} }
+              await waitMs(4000);
               if (await extractLink(p)) return true;
             }
           } catch (e: any) {
