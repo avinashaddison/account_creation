@@ -11509,7 +11509,8 @@ export async function registerReplitAccount(
         }
         await page.waitForTimeout(500);
 
-        // Fill billing address (India)
+        // Fill billing address (fixed US address)
+        const US_ADDR = { line1: "1523 Elizabeth Ave", city: "Charlotte", state: "NC", stateLabel: "North Carolina", zip: "28204", country: "US" };
         const countrySelectors = [
           'select[name="billingCountry"]',
           'select[autocomplete="billing country"]',
@@ -11520,8 +11521,8 @@ export async function registerReplitAccount(
             const el = page.locator(sel).first();
             const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
             if (visible) {
-              await el.selectOption({ value: "IN" });
-              log(`  Selected country: India`);
+              await el.selectOption({ value: "US" });
+              log(`  Selected country: United States`);
               break;
             }
           } catch {}
@@ -11529,13 +11530,12 @@ export async function registerReplitAccount(
         await page.waitForTimeout(1000);
 
         const addrSelectors = [
-          ['input[name="billingAddressLine1"]', 'input[autocomplete="billing address-line1"]', 'input[placeholder*="Address line 1" i]'],
+          ['input[name="billingAddressLine1"]', 'input[autocomplete="billing address-line1"]', 'input[placeholder*="Address line 1" i]', 'input[placeholder*="address" i]'],
           ['input[name="billingLocality"]', 'input[autocomplete="billing address-level2"]', 'input[placeholder*="City" i]'],
-          ['input[name="billingAdministrativeArea"]', 'select[autocomplete="billing address-level1"]', 'input[placeholder*="State" i]'],
-          ['input[name="billingPostalCode"]', 'input[autocomplete="billing postal-code"]', 'input[placeholder*="PIN" i]', 'input[placeholder*="Postal" i]'],
-          ['input[name="billingPhone"]', 'input[autocomplete="tel"]', 'input[type="tel"]'],
+          ['input[name="billingAdministrativeArea"]', 'select[autocomplete="billing address-level1"]', 'select[name*="state" i]', 'input[placeholder*="State" i]'],
+          ['input[name="billingPostalCode"]', 'input[autocomplete="billing postal-code"]', 'input[placeholder*="ZIP" i]', 'input[placeholder*="Postal" i]'],
         ];
-        const addrValues = [addr.line1, addr.city, addr.state, addr.zip, addr.phone];
+        const addrValues = [US_ADDR.line1, US_ADDR.city, US_ADDR.state, US_ADDR.zip];
         for (let i = 0; i < addrSelectors.length; i++) {
           for (const sel of addrSelectors[i]) {
             try {
@@ -11544,7 +11544,7 @@ export async function registerReplitAccount(
               if (visible) {
                 const tag = await el.evaluate((e: Element) => (e as HTMLElement).tagName.toLowerCase());
                 if (tag === "select") {
-                  await el.selectOption(addrValues[i]);
+                  await el.selectOption(addrValues[i]).catch(() => el.selectOption({ label: US_ADDR.stateLabel }).catch(() => {}));
                 } else {
                   await el.fill(addrValues[i]);
                 }
@@ -11556,7 +11556,7 @@ export async function registerReplitAccount(
           await page.waitForTimeout(300);
         }
 
-        log(`  Billing address (India): ${addr.line1}, ${addr.city}, ${addr.state} ${addr.zip}`);
+        log(`  Billing address (US): ${US_ADDR.line1}, ${US_ADDR.city}, ${US_ADDR.state} ${US_ADDR.zip}`);
         await page.waitForTimeout(1000);
 
         // ── IMAP host resolver ──────────────────────────────────────────
@@ -15598,13 +15598,25 @@ export async function checkoutExistingReplitAccount(
       await page.waitForTimeout(400);
     }
 
-    // Billing address (India)
-    const addr = INDIAN_ADDRESSES[Math.floor(Math.random() * INDIAN_ADDRESSES.length)];
-    log(`  Billing: ${addr.line1}, ${addr.city}, ${addr.state} ${addr.zip}`);
+    // Billing address (fixed US address)
+    const US_BILLING = { line1: "1523 Elizabeth Ave", city: "Charlotte", state: "NC", stateLabel: "North Carolina", zip: "28204" };
+    log(`  Billing: ${US_BILLING.line1}, ${US_BILLING.city}, ${US_BILLING.state} ${US_BILLING.zip}`);
+    // Select United States as country if visible
+    for (const cSel of ['select[name="billingCountry"]', 'select[autocomplete="billing country"]', 'select[name*="country" i]', 'select[id*="country" i]']) {
+      try {
+        const el = page.locator(cSel).first();
+        if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await el.selectOption({ value: "US" }).catch(() => el.selectOption({ label: "United States" }).catch(() => {}));
+          log(`  Selected country: United States`);
+          await page.waitForTimeout(600);
+          break;
+        }
+      } catch {}
+    }
     const addrSelectors = [
-      ['input[placeholder*="address" i], input[name*="address" i], input[autocomplete*="address-line1"]', addr.line1],
-      ['input[placeholder*="city" i], input[name*="city" i], input[autocomplete="address-level2"]', addr.city],
-      ['input[placeholder*="zip" i], input[placeholder*="postal" i], input[name*="postal" i]', addr.zip],
+      ['input[placeholder*="address" i], input[name*="address" i], input[autocomplete*="address-line1"], input[name="billingAddressLine1"]', US_BILLING.line1],
+      ['input[placeholder*="city" i], input[name*="city" i], input[autocomplete="address-level2"], input[name="billingLocality"]', US_BILLING.city],
+      ['input[placeholder*="zip" i], input[placeholder*="postal" i], input[name*="postal" i], input[name="billingPostalCode"]', US_BILLING.zip],
     ];
     for (const [sel, val] of addrSelectors) {
       try {
@@ -15615,6 +15627,17 @@ export async function checkoutExistingReplitAccount(
         }
       } catch {}
       await page.waitForTimeout(300);
+    }
+    // State selector
+    for (const sSel of ['select[autocomplete="billing address-level1"]', 'select[name*="state" i]', 'select[id*="state" i]']) {
+      try {
+        const el = page.locator(sSel).first();
+        if (await el.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await el.selectOption({ value: US_BILLING.state }).catch(() => el.selectOption({ label: US_BILLING.stateLabel }).catch(() => {}));
+          log(`  Selected state: ${US_BILLING.stateLabel}`);
+          break;
+        }
+      } catch {}
     }
     await page.waitForTimeout(1000);
 
