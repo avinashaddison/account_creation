@@ -3635,11 +3635,16 @@ export async function registerRoutes(
       const accounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
-      const lines = ["email,password,username,status"];
+      const header = "User ID / Email Address,Mobile Number,Password,Activation Date (eg. 01 Jan 2020),First Secret Question,First Secret Answer,Second Secret Question,Second Secret Answer,Third Secret Question,Third Secret Answer,First Name,Last Name,Account Country,Date of Birth (eg. 01 Jan 2020),Remark";
+      const lines = [header];
+      const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
       for (const a of accounts) {
-        const row = [a.email, a.password, a.username, a.status]
-          .map(v => `"${(v ?? "").replace(/"/g, '""')}"`)
-          .join(",");
+        const row = [
+          esc(a.email), // User ID / Email Address
+          "",            // Mobile Number
+          esc(a.password), // Password
+          "", "", "", "", "", "", "", "", "", "", "", ""  // remaining 12 columns empty
+        ].join(",");
         lines.push(row);
       }
       const csv = lines.join("\n");
