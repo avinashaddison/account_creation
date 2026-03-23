@@ -66,6 +66,7 @@ export interface IStorage {
   getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]>;
   deleteReplitAccount(id: string): Promise<void>;
   updateReplitAccountStatus(id: string, status: string): Promise<ReplitAccount>;
+  bulkUpdateReplitAccountStatus(status: string, ownerId?: string): Promise<number>;
   markReplitCouponExtracted(id: string, couponCode: string): Promise<ReplitAccount>;
   createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount>;
   updateLovableAccount(id: string, data: Partial<InsertLovableAccount>): Promise<LovableAccount>;
@@ -447,6 +448,14 @@ export class DatabaseStorage implements IStorage {
   async updateReplitAccountStatus(id: string, status: string): Promise<ReplitAccount> {
     const [row] = await db.update(replitAccounts).set({ status }).where(eq(replitAccounts.id, id)).returning();
     return row;
+  }
+
+  async bulkUpdateReplitAccountStatus(status: string, ownerId?: string): Promise<number> {
+    const query = ownerId
+      ? db.update(replitAccounts).set({ status }).where(eq(replitAccounts.createdBy, ownerId))
+      : db.update(replitAccounts).set({ status });
+    const rows = await query.returning();
+    return rows.length;
   }
 
   async markReplitCouponExtracted(id: string, couponCode: string): Promise<ReplitAccount> {

@@ -3656,6 +3656,19 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/replit-accounts/bulk-status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.body;
+      if (!status) return res.status(400).json({ error: "status required" });
+      const role = req.session.role;
+      const ownerId = role === "superadmin" ? undefined : req.session.userId;
+      const count = await storage.bulkUpdateReplitAccountStatus(status, ownerId);
+      res.json({ success: true, updated: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.patch("/api/replit-accounts/:id/status", requireAuth, async (req: Request, res: Response) => {
     try {
       const { status } = req.body;
