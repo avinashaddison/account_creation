@@ -191,6 +191,8 @@ export const lovableAccounts = pgTable("lovable_accounts", {
   outlookEmail: text("outlook_email"),
   status: text("status").notNull().default("created"),
   error: text("error"),
+  refreshToken: text("refresh_token"),
+  firebaseUid: text("firebase_uid"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

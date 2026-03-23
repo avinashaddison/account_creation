@@ -72,6 +72,7 @@ export interface IStorage {
   updateLovableAccount(id: string, data: Partial<InsertLovableAccount>): Promise<LovableAccount>;
   getAllLovableAccounts(): Promise<LovableAccount[]>;
   getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]>;
+  getLovableAccountsPendingVerification(): Promise<LovableAccount[]>;
   deleteLovableAccount(id: string): Promise<void>;
   createV0Account(data: InsertV0Account): Promise<V0Account>;
   getAllV0Accounts(): Promise<V0Account[]>;
@@ -482,6 +483,12 @@ export class DatabaseStorage implements IStorage {
 
   async getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]> {
     return db.select().from(lovableAccounts).where(eq(lovableAccounts.createdBy, ownerId)).orderBy(desc(lovableAccounts.createdAt));
+  }
+
+  async getLovableAccountsPendingVerification(): Promise<LovableAccount[]> {
+    return db.select().from(lovableAccounts)
+      .where(eq(lovableAccounts.status, "pending_verification"))
+      .orderBy(desc(lovableAccounts.createdAt));
   }
 
   async deleteLovableAccount(id: string): Promise<void> {

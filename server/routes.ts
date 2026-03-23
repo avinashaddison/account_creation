@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3744,6 +3744,24 @@ export async function registerRoutes(
                 broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
               }
               broadcast({ type: "lovable_create_result", bulkId, batchId, success: true, email: result.email, index: i + 1, total: toUse.length }, userId);
+            } else if (result.pendingVerification) {
+              try {
+                await storage.createLovableAccount({
+                  email: result.email!,
+                  password: result.password || null,
+                  outlookEmail: acc.email,
+                  status: "pending_verification",
+                  error: result.error || null,
+                  refreshToken: result.refreshToken || null,
+                  firebaseUid: result.firebaseUid || null,
+                  createdBy: userId,
+                });
+                successCount++;
+                broadcastLog(batchId, bulkId, `⏳ [${i + 1}/${toUse.length}] Pending verification — ${result.email}`, userId);
+              } catch (dbErr: any) {
+                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+              }
+              broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, pending: true, email: result.email, index: i + 1, total: toUse.length }, userId);
             } else {
               failCount++;
               broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
@@ -3809,6 +3827,24 @@ export async function registerRoutes(
               broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
             }
             broadcast({ type: "lovable_create_result", createId, batchId, success: true, email: result.email, password: result.password }, userId);
+          } else if (result.pendingVerification) {
+            // Firebase signup succeeded but email not yet verified — save as pending
+            try {
+              await storage.createLovableAccount({
+                email: result.email!,
+                password: result.password || null,
+                outlookEmail,
+                status: "pending_verification",
+                error: result.error || null,
+                refreshToken: result.refreshToken || null,
+                firebaseUid: result.firebaseUid || null,
+                createdBy: userId,
+              });
+              broadcastLog(batchId, createId, `⏳ Account saved as pending_verification — check Hotmail inbox for verification email`, userId);
+            } catch (dbErr: any) {
+              broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
+            }
+            broadcast({ type: "lovable_create_result", createId, batchId, success: false, pending: true, email: result.email, error: result.error }, userId);
           } else {
             broadcastLog(batchId, createId, `❌ Lovable creation failed: ${result.error || "Unknown error"}`, userId);
             broadcast({ type: "lovable_create_result", createId, batchId, success: false, error: result.error }, userId);
@@ -4314,6 +4350,102 @@ export async function registerRoutes(
     const tail = lines.slice(-40).join("\n");
     res.json({ logFile, lineCount: lines.length, tail, done: log.includes("🏁 Done") || log.includes("🎉 SUCCESS") });
   });
+
+  // ── Background: poll Firebase for pending Lovable email verifications ─────
+  const FIREBASE_API_KEY = "AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw";
+  const lovableOnboardingInProgress = new Set<string>();
+
+  async function checkPendingLovableVerifications() {
+    try {
+      const pending = await storage.getLovableAccountsPendingVerification();
+      if (pending.length === 0) return;
+      console.log(`[LovablePoller] Checking ${pending.length} pending verification account(s)...`);
+
+      for (const acct of pending) {
+        if (!acct.refreshToken || lovableOnboardingInProgress.has(acct.id)) continue;
+        try {
+          // Exchange refreshToken for a fresh idToken
+          const tokenResp = await fetch(
+            `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ grant_type: "refresh_token", refresh_token: acct.refreshToken }),
+            }
+          );
+          if (!tokenResp.ok) {
+            console.log(`[LovablePoller] Token refresh failed for ${acct.email}: ${tokenResp.status}`);
+            continue;
+          }
+          const tokenData = await tokenResp.json() as any;
+          const freshIdToken = tokenData.id_token;
+          if (!freshIdToken) continue;
+
+          // Check emailVerified via accounts:lookup
+          const lookupResp = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken: freshIdToken }),
+            }
+          );
+          if (!lookupResp.ok) continue;
+          const lookupData = await lookupResp.json() as any;
+          const user = lookupData.users?.[0];
+          if (!user?.emailVerified) {
+            console.log(`[LovablePoller] ${acct.email} — not yet verified`);
+            continue;
+          }
+
+          // Email is verified! Update refreshToken and trigger onboarding
+          console.log(`[LovablePoller] ✅ ${acct.email} is now verified! Triggering onboarding...`);
+          await storage.updateLovableAccount(acct.id, {
+            status: "verifying",
+            refreshToken: tokenData.refresh_token || acct.refreshToken,
+          });
+          lovableOnboardingInProgress.add(acct.id);
+
+          // Trigger onboarding in background
+          (async () => {
+            const logLines: string[] = [];
+            const log = (msg: string) => {
+              console.log(`[LovableOnboard/${acct.email.split("@")[0]}] ${msg}`);
+              logLines.push(msg);
+            };
+            try {
+              if (!acct.password) {
+                await storage.updateLovableAccount(acct.id, { status: "verified", error: "No password stored — manual login required" });
+                return;
+              }
+              const result = await loginAndCompleteOnboarding(acct.email, acct.password, log);
+              if (result.success) {
+                await storage.updateLovableAccount(acct.id, { status: "created", error: null });
+                console.log(`[LovablePoller] ✅ Onboarding complete for ${acct.email}`);
+                // Broadcast to the account owner
+                if (acct.createdBy) {
+                  broadcast({ type: "lovable_verified", email: acct.email, message: `✅ ${acct.email} email verified + onboarding complete!` }, acct.createdBy);
+                }
+              } else {
+                await storage.updateLovableAccount(acct.id, { status: "verified", error: result.error || "Onboarding failed" });
+                console.log(`[LovablePoller] ⚠️ Onboarding failed for ${acct.email}: ${result.error}`);
+              }
+            } finally {
+              lovableOnboardingInProgress.delete(acct.id);
+            }
+          })();
+        } catch (pollErr: any) {
+          console.log(`[LovablePoller] Error for ${acct.email}: ${(pollErr.message || "").substring(0, 100)}`);
+        }
+      }
+    } catch (err: any) {
+      console.log(`[LovablePoller] Outer error: ${(err.message || "").substring(0, 100)}`);
+    }
+  }
+
+  // Run immediately then every 60 seconds
+  setTimeout(checkPendingLovableVerifications, 10000);
+  setInterval(checkPendingLovableVerifications, 60000);
 
   return httpServer;
 }

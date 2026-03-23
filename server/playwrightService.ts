@@ -12728,7 +12728,7 @@ export async function registerLovableAccount(
   outlookEmail: string,
   outlookPassword: string,
   log: (msg: string) => void
-): Promise<{ success: boolean; email?: string; password?: string; error?: string }> {
+): Promise<{ success: boolean; email?: string; password?: string; error?: string; pendingVerification?: boolean; refreshToken?: string; firebaseUid?: string }> {
   let browser: any = null;
   let page: any = null;
 
@@ -12966,6 +12966,8 @@ export async function registerLovableAccount(
 
     // Log relevant API responses for debugging
     let capturedFirebaseIdToken: string | null = null;
+    let capturedFirebaseRefreshToken: string | null = null;
+    let capturedFirebaseUid: string | null = null;
     page.on("response", async (resp: any) => {
       const rUrl = resp.url() || "";
       const status = resp.status();
@@ -12982,6 +12984,24 @@ export async function registerLovableAccount(
               if (parsed.idToken) {
                 capturedFirebaseIdToken = parsed.idToken;
                 log(`✅ Firebase idToken captured (length: ${parsed.idToken.length})`);
+              }
+              if (parsed.refreshToken && !capturedFirebaseRefreshToken) {
+                capturedFirebaseRefreshToken = parsed.refreshToken;
+                log(`✅ Firebase refreshToken captured`);
+              }
+              if (parsed.localId && !capturedFirebaseUid) {
+                capturedFirebaseUid = parsed.localId;
+                log(`✅ Firebase UID captured: ${parsed.localId}`);
+              }
+            } catch {}
+          }
+          // Also capture refreshToken from accounts:lookup response
+          if (rUrl.includes("identitytoolkit.googleapis.com") && rUrl.includes("accounts:lookup") && status === 200) {
+            try {
+              const parsed = JSON.parse(body);
+              const user = parsed.users?.[0];
+              if (user?.localId && !capturedFirebaseUid) {
+                capturedFirebaseUid = user.localId;
               }
             } catch {}
           }
@@ -13039,6 +13059,41 @@ export async function registerLovableAccount(
     }
 
     await waitMs(500);
+
+    // Fire queued Turnstile callbacks NOW so the Continue button becomes enabled
+    // The fake Turnstile queues callbacks in __pendingTsCallbacks until the real token fires them
+    const earlyToken = await Promise.race([
+      capsolverTokenPromise,
+      new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+    ]);
+    if (earlyToken) {
+      const cbFired = await page.evaluate((token: string) => {
+        (window as any).__tsCurrentToken = token;
+        const cbs: any[] = (window as any).__pendingTsCallbacks || [];
+        let n = 0;
+        cbs.forEach((cb: any) => { try { cb(token); n++; } catch {} });
+        (window as any).__pendingTsCallbacks = [];
+        // Also set the hidden input
+        document.querySelectorAll('input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]')
+          .forEach((el: any) => { el.value = token; });
+        return n;
+      }, earlyToken);
+      log(`Pre-Continue: fired ${cbFired} Turnstile callback(s) with token — button should be enabled`);
+      await waitMs(1500);
+    } else {
+      log("⚠️ CapSolver token not ready in 8s — proceeding with Continue click anyway");
+    }
+
+    // Force-enable the Continue button regardless
+    await page.evaluate(() => {
+      (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
+        const t = (b.textContent || "").toLowerCase();
+        if (t.includes("continue") && !t.includes("google") && !t.includes("github") && !t.includes("cookie")) {
+          b.disabled = false; b.removeAttribute("disabled"); b.removeAttribute("aria-disabled");
+        }
+      });
+    });
+
     log("Clicking Continue...");
     await clickButton(page, [
       'button:has-text("Continue")',
@@ -13184,26 +13239,48 @@ export async function registerLovableAccount(
         log("✅ Account created and logged in directly — no email verification needed!");
         return { success: true, email: outlookEmail, password: generatedPassword };
       }
-      if (postText.toLowerCase().includes("already") &&
-          (postText.toLowerCase().includes("email") || postText.toLowerCase().includes("account"))) {
-        return { success: false, error: "Lovable account already exists for this email" };
-      }
-      if (postText.toLowerCase().includes("verify") || postText.toLowerCase().includes("check your email") ||
-          postText.toLowerCase().includes("we emailed") || postText.toLowerCase().includes("email sent")) {
-        log("✅ Signup accepted — awaiting verification email");
-      } else if (postUrl.includes("lovable.dev/signup")) {
-        log("Still on signup page — one more JS submit attempt...");
-        await page.evaluate(() => {
-          const b = (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).find((b) => {
-            const t = (b.textContent || "").toLowerCase();
-            return (t.includes("create") || t.includes("continue")) && !t.includes("google") && !t.includes("github");
+
+      // If Firebase signup succeeded (idToken captured), skip false-positive "already exists" detection
+      // and proceed directly to email scanning with Firebase resend
+      if (capturedFirebaseIdToken) {
+        log("✅ Firebase signup confirmed (idToken captured) — skipping retry, proceeding to email scan with Firebase resend");
+        // Send verification email immediately via Firebase API using captured idToken
+        try {
+          const immediateResend = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }),
+            }
+          );
+          const immediateResendBody = await immediateResend.json();
+          log(`Firebase immediate send response: ${JSON.stringify(immediateResendBody).substring(0, 150)}`);
+        } catch (ire: any) {
+          log(`⚠️ Firebase immediate send failed: ${(ire.message || "").substring(0, 60)}`);
+        }
+      } else {
+        if (postText.toLowerCase().includes("already") &&
+            (postText.toLowerCase().includes("email") || postText.toLowerCase().includes("account"))) {
+          return { success: false, error: "Lovable account already exists for this email" };
+        }
+        if (postText.toLowerCase().includes("verify") || postText.toLowerCase().includes("check your email") ||
+            postText.toLowerCase().includes("we emailed") || postText.toLowerCase().includes("email sent")) {
+          log("✅ Signup accepted — awaiting verification email");
+        } else if (postUrl.includes("lovable.dev/signup")) {
+          log("Still on signup page — one more JS submit attempt...");
+          await page.evaluate(() => {
+            const b = (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).find((b) => {
+              const t = (b.textContent || "").toLowerCase();
+              return (t.includes("create") || t.includes("continue")) && !t.includes("google") && !t.includes("github");
+            });
+            if (b) b.click();
           });
-          if (b) b.click();
-        });
-        await waitMs(10000);
-        const r2Url = page.url();
-        const r2Text = await page.evaluate(() => document.body?.innerText || "");
-        log(`After retry: ${r2Url} — ${r2Text.substring(0, 100).replace(/\s+/g, " ")}`);
+          await waitMs(10000);
+          const r2Url = page.url();
+          const r2Text = await page.evaluate(() => document.body?.innerText || "");
+          log(`After retry: ${r2Url} — ${r2Text.substring(0, 100).replace(/\s+/g, " ")}`);
+        }
       }
     } else if (magicLinkSent) {
       log("✅ Magic link sent (no password field) — checking Outlook for verification email");
@@ -13214,9 +13291,47 @@ export async function registerLovableAccount(
       }
     }
 
+    let verificationLink: string | null = null;
+    let verificationCode: string | null = null;
+    let owaBrowser: any = null;
+
+    // ── STEP 4.5: Dashboard bypass check ──────────────────────────────────────
+    // Lovable may allow dashboard access before email verification. Try navigating
+    // directly — if successful, we skip the entire email-scan phase (saves 5+ min).
+    const currentUrlForBypass = page.url();
+    if (capturedFirebaseIdToken && currentUrlForBypass.includes("verify-email")) {
+      log("🔍 Testing if Lovable allows dashboard access without email verification...");
+      try {
+        await page.goto("https://lovable.dev/getting-started", { waitUntil: "domcontentloaded", timeout: 20000 });
+        await waitMs(5000);
+        const bypassUrl = page.url();
+        const bypassText = await page.evaluate(() => document.body?.innerText || "");
+        log(`Bypass check → URL: ${bypassUrl.substring(0, 80)}`);
+        const onDash = bypassUrl.includes("lovable.dev") &&
+          !bypassUrl.includes("/verify-email") && !bypassUrl.includes("/login") &&
+          !bypassUrl.includes("/signup") && !bypassUrl.includes("/auth/") &&
+          (bypassUrl.includes("getting-started") || bypassUrl.includes("/projects") ||
+           bypassUrl.includes("/builder") || bypassText.toLowerCase().includes("pick your style") ||
+           bypassText.toLowerCase().includes("what are you building") ||
+           bypassText.toLowerCase().includes("dark") || bypassText.toLowerCase().includes("light"));
+        if (onDash) {
+          log("✅ Dashboard bypass succeeded — Lovable allows unverified access! Skipping email scan.");
+          verificationLink = "DASHBOARD_BYPASS";
+        } else {
+          log(`ℹ️ Email verification enforced (redirected to ${bypassUrl.substring(0, 50)}) — proceeding with IMAP scan`);
+          await page.goto("https://lovable.dev/verify-email", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        }
+      } catch (bypassErr: any) {
+        log(`Bypass check failed: ${(bypassErr.message || "").substring(0, 60)} — proceeding with IMAP`);
+        await page.goto("https://lovable.dev/verify-email", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      }
+    }
+
     // ── STEP 5: Check Outlook inbox for verification email ─────────────────
     // Wait 35s, then click Resend on Lovable page to ensure email is sent,
     // then wait another 50s before opening Outlook
+    // (skipped if dashboard bypass already succeeded)
+    if (!verificationLink) {
     log("Waiting 35s before clicking Lovable Resend...");
     await waitMs(35000);
     try {
@@ -13232,52 +13347,157 @@ export async function registerLovableAccount(
     }
     log("Waiting 50s more for verification email to arrive...");
     await waitMs(50000);
+    } // end if (!verificationLink) for Step 5 setup
 
-    let verificationLink: string | null = null;
-    let verificationCode: string | null = null;
-    let owaBrowser: any = null;
+    // ── IMAP scan (primary) — Hotmail supports IMAP; bypasses browser anti-bot ─
+    async function imapScanForLovable(delayLabel: string): Promise<boolean> {
+      try {
+        const { ImapFlow } = await import("imapflow");
+        log(`[IMAP/${delayLabel}] Connecting to imap-mail.outlook.com:993...`);
+        const client = new ImapFlow({
+          host: "imap-mail.outlook.com",
+          port: 993,
+          secure: true,
+          auth: { user: outlookEmail, pass: outlookPassword },
+          logger: false,
+          tls: { rejectUnauthorized: false },
+        });
+        // Prevent unhandled 'error' event from crashing the process (ECONNRESET etc.)
+        client.on("error", (err: any) => {
+          log(`[IMAP/${delayLabel}] Socket error: ${(err?.message || "").substring(0, 80)}`);
+        });
+        await client.connect();
+        log(`[IMAP/${delayLabel}] ✅ Connected`);
+
+        const foldersToCheck = ["INBOX", "Junk", "Junk Email", "Bulk", "Spam"];
+        for (const folder of foldersToCheck) {
+          try {
+            const lock = await client.getMailboxLock(folder);
+            try {
+              // Search for emails from lovable.dev (use UIDs for reliable fetching)
+              let searchResults: number[] = await client.search({ from: "lovable.dev" }, { uid: true }).catch(() => [] as number[]);
+              if (!searchResults.length) {
+                searchResults = await client.search({ subject: "Lovable" }, { uid: true }).catch(() => [] as number[]);
+              }
+              log(`[IMAP/${delayLabel}] ${folder}: ${searchResults.length} matching messages`);
+              if (searchResults.length > 0) {
+                // Fetch the most recent matching messages (last 3)
+                const uids = searchResults.slice(-3).reverse();
+                for (const uid of uids) {
+                  const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true }).catch(() => null);
+                  if (!msg) continue;
+                  const rawText = msg.source?.toString("utf8") || "";
+                  log(`[IMAP/${delayLabel}] ${folder} uid=${uid} from=${msg.envelope?.from?.[0]?.address || "?"} len=${rawText.length}`);
+
+                  // Extract verification link from raw email
+                  // Priority 0: Safelinks
+                  const safelinkRe = /safelinks\.protection\.outlook\.com\/\?url=([^&"'\s>]+)/gi;
+                  let slm: RegExpExecArray | null;
+                  while ((slm = safelinkRe.exec(rawText)) !== null) {
+                    try {
+                      const decoded = decodeURIComponent(slm[1]);
+                      if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
+                        verificationLink = decoded.replace(/["'<>)]/g, "").trim();
+                        log(`[IMAP/${delayLabel}] ✅ Found via Safelinks: ${verificationLink.substring(0, 120)}`);
+                        return true;
+                      }
+                    } catch {}
+                  }
+                  // Priority 1: Direct lovable.dev links (may be quoted-printable or base64 encoded)
+                  // Decode quoted-printable (=3D → =, etc.)
+                  const decodedText = rawText.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+                  const lovableRe = /https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^\s"'<>\r\n)]*/g;
+                  const allMatches = [...decodedText.matchAll(lovableRe)];
+                  for (const m of allMatches) {
+                    const url = m[0].replace(/=+$/, "").trim();
+                    if (url.includes("auth/action") || url.includes("verify") || url.includes("confirm") || url.includes("oobCode") || url.length > 100) {
+                      verificationLink = url;
+                      log(`[IMAP/${delayLabel}] ✅ Found Lovable link: ${verificationLink.substring(0, 120)}`);
+                      return true;
+                    }
+                  }
+                }
+              }
+            } finally {
+              lock.release();
+            }
+          } catch (folderErr: any) {
+            log(`[IMAP/${delayLabel}] ${folder} error: ${(folderErr.message || "").substring(0, 60)}`);
+          }
+        }
+        await client.logout();
+        log(`[IMAP/${delayLabel}] No Lovable email found via IMAP`);
+        return false;
+      } catch (imapErr: any) {
+        const imapErrMsg = (imapErr.message || imapErr.responseText || "").substring(0, 200);
+        const isBasicAuthBlocked = imapErrMsg.includes("BasicAuthBlocked") || imapErrMsg.includes("basic auth");
+        if (isBasicAuthBlocked) {
+          log(`[IMAP/${delayLabel}] ❌ Microsoft blocked Basic Auth IMAP for this account — OAuth2 required. Trying dashboard bypass instead.`);
+        } else {
+          log(`[IMAP/${delayLabel}] IMAP connection failed: ${imapErrMsg.substring(0, 80)}`);
+        }
+        return false;
+      }
+    }
+
+    // Try IMAP first (primary — no bot detection issues)
+    // (skipped if dashboard bypass already succeeded)
+    if (!verificationLink) {
+    log("📬 Scanning Hotmail inbox via IMAP (bypasses browser anti-bot)...");
+    let imapFound = await imapScanForLovable("initial");
+    if (!imapFound) {
+      // Wait 30s more and retry IMAP — email may still be in transit
+      log("IMAP initial scan empty — waiting 30s and retrying...");
+      await waitMs(30000);
+      imapFound = await imapScanForLovable("retry1");
+    }
+    if (!imapFound) {
+      // Firebase resend + wait more
+      if (capturedFirebaseIdToken) {
+        log("📤 Resending via Firebase API then waiting 60s...");
+        try {
+          const rr = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }),
+          });
+          const rb = await rr.json();
+          log(`Firebase resend (IMAP path): ${JSON.stringify(rb).substring(0, 100)}`);
+        } catch {}
+      }
+      await waitMs(60000);
+      imapFound = await imapScanForLovable("retry2");
+    }
+    if (!imapFound) {
+      await waitMs(90000);
+      imapFound = await imapScanForLovable("retry3");
+    }
+
+    if (imapFound) {
+      log("✅ IMAP found Lovable verification link — skipping browser OWA scan");
+    } else {
+      // ── Browser-based OWA fallback (in case IMAP fails for this account) ──
+      log("⚠️ IMAP scan found nothing — attempting browser OWA as fallback...");
 
     try {
       const { chromium: chrm } = await import("playwright");
 
+      // ZenRows blocks Microsoft/Outlook domains (returns host_not_allowed) — always use local headless browser for OWA
       let owaCtx: any = null;
-      let zenrowsUrlForOwa = "";
-      try {
-        const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
-        if (zrUrlRow.rows.length > 0 && zrUrlRow.rows[0].value) {
-          zenrowsUrlForOwa = zrUrlRow.rows[0].value as string;
-        }
-      } catch {}
-
-      if (zenrowsUrlForOwa) {
-        try {
-          log("OWA: Connecting via ZenRows proxy browser...");
-          owaBrowser = await chrm.connectOverCDP(zenrowsUrlForOwa, { timeout: 60000 });
-          owaCtx = owaBrowser.contexts()[0] || await owaBrowser.newContext();
-          log("OWA: Connected via ZenRows — Outlook login will use proxy browser");
-        } catch (zrOwaErr: any) {
-          log(`⚠️ ZenRows OWA connection failed (${(zrOwaErr.message || "").substring(0, 60)}) — falling back to local browser`);
-          owaBrowser = null;
-          zenrowsUrlForOwa = "";
-        }
-      }
-
-      if (!zenrowsUrlForOwa) {
-        log("OWA: Launching local headless browser for Outlook...");
-        owaBrowser = await chrm.launch({
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-        });
-        owaCtx = await owaBrowser.newContext({
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          viewport: { width: 1366, height: 768 },
-          locale: "en-US",
-        });
-        await owaCtx.addInitScript(() => {
-          Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-          (window as any).chrome = { runtime: {} };
-        });
-      }
+      log("OWA: Launching local headless browser for Outlook (ZenRows blocks Microsoft domains)...");
+      owaBrowser = await chrm.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+      });
+      owaCtx = await owaBrowser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+      });
+      await owaCtx.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        (window as any).chrome = { runtime: {} };
+      });
 
       const owaPage = await owaCtx.newPage();
       owaPage.setDefaultTimeout(30000);
@@ -13329,6 +13549,11 @@ export async function registerLovableAccount(
         log(`⚠️ Could not reach Outlook — URL: ${curUrl.substring(0, 80)}`);
       } else {
         log("✅ Logged into Outlook — scanning for Lovable verification email...");
+        // Diagnostic: log what OWA shows immediately after login
+        try {
+          const diagInboxText = await owaPage.evaluate(() => (document.body?.innerText || "").substring(0, 400).replace(/\s+/g, " ")).catch(() => "");
+          log(`OWA inbox snapshot: ${diagInboxText.substring(0, 300)}`);
+        } catch {}
 
         async function extractLink(p: any): Promise<boolean> {
           const body = await p.evaluate(() => document.body?.innerText || "");
@@ -13515,49 +13740,139 @@ export async function registerLovableAccount(
         }
 
         // Helper: close current OWA browser and open a fresh one, log in, return new page
+        // Always uses local headless browser (not ZenRows) — OWA doesn't need anti-bot proxy
         async function freshOwaPage(label: string): Promise<any> {
           if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
           const { chromium: c2 } = await import("playwright");
-          let ctx2: any = null;
-          let zrUrl2 = "";
-          try {
-            const r2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
-            if (r2.rows.length > 0 && r2.rows[0].value) zrUrl2 = r2.rows[0].value as string;
-          } catch {}
-          if (zrUrl2) {
-            try {
-              log(`${label}: Opening fresh ZenRows OWA session...`);
-              owaBrowser = await c2.connectOverCDP(zrUrl2, { timeout: 60000 });
-              ctx2 = await owaBrowser.newContext();
-            } catch (e2: any) { log(`${label}: ZenRows failed (${(e2.message||"").substring(0,50)}) — local fallback`); owaBrowser = null; zrUrl2 = ""; }
-          }
-          if (!zrUrl2) {
-            owaBrowser = await c2.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] });
-            ctx2 = await owaBrowser.newContext({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", viewport: { width: 1366, height: 768 }, locale: "en-US" });
-          }
+          log(`${label}: Launching local headless browser for fresh OWA session...`);
+          owaBrowser = await c2.launch({
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-web-security"],
+          });
+          const ctx2 = await owaBrowser.newContext({
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport: { width: 1366, height: 768 },
+            locale: "en-US",
+          });
+          await ctx2.addInitScript(() => {
+            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+            (window as any).chrome = { runtime: {} };
+          });
           const p2 = await ctx2.newPage();
           p2.setDefaultTimeout(30000);
+
+          // Login to Microsoft
           await p2.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
-          await waitMs(2000);
+          await waitMs(3000);
+          log(`${label}: Login page URL: ${p2.url().substring(0, 80)}`);
+
+          // Fill email
           const ei2 = await p2.$('input[type="email"], input[name="loginfmt"]');
-          if (ei2) { await ei2.fill(outlookEmail); const nx2 = await p2.$('input[type="submit"], button[type="submit"]'); if (nx2) { await nx2.click(); await waitMs(2500); } }
+          if (ei2) {
+            await ei2.fill(outlookEmail);
+            const nx2 = await p2.$('input[type="submit"], button[type="submit"]');
+            if (nx2) { await nx2.click(); await waitMs(3000); }
+            log(`${label}: Email filled, URL: ${p2.url().substring(0, 80)}`);
+          } else {
+            log(`${label}: ⚠️ No email input found on login page`);
+          }
+
+          // Fill password
           const pi2 = await p2.$('input[type="password"], input[name="passwd"]');
-          if (pi2) { await pi2.fill(outlookPassword); const si2 = await p2.$('input[type="submit"], button[type="submit"]'); if (si2) { await si2.click(); await waitMs(4000); } }
-          const u2 = p2.url();
+          if (pi2) {
+            await pi2.fill(outlookPassword);
+            const si2 = await p2.$('input[type="submit"], button[type="submit"]');
+            if (si2) { await si2.click(); await waitMs(6000); }
+            log(`${label}: Password filled, URL: ${p2.url().substring(0, 80)}`);
+          } else {
+            log(`${label}: ⚠️ No password input found`);
+          }
+
+          // Handle "Stay signed in?" prompt
+          const stayBtn = await p2.$('input[id="idBtn_Back"], button:has-text("Yes"), input[value="Yes"]');
+          if (stayBtn) { await stayBtn.click(); await waitMs(3000); log(`${label}: Clicked Stay signed in`); }
+          const noBtn = await p2.$('button:has-text("No"), input[id="idBtn_Back"]');
+          if (noBtn) { await noBtn.click(); await waitMs(3000); log(`${label}: Dismissed Stay signed in`); }
+
+          // If still not on OWA, navigate directly
+          let u2 = p2.url();
           if (u2.includes("account.live.com") || u2.includes("account.microsoft.com")) {
             await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await waitMs(3000);
-          }
-          if (!p2.url().includes("outlook.live.com") && !p2.url().includes("outlook.office")) {
-            await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
             await waitMs(5000);
+          } else if (!u2.includes("outlook.live.com") && !u2.includes("outlook.office")) {
+            await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitMs(7000);
           }
           log(`${label}: OWA ready — ${p2.url().substring(0, 80)}`);
           return p2;
         }
 
-        let found = await scanInboxBothTabs(owaPage);
-        if (!found) found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk");
+        // Outlook Search — fastest way to find the email regardless of which folder it's in
+        async function searchOutlookForLovable(p: any, label: string): Promise<boolean> {
+          // First navigate to clean inbox to avoid the bO=1/msalAuthRedirect "Something went wrong" error
+          try {
+            const diagUrl = p.url();
+            if (diagUrl.includes("bO=1") || diagUrl.includes("msalAuthRedirect") || diagUrl.includes("sessionId=")) {
+              log(`${label}: Cleaning up auth redirect params — navigating to clean inbox...`);
+              await p.goto("https://outlook.live.com/mail/0/", { waitUntil: "domcontentloaded", timeout: 20000 });
+              await new Promise((r) => setTimeout(r, 5000));
+            }
+          } catch {}
+
+          // Log current page state for diagnostics
+          try {
+            const diagUrl = p.url();
+            const diagText = await p.evaluate(() => (document.body?.innerText || "").substring(0, 200).replace(/\s+/g, " ")).catch(() => "");
+            log(`${label} search start — current URL: ${diagUrl.substring(0, 80)}`);
+            log(`${label} search start — page text: ${diagText.substring(0, 150)}`);
+          } catch {}
+
+          // Try both OWA search URL formats
+          const searchUrls = [
+            `https://outlook.live.com/mail/0/search/id/results?searchterm=lovable`,
+            `https://outlook.live.com/mail/0/search/id/results?searchterm=Lovable&includeBody=true`,
+            `https://outlook.live.com/mail/0/search?searchterm=lovable`,
+          ];
+          for (const sUrl of searchUrls) {
+            try {
+              log(`${label} search: ${sUrl.substring(0, 80)}`);
+              await p.goto(sUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+              await waitMs(10000);
+
+              // Log what the search page shows
+              const searchPageText = await p.evaluate(() => (document.body?.innerText || "").substring(0, 300).replace(/\s+/g, " ")).catch(() => "");
+              const searchPageUrl = p.url();
+              log(`${label} search result URL: ${searchPageUrl.substring(0, 80)}`);
+              log(`${label} search page text: ${searchPageText.substring(0, 200)}`);
+
+              if (await extractLink(p)) { log(`${label}: found via search URL`); return true; }
+
+              // Navigate directly to any email URLs found in search results
+              const emailUrls: string[] = await p.evaluate(() => {
+                return Array.from(document.querySelectorAll('a[href]') as NodeListOf<HTMLAnchorElement>)
+                  .map((a) => a.href)
+                  .filter((h) => /\/mail\/\d+\/[^/]+\/id\/[^?#]+/.test(h))
+                  .slice(0, 5);
+              }).catch(() => [] as string[]);
+              log(`${label} search results: ${emailUrls.length} direct email URLs`);
+              for (const eu of emailUrls) {
+                try {
+                  await p.goto(eu, { waitUntil: "domcontentloaded", timeout: 20000 });
+                  await waitMs(4000);
+                  if (await extractLink(p)) return true;
+                } catch {}
+              }
+            } catch (se: any) {
+              log(`${label} search error: ${(se.message || "").substring(0, 50)}`);
+            }
+          }
+          return false;
+        }
+
+        // Scan junk FIRST (confirmed destination for Lovable emails), then inbox, then search
+        let found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk");
+        if (!found) found = await scanInboxBothTabs(owaPage);
+        if (!found) found = await searchOutlookForLovable(owaPage, "initial");
         if (!found) {
           for (const f of ["clutter", "other"]) {
             found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, f);
@@ -13571,8 +13886,9 @@ export async function registerLovableAccount(
           await waitMs(60000);
           try {
             const retryPage = await freshOwaPage("retry-scan");
-            found = await scanInboxBothTabs(retryPage);
-            if (!found) found = await scanFolder(retryPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
+            found = await scanFolder(retryPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
+            if (!found) found = await scanInboxBothTabs(retryPage);
+            if (!found) found = await searchOutlookForLovable(retryPage, "retry");
             if (!found) {
               for (const f of ["clutter", "other"]) {
                 found = await scanFolder(retryPage, `https://outlook.live.com/mail/0/${f}`, `${f}-retry`);
@@ -13610,8 +13926,9 @@ export async function registerLovableAccount(
           await waitMs(90000);
           try {
             const finalPage = await freshOwaPage("final-scan");
-            found = await scanInboxBothTabs(finalPage);
-            if (!found) found = await scanFolder(finalPage, "https://outlook.live.com/mail/0/junkemail", "junk-final");
+            found = await scanFolder(finalPage, "https://outlook.live.com/mail/0/junkemail", "junk-final");
+            if (!found) found = await scanInboxBothTabs(finalPage);
+            if (!found) found = await searchOutlookForLovable(finalPage, "final");
             if (!found) {
               for (const f of ["clutter", "other", "archive"]) {
                 found = await scanFolder(finalPage, `https://outlook.live.com/mail/0/${f}`, `${f}-final`);
@@ -13630,47 +13947,166 @@ export async function registerLovableAccount(
     } finally {
       if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
+    } // end if (!imapFound) browser fallback
+    } // end if (!verificationLink) IMAP scan block
 
     // ── STEP 6: Navigate to verification link ─────────────────────────────
     if (!verificationLink && !verificationCode) {
-      return { success: false, error: "No verification link or code found in Outlook inbox — may be in Spam or signup was WAF-blocked" };
+      // If Firebase signup succeeded, save as pending_verification instead of hard failure
+      if (capturedFirebaseRefreshToken) {
+        log(`⏳ Firebase account created but email not yet verified (Microsoft IMAP blocked). Saving as pending_verification — will auto-complete when email link is clicked.`);
+        return {
+          success: false,
+          pendingVerification: true,
+          email: outlookEmail,
+          password: generatedPassword || undefined,
+          refreshToken: capturedFirebaseRefreshToken,
+          firebaseUid: capturedFirebaseUid || undefined,
+          error: "Pending email verification — click the link in your Hotmail inbox to complete setup",
+        };
+      }
+      return { success: false, error: "No verification link or code found in Outlook inbox — Microsoft blocks basic auth IMAP for consumer accounts" };
     }
 
     let accountVerified = false;
 
-    if (verificationLink) {
-      log("Navigating to verification link...");
-      await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
-      await waitMs(5000);
-      if (await isCloudflarePage(page)) await waitForCloudflare(page, 15000);
-      let vUrl = page.url();
-      let vText = await page.evaluate(() => document.body?.innerText || "");
-      log(`After verification link — URL: ${vUrl.substring(0, 120)}`);
-      // Handle Firebase email action page — may show success + "Continue" button
-      if (vUrl.includes("firebaseapp.com") || vUrl.includes("__/auth/action")) {
-        log("On Firebase action page — checking for continue button or redirect...");
-        const firebaseText = vText.toLowerCase();
-        if (firebaseText.includes("verified") || firebaseText.includes("confirmed") || firebaseText.includes("success")) {
-          log("Firebase confirmed email verified");
-          // Try clicking a Continue button to redirect to lovable.dev
-          const continueBtns = await page.$$('a[href*="lovable.dev"], button:has-text("Continue"), a:has-text("Continue"), a:has-text("continue to")');
-          if (continueBtns.length > 0) {
-            await continueBtns[0].click({ timeout: 8000 }).catch(() => {});
-            await waitMs(5000);
-          } else {
-            // Navigate directly to lovable.dev since Firebase verified the email
-            await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await waitMs(4000);
+    if (verificationLink === "DASHBOARD_BYPASS") {
+      // Already on the dashboard page from the bypass — just confirm we're there
+      log("✅ Dashboard bypass active — already on dashboard, skipping verification navigation");
+      const bypassConfirmUrl = page.url();
+      const bypassConfirmText = await page.evaluate(() => document.body?.innerText || "");
+      accountVerified = bypassConfirmUrl.includes("lovable.dev") &&
+        !bypassConfirmUrl.includes("/verify-email") && !bypassConfirmUrl.includes("/login") &&
+        !bypassConfirmUrl.includes("/signup");
+      log(`Bypass confirmation: accountVerified=${accountVerified} URL=${bypassConfirmUrl.substring(0, 80)}`);
+
+      // Handle getting-started onboarding if we landed there
+      if (accountVerified && bypassConfirmUrl.includes("getting-started")) {
+        log("Starting onboarding wizard (dashboard bypass path)...");
+        for (let step = 1; step <= 8; step++) {
+          await waitMs(2000);
+          const curUrl = page.url();
+          if (!curUrl.includes("getting-started")) { log(`Onboarding done — URL: ${curUrl.substring(0,80)}`); break; }
+          const curText = await page.evaluate(() => document.body?.innerText || "");
+          log(`Onboarding step ${step}: ${curText.substring(0, 80).replace(/\n/g, " ")}`);
+          // Dark theme
+          if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
+            await page.locator('button:has-text("Dark")').first().click({ timeout: 5000 }).catch(() => {});
+            await waitMs(500);
           }
-          vUrl = page.url();
-          vText = await page.evaluate(() => document.body?.innerText || "");
-          log(`After Firebase continue — URL: ${vUrl.substring(0, 120)}`);
+          // Name
+          if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name")) {
+            await page.locator('input[type="text"]').first().fill("Alex Johnson").catch(() => {});
+            await waitMs(500);
+          }
+          // Role
+          if (curText.toLowerCase().includes("role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer")) {
+            await page.locator('button:has-text("Engineer"), button:has-text("Developer")').first().click({ timeout: 3000 }).catch(() => {});
+            await waitMs(500);
+          }
+          // Use case
+          if (curText.toLowerCase().includes("personal") || curText.toLowerCase().includes("project")) {
+            await page.locator('button:has-text("Personal"), button:has-text("Side project")').first().click({ timeout: 3000 }).catch(() => {});
+            await waitMs(500);
+          }
+          // Next/Continue
+          let advanced = false;
+          for (const label of ["Next", "Continue", "Start building", "Get started", "Finish", "Done"]) {
+            try {
+              const loc = page.locator(`button:has-text("${label}")`).first();
+              if (await loc.isVisible().catch(() => false)) { await loc.click({ timeout: 5000 }); advanced = true; break; }
+            } catch {}
+          }
+          if (!advanced) { log(`No Next button on step ${step}`); break; }
         }
       }
-      accountVerified = vUrl.includes("/builder") || vUrl.includes("/dashboard") || vUrl.includes("/projects") ||
-        vText.toLowerCase().includes("project") || vText.toLowerCase().includes("what are you building") ||
-        (vUrl.includes("lovable.dev") && !vUrl.includes("signup") && !vUrl.includes("login") && !vUrl.includes("/auth/"));
-      log(`Verification result: ${accountVerified ? "✅ Success" : "⚠️ Not confirmed"} — URL: ${vUrl}`);
+    } else if (verificationLink) {
+      // ── Try Firebase API verification first (avoids stale browser session) ──
+      let apiVerified = false;
+      const LOVABLE_FIREBASE_KEY = "AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw";
+      try {
+        const linkUrl = new URL(verificationLink);
+        const oobCode = linkUrl.searchParams.get("oobCode");
+        if (oobCode) {
+          log(`🔑 Applying email verification via Firebase API (oobCode: ${oobCode.substring(0, 20)}...)`);
+          const verifyResp = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${LOVABLE_FIREBASE_KEY}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ oobCode }),
+            }
+          );
+          const verifyData = await verifyResp.json() as any;
+          if (verifyResp.ok && verifyData.emailVerified) {
+            log(`✅ Email verified via Firebase API! emailVerified=${verifyData.emailVerified}`);
+            apiVerified = true;
+            accountVerified = true;
+          } else {
+            log(`Firebase API verify response: ${JSON.stringify(verifyData).substring(0, 200)}`);
+          }
+        }
+      } catch (apiErr: any) {
+        log(`Firebase API verify error: ${(apiErr.message || "").substring(0, 100)}`);
+      }
+
+      let vUrl = "";
+      let vText = "";
+
+      if (!apiVerified) {
+        // Fall back: try browser navigation (original ZenRows page, may be stale)
+        log("Navigating to verification link (browser fallback)...");
+        try {
+          await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
+          await waitMs(5000);
+          if (await isCloudflarePage(page)) await waitForCloudflare(page, 15000);
+          vUrl = page.url();
+          vText = await page.evaluate(() => document.body?.innerText || "");
+          log(`After verification link — URL: ${vUrl.substring(0, 120)}`);
+          // Handle Firebase email action page
+          if (vUrl.includes("firebaseapp.com") || vUrl.includes("__/auth/action")) {
+            log("On Firebase action page — checking for continue button or redirect...");
+            const firebaseText = vText.toLowerCase();
+            if (firebaseText.includes("verified") || firebaseText.includes("confirmed") || firebaseText.includes("success")) {
+              log("Firebase confirmed email verified");
+              const continueBtns = await page.$$('a[href*="lovable.dev"], button:has-text("Continue"), a:has-text("Continue")');
+              if (continueBtns.length > 0) {
+                await continueBtns[0].click({ timeout: 8000 }).catch(() => {});
+                await waitMs(5000);
+              } else {
+                await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
+                await waitMs(4000);
+              }
+              vUrl = page.url();
+              vText = await page.evaluate(() => document.body?.innerText || "");
+              log(`After Firebase continue — URL: ${vUrl.substring(0, 120)}`);
+            }
+          }
+          accountVerified = vUrl.includes("/builder") || vUrl.includes("/dashboard") || vUrl.includes("/projects") ||
+            vText.toLowerCase().includes("project") || vText.toLowerCase().includes("what are you building") ||
+            (vUrl.includes("lovable.dev") && !vUrl.includes("signup") && !vUrl.includes("login") && !vUrl.includes("/auth/"));
+          log(`Verification result: ${accountVerified ? "✅ Success" : "⚠️ Not confirmed"} — URL: ${vUrl}`);
+        } catch (gotoErr: any) {
+          log(`Browser verification error: ${(gotoErr.message || "").substring(0, 100)}`);
+        }
+      }
+
+      // If verified via Firebase API, use fresh browser for onboarding
+      if (apiVerified && generatedPassword) {
+        log("🚀 Starting onboarding with fresh browser (Firebase API verified)...");
+        try { if (page) await page.close(); } catch {}
+        try { if (browser) await browser.close(); } catch {}
+        browser = null; page = null;
+        const onboardResult = await loginAndCompleteOnboarding(outlookEmail, generatedPassword, log);
+        if (onboardResult.success) {
+          log(`✅ Lovable account creation complete (API verified): ${outlookEmail}`);
+          return { success: true, email: outlookEmail, password: generatedPassword };
+        } else {
+          // Onboarding failed but email IS verified — account is still usable
+          log(`⚠️ Onboarding incomplete but email verified: ${onboardResult.error}`);
+          return { success: true, email: outlookEmail, password: generatedPassword };
+        }
+      }
 
       // ── STEP 6b: Complete onboarding (getting-started flow) ────────────────
       if (accountVerified && vUrl.includes("getting-started")) {
@@ -13844,6 +14280,123 @@ process.on("SIGTERM", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();
 });
+
+export async function loginAndCompleteOnboarding(
+  lovableEmail: string,
+  lovablePassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; error?: string }> {
+  let browser: any = null;
+  let page: any = null;
+
+  async function waitMs(ms: number) {
+    await new Promise((r) => setTimeout(r, ms));
+  }
+
+  try {
+    browser = await connectViaZenRows(log);
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    page = await ctx.newPage();
+
+    log(`[Onboard] Navigating to lovable.dev/login for ${lovableEmail}...`);
+    await page.goto("https://lovable.dev/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(4000);
+
+    // Fill email
+    const emailSel = 'input[type="email"], input[name="email"], input[placeholder*="email" i]';
+    const emailEl = await page.$(emailSel).catch(() => null);
+    if (!emailEl) {
+      // Try going via signup path (some Lovable flows redirect)
+      await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await waitMs(3000);
+    }
+
+    // Fill email + click Continue
+    await page.locator(emailSel).first().fill(lovableEmail).catch(() => {});
+    await waitMs(500);
+    for (const label of ["Continue", "Next", "Sign in"]) {
+      try {
+        const btn = page.locator(`button:has-text("${label}")`).first();
+        if (await btn.isVisible({ timeout: 2000 })) { await btn.click(); break; }
+      } catch {}
+    }
+    await waitMs(6000);
+
+    // Fill password
+    const passEl = await page.$('input[type="password"]').catch(() => null);
+    if (passEl) {
+      await passEl.fill(lovablePassword);
+      await waitMs(500);
+      // Click login/sign-in button
+      for (const label of ["Sign in", "Log in", "Login", "Continue"]) {
+        try {
+          const btn = page.locator(`button:has-text("${label}")`).first();
+          if (await btn.isVisible({ timeout: 2000 })) { await btn.click(); break; }
+        } catch {}
+      }
+      await waitMs(10000);
+    }
+
+    const loginUrl = page.url();
+    log(`[Onboard] After login: ${loginUrl.substring(0, 100)}`);
+
+    if (loginUrl.includes("/login") || loginUrl.includes("/signup")) {
+      return { success: false, error: "Login failed — still on auth page after submit" };
+    }
+
+    // Handle onboarding wizard if present
+    if (loginUrl.includes("getting-started")) {
+      log("[Onboard] Starting onboarding wizard...");
+      for (let step = 1; step <= 8; step++) {
+        await waitMs(2000);
+        const curUrl = page.url();
+        if (!curUrl.includes("getting-started")) { log(`[Onboard] Done at step ${step}`); break; }
+        const curText = await page.evaluate(() => document.body?.innerText || "");
+        log(`[Onboard] Step ${step}: ${curText.substring(0, 80).replace(/\n/g, " ")}`);
+        if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
+          await page.locator('button:has-text("Dark")').first().click({ timeout: 5000 }).catch(() => {});
+          await waitMs(500);
+        }
+        if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name")) {
+          await page.locator('input[type="text"]').first().fill("Alex Johnson").catch(() => {});
+          await waitMs(500);
+        }
+        if (curText.toLowerCase().includes("role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer")) {
+          await page.locator('button:has-text("Engineer"), button:has-text("Developer")').first().click({ timeout: 3000 }).catch(() => {});
+          await waitMs(500);
+        }
+        if (curText.toLowerCase().includes("personal") || curText.toLowerCase().includes("project")) {
+          await page.locator('button:has-text("Personal"), button:has-text("Side project")').first().click({ timeout: 3000 }).catch(() => {});
+          await waitMs(500);
+        }
+        let advanced = false;
+        for (const label of ["Next", "Continue", "Start building", "Get started", "Finish", "Done"]) {
+          try {
+            const loc = page.locator(`button:has-text("${label}")`).first();
+            if (await loc.isVisible().catch(() => false)) { await loc.click({ timeout: 5000 }); advanced = true; break; }
+          } catch {}
+        }
+        if (!advanced) { log(`[Onboard] No Next button on step ${step}`); break; }
+      }
+    }
+
+    const finalUrl = page.url();
+    log(`[Onboard] Final URL: ${finalUrl.substring(0, 100)}`);
+    const onDashboard = finalUrl.includes("lovable.dev") && !finalUrl.includes("/login") &&
+      !finalUrl.includes("/signup") && !finalUrl.includes("/verify-email");
+    if (!onDashboard) {
+      return { success: false, error: `Onboarding incomplete — stuck at ${finalUrl.substring(0, 80)}` };
+    }
+    log(`✅ [Onboard] Login + onboarding complete for ${lovableEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    log(`[Onboard] Error: ${(err.message || String(err)).substring(0, 200)}`);
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { if (page) await page.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+  }
+}
 
 export async function registerAdobeAccount(
   outlookEmail: string,
