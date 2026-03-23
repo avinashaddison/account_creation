@@ -17700,6 +17700,144 @@ async function _clickNextOrContinue(page: any, log: (msg: string) => void, stepL
   log(`  ⚠️  No Next/Continue button found for ${stepLabel}`);
 }
 
+// ── Extract coupon code + remaining slots from an account's referral page ──
+export async function extractCouponFromReplitAccount(
+  email: string,
+  password: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; coupon?: string; usedSlots?: number; totalSlots?: number; remainingSlots?: number; referralUrl?: string; error?: string }> {
+  const { chromium } = await import("playwright");
+  let browser: any = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage", "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+      ],
+    });
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const context = await browser.newContext({
+      userAgent: ua, viewport: { width: 1366, height: 768 }, locale: "en-US",
+      timezoneId: "America/New_York", javaScriptEnabled: true,
+      permissions: ["clipboard-read", "clipboard-write"],
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { app: {}, runtime: { id: undefined, connect: () => {}, sendMessage: () => {} }, loadTimes: () => ({}), csi: () => ({}) };
+    });
+    const page = await context.newPage();
+
+    // ── Login ──
+    log(`🔐 Logging into Replit as ${email}...`);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForSelector('input[name="username"], input[type="email"], input[name="email"]', { timeout: 20000 });
+    const emailInput = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
+    await emailInput.click(); await emailInput.fill(email);
+    await page.waitForTimeout(600);
+    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
+    const passInput = page.locator('input[type="password"]').first();
+    await passInput.click(); await passInput.fill(password);
+    await page.waitForTimeout(400);
+    const submitBtn = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in")').first();
+    if (await submitBtn.isVisible().catch(() => false)) await submitBtn.click();
+    else await passInput.press("Enter");
+    await page.waitForURL((u: URL) => !u.href.includes("replit.com/login"), { timeout: 60000 });
+    log(`✅ Logged in`);
+
+    // ── Navigate to referral page ──
+    log(`🔗 Opening referral page...`);
+
+    // Intercept any API responses that might contain the referral URL
+    let interceptedUrl = "";
+    page.on("response", async (res: any) => {
+      try {
+        if (res.url().includes("referral") || res.url().includes("coupon")) {
+          const text = await res.text().catch(() => "");
+          const m = text.match(/https:\/\/replit\.com\/stripe-checkout-by-price[^"'\s<>\\]+/);
+          if (m && m[0].includes("coupon=")) interceptedUrl = m[0];
+        }
+      } catch {}
+    });
+
+    await page.goto("https://replit.com/~?referral.show=true", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(4000); // wait for modal + JS to load
+
+    // ── Read "X of Y used" ──
+    let usedSlots = 0, totalSlots = 4;
+    const usedMatch = await page.evaluate(() => {
+      const text = document.body.innerText || "";
+      return text.match(/(\d+)\s+of\s+(\d+)\s+used/)?.[0] || null;
+    });
+    if (usedMatch) {
+      const m = usedMatch.match(/(\d+)\s+of\s+(\d+)/);
+      if (m) { usedSlots = parseInt(m[1]); totalSlots = parseInt(m[2]); }
+    }
+    const remainingSlots = totalSlots - usedSlots;
+    log(`📊 Referral usage: ${usedSlots} of ${totalSlots} used → ${remainingSlots} slot(s) remaining`);
+
+    // ── Extract referral URL ──
+    let referralUrl = interceptedUrl;
+
+    if (!referralUrl) {
+      // Try DOM: look for the full URL in anchors / inputs / text
+      referralUrl = await page.evaluate(() => {
+        // Check anchor hrefs
+        for (const a of Array.from(document.querySelectorAll("a"))) {
+          if (a.href?.includes("stripe-checkout-by-price") && a.href.includes("coupon=")) return a.href;
+        }
+        // Check input values
+        for (const inp of Array.from(document.querySelectorAll("input"))) {
+          const v = (inp as HTMLInputElement).value;
+          if (v?.includes("stripe-checkout-by-price") && v.includes("coupon=")) return v;
+        }
+        // Scan all text nodes
+        const bodyText = document.body.innerHTML;
+        const m = bodyText.match(/https:\/\/replit\.com\/stripe-checkout-by-price[^"'\s<>\\]+/);
+        if (m && m[0].includes("coupon=")) return m[0].replace(/&amp;/g, "&");
+        return "";
+      });
+    }
+
+    if (!referralUrl) {
+      // Try clicking Copy button and reading clipboard
+      log(`⏳ Trying Copy button approach...`);
+      const copyBtn = page.locator('button:has-text("Copy"), button:has-text("copy")').first();
+      if (await copyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await copyBtn.click();
+        await page.waitForTimeout(800);
+        try {
+          referralUrl = await page.evaluate(async () => {
+            return await navigator.clipboard.readText();
+          });
+        } catch {}
+      }
+    }
+
+    if (!referralUrl || !referralUrl.includes("coupon=")) {
+      throw new Error(`Could not extract referral URL from page. Make sure this account has the Agent 4 referral feature enabled.`);
+    }
+
+    // Clean up any HTML entities
+    referralUrl = referralUrl.replace(/&amp;/g, "&").split(/[\s"'<>]/)[0];
+    const coupon = new URL(referralUrl).searchParams.get("coupon") || "";
+    if (!coupon) throw new Error("No coupon parameter found in referral URL");
+
+    log(`✅ Coupon: ${coupon}`);
+    log(`🔗 Referral URL: ${referralUrl.substring(0, 80)}...`);
+    return { success: true, coupon, usedSlots, totalSlots, remainingSlots, referralUrl };
+  } catch (err: any) {
+    log(`❌ Error: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 // ── Lightweight checkout link generator (login + get Stripe URL, no payment) ──
 export async function generateSingleCheckoutLink(
   email: string,

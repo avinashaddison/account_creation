@@ -65,6 +65,8 @@ export default function ReplitCreate() {
   const [linksCoupon, setLinksCoupon] = useState("AGENT4BC4974559665");
   const [linksCount, setLinksCount] = useState(4);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
+  const [autoCouponSourceId, setAutoCouponSourceId] = useState("");
 
   // ── ONBOARDING mode state ──
   const [onbEmail, setOnbEmail] = useState("");
@@ -323,6 +325,29 @@ export default function ReplitCreate() {
       activeBatchId.current = data.batchId;
       addLog(`🔗 Bulk checkout link job started [${data.batchId}]`);
       addLog(`🎟️ Coupon: ${linksCoupon.trim()} · Count: ${linksCount}`);
+    } catch (err: any) {
+      sounds.error();
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setRunning(false);
+    }
+  };
+
+  const handleAutoCouponLinks = async () => {
+    if (!autoCouponSourceId) {
+      toast({ title: "Select source account", description: "Choose which account to extract the coupon from", variant: "destructive" });
+      return;
+    }
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+    setTotalCount(4);
+    try {
+      const res = await apiRequest("POST", "/api/replit-auto-coupon-links", { sourceAccountId: autoCouponSourceId });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to start");
+      activeBatchId.current = data.batchId;
+      addLog(`🤖 Auto Coupon job started [${data.batchId}]`);
     } catch (err: any) {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -728,68 +753,144 @@ export default function ReplitCreate() {
           {/* ══ BULK LINKS MODE ══ */}
           {mode === "links" && (
             <>
-              <div>
-                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
-                  <Tag className="w-2.5 h-2.5 inline mr-1" />Coupon Code
-                </label>
-                <input
-                  value={linksCoupon}
-                  onChange={(e) => { sounds.keypress(); setLinksCoupon(e.target.value); }}
-                  placeholder="AGENT4BC4974559665"
-                  className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
-                  style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${linksCoupon ? LA(0.45) : LA(0.15)}`, color: LA(0.9) }}
-                  data-testid="input-links-coupon"
-                />
+              {/* Sub-mode toggle: Auto / Manual */}
+              <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${LA(0.15)}` }}>
+                {(["auto", "manual"] as const).map(sm => (
+                  <button
+                    key={sm}
+                    onClick={() => { sounds.keypress(); setLinksSubMode(sm); }}
+                    className="flex-1 py-2 text-[10px] font-mono uppercase tracking-widest font-bold transition-all"
+                    style={{
+                      background: linksSubMode === sm ? LA(0.15) : "transparent",
+                      color: linksSubMode === sm ? L : LA(0.35),
+                      borderRight: sm === "auto" ? `1px solid ${LA(0.15)}` : "none",
+                    }}
+                  >
+                    {sm === "auto" ? "🤖 Auto Coupon" : "✍️ Manual"}
+                  </button>
+                ))}
               </div>
 
-              <div>
-                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
-                  <Layers className="w-2.5 h-2.5 inline mr-1" />Number of Links
-                </label>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5, 6].map(n => (
-                    <button
-                      key={n}
-                      onClick={() => { sounds.keypress(); setLinksCount(n); }}
-                      className="flex-1 rounded-lg py-2 text-xs font-mono font-bold transition-all"
-                      style={{
-                        background: linksCount === n ? LA(0.15) : "rgba(0,0,0,0.4)",
-                        border: `1px solid ${linksCount === n ? LA(0.55) : LA(0.1)}`,
-                        color: linksCount === n ? L : LA(0.35),
-                      }}
-                    >{n}</button>
-                  ))}
-                </div>
-              </div>
+              {/* ── AUTO MODE ── */}
+              {linksSubMode === "auto" && (
+                <>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                      <User className="w-2.5 h-2.5 inline mr-1" />Source Account (coupon owner)
+                    </label>
+                    <select
+                      value={autoCouponSourceId}
+                      onChange={(e) => { sounds.keypress(); setAutoCouponSourceId(e.target.value); }}
+                      className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                      style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${autoCouponSourceId ? LA(0.45) : LA(0.15)}`, color: autoCouponSourceId ? LA(0.9) : "rgba(255,255,255,0.35)" }}
+                      data-testid="select-auto-coupon-source"
+                    >
+                      <option value="">— Select account to extract coupon from —</option>
+                      {replitAccounts.map(a => (
+                        <option key={a.id} value={a.id}>@{a.username} ({a.email}) [{a.status}]</option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.15)}` }}>
-                <p className="text-[9px] font-mono" style={{ color: LA(0.55) }}>
-                  Picks {linksCount} available account(s) → logs into each → generates Stripe checkout URL → shows copyable links
-                </p>
-                <p className="text-[9px] font-mono" style={{ color: LA(0.35) }}>
-                  Account status: processing → working (link ready, red badge)
-                </p>
-              </div>
+                  <div className="rounded-lg p-3 space-y-1.5" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
+                    <p className="text-[9px] font-mono font-bold" style={{ color: LA(0.7) }}>How it works</p>
+                    <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.45) }}>
+                      1. Logs into selected account → opens referral page<br/>
+                      2. Reads coupon code + "X of 4 used" remaining slots<br/>
+                      3. Auto-generates exactly that many checkout links<br/>
+                      4. Status: processing → <span style={{ color: "#ef4444" }}>working</span> (red badge)
+                    </p>
+                  </div>
 
-              <button
-                onClick={handleBulkLinks}
-                disabled={running || !linksCoupon.trim()}
-                className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
-                style={{
-                  background: running || !linksCoupon.trim() ? LA(0.03) : `linear-gradient(135deg, ${LA(0.18)}, ${LA(0.07)})`,
-                  border: `1px solid ${running || !linksCoupon.trim() ? LA(0.08) : LA(0.55)}`,
-                  color: running || !linksCoupon.trim() ? LA(0.2) : L,
-                  textShadow: running || !linksCoupon.trim() ? "none" : `0 0 14px ${L}`,
-                  boxShadow: running || !linksCoupon.trim() ? "none" : `0 0 25px ${LA(0.08)}`,
-                  cursor: running || !linksCoupon.trim() ? "not-allowed" : "pointer",
-                }}
-                data-testid="button-run-links"
-              >
-                <Link2 className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
-                <span className="relative z-10">
-                  {running ? `generating ${linksCount} link(s)...` : `generate_checkout_links`}
-                </span>
-              </button>
+                  <button
+                    onClick={handleAutoCouponLinks}
+                    disabled={running || !autoCouponSourceId}
+                    className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
+                    style={{
+                      background: running || !autoCouponSourceId ? LA(0.03) : `linear-gradient(135deg, ${LA(0.2)}, ${LA(0.07)})`,
+                      border: `1px solid ${running || !autoCouponSourceId ? LA(0.08) : LA(0.6)}`,
+                      color: running || !autoCouponSourceId ? LA(0.2) : L,
+                      textShadow: running || !autoCouponSourceId ? "none" : `0 0 14px ${L}`,
+                      boxShadow: running || !autoCouponSourceId ? "none" : `0 0 25px ${LA(0.1)}`,
+                      cursor: running || !autoCouponSourceId ? "not-allowed" : "pointer",
+                    }}
+                    data-testid="button-auto-coupon-links"
+                  >
+                    <Hash className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                    <span className="relative z-10">
+                      {running ? "extracting coupon & generating..." : "auto_extract_coupon_and_generate"}
+                    </span>
+                  </button>
+                </>
+              )}
+
+              {/* ── MANUAL MODE ── */}
+              {linksSubMode === "manual" && (
+                <>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                      <Tag className="w-2.5 h-2.5 inline mr-1" />Coupon Code
+                    </label>
+                    <input
+                      value={linksCoupon}
+                      onChange={(e) => { sounds.keypress(); setLinksCoupon(e.target.value); }}
+                      placeholder="AGENT4BC4974559665"
+                      className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                      style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${linksCoupon ? LA(0.45) : LA(0.15)}`, color: LA(0.9) }}
+                      data-testid="input-links-coupon"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                      <Layers className="w-2.5 h-2.5 inline mr-1" />Number of Links
+                    </label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5, 6].map(n => (
+                        <button
+                          key={n}
+                          onClick={() => { sounds.keypress(); setLinksCount(n); }}
+                          className="flex-1 rounded-lg py-2 text-xs font-mono font-bold transition-all"
+                          style={{
+                            background: linksCount === n ? LA(0.15) : "rgba(0,0,0,0.4)",
+                            border: `1px solid ${linksCount === n ? LA(0.55) : LA(0.1)}`,
+                            color: linksCount === n ? L : LA(0.35),
+                          }}
+                        >{n}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
+                    <p className="text-[9px] font-mono" style={{ color: LA(0.45) }}>
+                      Picks {linksCount} processing account(s) → generates Stripe checkout URL with coupon
+                    </p>
+                    <p className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
+                      Account status: processing → <span style={{ color: "#ef4444" }}>working</span>
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleBulkLinks}
+                    disabled={running || !linksCoupon.trim()}
+                    className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
+                    style={{
+                      background: running || !linksCoupon.trim() ? LA(0.03) : `linear-gradient(135deg, ${LA(0.18)}, ${LA(0.07)})`,
+                      border: `1px solid ${running || !linksCoupon.trim() ? LA(0.08) : LA(0.55)}`,
+                      color: running || !linksCoupon.trim() ? LA(0.2) : L,
+                      textShadow: running || !linksCoupon.trim() ? "none" : `0 0 14px ${L}`,
+                      boxShadow: running || !linksCoupon.trim() ? "none" : `0 0 25px ${LA(0.08)}`,
+                      cursor: running || !linksCoupon.trim() ? "not-allowed" : "pointer",
+                    }}
+                    data-testid="button-run-links"
+                  >
+                    <Link2 className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                    <span className="relative z-10">
+                      {running ? `generating ${linksCount} link(s)...` : `generate_checkout_links`}
+                    </span>
+                  </button>
+                </>
+              )}
             </>
           )}
 

@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, registerLovableAccount, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3503,6 +3503,104 @@ export async function registerRoutes(
         }
 
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Auto Coupon: extract coupon from one account's referral page → generate N links ──
+  app.post("/api/replit-auto-coupon-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const role = req.session.role!;
+      const { sourceAccountId } = req.body;
+      if (!sourceAccountId) return res.status(400).json({ error: "sourceAccountId required" });
+
+      const allAccounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+      const sourceAccount = allAccounts.find(a => a.id === sourceAccountId);
+      if (!sourceAccount) return res.status(404).json({ error: "Source account not found" });
+
+      const batchId = `replit-auto-${Date.now().toString(36)}`;
+      const jobId = `auto-${Date.now()}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId });
+
+      (async () => {
+        broadcastLog(batchId, jobId, `🤖 Auto Coupon job started [${batchId}]`, userId);
+        broadcastLog(batchId, jobId, `👤 Source account: ${sourceAccount.email}`, userId);
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+
+        // Step 1: Extract coupon
+        broadcastLog(batchId, jobId, `🔍 Extracting coupon from referral page...`, userId);
+        const couponResult = await extractCouponFromReplitAccount(
+          sourceAccount.email,
+          sourceAccount.password,
+          (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+        );
+
+        if (!couponResult.success || !couponResult.coupon) {
+          broadcastLog(batchId, jobId, `❌ Failed to extract coupon: ${couponResult.error}`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+
+        const { coupon, usedSlots = 0, totalSlots = 4, remainingSlots = 0 } = couponResult;
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `📊 Slots: ${usedSlots}/${totalSlots} used — ${remainingSlots} available`, userId);
+
+        if (remainingSlots <= 0) {
+          broadcastLog(batchId, jobId, `⚠️ All ${totalSlots} referral slots are already used — nothing to generate`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+
+        // Step 2: Pick processing accounts (exclude source account)
+        const candidates = allAccounts.filter(a =>
+          a.id !== sourceAccountId && a.email && a.password && a.status === "processing"
+        );
+        const toProcess = candidates.slice(0, remainingSlots);
+
+        if (toProcess.length === 0) {
+          broadcastLog(batchId, jobId, `❌ No "processing" accounts available to generate links for`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) using coupon ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+
+        // Step 3: Generate links
+        const generatedLinks: { email: string; url: string }[] = [];
+        for (let i = 0; i < toProcess.length; i++) {
+          const acct = toProcess[i];
+          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
+          await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
+
+          const result = await generateSingleCheckoutLink(
+            acct.email,
+            acct.password,
+            coupon,
+            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+          );
+
+          if (result.success && result.stripeUrl) {
+            generatedLinks.push({ email: acct.email, url: result.stripeUrl });
+            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
+          } else {
+            broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
+          }
+          broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        }
+
         broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
