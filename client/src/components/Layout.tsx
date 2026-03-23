@@ -12,6 +12,10 @@ type LayoutProps = {
   onPanelNameChange?: (name: string) => void;
 };
 
+const R = "#ff2020";
+const RA = (a: number) => `rgba(255,32,32,${a})`;
+const RD = "#cc0000";
+
 const TM_SUBNAV = [
   { href: "/admin/tm-event-scanner", label: "Event Scanner", icon: Search },
   { href: "/admin/tm-live-alerts", label: "Live Alerts", icon: Bell },
@@ -21,16 +25,16 @@ const TM_SUBNAV = [
 ];
 
 const TAG_STYLES: Record<string, { bg: string; text: string; dot: string; glow: string }> = {
-  SYS: { bg: "rgba(255,255,255,0.07)", text: "rgba(255,255,255,0.5)", dot: "#e2e8f0", glow: "rgba(255,255,255,0.2)" },
-  OPS: { bg: "rgba(191,90,242,0.14)", text: "rgba(191,90,242,0.9)", dot: "#bf5af2", glow: "rgba(191,90,242,0.3)" },
-  DB:  { bg: "rgba(255,159,10,0.13)", text: "rgba(255,159,10,0.9)", dot: "#ff9f0a", glow: "rgba(255,159,10,0.3)" },
-  NET: { bg: "rgba(10,132,255,0.13)", text: "rgba(10,132,255,0.9)", dot: "#0a84ff", glow: "rgba(10,132,255,0.3)" },
-  FIN: { bg: "rgba(48,209,88,0.13)", text: "rgba(48,209,88,0.9)", dot: "#30d158", glow: "rgba(48,209,88,0.3)" },
-  PVT: { bg: "rgba(255,69,58,0.13)", text: "rgba(255,69,58,0.9)", dot: "#ff453a", glow: "rgba(255,69,58,0.3)" },
-  ADM: { bg: "rgba(255,159,10,0.12)", text: "rgba(255,159,10,0.85)", dot: "#ff9f0a", glow: "rgba(255,159,10,0.3)" },
-  CFG: { bg: "rgba(174,174,178,0.12)", text: "rgba(174,174,178,0.85)", dot: "#aeaeb2", glow: "rgba(174,174,178,0.2)" },
-  TKT: { bg: "rgba(10,132,255,0.12)", text: "rgba(10,132,255,0.9)", dot: "#0a84ff", glow: "rgba(10,132,255,0.3)" },
-  CRD: { bg: "rgba(100,210,255,0.12)", text: "rgba(100,210,255,0.85)", dot: "#64d2ff", glow: "rgba(100,210,255,0.3)" },
+  SYS: { bg: RA(0.10), text: RA(0.75), dot: R, glow: RA(0.25) },
+  OPS: { bg: RA(0.12), text: RA(0.85), dot: R, glow: RA(0.30) },
+  DB:  { bg: RA(0.10), text: RA(0.75), dot: RD, glow: RA(0.25) },
+  NET: { bg: RA(0.10), text: RA(0.75), dot: R, glow: RA(0.25) },
+  FIN: { bg: RA(0.10), text: RA(0.75), dot: R, glow: RA(0.25) },
+  PVT: { bg: RA(0.14), text: RA(0.90), dot: R, glow: RA(0.35) },
+  ADM: { bg: RA(0.10), text: RA(0.75), dot: RD, glow: RA(0.25) },
+  CFG: { bg: "rgba(174,174,178,0.10)", text: "rgba(174,174,178,0.75)", dot: "#aeaeb2", glow: "rgba(174,174,178,0.2)" },
+  TKT: { bg: RA(0.10), text: RA(0.75), dot: R, glow: RA(0.25) },
+  CRD: { bg: RA(0.10), text: RA(0.75), dot: R, glow: RA(0.25) },
 };
 
 function TagBadge({ tag }: { tag: string }) {
@@ -38,7 +42,7 @@ function TagBadge({ tag }: { tag: string }) {
   return (
     <span
       className="text-[8px] font-mono tracking-wider px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0"
-      style={{ background: s.bg, color: s.text, border: `1px solid ${s.dot}28` }}
+      style={{ background: s.bg, color: s.text, border: `1px solid ${s.dot}30` }}
     >
       <span className="w-1 h-1 rounded-full inline-block" style={{ background: s.dot }} />
       {tag}
@@ -46,14 +50,14 @@ function TagBadge({ tag }: { tag: string }) {
   );
 }
 
-function SectionDivider({ label, color }: { label: string; color: string }) {
+function SectionDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 px-1 pt-3.5 pb-1">
-      <div className="h-px flex-1" style={{ background: "rgba(255,255,255,0.06)" }} />
-      <span className="text-[9px] uppercase tracking-[0.2em] font-semibold" style={{ color: "rgba(255,255,255,0.28)", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }}>
+      <div className="h-px flex-1" style={{ background: RA(0.18) }} />
+      <span className="text-[9px] uppercase tracking-[0.22em] font-mono font-bold" style={{ color: RA(0.45) }}>
         {label}
       </span>
-      <div className="h-px flex-1" style={{ background: "rgba(255,255,255,0.06)" }} />
+      <div className="h-px flex-1" style={{ background: RA(0.18) }} />
     </div>
   );
 }
@@ -67,7 +71,6 @@ function NavItem({ item, location }: { item: { href: string; label: string; icon
     location === "/admin/lovable-create" || location === "/admin/v0-create" ||
     location === "/admin/card-generator"
   ));
-  const tag = TAG_STYLES[item.tag] || TAG_STYLES.SYS;
 
   return (
     <Link href={item.href}>
@@ -76,9 +79,9 @@ function NavItem({ item, location }: { item: { href: string; label: string; icon
         onMouseEnter={() => sounds.hover()}
         className="group/item relative flex items-center gap-2.5 px-2.5 py-[7px] rounded-xl cursor-pointer transition-all duration-200"
         style={isActive ? {
-          background: `linear-gradient(135deg, ${tag.dot}18 0%, ${tag.dot}08 100%)`,
-          border: `1px solid ${tag.dot}28`,
-          boxShadow: `0 2px 12px ${tag.dot}14, inset 0 1px 0 ${tag.dot}15`,
+          background: `linear-gradient(135deg, ${RA(0.18)} 0%, ${RA(0.07)} 100%)`,
+          border: `1px solid ${RA(0.35)}`,
+          boxShadow: `0 2px 14px ${RA(0.15)}, inset 0 1px 0 ${RA(0.15)}`,
         } : {
           border: "1px solid transparent",
           background: "transparent",
@@ -88,26 +91,26 @@ function NavItem({ item, location }: { item: { href: string; label: string; icon
         {isActive && (
           <div
             className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full"
-            style={{ height: "50%", background: tag.dot, boxShadow: `0 0 8px ${tag.dot}` }}
+            style={{ height: "55%", background: R, boxShadow: `0 0 10px ${R}, 0 0 20px ${RA(0.4)}` }}
           />
         )}
 
         <div
           className="relative shrink-0 w-[28px] h-[28px] rounded-lg flex items-center justify-center transition-all duration-200"
           style={isActive
-            ? { background: `${tag.dot}20`, border: `1px solid ${tag.dot}38` }
-            : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }
+            ? { background: RA(0.18), border: `1px solid ${RA(0.40)}` }
+            : { background: RA(0.05), border: `1px solid ${RA(0.12)}` }
           }
         >
           <item.icon
             className="w-[13px] h-[13px] shrink-0"
-            style={{ color: isActive ? tag.dot : "rgba(255,255,255,0.55)" }}
+            style={{ color: isActive ? R : RA(0.50) }}
           />
         </div>
 
         <span
-          className="flex-1 text-[12px] font-medium tracking-tight transition-colors duration-200"
-          style={{ color: isActive ? "#ffffff" : "rgba(255,255,255,0.82)", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }}
+          className="flex-1 text-[12px] font-mono tracking-tight transition-colors duration-200"
+          style={{ color: isActive ? "#ffffff" : RA(0.70) }}
         >
           {item.label}
         </span>
@@ -182,19 +185,21 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
   };
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'linear-gradient(135deg, #08080f 0%, #0c0c18 50%, #08080f 100%)' }}>
+    <div className="min-h-screen flex" style={{ background: 'linear-gradient(135deg, #050508 0%, #0a0205 50%, #050508 100%)' }}>
       <aside
-        className="w-[256px] flex flex-col shrink-0 h-screen sticky top-0 overflow-hidden glass-sidebar"
+        className="w-[256px] flex flex-col shrink-0 h-screen sticky top-0 overflow-hidden"
+        style={{ background: "linear-gradient(180deg, #0a0205 0%, #080108 100%)", borderRight: `1px solid ${RA(0.18)}` }}
         data-testid="sidebar"
       >
-        {/* Subtle top highlight */}
-        <div className="absolute top-0 left-0 right-0 h-px" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent)" }} />
+        {/* Red top glow line */}
+        <div className="absolute top-0 left-0 right-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${R}, transparent)` }} />
 
-        {/* Ambient blob */}
-        <div className="absolute top-0 left-0 w-48 h-48 pointer-events-none" style={{ background: "radial-gradient(ellipse at top left, rgba(48,209,88,0.05), transparent 65%)" }} />
+        {/* Ambient red blob */}
+        <div className="absolute top-0 left-0 w-52 h-52 pointer-events-none" style={{ background: `radial-gradient(ellipse at top left, ${RA(0.08)}, transparent 65%)` }} />
+        <div className="absolute bottom-0 right-0 w-40 h-40 pointer-events-none" style={{ background: `radial-gradient(ellipse at bottom right, ${RA(0.05)}, transparent 65%)` }} />
 
         {/* Header */}
-        <div className="px-4 pt-5 pb-3">
+        <div className="px-4 pt-5 pb-3 relative">
           {isEditing ? (
             <div className="space-y-2">
               <Input
@@ -202,12 +207,12 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                 onChange={(e) => setEditName(e.target.value)}
                 maxLength={50}
                 autoFocus
-                className="h-8 text-sm bg-white/5 border-white/15 text-white rounded-xl"
+                className="h-8 text-sm font-mono bg-black/50 border-red-900/50 text-red-100 rounded-xl"
                 onKeyDown={(e) => { if (e.key === "Enter") savePanelName(); if (e.key === "Escape") { setIsEditing(false); setEditName(panelName); } }}
                 data-testid="input-panel-name"
               />
               <div className="flex gap-1">
-                <Button size="sm" variant="ghost" className="h-6 px-2 text-green-400 hover:text-green-300 hover:bg-green-500/10" onClick={savePanelName} disabled={saving} data-testid="button-save-panel-name">
+                <Button size="sm" variant="ghost" className="h-6 px-2 hover:bg-red-500/10" style={{ color: R }} onClick={savePanelName} disabled={saving} data-testid="button-save-panel-name">
                   <Check className="w-3 h-3" />
                 </Button>
                 <Button size="sm" variant="ghost" className="h-6 px-2 text-white/40 hover:text-white/70 hover:bg-white/5" onClick={() => { setIsEditing(false); setEditName(panelName); }}>
@@ -221,32 +226,33 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
               <div
                 className="relative shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center"
                 style={{
-                  background: "linear-gradient(135deg, rgba(48,209,88,0.22) 0%, rgba(48,209,88,0.08) 100%)",
-                  border: "1px solid rgba(48,209,88,0.28)",
-                  boxShadow: "0 4px 16px rgba(48,209,88,0.12), inset 0 1px 0 rgba(255,255,255,0.1)",
+                  background: `linear-gradient(135deg, ${RA(0.25)} 0%, ${RA(0.10)} 100%)`,
+                  border: `1px solid ${RA(0.40)}`,
+                  boxShadow: `0 4px 16px ${RA(0.20)}, inset 0 1px 0 ${RA(0.20)}`,
                 }}
               >
-                <Terminal className="w-4.5 h-4.5" style={{ color: "#30d158" }} />
+                <Terminal className="w-[18px] h-[18px]" style={{ color: R, filter: `drop-shadow(0 0 6px ${R})` }} />
               </div>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <h2
-                    className="text-[13px] font-semibold text-white tracking-tight truncate"
-                    style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif" }}
+                    className="text-[13px] font-mono font-bold tracking-tight truncate"
+                    style={{ color: "#ffffff", textShadow: `0 0 12px ${RA(0.4)}` }}
                     data-testid="text-brand"
                   >
                     {panelName}
                   </h2>
                   <button
                     onClick={() => { setEditName(panelName); setIsEditing(true); }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded-md hover:bg-white/8 transition-all shrink-0"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded-md transition-all shrink-0"
+                    style={{ color: RA(0.40) }}
                     data-testid="button-edit-panel-name"
                   >
-                    <Pencil className="w-2.5 h-2.5 text-white/35" />
+                    <Pencil className="w-2.5 h-2.5" />
                   </button>
                 </div>
-                <p className="text-[9px] uppercase tracking-[0.18em] mt-0.5" style={{ color: "rgba(255,255,255,0.28)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif" }}>Command Center</p>
+                <p className="text-[9px] uppercase tracking-[0.22em] mt-0.5 font-mono" style={{ color: RA(0.45) }}>Command Center</p>
               </div>
             </div>
           )}
@@ -257,27 +263,27 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
           <div
             className="px-3 py-2 rounded-xl"
             style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.07)",
+              background: RA(0.05),
+              border: `1px solid ${RA(0.18)}`,
             }}
           >
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-1.5">
                 <div className="relative">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                  <div className="absolute inset-0 w-1.5 h-1.5 rounded-full bg-green-400 animate-ping opacity-50" />
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: R }} />
+                  <div className="absolute inset-0 w-1.5 h-1.5 rounded-full animate-ping" style={{ background: R, opacity: 0.6 }} />
                 </div>
-                <span className="text-[9px] font-medium tracking-wide" style={{ color: "rgba(48,209,88,0.85)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}>Online</span>
+                <span className="text-[9px] font-mono font-bold tracking-widest uppercase" style={{ color: R, textShadow: `0 0 8px ${R}` }}>Online</span>
               </div>
-              <span className="text-[9px] tabular-nums font-mono" style={{ color: "rgba(255,255,255,0.32)" }}>
+              <span className="text-[9px] tabular-nums font-mono" style={{ color: RA(0.50) }}>
                 {time.toLocaleTimeString("en-US", { hour12: false })}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[8px] font-mono" style={{ color: "rgba(255,255,255,0.28)" }}>UP {formatUptime(uptime)}</span>
+              <span className="text-[8px] font-mono" style={{ color: RA(0.40) }}>UP {formatUptime(uptime)}</span>
               <div className="flex items-center gap-0.5">
                 {[1,2,3,4].map(i => (
-                  <div key={i} className="w-0.5 rounded-full" style={{ height: `${4 + i * 2}px`, background: i <= 3 ? "rgba(48,209,88,0.55)" : "rgba(255,255,255,0.1)" }} />
+                  <div key={i} className="w-0.5 rounded-full" style={{ height: `${4 + i * 2}px`, background: i <= 3 ? RA(0.65) : RA(0.12) }} />
                 ))}
               </div>
             </div>
@@ -286,42 +292,42 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
 
         {/* Nav */}
         <nav className="flex-1 px-3 overflow-y-auto pb-2 space-y-0.5 mt-1">
-          <SectionDivider label="Core" color="rgba(255,255,255,0.15)" />
+          <SectionDivider label="Core" />
           <NavItem item={nav[0]} location={location} />
 
           {/* Ticket Master expandable */}
-          <SectionDivider label="Ticket Master" color="rgba(255,255,255,0.12)" />
+          <SectionDivider label="Ticket Master" />
           <div>
             <div
               onClick={() => { setTmExpanded((v) => !v); sounds.navigate(); }}
               onMouseEnter={() => sounds.hover()}
               className="relative flex items-center gap-2.5 px-2.5 py-[7px] rounded-xl cursor-pointer transition-all duration-200"
               style={isTmRoute ? {
-                background: "linear-gradient(135deg, rgba(10,132,255,0.16) 0%, rgba(10,132,255,0.07) 100%)",
-                border: "1px solid rgba(10,132,255,0.28)",
-                boxShadow: "0 2px 12px rgba(10,132,255,0.12), inset 0 1px 0 rgba(10,132,255,0.14)",
+                background: `linear-gradient(135deg, ${RA(0.18)} 0%, ${RA(0.07)} 100%)`,
+                border: `1px solid ${RA(0.35)}`,
+                boxShadow: `0 2px 14px ${RA(0.15)}, inset 0 1px 0 ${RA(0.15)}`,
               } : { border: "1px solid transparent" }}
               data-testid="nav-ticket-master"
             >
               {isTmRoute && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full" style={{ height: "50%", background: "#0a84ff", boxShadow: "0 0 8px #0a84ff" }} />
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-r-full" style={{ height: "55%", background: R, boxShadow: `0 0 10px ${R}` }} />
               )}
               <div
                 className="shrink-0 w-[28px] h-[28px] rounded-lg flex items-center justify-center transition-all duration-200"
                 style={isTmRoute
-                  ? { background: "rgba(10,132,255,0.18)", border: "1px solid rgba(10,132,255,0.35)" }
-                  : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }
+                  ? { background: RA(0.18), border: `1px solid ${RA(0.40)}` }
+                  : { background: RA(0.05), border: `1px solid ${RA(0.12)}` }
                 }
               >
-                <Ticket className="w-[13px] h-[13px]" style={{ color: isTmRoute ? "#0a84ff" : "rgba(255,255,255,0.55)" }} />
+                <Ticket className="w-[13px] h-[13px]" style={{ color: isTmRoute ? R : RA(0.50) }} />
               </div>
-              <span className="flex-1 text-[12px] font-medium tracking-tight" style={{ color: isTmRoute ? "#ffffff" : "rgba(255,255,255,0.82)", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }}>Ticket Master</span>
+              <span className="flex-1 text-[12px] font-mono tracking-tight" style={{ color: isTmRoute ? "#ffffff" : RA(0.70) }}>Ticket Master</span>
               <TagBadge tag="TKT" />
-              <ChevronRight className="w-3 h-3 transition-transform duration-200 ml-0.5" style={{ transform: tmExpanded ? "rotate(90deg)" : "rotate(0deg)", color: "rgba(255,255,255,0.35)" }} />
+              <ChevronRight className="w-3 h-3 transition-transform duration-200 ml-0.5" style={{ transform: tmExpanded ? "rotate(90deg)" : "rotate(0deg)", color: RA(0.35) }} />
             </div>
 
             {tmExpanded && (
-              <div className="ml-4 mt-1 pl-3 space-y-0.5" style={{ borderLeft: "1px solid rgba(255,255,255,0.07)" }}>
+              <div className="ml-4 mt-1 pl-3 space-y-0.5" style={{ borderLeft: `1px solid ${RA(0.18)}` }}>
                 {TM_SUBNAV.map((item) => {
                   const isActive = location === item.href;
                   return (
@@ -329,18 +335,18 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                       <div
                         onClick={() => sounds.navigate()}
                         onMouseEnter={() => sounds.hover()}
-                        className="relative flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150"
+                        className="relative flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-mono cursor-pointer transition-all duration-150"
                         style={isActive
-                          ? { background: "rgba(10,132,255,0.10)", border: "1px solid rgba(10,132,255,0.20)", color: "#64d2ff" }
-                          : { border: "1px solid transparent", color: "rgba(255,255,255,0.75)" }
+                          ? { background: RA(0.12), border: `1px solid ${RA(0.28)}`, color: R }
+                          : { border: "1px solid transparent", color: RA(0.60) }
                         }
                         data-testid={`nav-tm-${item.label.toLowerCase().replace(/ /g, "-")}`}
                       >
                         {isActive && (
-                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3 rounded-r-full" style={{ background: "#0a84ff" }} />
+                          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-3 rounded-r-full" style={{ background: R }} />
                         )}
-                        <item.icon className="w-[11px] h-[11px] shrink-0" style={{ color: isActive ? "#64d2ff" : "rgba(255,255,255,0.45)" }} />
-                        <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif" }}>{item.label}</span>
+                        <item.icon className="w-[11px] h-[11px] shrink-0" style={{ color: isActive ? R : RA(0.40) }} />
+                        <span>{item.label}</span>
                       </div>
                     </Link>
                   );
@@ -349,31 +355,31 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
             )}
           </div>
 
-          <SectionDivider label="Operations" color="rgba(255,255,255,0.12)" />
+          <SectionDivider label="Operations" />
           <NavItem item={nav[1]} location={location} />
 
-          <SectionDivider label="Data" color="rgba(255,255,255,0.12)" />
+          <SectionDivider label="Data" />
           {nav.slice(2, 6).map((item) => <NavItem key={item.href} item={item} location={location} />)}
 
           {user.role === "superadmin" && (
             <>
-              <SectionDivider label="Admin" color="rgba(255,255,255,0.12)" />
+              <SectionDivider label="Admin" />
               {nav.slice(6).map((item) => <NavItem key={item.href} item={item} location={location} />)}
             </>
           )}
         </nav>
 
         {/* Bottom fade */}
-        <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none" style={{ background: "linear-gradient(0deg, rgba(8,8,18,0.9), transparent)" }} />
+        <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none" style={{ background: "linear-gradient(0deg, rgba(5,1,5,0.95), transparent)" }} />
 
         {/* User card */}
         <div className="relative mx-3 mb-3 mt-1">
           <div
             className="p-3 rounded-2xl"
             style={{
-              background: "rgba(255,255,255,0.045)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "0 2px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+              background: RA(0.06),
+              border: `1px solid ${RA(0.20)}`,
+              boxShadow: `0 2px 16px ${RA(0.10)}, inset 0 1px 0 ${RA(0.10)}`,
             }}
           >
             <div className="flex items-center gap-2.5 mb-2.5">
@@ -381,36 +387,36 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
                 <div
                   className="w-9 h-9 rounded-xl flex items-center justify-center"
                   style={{
-                    background: "linear-gradient(135deg, rgba(48,209,88,0.15), rgba(48,209,88,0.06))",
-                    border: "1px solid rgba(48,209,88,0.22)",
+                    background: `linear-gradient(135deg, ${RA(0.20)}, ${RA(0.08)})`,
+                    border: `1px solid ${RA(0.35)}`,
                   }}
                 >
-                  <User className="w-4 h-4" style={{ color: "#30d158" }} />
+                  <User className="w-4 h-4" style={{ color: R }} />
                 </div>
-                <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 border border-black" />
+                <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-black" style={{ background: R }} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10.5px] font-mono truncate text-white/75" data-testid="text-user-email">
+                <p className="text-[10.5px] font-mono truncate" style={{ color: "rgba(255,255,255,0.80)" }} data-testid="text-user-email">
                   {user.email}
                 </p>
-                <p className="text-[8.5px] capitalize mt-0.5" style={{ color: "rgba(48,209,88,0.65)", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }} data-testid="text-user-role">
+                <p className="text-[8.5px] capitalize mt-0.5 font-mono font-bold tracking-widest uppercase" style={{ color: RA(0.65) }} data-testid="text-user-role">
                   {user.role}
                 </p>
               </div>
             </div>
 
             <button
-              className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl text-[10.5px] transition-all duration-150"
-              style={{ border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.38)", background: "transparent", fontFamily: "-apple-system, BlinkMacSystemFont, system-ui" }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl text-[10.5px] font-mono transition-all duration-150"
+              style={{ border: `1px solid ${RA(0.15)}`, color: RA(0.45), background: "transparent" }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255,69,58,0.09)";
-                e.currentTarget.style.borderColor = "rgba(255,69,58,0.22)";
-                e.currentTarget.style.color = "rgba(255,100,90,0.95)";
+                e.currentTarget.style.background = RA(0.12);
+                e.currentTarget.style.borderColor = RA(0.40);
+                e.currentTarget.style.color = R;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)";
-                e.currentTarget.style.color = "rgba(255,255,255,0.38)";
+                e.currentTarget.style.borderColor = RA(0.15);
+                e.currentTarget.style.color = RA(0.45);
               }}
               onClick={() => { sounds.logout(); onLogout(); }}
               data-testid="button-logout"
