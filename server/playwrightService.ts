@@ -13,6 +13,21 @@ import * as ProxyChain from "proxy-chain";
 
 const execFileAsync = promisify(execFile);
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
+
+// ── Live screenshot store ────────────────────────────────────────────────────
+// Stores the latest browser screenshot so the frontend can poll and display it
+export const liveScreenshot: { data: string | null; label: string; ts: number } = {
+  data: null, label: "", ts: 0
+};
+export async function captureScreenshot(page: any, label: string): Promise<void> {
+  try {
+    const buf = await page.screenshot({ type: "jpeg", quality: 70, fullPage: false });
+    liveScreenshot.data = `data:image/jpeg;base64,${buf.toString("base64")}`;
+    liveScreenshot.label = label;
+    liveScreenshot.ts = Date.now();
+  } catch {}
+}
+// ─────────────────────────────────────────────────────────────────────────────
 const CURL_COOKIE_DIR = "/tmp/la28_curl_sessions";
 
 chromium.use(StealthPlugin());
@@ -15520,6 +15535,7 @@ export async function checkoutExistingReplitAccount(
     }
 
     log(`💳 Filling card details in Stripe checkout...`);
+    await captureScreenshot(page, "Stripe checkout loaded — filling card");
 
     // ── Helper: fill Stripe iframe input ──
     // IMPORTANT: Must use triple-click + type (not el.evaluate/fill) so Stripe's
@@ -15708,6 +15724,7 @@ export async function checkoutExistingReplitAccount(
       }
     } catch (e: any) { log(`⚠️ Pre-solve failed: ${e.message}`); }
 
+    await captureScreenshot(page, "Card & billing filled — ready to Subscribe");
     // ── Click Subscribe ──
     log(`💳 Clicking Subscribe...`);
     let paymentSubmitTime = new Date();
@@ -15729,6 +15746,7 @@ export async function checkoutExistingReplitAccount(
     } catch (e: any) { log(`⚠️ Subscribe click failed: ${e.message}`); }
 
     await page.waitForTimeout(5000);
+    await captureScreenshot(page, "After Subscribe click — checking for hCaptcha");
 
     // ── Handle hCaptcha if it appears ──
     const hcapFrames = page.frames().filter((f: any) => f.url().includes("hcaptcha.com") || f.url().includes("HCaptcha.html") || f.url().includes("HCaptchaInvisible.html"));
@@ -15932,6 +15950,7 @@ export async function checkoutExistingReplitAccount(
             const u = f.url();
             if (u.includes("m2pfintech") || u.includes("m2pSecAuth") || u.includes("federalbank") || u.includes("3ds") || u.includes("acs") || u.includes("securecheckout")) {
               log(`✅ Bank ACS frame appeared early after checkbox click: ${u.substring(0, 80)}`);
+              await captureScreenshot(page, "✅ Bank OTP popup appeared!");
               acsFoundEarly = true;
               break;
             }
