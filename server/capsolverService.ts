@@ -240,11 +240,12 @@ async function solveHCaptchaViaJsonApi(
 // Docs: https://nopecha.com/api-reference/#postHcaptchaToken
 // Submit: POST /v1/token/hcaptcha  Authorization: Basic API_KEY  → {data: JOB_ID}
 // Poll:   GET  /v1/token/hcaptcha?id=JOB_ID  → {data: "P0_eyJ..."} when ready
-async function solveHCaptchaViaNopeCHA(
+export async function solveHCaptchaViaNopeCHA(
   apiKey: string,
   websiteURL: string,
   websiteKey: string,
-  rqdata?: string | null
+  rqdata?: string | null,
+  maxWaitSec: number = 180
 ): Promise<CapSolverTaskResult> {
   try {
     const authHeader = `Basic ${apiKey}`;
@@ -271,9 +272,10 @@ async function solveHCaptchaViaNopeCHA(
       return { success: false, error: `NopeCHA: no task ID returned — ${JSON.stringify(submitResp.data)}` };
     }
 
-    console.log(`[NopeCHA] Task submitted: ${taskId} — polling every 5s (max 180s)...`);
+    const maxPolls = Math.ceil(maxWaitSec / 5);
+    console.log(`[NopeCHA] Task submitted: ${taskId} — polling every 5s (max ${maxWaitSec}s)...`);
 
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0; i < maxPolls; i++) {
       await new Promise(r => setTimeout(r, 5000));
 
       let pollData: any = null;

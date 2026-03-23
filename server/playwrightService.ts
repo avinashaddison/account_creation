@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, classifyFunCaptchaImages } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import * as ProxyChain from "proxy-chain";
 
@@ -15717,16 +15717,107 @@ export async function checkoutExistingReplitAccount(
       });
     } catch {}
 
-    // Pre-solve without rqdata
-    log(`🤖 Pre-solving hCaptcha (no rqdata)...`);
-    try {
-      const pre = await solveHCaptchaWith2Captcha(HCAP_URL, HCAP_SITE_KEY);
-      const pre2 = pre.success ? pre : await solveHCaptcha(HCAP_URL, HCAP_SITE_KEY);
-      if (pre2.success && pre2.token) {
-        preSolvedToken = pre2.token;
-        log(`✅ Pre-solved hCaptcha token (len=${pre2.token.length})`);
+    // Pre-solve without rqdata — start TWO NopeCHA solves in parallel.
+    // Click Subscribe as soon as the FIRST token (A) is ready.
+    // Token B continues in background and is used for the visible checkbox captcha.
+    log(`🤖 Pre-solving hCaptcha x2 (no rqdata) — both tokens in parallel...`);
+    let preSolvedToken2: string | null = null;
+
+    const nopeKeyRowPre = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+    const nopeKeyPre = nopeKeyRowPre.rows.length > 0 ? (nopeKeyRowPre.rows[0].value as string) : "";
+
+    const solveOneNope = async (label: string): Promise<string | null> => {
+      if (!nopeKeyPre) return null;
+      try {
+        const r = await solveHCaptchaViaNopeCHA(nopeKeyPre, HCAP_URL, HCAP_SITE_KEY, undefined, 120);
+        if (r.success && r.token) {
+          log(`✅ Pre-solved token ${label} (len=${r.token.length})`);
+          return r.token;
+        }
+      } catch (e: any) { log(`⚠️ Pre-solve ${label} failed: ${e.message}`); }
+      return null;
+    };
+
+    // Start both solves immediately. Token A blocks Subscribe; token B continues in background.
+    const solveAPromise = solveOneNope("A");
+    const solveBPromise = solveOneNope("B");
+
+    // Wait for token A (needed before clicking Subscribe)
+    const tokA = await solveAPromise;
+    if (tokA) preSolvedToken = tokA;
+
+    // Token B is still solving in background — captured asynchronously
+    solveBPromise.then(tokB => {
+      if (tokB) {
+        preSolvedToken2 = tokB;
+        if (!preSolvedToken) preSolvedToken = tokB;
       }
-    } catch (e: any) { log(`⚠️ Pre-solve failed: ${e.message}`); }
+    }).catch(() => {});
+
+    // Inject pre-solved token into invisible hCaptcha BEFORE clicking Subscribe
+    // so Stripe's hcaptcha-invisible wrapper already has the response when the button fires
+    if (preSolvedToken) {
+      await broadcastToken(preSolvedToken);
+      // Directly set h-captcha-response in all frames (more reliable than just postMessage)
+      for (const fr of page.frames()) {
+        try {
+          await fr.evaluate((tok: string) => {
+            document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], input[name='h-captcha-response']")
+              .forEach(el => { el.value = tok; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); });
+            // Also set in hCaptcha's internal state
+            const w = window as any;
+            if (w.hcaptcha) {
+              try { w.hcaptcha.setResponse?.(tok); } catch {}
+            }
+          }, preSolvedToken).catch(() => {});
+        } catch {}
+      }
+      // Send challenge.passed postMessage from hcaptcha-invisible frame to checkout frame
+      const hcapInvFrame = page.frames().find((f: any) => f.url().includes("hcaptcha-invisible"));
+      if (hcapInvFrame) {
+        const hcapWidgetId = new URL(hcapInvFrame.url()).searchParams.get("id") || "hcaptcha-invisible";
+        try {
+          await hcapInvFrame.evaluate(([tok, wid]: [string, string]) => {
+            const msgs = [
+              JSON.stringify({ id: wid, type: "challenge.passed", response: tok }),
+              JSON.stringify({ id: wid, type: "success", token: tok }),
+            ];
+            msgs.forEach(msg => { try { window.parent.postMessage(msg, "*"); } catch {} });
+          }, [preSolvedToken, hcapWidgetId]).catch(() => {});
+        } catch {}
+      }
+      log(`📌 Pre-injected token A into hcaptcha-invisible frame before Subscribe click`);
+    }
+
+    // ── Route interceptor: log & inject hCaptcha token into Stripe payment API calls ──
+    let routeInterceptorActive = true;
+    try {
+      await page.route("**/*", async (route) => {
+        if (!routeInterceptorActive) { await route.continue().catch(() => {}); return; }
+        const req = route.request();
+        const url = req.url();
+        const method = req.method();
+
+        // Log ALL POST requests to stripe/m.stripe/api.stripe so we can see exact endpoints
+        if (method === "POST" && (url.includes("stripe.com") || url.includes("m.stripe") || url.includes("api.stripe"))) {
+          const postData = (req.postData() || "").substring(0, 300);
+          log(`  🔌 POST→Stripe: ${url.substring(0, 100)} body=${postData.substring(0, 200)}`);
+          // If it's a payment/confirm call, inject hCaptcha token
+          const isPaymentCall = url.includes("confirm") || url.includes("payment_intent") ||
+            url.includes("/pay/") || url.includes("sources") || url.includes("/v1/");
+          const tokenToUse = preSolvedToken || (preSolvedToken2 as string | null);
+          if (isPaymentCall && tokenToUse && !postData.includes("captcha_token")) {
+            try {
+              const newBody = postData + `&captcha_token=${encodeURIComponent(tokenToUse)}&hcaptcha_response=${encodeURIComponent(tokenToUse)}`;
+              log(`  ✏️  Injecting captcha_token into ${url.substring(0, 60)}...`);
+              await route.continue({ postData: newBody }).catch(() => route.continue().catch(() => {}));
+              return;
+            } catch { }
+          }
+        }
+        await route.continue().catch(() => {});
+      });
+    } catch (e: any) { log(`⚠️ Route interceptor setup error: ${e.message}`); }
 
     await captureScreenshot(page, "Card & billing filled — ready to Subscribe");
     // ── Click Subscribe ──
@@ -15776,8 +15867,32 @@ export async function checkoutExistingReplitAccount(
       }
       log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found"}`);
 
-      const solveResult = await solveHCaptchaWith2Captcha(HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined);
-      const finalResult = solveResult.success ? solveResult : await solveHCaptcha(HCAP_URL, HCAP_SITE_KEY, undefined, capturedRqdata || undefined);
+      // Attempt a FRESH NopeCHA solve for the specific visible challenge.
+      // NopeCHA solves in ~35s when not rate-limited — much better than using a stale pre-solved token.
+      // Race NopeCHA (90s timeout) against a pre-solved fallback.
+      let finalResult: { success: boolean; token?: string; error?: string };
+      const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+      const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0].value as string) : "";
+      const freshSolvePromise = nopeKey
+        ? solveHCaptchaViaNopeCHA(nopeKey, HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
+        : Promise.resolve({ success: false, error: "no NopeCHA key" } as { success: false; error: string });
+      log(`  🔄 Starting fresh NopeCHA solve for visible challenge (90s timeout)...`);
+      const freshResult = await freshSolvePromise;
+      if (freshResult.success && freshResult.token) {
+        log(`  ✅ Fresh live solve succeeded (len=${freshResult.token.length})`);
+        finalResult = freshResult;
+      } else {
+        // Fresh solve failed — try pre-solved token B then A as fallback
+        const visibleToken: string | null = preSolvedToken2 || preSolvedToken || null;
+        if (visibleToken) {
+          log(`  ⚡ Fresh solve failed (${freshResult.error}) — using pre-solved token (len=${visibleToken.length})`);
+          finalResult = { success: true, token: visibleToken };
+        } else {
+          log(`  No tokens available — attempting 2captcha as last resort...`);
+          const solveResult = await solveHCaptchaWith2Captcha(HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined);
+          finalResult = solveResult.success ? solveResult : { success: false, error: "all solvers exhausted" };
+        }
+      }
 
       if (finalResult.success && finalResult.token) {
         const token = finalResult.token;
@@ -15983,8 +16098,22 @@ export async function checkoutExistingReplitAccount(
       }
 
       // Re-click Subscribe after hCaptcha injection
-      let bankAcsNow = page.frames().some((f: any) => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+      const isAcsFrame = (url: string) =>
+        url.includes("m2pfintech.com") || url.includes("m2pSecAuth") ||
+        url.includes("federalbank") || url.includes("m2p") ||
+        url.includes("payu.in") || url.includes("3dsecure") ||
+        url.includes("visa.com") || url.includes("mastercard") ||
+        (url.includes("acs") && !url.includes("hcaptcha") && !url.includes("stripe") && !url.includes("replit")) ||
+        url.includes("paysecure") || url.includes("bankacs") ||
+        url.includes("secure.federalbank") || url.includes("fbsec") ||
+        (url.includes("3ds") && !url.includes("hcaptcha"));
+
+      let bankAcsNow = page.frames().some((f: any) => isAcsFrame(f.url()));
       if (!bankAcsNow) {
+        await captureScreenshot(page, "After checkbox — no ACS yet, re-clicking Subscribe");
+        // Log all current frame URLs to help debug what we're missing
+        const frameUrls = page.frames().map((f: any) => f.url()).filter(u => u && u !== "about:blank");
+        log(`  All frames (${frameUrls.length}): ${frameUrls.map(u => u.substring(0, 60)).join(" | ")}`);
         log(`  Bank ACS not yet — re-clicking Subscribe...`);
         try {
           const resubBtn = page.locator('button[data-testid="hosted-payment-submit-button"], button:has-text("Subscribe"), button[type="submit"]').first();
@@ -15993,30 +16122,44 @@ export async function checkoutExistingReplitAccount(
             log(`  Re-clicked Subscribe`);
           }
         } catch {}
-        const acsDeadline = Date.now() + 45000;
+        const acsDeadline = Date.now() + 60000;
+        let lastErrLog = 0;
+        let lastFrameLog = 0;
         while (!bankAcsNow && Date.now() < acsDeadline) {
           await page.waitForTimeout(3000);
-          bankAcsNow = page.frames().some((f: any) => f.url().includes("m2pfintech.com") || f.url().includes("m2pSecAuth"));
+          bankAcsNow = page.frames().some((f: any) => isAcsFrame(f.url()));
           const curUrl = page.url();
           if (curUrl.includes("replit.com") && !curUrl.includes("stripe")) {
             log(`✅ Payment succeeded (redirected): ${curUrl.substring(0, 80)}`);
+            routeInterceptorActive = false;
             return { success: true, checkoutComplete: true };
           }
           if (bankAcsNow) { log(`✅ Bank ACS frame appeared`); break; }
+          // Periodically log frame URLs so we can see what's happening
+          if (Date.now() - lastFrameLog > 12000) {
+            lastFrameLog = Date.now();
+            const curFrames = page.frames().map((f: any) => f.url()).filter(u => u && u !== "about:blank" && !u.includes("js.stripe.com") && !u.includes("hcaptcha"));
+            log(`  Frames (non-stripe): ${curFrames.map(u => u.substring(0, 60)).join(" | ")}`);
+            await captureScreenshot(page, "Polling for Bank ACS");
+          }
           // Log any Stripe error message visible on the page
-          try {
-            const errMsg = await page.evaluate(() => {
-              const selectors = ['[class*="Error"]', '[class*="error-message"]', '[role="alert"]', '[data-testid*="error"]', '.StripeElement--invalid + *', 'p[class*="warning"]'];
-              for (const sel of selectors) {
-                const el = document.querySelector(sel);
-                if (el && el.textContent?.trim()) return el.textContent.trim();
-              }
-              return null;
-            }).catch(() => null);
-            if (errMsg) log(`⚠️ Stripe UI error: ${errMsg.substring(0, 150)}`);
-          } catch {}
+          if (Date.now() - lastErrLog > 6000) {
+            lastErrLog = Date.now();
+            try {
+              const errMsg = await page.evaluate(() => {
+                const selectors = ['[class*="Error"]', '[class*="error-message"]', '[role="alert"]', '[data-testid*="error"]', '.StripeElement--invalid + *', 'p[class*="warning"]', 'span[class*="error"]'];
+                for (const sel of selectors) {
+                  const el = document.querySelector(sel);
+                  if (el && el.textContent?.trim()) return el.textContent.trim();
+                }
+                return null;
+              }).catch(() => null);
+              if (errMsg) log(`⚠️ Stripe UI error: ${errMsg.substring(0, 200)}`);
+            } catch {}
+          }
         }
       }
+      routeInterceptorActive = false;
     }
 
     // ── Handle 3DS OTP ──
