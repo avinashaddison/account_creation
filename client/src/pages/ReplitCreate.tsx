@@ -20,6 +20,8 @@ type ReplitAccount = {
   outlookEmail: string | null;
   status: string;
   error: string | null;
+  couponExtracted: boolean;
+  couponCode: string | null;
   createdAt: string;
 };
 
@@ -66,7 +68,6 @@ export default function ReplitCreate() {
   const [linksCount, setLinksCount] = useState(4);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
-  const [autoCouponSourceId, setAutoCouponSourceId] = useState("");
 
   // ── ONBOARDING mode state ──
   const [onbEmail, setOnbEmail] = useState("");
@@ -333,21 +334,18 @@ export default function ReplitCreate() {
   };
 
   const handleAutoCouponLinks = async () => {
-    if (!autoCouponSourceId) {
-      toast({ title: "Select source account", description: "Choose which account to extract the coupon from", variant: "destructive" });
-      return;
-    }
     sounds.start();
     setLogs([]);
     setRunning(true);
     setCompletedCount(0);
     setTotalCount(4);
     try {
-      const res = await apiRequest("POST", "/api/replit-auto-coupon-links", { sourceAccountId: autoCouponSourceId });
+      const res = await apiRequest("POST", "/api/replit-auto-coupon-links", {});
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start");
       activeBatchId.current = data.batchId;
       addLog(`🤖 Auto Coupon job started [${data.batchId}]`);
+      if (data.sourceEmail) addLog(`👤 Using account: ${data.sourceEmail}`);
     } catch (err: any) {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -772,57 +770,81 @@ export default function ReplitCreate() {
               </div>
 
               {/* ── AUTO MODE ── */}
-              {linksSubMode === "auto" && (
-                <>
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
-                      <User className="w-2.5 h-2.5 inline mr-1" />Source Account (coupon owner)
-                    </label>
-                    <select
-                      value={autoCouponSourceId}
-                      onChange={(e) => { sounds.keypress(); setAutoCouponSourceId(e.target.value); }}
-                      className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
-                      style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${autoCouponSourceId ? LA(0.45) : LA(0.15)}`, color: autoCouponSourceId ? LA(0.9) : "rgba(255,255,255,0.35)" }}
-                      data-testid="select-auto-coupon-source"
+              {linksSubMode === "auto" && (() => {
+                const nextSource = replitAccounts.find(a => !a.couponExtracted && a.email && a.password);
+                const exhausted = !nextSource;
+                const usedCount = replitAccounts.filter(a => a.couponExtracted).length;
+                return (
+                  <>
+                    {/* Queue status */}
+                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${LA(0.18)}` }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Coupon Queue</span>
+                        <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>{usedCount} used · {replitAccounts.length - usedCount} remaining</span>
+                      </div>
+                      {exhausted ? (
+                        <p className="text-[10px] font-mono" style={{ color: "#ef4444" }}>⚠️ All accounts have been used for coupon extraction</p>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-mono" style={{ color: LA(0.4) }}>Next account (auto-selected):</p>
+                          <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: LA(0.06), border: `1px solid ${LA(0.2)}` }}>
+                            <User className="w-3 h-3 flex-shrink-0" style={{ color: LA(0.6) }} />
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-mono font-bold truncate" style={{ color: L }}>@{nextSource!.username}</p>
+                              <p className="text-[9px] font-mono truncate" style={{ color: LA(0.5) }}>{nextSource!.email}</p>
+                            </div>
+                            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(0,255,65,0.08)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.2)" }}>
+                              unused
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Already extracted coupons */}
+                    {usedCount > 0 && (
+                      <div className="rounded-lg p-3 space-y-1.5" style={{ background: LA(0.03), border: `1px solid ${LA(0.1)}` }}>
+                        <p className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.35) }}>Extracted coupons ({usedCount})</p>
+                        <div className="space-y-1 max-h-28 overflow-y-auto">
+                          {replitAccounts.filter(a => a.couponExtracted).map(a => (
+                            <div key={a.id} className="flex items-center gap-2 text-[9px] font-mono" style={{ color: LA(0.4) }}>
+                              <span className="truncate" style={{ maxWidth: 120 }}>{a.email.split("@")[0]}</span>
+                              <span style={{ color: LA(0.2) }}>→</span>
+                              <span className="font-bold" style={{ color: LA(0.7) }}>{a.couponCode || "?"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.03), border: `1px solid ${LA(0.1)}` }}>
+                      <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.4) }}>
+                        Auto-picks the next unused account → reads coupon + remaining slots → generates that many links → marks account as used in DB
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleAutoCouponLinks}
+                      disabled={running || exhausted}
+                      className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
+                      style={{
+                        background: running || exhausted ? LA(0.03) : `linear-gradient(135deg, ${LA(0.2)}, ${LA(0.07)})`,
+                        border: `1px solid ${running || exhausted ? LA(0.08) : LA(0.6)}`,
+                        color: running || exhausted ? LA(0.2) : L,
+                        textShadow: running || exhausted ? "none" : `0 0 14px ${L}`,
+                        boxShadow: running || exhausted ? "none" : `0 0 25px ${LA(0.1)}`,
+                        cursor: running || exhausted ? "not-allowed" : "pointer",
+                      }}
+                      data-testid="button-auto-coupon-links"
                     >
-                      <option value="">— Select account to extract coupon from —</option>
-                      {replitAccounts.map(a => (
-                        <option key={a.id} value={a.id}>@{a.username} ({a.email}) [{a.status}]</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="rounded-lg p-3 space-y-1.5" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
-                    <p className="text-[9px] font-mono font-bold" style={{ color: LA(0.7) }}>How it works</p>
-                    <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.45) }}>
-                      1. Logs into selected account → opens referral page<br/>
-                      2. Reads coupon code + "X of 4 used" remaining slots<br/>
-                      3. Auto-generates exactly that many checkout links<br/>
-                      4. Status: processing → <span style={{ color: "#ef4444" }}>working</span> (red badge)
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={handleAutoCouponLinks}
-                    disabled={running || !autoCouponSourceId}
-                    className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
-                    style={{
-                      background: running || !autoCouponSourceId ? LA(0.03) : `linear-gradient(135deg, ${LA(0.2)}, ${LA(0.07)})`,
-                      border: `1px solid ${running || !autoCouponSourceId ? LA(0.08) : LA(0.6)}`,
-                      color: running || !autoCouponSourceId ? LA(0.2) : L,
-                      textShadow: running || !autoCouponSourceId ? "none" : `0 0 14px ${L}`,
-                      boxShadow: running || !autoCouponSourceId ? "none" : `0 0 25px ${LA(0.1)}`,
-                      cursor: running || !autoCouponSourceId ? "not-allowed" : "pointer",
-                    }}
-                    data-testid="button-auto-coupon-links"
-                  >
-                    <Hash className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
-                    <span className="relative z-10">
-                      {running ? "extracting coupon & generating..." : "auto_extract_coupon_and_generate"}
-                    </span>
-                  </button>
-                </>
-              )}
+                      <Hash className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                      <span className="relative z-10">
+                        {running ? "extracting coupon & generating..." : exhausted ? "no_accounts_remaining" : "auto_extract_coupon_and_generate"}
+                      </span>
+                    </button>
+                  </>
+                );
+              })()}
 
               {/* ── MANUAL MODE ── */}
               {linksSubMode === "manual" && (

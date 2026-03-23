@@ -174,6 +174,8 @@ export const replitAccounts = pgTable("replit_accounts", {
   status: text("status").notNull().default("processing"),
   credits: text("credits"),
   error: text("error"),
+  couponExtracted: boolean("coupon_extracted").notNull().default(false),
+  couponCode: text("coupon_code"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

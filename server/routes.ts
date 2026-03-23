@@ -3511,28 +3511,30 @@ export async function registerRoutes(
     }
   });
 
-  // ── Auto Coupon: extract coupon from one account's referral page → generate N links ──
+  // ── Auto Coupon: auto-pick next unused account → extract coupon → generate links ──
   app.post("/api/replit-auto-coupon-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       const role = req.session.role!;
-      const { sourceAccountId } = req.body;
-      if (!sourceAccountId) return res.status(400).json({ error: "sourceAccountId required" });
 
       const allAccounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
-      const sourceAccount = allAccounts.find(a => a.id === sourceAccountId);
-      if (!sourceAccount) return res.status(404).json({ error: "Source account not found" });
+
+      // Auto-pick: first account with couponExtracted=false that has credentials
+      const sourceAccount = allAccounts.find(a => !a.couponExtracted && a.email && a.password);
+      if (!sourceAccount) {
+        return res.status(400).json({ error: "No unused accounts available for coupon extraction — all accounts have already been used" });
+      }
 
       const batchId = `replit-auto-${Date.now().toString(36)}`;
       const jobId = `auto-${Date.now()}`;
       batchOwners.set(batchId, userId);
-      res.json({ success: true, batchId });
+      res.json({ success: true, batchId, sourceEmail: sourceAccount.email });
 
       (async () => {
         broadcastLog(batchId, jobId, `🤖 Auto Coupon job started [${batchId}]`, userId);
-        broadcastLog(batchId, jobId, `👤 Source account: ${sourceAccount.email}`, userId);
+        broadcastLog(batchId, jobId, `👤 Coupon source: ${sourceAccount.email}`, userId);
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
         // Step 1: Extract coupon
@@ -3550,9 +3552,14 @@ export async function registerRoutes(
         }
 
         const { coupon, usedSlots = 0, totalSlots = 4, remainingSlots = 0 } = couponResult;
+
+        // Mark source account as used (regardless of remaining slots — don't re-use it)
+        await storage.markReplitCouponExtracted(sourceAccount.id, coupon).catch(() => {});
+
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
         broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon}`, userId);
-        broadcastLog(batchId, jobId, `📊 Slots: ${usedSlots}/${totalSlots} used — ${remainingSlots} available`, userId);
+        broadcastLog(batchId, jobId, `📊 Slots: ${usedSlots}/${totalSlots} used — ${remainingSlots} remaining`, userId);
+        broadcastLog(batchId, jobId, `💾 Coupon saved to account ${sourceAccount.email}`, userId);
 
         if (remainingSlots <= 0) {
           broadcastLog(batchId, jobId, `⚠️ All ${totalSlots} referral slots are already used — nothing to generate`, userId);
@@ -3562,7 +3569,7 @@ export async function registerRoutes(
 
         // Step 2: Pick processing accounts (exclude source account)
         const candidates = allAccounts.filter(a =>
-          a.id !== sourceAccountId && a.email && a.password && a.status === "processing"
+          a.id !== sourceAccount.id && a.email && a.password && a.status === "processing"
         );
         const toProcess = candidates.slice(0, remainingSlots);
 
@@ -3582,7 +3589,6 @@ export async function registerRoutes(
         for (let i = 0; i < toProcess.length; i++) {
           const acct = toProcess[i];
           broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
-          await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
 
           const result = await generateSingleCheckoutLink(
             acct.email,
