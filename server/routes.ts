@@ -3732,6 +3732,92 @@ export async function registerRoutes(
     }
   });
 
+  // Parallel batch: N agent accounts run simultaneously, each 1 coupon → 1 checkout link
+  app.post("/api/replit-batch-coupon-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const role = req.session.role!;
+      const count = Math.min(Math.max(parseInt(req.body.count || "5", 10), 1), 20);
+
+      const allAccounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+
+      const sources = allAccounts.filter(a => !a.couponExtracted && a.email && a.password).slice(0, count);
+      if (sources.length === 0) {
+        return res.status(400).json({ error: "No unused agent accounts available for coupon extraction" });
+      }
+
+      const sourceIds = new Set(sources.map(a => a.id));
+      const targets = allAccounts
+        .filter(a => !sourceIds.has(a.id) && a.email && a.password && a.status === "processing")
+        .slice(0, sources.length);
+
+      if (targets.length === 0) {
+        return res.status(400).json({ error: "No processing accounts available to generate links for" });
+      }
+
+      const actualCount = Math.min(sources.length, targets.length);
+      const batchId = `replit-batch-${Date.now().toString(36)}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId, count: actualCount });
+
+      (async () => {
+        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} job(s) starting simultaneously`, userId);
+        broadcastLog(batchId, "batch-init", `─`.repeat(50), userId);
+
+        const jobs = sources.slice(0, actualCount).map((source, i) => {
+          const target = targets[i];
+          const jobId = `batch-job-${i}`;
+          const tag = `[Job ${i + 1}]`;
+          return (async () => {
+            broadcastLog(batchId, jobId, `${tag} 🤖 Source: ${source.email} → Target: ${target.email}`, userId);
+            const couponResult = await extractCouponFromReplitAccount(
+              source.email, source.password,
+              (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
+            );
+            if (!couponResult.success || !couponResult.coupon) {
+              broadcastLog(batchId, jobId, `${tag} ❌ Coupon extraction failed: ${couponResult.error}`, userId);
+              return { success: false, source: source.email, target: target.email };
+            }
+            const coupon = couponResult.coupon;
+            await storage.markReplitCouponExtracted(source.id, coupon).catch(() => {});
+            broadcastLog(batchId, jobId, `${tag} 🎟️ Coupon: ${coupon}`, userId);
+
+            let result = await generateSingleCheckoutLink(
+              target.email, target.password, coupon,
+              (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
+            );
+            if (!result.success) {
+              broadcastLog(batchId, jobId, `${tag} ↩️  Retrying...`, userId);
+              result = await generateSingleCheckoutLink(
+                target.email, target.password, coupon,
+                (msg) => broadcastLog(batchId, jobId, `${tag}   [retry] ${msg}`, userId)
+              );
+            }
+            if (result.success && result.stripeUrl) {
+              broadcastLog(batchId, jobId, `CHECKOUT_URL|${target.email}|${result.stripeUrl}`, userId);
+              await storage.updateReplitAccountStatus(target.id, "working").catch(() => {});
+              broadcastLog(batchId, jobId, `${tag} ✅ Done — link generated for ${target.email}`, userId);
+              return { success: true, source: source.email, target: target.email, url: result.stripeUrl };
+            } else {
+              broadcastLog(batchId, jobId, `${tag} ❌ Link generation failed: ${result.error}`, userId);
+              return { success: false, source: source.email, target: target.email };
+            }
+          })();
+        });
+
+        const results = await Promise.allSettled(jobs);
+        const succeeded = results.filter(r => r.status === "fulfilled" && (r as any).value?.success).length;
+        broadcastLog(batchId, "batch-done", `─`.repeat(50), userId);
+        broadcastLog(batchId, "batch-done", `✅ Batch complete — ${succeeded}/${actualCount} links generated`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/replit-accounts", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;

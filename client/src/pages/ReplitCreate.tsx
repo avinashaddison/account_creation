@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save, Zap } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -69,6 +69,7 @@ export default function ReplitCreate() {
   const [linksCount, setLinksCount] = useState(4);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
+  const [batchCount, setBatchCount] = useState(5);
   const [checkoutDelayMinutes, setCheckoutDelayMinutes] = useState(0);
   const [checkoutDelaySaving, setCheckoutDelaySaving] = useState(false);
   const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
@@ -364,6 +365,25 @@ export default function ReplitCreate() {
       activeBatchId.current = data.batchId;
       addLog(`🤖 Auto Coupon job started [${data.batchId}]`);
       if (data.sourceEmail) addLog(`👤 Using account: ${data.sourceEmail}`);
+    } catch (err: any) {
+      sounds.error();
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setRunning(false);
+    }
+  };
+
+  const handleBatchCouponLinks = async () => {
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+    setTotalCount(batchCount);
+    try {
+      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to start batch");
+      activeBatchId.current = data.batchId;
+      addLog(`🚀 Parallel batch started — ${data.count} job(s) running simultaneously [${data.batchId}]`);
     } catch (err: any) {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -875,6 +895,48 @@ export default function ReplitCreate() {
                       </div>
                     </div>
 
+                    {/* Parallel batch controls */}
+                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${LA(0.18)}` }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Parallel Batch</span>
+                        <span className="text-[9px] font-mono" style={{ color: LA(0.25) }}>run N jobs simultaneously</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={20}
+                          value={batchCount}
+                          onChange={e => setBatchCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                          className="w-16 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
+                          style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
+                          data-testid="input-batch-count"
+                        />
+                        <span className="text-[10px] font-mono flex-1" style={{ color: LA(0.4) }}>
+                          accounts in parallel · {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length)} available sources · {replitAccounts.filter(a => a.status === "processing").length} targets
+                        </span>
+                      </div>
+                      <button
+                        onClick={handleBatchCouponLinks}
+                        disabled={running || exhausted}
+                        className="relative w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
+                        style={{
+                          background: running || exhausted ? LA(0.03) : `linear-gradient(135deg, rgba(34,197,94,0.25), rgba(34,197,94,0.08))`,
+                          border: `1px solid ${running || exhausted ? LA(0.08) : "rgba(34,197,94,0.6)"}`,
+                          color: running || exhausted ? LA(0.2) : "#22c55e",
+                          textShadow: running || exhausted ? "none" : "0 0 12px rgba(34,197,94,0.8)",
+                          boxShadow: running || exhausted ? "none" : "0 0 20px rgba(34,197,94,0.1)",
+                          cursor: running || exhausted ? "not-allowed" : "pointer",
+                        }}
+                        data-testid="button-batch-coupon-links"
+                      >
+                        <Zap className={`w-3.5 h-3.5 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                        <span className="relative z-10">
+                          {running ? `running ${batchCount} jobs in parallel...` : exhausted ? "no_accounts_remaining" : `run_batch_${batchCount}_parallel`}
+                        </span>
+                      </button>
+                    </div>
+
                     <button
                       onClick={handleAutoCouponLinks}
                       disabled={running || exhausted}
@@ -891,7 +953,7 @@ export default function ReplitCreate() {
                     >
                       <Hash className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
                       <span className="relative z-10">
-                        {running ? "extracting coupon & generating..." : exhausted ? "no_accounts_remaining" : "auto_extract_coupon_and_generate"}
+                        {running ? "extracting coupon & generating..." : exhausted ? "no_accounts_remaining" : "auto_extract_coupon_and_generate (1x)"}
                       </span>
                     </button>
                   </>
