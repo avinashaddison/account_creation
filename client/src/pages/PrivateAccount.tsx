@@ -1816,12 +1816,6 @@ export default function PrivateAccount() {
                             {copied === `le-${acct.id}` ? <span className="text-emerald-400">✓ Copied!</span> : acct.email}
                           </span>
                         </button>
-                        {acct.outlookEmail && acct.outlookEmail !== acct.email && (
-                          <div className="flex items-center gap-1">
-                            <Mail className="w-2.5 h-2.5 text-pink-400/40" />
-                            <span className="text-[11px] font-mono text-pink-400/40 truncate max-w-[220px]">{acct.outlookEmail}</span>
-                          </div>
-                        )}
                       </div>
 
                       {/* Password — click to copy, toggle visibility */}
