@@ -18,9 +18,9 @@ externalPort = 3000
 PORT = "5000"
 
 [deployment]
-deploymentTarget = "vm"
+deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
-run = ["bash", "-c", "node_modules/.bin/playwright install chromium chromium-headless-shell --quiet 2>/dev/null; NODE_ENV=production node dist/index.cjs"]
+run = ["node", "./dist/index.cjs"]
 
 [workflows]
 runButton = "Project"
