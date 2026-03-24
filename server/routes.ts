@@ -1031,7 +1031,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/admin/replit-checkout-delay", requireAuth, async (req: Request, res: Response) => {
+  app.put("/api/admin/replit-checkout-delay", requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
     try {
       const { minutes } = req.body;
       const val = parseInt(minutes, 10);
