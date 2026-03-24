@@ -1,0 +1,183 @@
+19:46:02
+·
+🤖 Auto Coupon job started [replit-auto-mn4p6hv4]
+19:46:02
+·
+👤 Using account: balanbkeisssht@hotmail.com
+19:46:02
+·
+🔐 Logging into Replit as balanbkeisssht@hotmail.com...
+19:46:09
++
+✅ Logged in
+19:46:09
+·
+🔗 Opening referral page...
+19:46:14
+·
+📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+19:46:14
++
+✅ Coupon: AGENT47419AEA5D311
+19:46:14
+$
+🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+19:46:15
+·
+──────────────────────────────────────────────────
+19:46:15
+·
+🎟️ Coupon: AGENT47419AEA5D311
+19:46:15
+·
+📊 Slots: 0/4 used — 4 remaining
+19:46:15
++
+💾 Coupon saved to account balanbkeisssht@hotmail.com
+19:46:15
+·
+──────────────────────────────────────────────────
+19:46:15
+$
+🔗 Generating 4 checkout link(s) using coupon AGENT47419AEA5D311
+19:46:15
+·
+📋 Accounts: reyezgtripicw@hotmail.com, courtneywilson7730@outlook.com, jeffreyjohnson6210@outlook.com, annchase5710@outlook.com
+19:46:15
+·
+──────────────────────────────────────────────────
+19:46:15
+·
+[1/4] 🚀 reyezgtripicw@hotmail.com
+19:46:15
+·
+🌐 SOAX connected — session: wtpj7y5e087h | endpoint: proxy.soax.com:5000
+19:46:15
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+19:46:15
+·
+│ Exit IP : 34.148.42.180
+19:46:15
+·
+│ Location : North Charleston, South Carolina, US
+19:46:15
+·
+│ Provider : AS396982 Google LLC
+19:46:15
+·
+└────────────────────────────────────────────────
+19:46:15
+·
+🔐 Logging into Replit as reyezgtripicw@hotmail.com...
+19:47:29
+!
+❌ Error: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+19:47:29
+!
+❌ Failed for reyezgtripicw@hotmail.com: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+19:47:29
+·
+──────────────────────────────────────────────────
+19:47:29
+·
+[2/4] 🚀 courtneywilson7730@outlook.com
+19:47:29
+·
+🌐 SOAX connected — session: hcv15s1tcoa9 | endpoint: proxy.soax.com:5000
+19:47:30
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+19:47:30
+·
+│ Exit IP : 34.148.42.180
+19:47:30
+·
+│ Location : North Charleston, South Carolina, US
+19:47:30
+·
+│ Provider : AS396982 Google LLC
+19:47:30
+·
+└────────────────────────────────────────────────
+19:47:30
+·
+🔐 Logging into Replit as courtneywilson7730@outlook.com...
+19:48:34
+!
+❌ Error: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+19:48:34
+!
+❌ Failed for courtneywilson7730@outlook.com: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+19:48:34
+·
+──────────────────────────────────────────────────
+19:48:34
+·
+[3/4] 🚀 jeffreyjohnson6210@outlook.com
+19:48:34
+·
+🌐 SOAX connected — session: x4nhob5gfad6 | endpoint: proxy.soax.com:5000
+19:48:34
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+19:48:34
+·
+│ Exit IP : 34.148.42.180
+19:48:34
+·
+│ Location : North Charleston, South Carolina, US
+19:48:34
+·
+│ Provider : AS396982 Google LLC
+19:48:34
+·
+└────────────────────────────────────────────────
+19:48:35
+·
+🔐 Logging into Replit as jeffreyjohnson6210@outlook.com...
+19:49:20
+!
+❌ Error: page.goto: Timeout 45000ms exceeded. Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+19:49:20
+!
+❌ Failed for jeffreyjohnson6210@outlook.com: page.goto: Timeout 45000ms exceeded. Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+19:49:20
+·
+──────────────────────────────────────────────────
+19:49:20
+·
+[4/4] 🚀 annchase5710@outlook.com
+19:49:20
+·
+🌐 SOAX connected — session: c3tgfwd7uzcs | endpoint: proxy.soax.com:5000
+19:49:20
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+19:49:20
+·
+│ Exit IP : 34.148.42.180
+19:49:20
+·
+│ Location : North Charleston, South Carolina, US
+19:49:20
+·
+│ Provider : AS396982 Google LLC
+19:49:20
+·
+└────────────────────────────────────────────────
+19:49:20
+·
+🔐 Logging into Replit as annchase5710@outlook.com...
+19:50:25
+!
+❌ Error: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+19:50:25
+!
+❌ Failed for annchase5710@outlook.com: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+19:50:25
+·
+──────────────────────────────────────────────────
+19:50:25
++
+✅ Done — 0/4 links generated

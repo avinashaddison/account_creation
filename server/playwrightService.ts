@@ -12,40 +12,62 @@ import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService
 import { getAvailableDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent } from "./mailService";
 import * as ProxyChain from "proxy-chain";
 import { HttpsProxyAgent } from "https-proxy-agent";
+import * as https from "https";
 
 const execFileAsync = promisify(execFile);
 
-// ── Proxy IP resolver — routes a check request through the anonymized proxy ──
+// ── Proxy IP resolver — routes a real HTTPS request through the proxy ────────
+// Uses Node's built-in https.get (not native fetch) so the agent is respected.
 async function resolveProxyIp(
   anonymizedProxy: string,
   log: (msg: string) => void,
   label = "PROXY"
 ): Promise<string> {
-  try {
-    const agent = new HttpsProxyAgent(anonymizedProxy);
-    const res = await fetch("https://ipinfo.io/json", {
-      // @ts-ignore — node-fetch agent compat
-      agent,
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data: any = await res.json();
-    const ip      = data.ip      || "unknown";
-    const city    = data.city    || "";
-    const region  = data.region  || "";
-    const country = data.country || "";
-    const org     = data.org     || "";
-    const loc     = [city, region, country].filter(Boolean).join(", ");
-    log(`┌─── ${label} ACTIVE ───────────────────────────`);
-    log(`│  Exit IP  : ${ip}`);
-    if (loc)  log(`│  Location : ${loc}`);
-    if (org)  log(`│  Provider : ${org}`);
-    log(`└────────────────────────────────────────────────`);
-    return ip;
-  } catch (e: any) {
-    log(`│  [IP check failed: ${(e.message || "").substring(0, 60)}]`);
-    return "unknown";
-  }
+  return new Promise<string>((resolve) => {
+    try {
+      const agent = new HttpsProxyAgent(anonymizedProxy);
+      const req = https.get(
+        "https://ipinfo.io/json",
+        { agent: agent as any, timeout: 10000 },
+        (res) => {
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () => {
+            try {
+              const d = JSON.parse(body);
+              const ip      = d.ip      || "unknown";
+              const city    = d.city    || "";
+              const region  = d.region  || "";
+              const country = d.country || "";
+              const org     = d.org     || "";
+              const loc     = [city, region, country].filter(Boolean).join(", ");
+              log(`┌─── ${label} ACTIVE ───────────────────────────`);
+              log(`│  Exit IP  : ${ip}`);
+              if (loc) log(`│  Location : ${loc}`);
+              if (org) log(`│  Provider : ${org}`);
+              log(`└────────────────────────────────────────────────`);
+              resolve(ip);
+            } catch {
+              log(`│  [IP check: malformed response]`);
+              resolve("unknown");
+            }
+          });
+        }
+      );
+      req.on("error", (e: any) => {
+        log(`│  [IP check failed: ${(e.message || "").substring(0, 60)}]`);
+        resolve("unknown");
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        log(`│  [IP check timed out]`);
+        resolve("unknown");
+      });
+    } catch (e: any) {
+      log(`│  [IP check error: ${(e.message || "").substring(0, 60)}]`);
+      resolve("unknown");
+    }
+  });
 }
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
 
@@ -18645,10 +18667,23 @@ export async function generateSingleCheckoutLink(
       await passInput.press("Enter");
     }
     // Wait for redirect away from /login (up to 60s for slow accounts)
-    await page.waitForURL(
-      (u: URL) => !u.href.includes("replit.com/login"),
-      { timeout: 60000 }
-    );
+    try {
+      await page.waitForURL(
+        (u: URL) => !u.href.includes("replit.com/login"),
+        { timeout: 60000 }
+      );
+    } catch {
+      // Timeout — capture what Replit is actually showing to help diagnose
+      const currentUrl = page.url();
+      const pageTitle  = await page.title().catch(() => "");
+      const errorText  = await page.locator('[data-cy="error-message"], .error, [role="alert"], p.text-red-500').first().textContent({ timeout: 2000 }).catch(() => "");
+      const bodySnip   = await page.evaluate(() => document.body?.innerText?.substring(0, 200)).catch(() => "");
+      log(`⚠️  Login stuck — URL: ${currentUrl.substring(0, 80)}`);
+      if (pageTitle)  log(`⚠️  Page title: ${pageTitle}`);
+      if (errorText)  log(`⚠️  Error msg : ${errorText.trim()}`);
+      if (bodySnip)   log(`⚠️  Page text : ${bodySnip.replace(/\n/g, " ").substring(0, 150)}`);
+      throw new Error(`Login redirect timed out (stuck on: ${currentUrl.substring(0, 60)})`);
+    }
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page");
     log(`✅ Logged in`);
 
