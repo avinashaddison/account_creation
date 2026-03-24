@@ -9,6 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
+import { getAvailableDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent } from "./mailService";
 import * as ProxyChain from "proxy-chain";
 
 const execFileAsync = promisify(execFile);
@@ -13018,6 +13019,27 @@ export async function registerLovableAccount(
       }
     });
 
+    // ── MAIL.GW SETUP: Generate fresh temp email for Lovable signup ───────
+    let mailGwEmail = outlookEmail; // fallback to outlookEmail if mail.gw fails
+    let mailGwPassword = "MailGw@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
+    let mailGwProvider: "mail.gw" | "mail.tm" = "mail.gw";
+    try {
+      const gwDomain = await getAvailableDomain(true);
+      mailGwProvider = (gwDomain.includes("oakon") || gwDomain.includes("teihu") || gwDomain.includes("raleigh") || gwDomain.includes("pastry") || gwDomain.includes("questtech")) ? "mail.gw" : "mail.tm";
+      const adjectives = ["swift","bright","cool","smart","keen","bold","calm","glad","fine","pure","neat","wise","warm","fair","free"];
+      const nouns = ["fox","owl","jay","bee","ark","elm","oak","ivy","fen","dew","ray","sky","sea","bay","glen"];
+      const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const noun = nouns[Math.floor(Math.random() * nouns.length)];
+      const num = Math.floor(Math.random() * 9000 + 1000);
+      const localPart = `${adj}${noun}${num}`;
+      mailGwEmail = `${localPart}@${gwDomain}`;
+      await createTempEmail(mailGwEmail, mailGwPassword);
+      log(`✅ mail.gw account created: ${mailGwEmail}`);
+    } catch (gwErr: any) {
+      log(`⚠️ mail.gw setup failed (${(gwErr.message || "").substring(0, 80)}) — falling back to outlookEmail`);
+      mailGwEmail = outlookEmail;
+    }
+
     // ── STEP 1: Navigate to signup page ───────────────────────────────────
     log("Navigating to https://lovable.dev/signup ...");
     // ERR_CONNECTION_CLOSED is a transient Cloudflare/CDN reset — retry up to 3 times
@@ -13068,13 +13090,13 @@ export async function registerLovableAccount(
     }
 
     // ── STEP 2: Fill email and click Continue ─────────────────────────────
-    log(`Filling email: ${outlookEmail}`);
+    log(`Filling email: ${mailGwEmail}`);
     const emailFilled = await fillInput(page, [
       'input[type="email"]',
       'input[name="email"]',
       'input[placeholder*="email" i]',
       'input[id*="email" i]',
-    ], outlookEmail, "email");
+    ], mailGwEmail, "email");
 
     if (!emailFilled) {
       const snippet = await page.evaluate(() => (document.body?.innerHTML || "").substring(0, 500));
@@ -13406,7 +13428,6 @@ export async function registerLovableAccount(
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
-    let owaBrowser: any = null;
 
     // ── STEP 4.5: Dashboard bypass check ──────────────────────────────────────
     // Lovable may allow dashboard access before email verification. Try navigating
@@ -13431,712 +13452,149 @@ export async function registerLovableAccount(
           log("✅ Dashboard bypass succeeded — Lovable allows unverified access! Skipping email scan.");
           verificationLink = "DASHBOARD_BYPASS";
         } else {
-          log(`ℹ️ Email verification enforced (redirected to ${bypassUrl.substring(0, 50)}) — proceeding with IMAP scan`);
+          log(`ℹ️ Email verification enforced (redirected to ${bypassUrl.substring(0, 50)}) — will poll mail.gw for verification link`);
           await page.goto("https://lovable.dev/verify-email", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
         }
       } catch (bypassErr: any) {
-        log(`Bypass check failed: ${(bypassErr.message || "").substring(0, 60)} — proceeding with IMAP`);
+        log(`Bypass check failed: ${(bypassErr.message || "").substring(0, 60)} — will poll mail.gw`);
         await page.goto("https://lovable.dev/verify-email", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
       }
     }
 
-    // ── STEP 5: Check Outlook inbox for verification email ─────────────────
-    // Wait 35s, then click Resend on Lovable page to ensure email is sent,
-    // then wait another 50s before opening Outlook
+    // ── STEP 5: Poll mail.gw API for Lovable verification email ───────────
     // (skipped if dashboard bypass already succeeded)
     if (!verificationLink) {
-    log("Waiting 35s before clicking Lovable Resend...");
-    await waitMs(35000);
+
+    // Poll mail.gw API for the Lovable verification email
+    log("📬 Polling mail.gw inbox for verification email (up to 3 minutes)...");
     try {
-      const resendBtn = await page.$('button:has-text("Resend"), a:has-text("Resend"), button:has-text("resend"), span:has-text("Resend")');
-      if (resendBtn) {
-        await resendBtn.click({ timeout: 5000 });
-        log("✅ Clicked Lovable Resend button — second email delivery triggered");
-      } else {
-        log("ℹ️ No Resend button found on Lovable page — continuing with original email");
+      const gwToken = await getAuthToken(mailGwEmail, mailGwPassword, mailGwProvider as any);
+      const pollStart = Date.now();
+      const pollTimeout = 3 * 60 * 1000;
+      const pollInterval = 5000;
+      const seenMsgIds = new Set<string>();
+
+      while (Date.now() - pollStart < pollTimeout && !verificationLink) {
+        try {
+          const msgs = await fetchMessages(gwToken, mailGwProvider as any);
+          for (const msg of msgs) {
+            if (seenMsgIds.has(msg.id)) continue;
+            seenMsgIds.add(msg.id);
+            const subject = (msg.subject || "").toLowerCase();
+            const fromAddr = ((msg.from && msg.from.address) || "").toLowerCase();
+            if (
+              !subject.includes("lovable") && !subject.includes("verify") &&
+              !subject.includes("confirm") && !subject.includes("sign") &&
+              !fromAddr.includes("lovable") && !fromAddr.includes("noreply") &&
+              !fromAddr.includes("firebase")
+            ) continue;
+            log(`📧 Got email: "${msg.subject}" from ${(msg.from && msg.from.address) || "?"}`);
+            const content = await fetchMessageContent(gwToken, msg.id, mailGwProvider as any);
+
+            const decodeHtmlEntities = (s: string) => {
+              let prev = "";
+              while (prev !== s) { prev = s; s = s.replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'"); }
+              return s;
+            };
+
+            // Priority 1: lovable.dev auth action with oobCode
+            const lovableRe = /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/g;
+            const lovableMatches = [...content.matchAll(lovableRe)].map((m: any) => m[0].trim());
+            const withOob = lovableMatches.filter((u: string) => u.includes("oobCode"));
+            if (withOob.length > 0) {
+              verificationLink = withOob[withOob.length - 1];
+              log(`✅ mail.gw: Lovable verification link: ${verificationLink.substring(0, 120)}`);
+              break;
+            }
+            if (lovableMatches.length > 0) {
+              verificationLink = lovableMatches[lovableMatches.length - 1];
+              log(`✅ mail.gw: Lovable link (no oobCode): ${verificationLink.substring(0, 120)}`);
+              break;
+            }
+
+            // Priority 2: Firebase project URL
+            const fbRe = /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/g;
+            const fbMatches = [...content.matchAll(fbRe)].map((m: any) => m[0].trim()).filter((u: string) => u.includes("oobCode"));
+            if (fbMatches.length > 0) {
+              verificationLink = fbMatches[fbMatches.length - 1];
+              log(`✅ mail.gw: Firebase verification link: ${verificationLink.substring(0, 120)}`);
+              break;
+            }
+
+            // Priority 3: Any lovable.dev or firebase link with oobCode (with HTML entity decode)
+            const anyRe = /https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^\s"'<>\r\n)]*/g;
+            const anyMatches = [...content.matchAll(anyRe)].map((m: any) => decodeHtmlEntities(m[0].trim())).filter((u: string) => u.includes("oobCode"));
+            if (anyMatches.length > 0) {
+              verificationLink = anyMatches[anyMatches.length - 1];
+              log(`✅ mail.gw: Verification link (decoded): ${verificationLink.substring(0, 120)}`);
+              break;
+            }
+          }
+        } catch (pollErr: any) {
+          log(`⚠️ mail.gw poll error: ${(pollErr.message || "").substring(0, 80)}`);
+        }
+        if (!verificationLink) await waitMs(pollInterval);
       }
-    } catch (rErr: any) {
-      log(`⚠️ Resend click failed: ${(rErr.message || "").substring(0, 60)}`);
-    }
-    log("Waiting 50s more for verification email to arrive...");
-    await waitMs(50000);
-    } // end if (!verificationLink) for Step 5 setup
 
-    // ── IMAP scan (primary) — Hotmail supports IMAP; bypasses browser anti-bot ─
-    async function imapScanForLovable(delayLabel: string): Promise<boolean> {
-      try {
-        const { ImapFlow } = await import("imapflow");
-        log(`[IMAP/${delayLabel}] Connecting to imap-mail.outlook.com:993...`);
-        const client = new ImapFlow({
-          host: "imap-mail.outlook.com",
-          port: 993,
-          secure: true,
-          auth: { user: outlookEmail, pass: outlookPassword },
-          logger: false,
-          tls: { rejectUnauthorized: false },
-        });
-        // Prevent unhandled 'error' event from crashing the process (ECONNRESET etc.)
-        client.on("error", (err: any) => {
-          log(`[IMAP/${delayLabel}] Socket error: ${(err?.message || "").substring(0, 80)}`);
-        });
-        await client.connect();
-        log(`[IMAP/${delayLabel}] ✅ Connected`);
-
-        const foldersToCheck = ["INBOX", "Junk", "Junk Email", "Bulk", "Spam"];
-        for (const folder of foldersToCheck) {
+      if (!verificationLink) {
+        log("⚠️ mail.gw: No verification email received after 3 minutes — trying Firebase resend + 90s extended poll...");
+        if (capturedFirebaseIdToken) {
           try {
-            const lock = await client.getMailboxLock(folder);
-            try {
-              // Search for emails from lovable.dev (use UIDs for reliable fetching)
-              let searchResults: number[] = await client.search({ from: "lovable.dev" }, { uid: true }).catch(() => [] as number[]);
-              if (!searchResults.length) {
-                searchResults = await client.search({ subject: "Lovable" }, { uid: true }).catch(() => [] as number[]);
-              }
-              log(`[IMAP/${delayLabel}] ${folder}: ${searchResults.length} matching messages`);
-              if (searchResults.length > 0) {
-                // Fetch the most recent matching messages (last 3)
-                const uids = searchResults.slice(-3).reverse();
-                for (const uid of uids) {
-                  const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true }).catch(() => null);
-                  if (!msg) continue;
-                  const rawText = msg.source?.toString("utf8") || "";
-                  log(`[IMAP/${delayLabel}] ${folder} uid=${uid} from=${msg.envelope?.from?.[0]?.address || "?"} len=${rawText.length}`);
-
-                  // Extract verification link from raw email
-                  // Priority 0: Safelinks
-                  const safelinkRe = /safelinks\.protection\.outlook\.com\/\?url=([^&"'\s>]+)/gi;
-                  let slm: RegExpExecArray | null;
-                  while ((slm = safelinkRe.exec(rawText)) !== null) {
-                    try {
-                      const decoded = decodeURIComponent(slm[1]);
-                      if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
-                        verificationLink = decoded.replace(/["'<>)]/g, "").trim();
-                        log(`[IMAP/${delayLabel}] ✅ Found via Safelinks: ${verificationLink.substring(0, 120)}`);
-                        return true;
-                      }
-                    } catch {}
-                  }
-                  // Priority 1: Direct lovable.dev links (may be quoted-printable or base64 encoded)
-                  // Decode quoted-printable (=3D → =, etc.)
-                  const decodedText = rawText.replace(/=\r?\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-                  const lovableRe = /https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^\s"'<>\r\n)]*/g;
-                  const allMatches = [...decodedText.matchAll(lovableRe)];
-                  for (const m of allMatches) {
-                    const url = m[0].replace(/=+$/, "").trim();
-                    if (url.includes("auth/action") || url.includes("verify") || url.includes("confirm") || url.includes("oobCode") || url.length > 100) {
-                      verificationLink = url;
-                      log(`[IMAP/${delayLabel}] ✅ Found Lovable link: ${verificationLink.substring(0, 120)}`);
-                      return true;
-                    }
-                  }
-                }
-              }
-            } finally {
-              lock.release();
-            }
-          } catch (folderErr: any) {
-            log(`[IMAP/${delayLabel}] ${folder} error: ${(folderErr.message || "").substring(0, 60)}`);
-          }
-        }
-        await client.logout();
-        log(`[IMAP/${delayLabel}] No Lovable email found via IMAP`);
-        return false;
-      } catch (imapErr: any) {
-        const imapErrMsg = (imapErr.message || imapErr.responseText || "").substring(0, 200);
-        const isBasicAuthBlocked = imapErrMsg.includes("BasicAuthBlocked") || imapErrMsg.includes("basic auth");
-        if (isBasicAuthBlocked) {
-          log(`[IMAP/${delayLabel}] ❌ Microsoft blocked Basic Auth IMAP for this account — OAuth2 required. Trying dashboard bypass instead.`);
-        } else {
-          log(`[IMAP/${delayLabel}] IMAP connection failed: ${imapErrMsg.substring(0, 80)}`);
-        }
-        return false;
-      }
-    }
-
-    // Try IMAP first (primary — no bot detection issues)
-    // (skipped if dashboard bypass already succeeded)
-    if (!verificationLink) {
-    log("📬 Scanning Hotmail inbox via IMAP (bypasses browser anti-bot)...");
-    let imapFound = await imapScanForLovable("initial");
-    if (!imapFound) {
-      // Wait 30s more and retry IMAP — email may still be in transit
-      log("IMAP initial scan empty — waiting 30s and retrying...");
-      await waitMs(30000);
-      imapFound = await imapScanForLovable("retry1");
-    }
-    if (!imapFound) {
-      // Firebase resend + wait more
-      if (capturedFirebaseIdToken) {
-        log("📤 Resending via Firebase API then waiting 60s...");
-        try {
-          const rr = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }),
-          });
-          const rb = await rr.json();
-          log(`Firebase resend (IMAP path): ${JSON.stringify(rb).substring(0, 100)}`);
-        } catch {}
-      }
-      await waitMs(60000);
-      imapFound = await imapScanForLovable("retry2");
-    }
-    if (!imapFound) {
-      await waitMs(90000);
-      imapFound = await imapScanForLovable("retry3");
-    }
-
-    if (imapFound) {
-      log("✅ IMAP found Lovable verification link — skipping browser OWA scan");
-    } else {
-      // ── Browser-based OWA fallback (in case IMAP fails for this account) ──
-      log("⚠️ IMAP scan found nothing — attempting browser OWA as fallback...");
-
-    try {
-      const { chromium: chrm } = await import("playwright");
-
-      // ZenRows blocks Microsoft/Outlook domains (returns host_not_allowed) — always use local headless browser for OWA
-      let owaCtx: any = null;
-      log("OWA: Launching local headless browser for Outlook (ZenRows blocks Microsoft domains)...");
-      owaBrowser = await chrm.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-      });
-      owaCtx = await owaBrowser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        viewport: { width: 1366, height: 768 },
-        locale: "en-US",
-      });
-      await owaCtx.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-        (window as any).chrome = { runtime: {} };
-      });
-
-      const owaPage = await owaCtx.newPage();
-      owaPage.setDefaultTimeout(30000);
-
-      log("Logging into Outlook Web...");
-      await owaPage.goto(
-        "https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&lc=1033&mkt=EN-US",
-        { waitUntil: "domcontentloaded", timeout: 30000 }
-      );
-      await waitMs(2000);
-
-      const emailInp = await owaPage.$('input[type="email"], input[name="loginfmt"]');
-      if (emailInp) {
-        await emailInp.fill(outlookEmail);
-        const nxt = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (nxt) { await nxt.click(); await waitMs(2500); }
-      }
-      const passInp = await owaPage.$('input[type="password"], input[name="passwd"]');
-      if (passInp) {
-        await passInp.fill(outlookPassword);
-        const signIn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (signIn) { await signIn.click(); await waitMs(4000); }
-      }
-
-      let curUrl = owaPage.url();
-      log(`OWA login URL: ${curUrl.substring(0, 100)}`);
-
-      if (curUrl.includes("account.live.com") || curUrl.includes("account.microsoft.com")) {
-        let dest = "https://outlook.live.com/mail/0/inbox";
-        try {
-          const pu = new URL(curUrl);
-          const wr = pu.searchParams.get("posturl") || pu.searchParams.get("wreply");
-          if (wr) dest = decodeURIComponent(wr);
-        } catch {}
-        await owaPage.goto(dest, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await waitMs(3000);
-        curUrl = owaPage.url();
-      }
-
-      if (!curUrl.includes("outlook.live.com") && !curUrl.includes("outlook.office")) {
-        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await waitMs(5000);
-        curUrl = owaPage.url();
-      }
-
-      const isOutlook = curUrl.includes("outlook.live.com") || curUrl.includes("outlook.office");
-
-      if (!isOutlook) {
-        log(`⚠️ Could not reach Outlook — URL: ${curUrl.substring(0, 80)}`);
-      } else {
-        log("✅ Logged into Outlook — scanning for Lovable verification email...");
-        // Diagnostic: log what OWA shows immediately after login
-        try {
-          const diagInboxText = await owaPage.evaluate(() => (document.body?.innerText || "").substring(0, 400).replace(/\s+/g, " ")).catch(() => "");
-          log(`OWA inbox snapshot: ${diagInboxText.substring(0, 300)}`);
-        } catch {}
-
-        async function extractLink(p: any): Promise<boolean> {
-          const body = await p.evaluate(() => document.body?.innerText || "");
-          const html = await p.evaluate(() => document.body?.innerHTML || "");
-
-          // Priority 0: Microsoft Safelinks — Outlook wraps all junk URLs with safelinks.protection.outlook.com
-          // IMPORTANT: In Outlook conversation view, messages appear oldest-first in the DOM.
-          // We MUST take the LAST match (newest message's oobCode), not the first (oldest/stale).
-          const safelinkRe = /safelinks\.protection\.outlook\.com\/\?url=([^&"'\s>]+)/gi;
-          let slm: RegExpExecArray | null;
-          let lastSafelinkHtml = "";
-          while ((slm = safelinkRe.exec(html)) !== null) {
-            try {
-              const decoded = decodeURIComponent(slm[1]);
-              if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
-                lastSafelinkHtml = decoded.replace(/["'<>)]/g, "").trim();
-              }
-            } catch {}
-          }
-          if (lastSafelinkHtml) {
-            verificationLink = lastSafelinkHtml;
-            log(`Extracted Lovable link via Safelinks decode (newest): ${verificationLink.substring(0, 120)}`);
-            return true;
-          }
-          // Also check body text for safelinks-encoded lovable URLs
-          const safelinkBodyRe = /safelinks\.protection\.outlook\.com\/\?url=([^\s&]+)/gi;
-          let slb: RegExpExecArray | null;
-          let lastSafelinkBody = "";
-          while ((slb = safelinkBodyRe.exec(body)) !== null) {
-            try {
-              const decoded = decodeURIComponent(slb[1]);
-              if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
-                lastSafelinkBody = decoded.replace(/["'<>)]/g, "").trim();
-              }
-            } catch {}
-          }
-          if (lastSafelinkBody) {
-            verificationLink = lastSafelinkBody;
-            log(`Extracted Lovable link via Safelinks (body, newest): ${verificationLink.substring(0, 120)}`);
-            return true;
-          }
-
-          // Helper: decode HTML entities iteratively (handles &amp;amp; double-encoding)
-          const decodeHtmlEntities = (s: string) => {
-            let prev = "";
-            while (prev !== s) { prev = s; s = s.replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'"); }
-            return s;
-          };
-
-          // Priority 1: direct lovable.dev verification/auth links
-          // IMPORTANT: Search body (innerText) FIRST — already HTML-decoded, no &amp; issues.
-          // Only fall back to html (innerHTML) if body has no matches, and decode entities from HTML.
-          // Take the LAST match in each source — in Outlook conversation view, newest message is last in DOM.
-          // Patterns for innerText (body) — & is a valid URL char, stop at whitespace/quotes
-          // Patterns for innerHTML (html) — stop at & too, because & in HTML indicates &amp; encoding
-          const lovablePatternsBody = [
-            /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/g,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/gi,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/gi,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*/g,
-          ];
-          const lovablePatternsHtml = [
-            /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n&)]*/g,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n&)]*verify[^\s"'<>\r\n&)]*/gi,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n&)]*confirm[^\s"'<>\r\n&)]*/gi,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n&)]*/g,
-          ];
-          const lovablePatterns = lovablePatternsBody; // used in Priority 1b below
-          for (let i = 0; i < lovablePatternsBody.length; i++) {
-            const bodyPat = lovablePatternsBody[i];
-            const htmlPat = lovablePatternsHtml[i];
-            // Try body (innerText) — decoded plain text, & is valid URL char here
-            const bodyMatches = [...(body.matchAll(bodyPat))].map(m => m[0].replace(/["'<>)]/g, "").trim());
-            const validBody = bodyMatches.filter(u => u.includes("lovable.dev") && u.includes("oobCode"));
-            if (validBody.length > 0) {
-              verificationLink = validBody[validBody.length - 1];
-              log(`Extracted lovable.dev link from body (newest of ${validBody.length}): ${verificationLink.substring(0, 120)}`);
-              return true;
-            }
-            // Fall back to HTML — stops at & to avoid &amp; fragments, then decode entities on partial URL
-            // Since the HTML pattern stops at &, we get "mode=verifyEmail" part; we need to get the oobCode from the full href attribute instead
-            // (handled in Priority 3 href scan below). Still try html scan in case oobCode appears before any &amp;
-            const htmlMatches = [...(html.matchAll(htmlPat))].map(m => {
-              // The HTML pattern stops at &, so m[0] may be truncated. Try to extend by looking at raw href
-              return decodeHtmlEntities(m[0].replace(/["'<>)]/g, "").trim());
+            const rr = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }),
             });
-            const validHtml = htmlMatches.filter(u => u.includes("lovable.dev") && u.includes("oobCode"));
-            if (validHtml.length > 0) {
-              verificationLink = validHtml[validHtml.length - 1];
-              log(`Extracted lovable.dev link from html (newest of ${validHtml.length}): ${verificationLink.substring(0, 120)}`);
-              return true;
-            }
-          }
-          // Priority 1b: allow links without oobCode (e.g. dashboard/builder redirect)
-          for (const pat of lovablePatternsBody) {
-            const bodyMatches = [...(body.matchAll(pat))].map(m => m[0].replace(/["'<>)]/g, "").trim()).filter(u => u.includes("lovable.dev"));
-            if (bodyMatches.length > 0) {
-              verificationLink = bodyMatches[bodyMatches.length - 1];
-              log(`Extracted lovable.dev link (no oobCode, body, newest): ${verificationLink.substring(0, 120)}`);
-              return true;
-            }
-          }
-          // Priority 2: ONLY Lovable's specific Firebase project (gpt-engineer-390607)
-          // Body pattern allows & (URL param separator in decoded text)
-          const firebaseBodyPat = /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/g;
-          const firebaseHtmlPat = /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n&)]*/g;
-          {
-            const bodyMatches = [...(body.matchAll(firebaseBodyPat))].map(m => m[0].replace(/["'<>)]/g, "").trim()).filter(u => u.includes("gpt-engineer-390607") && u.includes("oobCode"));
-            if (bodyMatches.length > 0) {
-              verificationLink = bodyMatches[bodyMatches.length - 1];
-              log(`Extracted Lovable Firebase link (body, newest): ${verificationLink.substring(0, 120)}`);
-              return true;
-            }
-            const htmlMatches = [...(html.matchAll(firebaseHtmlPat))].map(m => decodeHtmlEntities(m[0].replace(/["'<>)]/g, "").trim())).filter(u => u.includes("gpt-engineer-390607") && u.includes("oobCode"));
-            if (htmlMatches.length > 0) {
-              verificationLink = htmlMatches[htmlMatches.length - 1];
-              log(`Extracted Lovable Firebase link (html, newest): ${verificationLink.substring(0, 120)}`);
-              return true;
-            }
-          }
-          // Priority 3: scan hrefs from lovable.dev or gpt-engineer-390607 domains — take LAST (newest), decode entities
-          const hrefMatches = html.match(/href="(https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^"]*)"/gi) || [];
-          let lastHref = "";
-          for (const hm of hrefMatches) {
-            const urlMatch = hm.match(/href="(https?:\/\/[^"]+)"/i);
-            if (urlMatch) {
-              const url = decodeHtmlEntities(urlMatch[1].trim());
-              if (url.includes("lovable.dev") || url.includes("gpt-engineer-390607")) {
-                lastHref = url;
-              }
-            }
-          }
-          if (lastHref) {
-            verificationLink = lastHref;
-            log(`Extracted Lovable href link (newest, decoded): ${verificationLink.substring(0, 120)}`);
-            return true;
-          }
-          // Only extract a 6-digit code if the email is clearly Lovable-related
-          const isLovableEmail = body.toLowerCase().includes("lovable") ||
-            body.toLowerCase().includes("gpt-engineer") ||
-            body.toLowerCase().includes("noreply@lovable");
-          if (isLovableEmail) {
-            const code = body.match(/\b([0-9]{6})\b/);
-            if (code) { verificationCode = code[1]; log(`Extracted 6-digit code: ${verificationCode}`); return true; }
-          }
-          return false;
-        }
-
-        async function scanFolder(p: any, folderUrl: string, label: string): Promise<boolean> {
-          try {
-            await p.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-            await waitMs(10000);
-
-            // Pass 0: global page scan — catches any Lovable link in list previews or reading pane
-            if (await extractLink(p)) { log(`${label}: found via global page scan`); return true; }
-
-            // Pass 1: navigate directly to each email by href (most reliable — bypasses selector issues)
-            // Extract individual email URLs from the folder page (pattern: /mail/0/<folder>/id/<id>)
-            const emailUrls: string[] = await p.evaluate((base: string) => {
-              const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
-              const seen = new Set<string>();
-              const results: string[] = [];
-              for (const a of anchors) {
-                const href = a.href || "";
-                // Match Outlook individual email URLs: /mail/0/<folder>/id/<id>
-                if (/\/mail\/\d+\/[^/]+\/id\/[^?#]+/.test(href) && !seen.has(href)) {
-                  seen.add(href);
-                  results.push(href);
-                }
-              }
-              return results.slice(0, 10);
-            }, folderUrl).catch(() => [] as string[]);
-
-            log(`${label}: ${emailUrls.length} direct email URLs found`);
-            for (const emailUrl of emailUrls) {
-              log(`${label}: navigating to ${emailUrl.substring(0, 80)}`);
-              try {
-                await p.goto(emailUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-                await waitMs(4000);
-                if (await extractLink(p)) return true;
-              } catch (navErr: any) {
-                log(`${label}: nav error — ${(navErr.message || "").substring(0, 50)}`);
-              }
-            }
-
-            // Pass 2: click-based fallback using multiple selectors
-            await p.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-            await waitMs(8000);
-            let all: any[] = await p.$$('[data-convid]');
-            if (all.length === 0) all = await p.$$('[role="option"][tabindex]');
-            if (all.length === 0) all = await p.$$('div[class*="customScrollBar"] [role="option"]');
-            if (all.length === 0) all = await p.$$('[role="listitem"]');
-            if (all.length === 0) all = await p.$$('[aria-label][tabindex="0"]:not([aria-label=""])');
-            log(`${label}: click-pass ${all.length} items`);
-
-            for (const item of all.slice(0, 10)) {
-              const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
-              const isLovable = txt.includes("lovable") || txt.includes("noreply@lovable") ||
-                txt.includes("verify your email") || txt.includes("confirm your email");
-              const label2 = isLovable ? "keyword-match" : "fallback";
-              if (!isLovable && all.indexOf(item) >= 5) continue; // fallback only first 5
-              log(`${label} ${label2}: "${txt.replace(/\s+/g, " ").substring(0, 60)}"`);
-              try { await item.click({ timeout: 8000 }); }
-              catch { try { await p.evaluate((el: any) => el.click(), item); } catch {} }
-              await waitMs(4000);
-              if (await extractLink(p)) return true;
-            }
-          } catch (e: any) {
-            log(`⚠️ Error scanning ${label}: ${(e.message || "").substring(0, 60)}`);
-          }
-          return false;
-        }
-
-        // Helper to also scan Outlook's "focused" and "other" tabs (part of the same inbox URL)
-        async function scanInboxBothTabs(p: any): Promise<boolean> {
-          // Try main inbox first (default tab = "Focused")
-          let found = await scanFolder(p, "https://outlook.live.com/mail/0/inbox", "inbox-focused");
-          if (found) return true;
-          // Try "Other" tab by clicking it (Outlook Focused Inbox)
-          try {
-            await p.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 20000 });
-            await waitMs(4000);
-            const otherTab = await p.$('[aria-label="Other"]');
-            if (otherTab) {
-              await otherTab.click({ timeout: 5000 }).catch(() => {});
-              await waitMs(3000);
-              const items2 = await p.$$('[data-convid]');
-              const alt2 = items2.length === 0 ? await p.$$('[role="option"]') : [];
-              const all2 = items2.length > 0 ? items2 : alt2;
-              log(`inbox-other-tab: ${all2.length} emails`);
-              for (const item of all2.slice(0, 10)) {
-                const txt = ((await item.innerText().catch(() => "")) as string).toLowerCase();
-                if (txt.includes("lovable") || txt.includes("verify") || txt.includes("confirm")) {
-                  try { await item.click({ timeout: 8000 }); } catch { try { await p.evaluate((el: any) => el.click(), item); } catch {} }
-                  await waitMs(3000);
-                  if (await extractLink(p)) return true;
-                }
-              }
-            }
+            const rb = await rr.json();
+            log(`Firebase resend result: ${JSON.stringify(rb).substring(0, 100)}`);
           } catch {}
-          return false;
-        }
-
-        // Helper: close current OWA browser and open a fresh one, log in, return new page
-        // Always uses local headless browser (not ZenRows) — OWA doesn't need anti-bot proxy
-        async function freshOwaPage(label: string): Promise<any> {
-          if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
-          const { chromium: c2 } = await import("playwright");
-          log(`${label}: Launching local headless browser for fresh OWA session...`);
-          owaBrowser = await c2.launch({
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-web-security"],
-          });
-          const ctx2 = await owaBrowser.newContext({
-            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport: { width: 1366, height: 768 },
-            locale: "en-US",
-          });
-          await ctx2.addInitScript(() => {
-            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-            (window as any).chrome = { runtime: {} };
-          });
-          const p2 = await ctx2.newPage();
-          p2.setDefaultTimeout(30000);
-
-          // Login to Microsoft
-          await p2.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
-          await waitMs(3000);
-          log(`${label}: Login page URL: ${p2.url().substring(0, 80)}`);
-
-          // Fill email
-          const ei2 = await p2.$('input[type="email"], input[name="loginfmt"]');
-          if (ei2) {
-            await ei2.fill(outlookEmail);
-            const nx2 = await p2.$('input[type="submit"], button[type="submit"]');
-            if (nx2) { await nx2.click(); await waitMs(3000); }
-            log(`${label}: Email filled, URL: ${p2.url().substring(0, 80)}`);
-          } else {
-            log(`${label}: ⚠️ No email input found on login page`);
-          }
-
-          // Fill password
-          const pi2 = await p2.$('input[type="password"], input[name="passwd"]');
-          if (pi2) {
-            await pi2.fill(outlookPassword);
-            const si2 = await p2.$('input[type="submit"], button[type="submit"]');
-            if (si2) { await si2.click(); await waitMs(6000); }
-            log(`${label}: Password filled, URL: ${p2.url().substring(0, 80)}`);
-          } else {
-            log(`${label}: ⚠️ No password input found`);
-          }
-
-          // Handle "Stay signed in?" prompt
-          const stayBtn = await p2.$('input[id="idBtn_Back"], button:has-text("Yes"), input[value="Yes"]');
-          if (stayBtn) { await stayBtn.click(); await waitMs(3000); log(`${label}: Clicked Stay signed in`); }
-          const noBtn = await p2.$('button:has-text("No"), input[id="idBtn_Back"]');
-          if (noBtn) { await noBtn.click(); await waitMs(3000); log(`${label}: Dismissed Stay signed in`); }
-
-          // If still not on OWA, navigate directly
-          let u2 = p2.url();
-          if (u2.includes("account.live.com") || u2.includes("account.microsoft.com")) {
-            await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await waitMs(5000);
-          } else if (!u2.includes("outlook.live.com") && !u2.includes("outlook.office")) {
-            await p2.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-            await waitMs(7000);
-          }
-          log(`${label}: OWA ready — ${p2.url().substring(0, 80)}`);
-          return p2;
-        }
-
-        // Outlook Search — fastest way to find the email regardless of which folder it's in
-        async function searchOutlookForLovable(p: any, label: string): Promise<boolean> {
-          // First navigate to clean inbox to avoid the bO=1/msalAuthRedirect "Something went wrong" error
-          try {
-            const diagUrl = p.url();
-            if (diagUrl.includes("bO=1") || diagUrl.includes("msalAuthRedirect") || diagUrl.includes("sessionId=")) {
-              log(`${label}: Cleaning up auth redirect params — navigating to clean inbox...`);
-              await p.goto("https://outlook.live.com/mail/0/", { waitUntil: "domcontentloaded", timeout: 20000 });
-              await new Promise((r) => setTimeout(r, 5000));
-            }
-          } catch {}
-
-          // Log current page state for diagnostics
-          try {
-            const diagUrl = p.url();
-            const diagText = await p.evaluate(() => (document.body?.innerText || "").substring(0, 200).replace(/\s+/g, " ")).catch(() => "");
-            log(`${label} search start — current URL: ${diagUrl.substring(0, 80)}`);
-            log(`${label} search start — page text: ${diagText.substring(0, 150)}`);
-          } catch {}
-
-          // Try both OWA search URL formats
-          const searchUrls = [
-            `https://outlook.live.com/mail/0/search/id/results?searchterm=lovable`,
-            `https://outlook.live.com/mail/0/search/id/results?searchterm=Lovable&includeBody=true`,
-            `https://outlook.live.com/mail/0/search?searchterm=lovable`,
-          ];
-          for (const sUrl of searchUrls) {
+          const extStart = Date.now();
+          const extToken = await getAuthToken(mailGwEmail, mailGwPassword, mailGwProvider as any).catch(() => gwToken);
+          const seenMsgIds2 = new Set<string>(seenMsgIds);
+          while (Date.now() - extStart < 90000 && !verificationLink) {
             try {
-              log(`${label} search: ${sUrl.substring(0, 80)}`);
-              await p.goto(sUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-              await waitMs(10000);
-
-              // Log what the search page shows
-              const searchPageText = await p.evaluate(() => (document.body?.innerText || "").substring(0, 300).replace(/\s+/g, " ")).catch(() => "");
-              const searchPageUrl = p.url();
-              log(`${label} search result URL: ${searchPageUrl.substring(0, 80)}`);
-              log(`${label} search page text: ${searchPageText.substring(0, 200)}`);
-
-              if (await extractLink(p)) { log(`${label}: found via search URL`); return true; }
-
-              // Navigate directly to any email URLs found in search results
-              const emailUrls: string[] = await p.evaluate(() => {
-                return Array.from(document.querySelectorAll('a[href]') as NodeListOf<HTMLAnchorElement>)
-                  .map((a) => a.href)
-                  .filter((h) => /\/mail\/\d+\/[^/]+\/id\/[^?#]+/.test(h))
-                  .slice(0, 5);
-              }).catch(() => [] as string[]);
-              log(`${label} search results: ${emailUrls.length} direct email URLs`);
-              for (const eu of emailUrls) {
-                try {
-                  await p.goto(eu, { waitUntil: "domcontentloaded", timeout: 20000 });
-                  await waitMs(4000);
-                  if (await extractLink(p)) return true;
-                } catch {}
+              const msgs2 = await fetchMessages(extToken, mailGwProvider as any);
+              for (const msg2 of msgs2) {
+                if (seenMsgIds2.has(msg2.id)) continue;
+                seenMsgIds2.add(msg2.id);
+                const sub2 = (msg2.subject || "").toLowerCase();
+                const from2 = ((msg2.from && msg2.from.address) || "").toLowerCase();
+                if (!sub2.includes("lovable") && !sub2.includes("verify") && !sub2.includes("confirm") && !from2.includes("lovable") && !from2.includes("noreply") && !from2.includes("firebase")) continue;
+                log(`📧 Extended poll — email: "${msg2.subject}"`);
+                const content2 = await fetchMessageContent(extToken, msg2.id, mailGwProvider as any);
+                const anyRe2 = /https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^\s"'<>\r\n)]*/g;
+                const anyM2 = [...content2.matchAll(anyRe2)].map((m: any) => m[0].trim()).filter((u: string) => u.includes("oobCode"));
+                if (anyM2.length > 0) {
+                  verificationLink = anyM2[anyM2.length - 1];
+                  log(`✅ mail.gw extended poll: ${verificationLink.substring(0, 120)}`);
+                  break;
+                }
               }
-            } catch (se: any) {
-              log(`${label} search error: ${(se.message || "").substring(0, 50)}`);
-            }
-          }
-          return false;
-        }
-
-        // Scan junk FIRST (confirmed destination for Lovable emails), then inbox, then search
-        let found = await scanFolder(owaPage, "https://outlook.live.com/mail/0/junkemail", "junk");
-        if (!found) found = await scanInboxBothTabs(owaPage);
-        if (!found) found = await searchOutlookForLovable(owaPage, "initial");
-        if (!found) {
-          for (const f of ["clutter", "other"]) {
-            found = await scanFolder(owaPage, `https://outlook.live.com/mail/0/${f}`, f);
-            if (found) break;
+            } catch {}
+            if (!verificationLink) await waitMs(5000);
           }
         }
-
-        if (!found) {
-          log("Email not found yet — closing OWA, waiting 60s, then re-scanning with fresh session...");
-          if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
-          await waitMs(60000);
-          try {
-            const retryPage = await freshOwaPage("retry-scan");
-            found = await scanFolder(retryPage, "https://outlook.live.com/mail/0/junkemail", "junk-retry");
-            if (!found) found = await scanInboxBothTabs(retryPage);
-            if (!found) found = await searchOutlookForLovable(retryPage, "retry");
-            if (!found) {
-              for (const f of ["clutter", "other"]) {
-                found = await scanFolder(retryPage, `https://outlook.live.com/mail/0/${f}`, `${f}-retry`);
-                if (found) break;
-              }
-            }
-          } catch (retryErr: any) {
-            log(`⚠️ Retry scan failed: ${(retryErr.message || "").substring(0, 80)}`);
-          }
-        }
-
-        // Firebase resend if still not found
-        if (!found && capturedFirebaseIdToken) {
-          try {
-            log("📤 Resending Lovable verification email via Firebase API...");
-            const resendResp = await fetch(
-              `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }),
-              }
-            );
-            const resendBody = await resendResp.json();
-            log(`Firebase resend response: ${JSON.stringify(resendBody).substring(0, 200)}`);
-          } catch (resendErr: any) {
-            log(`⚠️ Firebase resend failed: ${resendErr.message || "unknown"}`);
-          }
-        }
-
-        // Third retry — close OWA, wait 90s, open fresh session
-        if (!found) {
-          log("Email still not found — closing OWA, waiting 90s, then final scan with fresh session...");
-          if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
-          await waitMs(90000);
-          try {
-            const finalPage = await freshOwaPage("final-scan");
-            found = await scanFolder(finalPage, "https://outlook.live.com/mail/0/junkemail", "junk-final");
-            if (!found) found = await scanInboxBothTabs(finalPage);
-            if (!found) found = await searchOutlookForLovable(finalPage, "final");
-            if (!found) {
-              for (const f of ["clutter", "other", "archive"]) {
-                found = await scanFolder(finalPage, `https://outlook.live.com/mail/0/${f}`, `${f}-final`);
-                if (found) break;
-              }
-            }
-          } catch (finalErr: any) {
-            log(`⚠️ Final scan failed: ${(finalErr.message || "").substring(0, 80)}`);
-          }
-        }
-
-        if (!found) log("⚠️ No Lovable verification email found in any folder");
       }
-    } catch (owaErr: any) {
-      log(`⚠️ Outlook check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
-    } finally {
-      if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
+    } catch (gwPollErr: any) {
+      log(`⚠️ mail.gw polling setup failed: ${(gwPollErr.message || "").substring(0, 100)}`);
     }
-    } // end if (!imapFound) browser fallback
-    } // end if (!verificationLink) IMAP scan block
+    } // end if (!verificationLink) mail.gw poll block
 
     // ── STEP 6: Navigate to verification link ─────────────────────────────
     if (!verificationLink && !verificationCode) {
-      // If Firebase signup succeeded, save as pending_verification instead of hard failure
       if (capturedFirebaseRefreshToken) {
-        log(`⏳ Firebase account created but email not yet verified (Microsoft IMAP blocked). Saving as pending_verification — will auto-complete when email link is clicked.`);
+        log(`⏳ Firebase account created but verification email not yet received via mail.gw. Saving as pending_verification.`);
         return {
           success: false,
           pendingVerification: true,
-          email: outlookEmail,
+          email: mailGwEmail,
           password: generatedPassword || undefined,
           refreshToken: capturedFirebaseRefreshToken,
           firebaseUid: capturedFirebaseUid || undefined,
-          error: "Pending email verification — click the link in your Hotmail inbox to complete setup",
+          error: "Pending email verification — verification link not found in mail.gw inbox after polling",
         };
       }
-      return { success: false, error: "No verification link or code found in Outlook inbox — Microsoft blocks basic auth IMAP for consumer accounts" };
+      return { success: false, error: "No verification link found — mail.gw inbox empty and no Firebase token captured" };
     }
 
     let accountVerified = false;
