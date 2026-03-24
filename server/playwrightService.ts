@@ -18532,21 +18532,47 @@ export async function generateSingleCheckoutLink(
 ): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
   const { chromium } = await import("playwright");
   let browser: any = null;
+  let linkAnonymizedProxy: string | null = null;
   try {
-    browser = await chromium.launch({
+    // ── SOAX residential proxy — unique IP per link generation ──
+    try {
+      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const rawProxy = soaxTemplate || residentialUrl;
+      if (rawProxy) {
+        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+        let rotatedProxy = rawProxy;
+        if (rawProxy.includes("sessionid-")) rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+        else if (rawProxy.includes("sessid=")) rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+        else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
+        linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+        log(`🌐 Proxy active (session: ${sessionId.substring(0, 8)}...)`);
+      }
+    } catch { /* continue without proxy */ }
+
+    // ── Randomised fingerprint ──
+    const GL_VIEWPORTS = [{ width: 1280, height: 800 }, { width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1536, height: 864 }, { width: 1920, height: 1080 }];
+    const GL_TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles", "America/Denver", "America/Phoenix", "America/Detroit"];
+    const GL_CVS = ["120", "121", "122", "123", "124"];
+    const glVp = GL_VIEWPORTS[Math.floor(Math.random() * GL_VIEWPORTS.length)];
+    const glTz = GL_TIMEZONES[Math.floor(Math.random() * GL_TIMEZONES.length)];
+    const glCv = GL_CVS[Math.floor(Math.random() * GL_CVS.length)];
+
+    const glLaunchOptions: any = {
       headless: true,
-      args: [
-        "--no-sandbox", "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-dev-shm-usage", "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process",
-      ],
-    });
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-web-security", "--disable-features=IsolateOrigins,site-per-process"],
+    };
+    if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
+    browser = await chromium.launch(glLaunchOptions);
+
+    const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
     const context = await browser.newContext({
-      userAgent: ua, viewport: { width: 1366, height: 768 }, locale: "en-US",
-      timezoneId: "America/New_York", javaScriptEnabled: true,
-      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+      userAgent: ua, viewport: glVp, locale: "en-US",
+      timezoneId: glTz, javaScriptEnabled: true,
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9", "Sec-Ch-Ua": `"Chromium";v="${glCv}", "Not(A:Brand";v="24", "Google Chrome";v="${glCv}"`, "Sec-Ch-Ua-Mobile": "?0", "Sec-Ch-Ua-Platform": '"Windows"' },
     });
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -18620,6 +18646,7 @@ export async function generateSingleCheckoutLink(
     return { success: false, error: err.message };
   } finally {
     if (browser) await browser.close().catch(() => {});
+    if (linkAnonymizedProxy) { try { await ProxyChain.closeAnonymizedProxy(linkAnonymizedProxy, true); } catch {} }
   }
 }
 
