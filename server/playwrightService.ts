@@ -11,8 +11,42 @@ import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import { getAvailableDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent } from "./mailService";
 import * as ProxyChain from "proxy-chain";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 const execFileAsync = promisify(execFile);
+
+// ── Proxy IP resolver — routes a check request through the anonymized proxy ──
+async function resolveProxyIp(
+  anonymizedProxy: string,
+  log: (msg: string) => void,
+  label = "PROXY"
+): Promise<string> {
+  try {
+    const agent = new HttpsProxyAgent(anonymizedProxy);
+    const res = await fetch("https://ipinfo.io/json", {
+      // @ts-ignore — node-fetch agent compat
+      agent,
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: any = await res.json();
+    const ip      = data.ip      || "unknown";
+    const city    = data.city    || "";
+    const region  = data.region  || "";
+    const country = data.country || "";
+    const org     = data.org     || "";
+    const loc     = [city, region, country].filter(Boolean).join(", ");
+    log(`┌─── ${label} ACTIVE ───────────────────────────`);
+    log(`│  Exit IP  : ${ip}`);
+    if (loc)  log(`│  Location : ${loc}`);
+    if (org)  log(`│  Provider : ${org}`);
+    log(`└────────────────────────────────────────────────`);
+    return ip;
+  } catch (e: any) {
+    log(`│  [IP check failed: ${(e.message || "").substring(0, 60)}]`);
+    return "unknown";
+  }
+}
 const CURL_IMPERSONATE_PATH = path.resolve(process.cwd(), "server", "curl_chrome116");
 
 // ── Live screenshot store ────────────────────────────────────────────────────
@@ -10515,7 +10549,8 @@ export async function registerReplitAccount(
         const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
         const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
         replitAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`🌐 SOAX proxy active → ${pUrl.hostname}:${pUrl.port} (session: ${sessionId.substring(0, 8)}...)`);
+        log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+        await resolveProxyIp(replitAnonymizedProxy, log, "SOAX RESIDENTIAL");
       } else {
         log("⚠️ No SOAX proxy configured — using direct connection (higher ban risk)");
       }
@@ -17453,7 +17488,8 @@ export async function onboardingCheckoutReplitAccount(
         const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
         const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
         checkoutAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`🌐 SOAX proxy active → ${pUrl.hostname}:${pUrl.port} (session: ${sessionId.substring(0, 8)}...)`);
+        log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+        await resolveProxyIp(checkoutAnonymizedProxy, log, "SOAX CHECKOUT");
       } else {
         log("⚠️ No SOAX proxy configured — checkout using direct connection (higher ban risk)");
       }
@@ -18549,7 +18585,8 @@ export async function generateSingleCheckoutLink(
         const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
         const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
         linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`🌐 Proxy active (session: ${sessionId.substring(0, 8)}...)`);
+        log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+        await resolveProxyIp(linkAnonymizedProxy, log, "SOAX LINK-GEN");
       }
     } catch { /* continue without proxy */ }
 
