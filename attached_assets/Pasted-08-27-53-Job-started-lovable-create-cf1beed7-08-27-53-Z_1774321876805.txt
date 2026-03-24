@@ -1,0 +1,255 @@
+08:27:53
+·
+Job started: lovable-create-cf1beed7
+08:27:53
+>
+ZenRows browser mode enabled
+08:27:53
+>
+Connecting to ZenRows browser: wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fa...
+08:27:54
++
+✅ Connected via ZenRows anti-bot browser — Cloudflare WAF bypassed
+08:27:54
+·
+Solving Turnstile via CapSolver in background (sitekey: 0x4AAAAAAChnKAZBY0iFpFHC, action: signup_email_password)...
+08:27:54
+>
+Navigating to https://lovable.dev/signup ...
+08:27:58
++
+✅ Background CapSolver solved! Token length: 1050
+08:28:05
+·
+Page title: "Create account" | Has email input: true
+08:28:05
+·
+Filling email: cynthiavaughn1527@outlook.com
+08:28:13
+·
+Filled email via input[type="email"]
+08:28:14
+·
+Pre-Continue: fired 0 Turnstile callback(s) with token — button should be enabled
+08:28:15
+·
+Clicking Continue...
+08:28:17
+·
+Clicked Continue: "continue"
+08:28:17
+·
+Waiting for page response (7s)...
+08:28:19
+·
+[API 200] https://api.lovable.dev/auth/check-auth-provider → {"has_sso_provider":false,"has_email_password":false,"domain_lock":false}
+08:28:19
+·
+Fake Turnstile script served — render() callbacks queued until real CapSolver token
+08:28:25
+·
+URL after Continue: https://lovable.dev/signup
+08:28:25
+·
+Text snippet: We use cookies to enhance your development experience and keep your data secure. Privacy Policy Accept all Manage preferences Create your account Continue with Google Continue with GitHub OR Email E
+08:28:25
++
+✅ Password field detected — using email + password registration
+08:28:30
+·
+Filled password via input[type="password"]
+08:28:30
+·
+Generated password: vk#777Ywb@aCAa1!
+08:28:31
+·
+Awaiting real CapSolver token to fire queued Turnstile callbacks...
+08:28:31
++
+✅ Got real CapSolver token (1050 chars) — firing queued Turnstile callbacks
+08:28:31
+·
+Fired 1 queued Turnstile callback(s) with real token
+08:28:31
+·
+Waiting 5s for Lovable to write token to Firestore...
+08:28:36
+·
+Buttons: "Accept all" disabled=false | "Deny Non-Essential" disabled=false | "Manage preferences" disabled=false | "Close Cookie Preferences" disabled=false | "Continue with Google" disabled=false | "Continue with GitHub" disabled=false | "Edit" disabled=false | "" disabled=false | "Create your account" disabled=false
+08:28:36
+·
+Submitting password form...
+08:28:38
+·
+Clicked Submit: "create your account"
+08:28:38
+·
+Waiting 18s for signup response...
+08:28:42
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","-RxzT2-9S1qxHPB6BjolHg","",8,14,30000]]]
+08:28:43
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+08:28:47
+·
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#SignupNewUserResponse", "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjczMmNhOTY3MTNiMWRkMTcyMzg1MDg0Y2U5ZjQzODFhZDAwY2VjZTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vZ3B0LWVuZ2luZWVyLTM5MDYwNyIsImF1ZCI6ImdwdC1lbmdpbmVlci0zOTA2MDciLCJhdXRoX3RpbWUiOjE3NzQzMjExMjYsInVzZXJfaWQiOiJzMkMyUkNiSzluYlg5OGpPaGE2RmpneXg1SnExIiwic3ViIjoiczJDMlJDYks5bmJYOT
+08:28:47
++
+✅ Firebase idToken captured (length: 961)
+08:28:47
++
+✅ Firebase refreshToken captured
+08:28:47
++
+✅ Firebase UID captured: s2C2RCbK9nbX98jOha6Fjgyx5Jq1
+08:28:47
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "s2C2RCbK9nbX98jOha6Fjgyx5Jq1", "email": "cynthiavaughn1527@outlook.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774321124417, "providerUserInfo": [ { "providerId": "password", "federatedId": "cynthiavaughn1527@ou
+08:28:48
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 →
+08:28:50
+›
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetOobConfirmationCodeResponse", "email": "cynthiavaughn1527@outlook.com" }
+08:28:51
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","_JzA1MbNn_8Gr16vHCl3Qw","",8,14,30000]]]
+08:28:53
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+08:28:53
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 51 [[0,["c","_Cm6IwNGSJYToKhyEcOvQg","",8,14,30000]]]
+08:28:55
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 9 [1,16,7]
+08:28:56
+·
+URL after submit: https://lovable.dev/verify-email
+08:28:56
+›
+Text after submit: We use cookies to enhance your development experience and keep your data secure. Privacy Policy Accept all Manage preferences Sign out Check your inbox Click the link we sent to cynthiavaughn1527@outl
+08:28:56
++
+✅ Firebase signup confirmed (idToken captured) — skipping retry, proceeding to email scan with Firebase resend
+08:28:56
+!
+Firebase immediate send response: {"error":{"code":400,"message":"TOO_MANY_ATTEMPTS_TRY_LATER","errors":[{"message":"TOO_MANY_ATTEMPTS_TRY_LATER","domain":"global","reason":"invalid"}]
+08:28:56
+›
+🔍 Testing if Lovable allows dashboard access without email verification...
+08:29:03
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "s2C2RCbK9nbX98jOha6Fjgyx5Jq1", "email": "cynthiavaughn1527@outlook.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774321124417, "providerUserInfo": [ { "providerId": "password", "federatedId": "cynthiavaughn1527@ou
+08:29:04
+·
+Bypass check → URL: https://lovable.dev/verify-email?redirect=%2Fgetting-started
+08:29:04
+›
+ℹ️ Email verification enforced (redirected to https://lovable.dev/verify-email?redirect=%2Fgetti) — proceeding with IMAP scan
+08:29:08
+·
+Waiting 35s before clicking Lovable Resend...
+08:29:12
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "s2C2RCbK9nbX98jOha6Fjgyx5Jq1", "email": "cynthiavaughn1527@outlook.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774321124417, "providerUserInfo": [ { "providerId": "password", "federatedId": "cynthiavaughn1527@ou
+08:29:15
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 51 [[0,["c","a9JD2P80ewNTSIl6rMBAEQ","",8,14,30000]]]
+08:29:17
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 9 [1,16,7]
+08:29:49
+!
+⚠️ Resend click failed: elementHandle.click: Timeout 5000ms exceeded. Call log: [2m
+08:29:49
+›
+Waiting 50s more for verification email to arrive...
+08:30:39
+>
+📬 Scanning Hotmail inbox via IMAP (bypasses browser anti-bot)...
+08:30:39
+·
+[IMAP/initial] Connecting to imap-mail.outlook.com:993...
+08:30:40
+!
+[IMAP/initial] IMAP connection failed: Command failed
+08:30:40
+·
+IMAP initial scan empty — waiting 30s and retrying...
+08:31:10
+·
+[IMAP/retry1] Connecting to imap-mail.outlook.com:993...
+08:31:11
+!
+[IMAP/retry1] IMAP connection failed: Command failed
+08:31:12
+·
+📤 Resending via Firebase API then waiting 60s...
+08:31:12
+›
+Firebase resend (IMAP path): {"kind":"identitytoolkit#GetOobConfirmationCodeResponse","email":"cynthiavaughn1527@outlook.com"}
+08:32:12
+·
+[IMAP/retry2] Connecting to imap-mail.outlook.com:993...
+08:32:13
+!
+[IMAP/retry2] IMAP connection failed: Command failed
+08:33:14
+!
+[IMAP/retry2] Socket error: read ECONNRESET
+08:33:43
+·
+[IMAP/retry3] Connecting to imap-mail.outlook.com:993...
+08:33:43
+!
+[IMAP/retry3] IMAP connection failed: Command failed
+08:33:43
+~
+⚠️ IMAP scan found nothing — attempting browser OWA as fallback...
+08:33:43
+>
+OWA: Launching local headless browser for Outlook (ZenRows blocks Microsoft domains)...
+08:33:43
+·
+Logging into Outlook Web...
+08:33:53
+·
+OWA login URL: https://account.live.com/proofs/Add?mkt=EN-US&uiflavor=web&id=292841&mpcxt=CATB&sn=549183&posturl=ht
+08:34:01
++
+✅ Logged into Outlook — scanning for Lovable verification email...
+08:34:01
+·
+OWA inbox snapshot: Outlook   现在开会   CY   文件 主页 查看 帮助  新邮件 创建新的电子邮件。 (N) 新邮件   删除 删除此消息。 (Delete) 删除   存档 将邮件移动到存档文件夹。 (E)  报告 将此邮件报告为网络钓鱼。 报告   移至 移至文件夹。 (V)   全部答复 按“全部答复”来答复此邮件。 (Shift+R / Ctrl+Shift+R) 全部答复   全部标记为已读 将此文件夹中的所有邮件标记为已读。  标记/取消标记 标记或取消标记此消息。 标记/取消标记   通过应用增强 Outlook。  发现组 浏览查找现有组
+08:34:12
+›
+Extracted lovable.dev link: https://lovable.dev/auth/action?mode=verifyEmail&oobCode=F3Iop0Bt64yEz5OQfu6aCoCDxJVYrT5eOKqCFGefLsEAAAGdHcoE_g&apiKey=A
+08:34:12
+·
+junk: found via global page scan
+08:34:12
+›
+🔑 Applying email verification via Firebase API (oobCode: F3Iop0Bt64yEz5OQfu6a...)
+08:34:12
++
+✅ Email verified via Firebase API! emailVerified=true
+08:34:12
+>
+🚀 Starting onboarding with fresh browser (Firebase API verified)...
+08:34:12
+·
+Connecting via Addison Proxy...
+08:34:13
+!
+[Onboard] Error: browserType.connectOverCDP: WebSocket error: wss://browser.zenrows.com/ 400 Bad Request {"code":"REQS004","instance":"/v1","status":400,"title":"Unexpected 'proxy' parameter (REQS004)","type":"https:/
+08:34:13
++
+⚠️ Onboarding incomplete but email verified: browserType.connectOverCDP: WebSocket error: wss://browser.zenrows.com/ 400 Bad Request {"code":"REQS004","instance":"/v1","status":400,"title":"Unexpected 'proxy' parameter (REQS004)","type":"https://docs.zenrows.com/api-error-codes#REQS004"} Call log: [2m - <ws connecting> wss://browser.zenrows.com/[22m [2m - <ws unexpected response> wss://browser.zenrows.com/ 400 Bad Request[22m [2m{"code":"REQS004","instance":"/v1","status":400,"title":"Unexpected 'proxy' parameter (REQS004)","type":"https://docs.zenrows.com/api-error-codes#REQS004"}[22m [2m - <ws error> wss://browser.zenrows.com/ error WebSocket was closed before the connection was established[22m [2m - <ws connect error> wss://browser.zenrows.com/ WebSocket was closed before the connection was established[22m [2m - <ws disconnected> wss://browser.zenrows.com/ code=1006 reason=[22m
+08:34:13
++
+✅ Account saved to database
+08:34:46
+!
+[IMAP/retry3] Socket error: read ECONNRESET

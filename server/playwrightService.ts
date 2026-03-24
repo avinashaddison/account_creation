@@ -74,8 +74,12 @@ function buildCDPUrlWithProxy(cdpUrl: string, proxyUrl: string | null): string {
 
 export async function connectViaZenRows(log?: (msg: string) => void, customProxy?: string): Promise<Browser> {
   let cdpUrl = await getZenRowsCDPUrl();
-  const residentialProxy = customProxy || await getResidentialProxyUrl();
-  cdpUrl = buildCDPUrlWithProxy(cdpUrl, residentialProxy);
+  // ZenRows handles proxy routing internally — do NOT append a proxy= parameter
+  // (doing so causes REQS004: Unexpected 'proxy' parameter error)
+  if (!cdpUrl.includes("browser.zenrows.com")) {
+    const residentialProxy = customProxy || await getResidentialProxyUrl();
+    cdpUrl = buildCDPUrlWithProxy(cdpUrl, residentialProxy);
+  }
   if (log) log("Connecting via Addison Proxy...");
   console.log("[Proxy] Connecting to CDP...");
   const browser = await vanillaChromium.connectOverCDP(cdpUrl, { timeout: 60000 });
@@ -3520,8 +3524,10 @@ export async function completeDrawViaGigyaBrowser(
             throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
           }
           zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-          const resProxy1 = await getResidentialProxyUrl();
-          zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxy1);
+          if (!zenrowsUrl.includes("browser.zenrows.com")) {
+            const resProxy1 = await getResidentialProxyUrl();
+            zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxy1);
+          }
           console.log("[Proxy] Connecting...");
           bdBrowser = await chromium.connectOverCDP(zenrowsUrl, { timeout: 60000 });
           console.log("[Proxy] Connected!");
@@ -4087,8 +4093,10 @@ export async function completeDrawViaGigyaBrowser(
             throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
           }
           zenrowsUrl2 = zenrowsUrl2.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-          const resProxy2 = await getResidentialProxyUrl();
-          zenrowsUrl2 = buildCDPUrlWithProxy(zenrowsUrl2, resProxy2);
+          if (!zenrowsUrl2.includes("browser.zenrows.com")) {
+            const resProxy2 = await getResidentialProxyUrl();
+            zenrowsUrl2 = buildCDPUrlWithProxy(zenrowsUrl2, resProxy2);
+          }
           console.log("[Proxy-Full] Connecting...");
           bdBrowser2 = await chromium.connectOverCDP(zenrowsUrl2, { timeout: 60000 });
           console.log("[Proxy-Full] Connected!");
@@ -5435,8 +5443,7 @@ export async function retryDrawRegistration(
   var connectUrl = zenrowsUrl || proxyUrl;
   if (connectUrl.includes('zenrows.com')) {
     connectUrl = connectUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-    const resProxyDraw = await getResidentialProxyUrl();
-    connectUrl = buildCDPUrlWithProxy(connectUrl, resProxyDraw);
+    // ZenRows does not accept a proxy= parameter — skip buildCDPUrlWithProxy for ZenRows URLs
   }
   log("Connecting to " + (zenrowsUrl ? "Addison Proxy" : "proxy") + " browser...");
   const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
