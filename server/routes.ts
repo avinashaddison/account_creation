@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -1017,6 +1017,29 @@ export async function registerRoutes(
       }
       await storage.setSetting("nopecha_api_key", key.trim());
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/settings/replit-checkout-delay", requireAuth, async (_req, res) => {
+    try {
+      const value = await storage.getSetting("replit_checkout_delay_minutes");
+      res.json({ minutes: parseInt(value || "0", 10) || 0 });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/replit-checkout-delay", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { minutes } = req.body;
+      const val = parseInt(minutes, 10);
+      if (isNaN(val) || val < 0 || val > 480) {
+        return res.status(400).json({ error: "Minutes must be 0–480" });
+      }
+      await storage.setSetting("replit_checkout_delay_minutes", String(val));
+      res.json({ success: true, minutes: val });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3521,6 +3544,58 @@ export async function registerRoutes(
   });
 
   // ── Auto Coupon: auto-pick next unused account → extract coupon → generate links ──
+  // ── Warm Accounts: create activity (Repl + browse + bio) before checkout ──
+  app.post("/api/replit-warm-accounts", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const role = req.session.role!;
+      const { accountIds } = req.body as { accountIds?: string[] };
+
+      const allAccounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+
+      const toWarm = accountIds && accountIds.length > 0
+        ? allAccounts.filter(a => accountIds.includes(a.id) && a.email && a.password && !a.warmedAt)
+        : allAccounts.filter(a => a.email && a.password && !a.warmedAt);
+
+      if (toWarm.length === 0) {
+        return res.status(400).json({ error: "No accounts to warm — all selected accounts are either already warmed or missing credentials" });
+      }
+
+      const batchId = `replit-warm-${Date.now().toString(36)}`;
+      const jobId = `warm-${Date.now()}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId, count: toWarm.length });
+
+      (async () => {
+        broadcastLog(batchId, jobId, `🔥 Warming ${toWarm.length} account(s)...`, userId);
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        let warmed = 0;
+        for (let i = 0; i < toWarm.length; i++) {
+          const acct = toWarm[i];
+          broadcastLog(batchId, jobId, `[${i + 1}/${toWarm.length}] 🔥 ${acct.email}`, userId);
+          const result = await warmReplitAccount(
+            acct.email,
+            acct.password,
+            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+          );
+          if (result.success) {
+            await storage.markReplitAccountWarmed(acct.id).catch(() => {});
+            warmed++;
+          } else {
+            broadcastLog(batchId, jobId, `  ❌ Failed: ${result.error}`, userId);
+          }
+          broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        }
+        broadcastLog(batchId, jobId, `✅ Done — ${warmed}/${toWarm.length} accounts warmed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/replit-auto-coupon-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
@@ -3588,16 +3663,30 @@ export async function registerRoutes(
           return;
         }
 
+        // Read checkout spacing setting (default 0 = no delay for backwards compat)
+        const checkoutDelayMinutes = await storage.getSetting("replit_checkout_delay_minutes").then(v => parseInt(v || "0", 10) || 0).catch(() => 0);
+        const checkoutDelayMs = checkoutDelayMinutes * 60 * 1000;
+
+        // Warn about unwarmed accounts
+        const unwarmed = toProcess.filter(a => !a.warmedAt);
+        if (unwarmed.length > 0) {
+          broadcastLog(batchId, jobId, `⚠️  ${unwarmed.length} account(s) not warmed — ban risk higher (use Warm Accounts first)`, userId);
+          broadcastLog(batchId, jobId, `   Unwarmed: ${unwarmed.map(a => a.email).join(", ")}`, userId);
+        }
+
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
         broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) using coupon ${coupon}`, userId);
         broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+        if (checkoutDelayMinutes > 0) {
+          broadcastLog(batchId, jobId, `⏱️  Spacing: ${checkoutDelayMinutes} min between each link`, userId);
+        }
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
         // Step 3: Generate links (with 1 automatic retry on failure)
         const generatedLinks: { email: string; url: string }[] = [];
         for (let i = 0; i < toProcess.length; i++) {
           const acct = toProcess[i];
-          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
+          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}${acct.warmedAt ? " ✅ warmed" : " ⚠️ not warmed"}`, userId);
 
           let result = await generateSingleCheckoutLink(
             acct.email,
@@ -3625,6 +3714,13 @@ export async function registerRoutes(
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
           }
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+
+          // Inter-account delay to spread referral timing across Replit's servers
+          if (checkoutDelayMs > 0 && i < toProcess.length - 1) {
+            const mins = Math.round(checkoutDelayMs / 60000);
+            broadcastLog(batchId, jobId, `⏳ Waiting ${mins} min before next account...`, userId);
+            await new Promise<void>(r => setTimeout(r, checkoutDelayMs));
+          }
         }
 
         broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);

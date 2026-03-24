@@ -18584,6 +18584,158 @@ export async function extractCouponFromReplitAccount(
   }
 }
 
+// ── Account warming: create a Repl + browse public Repls to build activity history ──
+export async function warmReplitAccount(
+  email: string,
+  password: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; error?: string }> {
+  const { chromium: wChromium } = await import("playwright-extra");
+  const WStealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+  wChromium.use(WStealthPlugin());
+  let browser: any = null;
+  try {
+    const VIEWPORTS = [{ width: 1280, height: 800 }, { width: 1366, height: 768 }, { width: 1440, height: 900 }];
+    const TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles"];
+    const CVS = ["120", "121", "122", "123", "124"];
+    const vp = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+    const tz = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
+    const cv = CVS[Math.floor(Math.random() * CVS.length)];
+
+    browser = await wChromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+    });
+    const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
+    const context = await browser.newContext({ userAgent: ua, viewport: vp, locale: "en-US", timezoneId: tz, javaScriptEnabled: true });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+      Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+    });
+    const page = await context.newPage();
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+    const humanType = async (loc: any, txt: string) => {
+      await loc.focus();
+      await loc.fill("");
+      await loc.pressSequentially(txt, { delay: 55 + Math.floor(Math.random() * 70) });
+    };
+
+    // ── Step 1: Login ──
+    log(`🔐 Logging in as ${email}...`);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(3000);
+    await page.waitForSelector('input[name="username"], input[type="email"]', { timeout: 20000, state: "visible" });
+    await humanType(page.locator('input[name="username"], input[type="email"]').first(), email);
+    await sleep(500 + Math.floor(Math.random() * 300));
+    await humanType(page.locator('input[type="password"]').first(), password);
+    await sleep(400 + Math.floor(Math.random() * 300));
+    await page.getByRole("button", { name: /log in|sign in|continue/i }).first().click();
+    await page.waitForURL((u: URL) => !u.href.includes("/login") && !u.href.includes("/signup"), { timeout: 45000 });
+    await sleep(2000 + Math.floor(Math.random() * 1000));
+    log(`✅ Logged in — ${page.url()}`);
+
+    // ── Step 2: Create a simple Repl ──
+    log(`🛠️  Creating a starter Repl...`);
+    await page.goto("https://replit.com/new", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await sleep(3000);
+
+    // Look for HTML/CSS/JS template
+    try {
+      const htmlTemplate = page.getByText(/html.*css.*js|html, css/i).first()
+        .or(page.locator('[data-value*="html" i], [data-id*="html" i], [class*="template" i]').filter({ hasText: /html/i }).first());
+      const htmlVisible = await htmlTemplate.isVisible({ timeout: 6000 }).catch(() => false);
+      if (htmlVisible) {
+        await htmlTemplate.click();
+        log(`  ✅ HTML/CSS/JS template selected`);
+        await sleep(1500);
+      } else {
+        // Try search for HTML template
+        const searchBox = page.locator('input[placeholder*="search" i], input[type="search"]').first();
+        const searchVisible = await searchBox.isVisible({ timeout: 3000 }).catch(() => false);
+        if (searchVisible) {
+          await searchBox.fill("HTML");
+          await sleep(1000);
+          const firstResult = page.locator('[class*="template" i], [class*="Template" i]').first();
+          if (await firstResult.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await firstResult.click();
+            await sleep(1000);
+          }
+        }
+      }
+    } catch { /* continue */ }
+
+    // Find and click the create/run button
+    try {
+      const createBtn = page.getByRole("button", { name: /^create repl$|^create$/i }).first()
+        .or(page.locator('button:has-text("Create Repl"), button:has-text("Create")').first());
+      if (await createBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await createBtn.click();
+        log(`  ✅ Create button clicked — waiting for editor...`);
+        await sleep(6000); // wait for Repl to be created and opened
+        log(`  ✅ Repl created`);
+      } else {
+        log(`  ⚠️  Create button not found — Repl may already be created`);
+      }
+    } catch { /* continue */ }
+
+    // ── Step 3: Browse 1-2 public Repls ──
+    log(`🌐 Browsing public Repls...`);
+    const publicRepls = [
+      "https://replit.com/@amasad/tic-tac-toe",
+      "https://replit.com/@replit/Python-Snake-Game",
+      "https://replit.com/@replit/HTML-CSS-JS",
+    ];
+    const toVisit = publicRepls.slice(0, 1 + Math.floor(Math.random() * 2));
+    for (const url of toVisit) {
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        await sleep(4000 + Math.floor(Math.random() * 3000));
+        log(`  ✅ Visited ${url}`);
+      } catch { /* ignore */ }
+    }
+
+    // ── Step 4: Set a short bio on the profile page ──
+    log(`✏️  Setting profile bio...`);
+    try {
+      await page.goto("https://replit.com/account", { waitUntil: "domcontentloaded", timeout: 20000 });
+      await sleep(2000);
+      const bios = [
+        "Software developer building cool things",
+        "Learning to code one project at a time",
+        "Full-stack developer | Building web apps",
+        "Coding enthusiast | Always learning",
+        "Developer exploring new technologies",
+      ];
+      const bio = bios[Math.floor(Math.random() * bios.length)];
+      const bioField = page.locator('textarea[placeholder*="bio" i], textarea[name*="bio" i], input[placeholder*="bio" i]').first();
+      const bioVisible = await bioField.isVisible({ timeout: 5000 }).catch(() => false);
+      if (bioVisible) {
+        await humanType(bioField, bio);
+        await sleep(800);
+        const saveBtn = page.getByRole("button", { name: /save|update/i }).first();
+        if (await saveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await saveBtn.click();
+          log(`  ✅ Bio saved: "${bio}"`);
+          await sleep(1500);
+        }
+      } else {
+        log(`  ⚠️  Bio field not found — skipping`);
+      }
+    } catch { /* ignore */ }
+
+    log(`✅ Account warming complete for ${email}`);
+    return { success: true };
+  } catch (err: any) {
+    log(`❌ Warmup error: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 // ── Lightweight checkout link generator (login + get Stripe URL, no payment) ──
 export async function generateSingleCheckoutLink(
   email: string,
@@ -18591,7 +18743,9 @@ export async function generateSingleCheckoutLink(
   couponCode: string,
   log: (msg: string) => void
 ): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
-  const { chromium } = await import("playwright");
+  const { chromium: stealthChromium } = await import("playwright-extra");
+  const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
+  stealthChromium.use(StealthPluginCls());
   let browser: any = null;
   let linkAnonymizedProxy: string | null = null;
   try {
@@ -18635,7 +18789,7 @@ export async function generateSingleCheckoutLink(
       ],
     };
     if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
-    browser = await chromium.launch(glLaunchOptions);
+    browser = await stealthChromium.launch(glLaunchOptions);
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
     const context = await browser.newContext({

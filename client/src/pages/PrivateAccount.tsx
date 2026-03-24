@@ -36,6 +36,7 @@ type ReplitAccount = {
   outlookEmail: string | null;
   status: string;
   credits: string | null;
+  warmedAt: string | null;
   createdAt: string;
 };
 
@@ -82,6 +83,10 @@ export default function PrivateAccount() {
   const [replitAccounts, setReplitAccounts] = useState<ReplitAccount[]>([]);
   const [lovableShowPasswords, setLovableShowPasswords] = useState<Record<string, boolean>>({});
   const [lovableAccounts, setLovableAccounts] = useState<LovableAccount[]>([]);
+  const [warmLogs, setWarmLogs] = useState<string[]>([]);
+  const [warmRunning, setWarmRunning] = useState(false);
+  const [warmBatchId, setWarmBatchId] = useState<string | null>(null);
+  const warmLogsEndRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -142,6 +147,15 @@ export default function PrivateAccount() {
       }
 
       if (data.type === "replit_create_result") {
+        fetchReplit();
+      }
+
+      if (data.type === "log" && data.batchId?.startsWith("replit-warm-")) {
+        setWarmBatchId((prev) => prev || data.batchId);
+        setWarmLogs((prev) => [...prev, data.message].slice(-200));
+      }
+      if (data.type === "batch_complete" && data.batchId?.startsWith("replit-warm-")) {
+        setWarmRunning(false);
         fetchReplit();
       }
 
@@ -233,6 +247,10 @@ export default function PrivateAccount() {
   }, []);
 
   useEffect(() => {
+    warmLogsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [warmLogs]);
+
+  useEffect(() => {
     const fetchers: Record<TabType, () => void> = {
       outlook: fetchOutlook,
       zenrows: fetchZenrows,
@@ -254,6 +272,33 @@ export default function PrivateAccount() {
 
   function togglePassword(id: string) {
     setShowPasswords((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  async function handleWarmAccounts() {
+    const unwarmeds = replitAccounts.filter(a => !a.warmedAt && a.email && a.password);
+    if (unwarmeds.length === 0) {
+      toast({ title: "Nothing to warm", description: "All accounts are already warmed" });
+      return;
+    }
+    setWarmLogs([`🔥 Starting warmup for ${unwarmeds.length} account(s)...`]);
+    setWarmRunning(true);
+    setWarmBatchId(null);
+    try {
+      const res = await fetch("/api/replit-warm-accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ accountIds: unwarmeds.map(a => a.id) }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setWarmRunning(false);
+        toast({ title: "Warmup failed", description: data.error, variant: "destructive" });
+      }
+    } catch (err: any) {
+      setWarmRunning(false);
+      toast({ title: "Warmup error", description: err.message, variant: "destructive" });
+    }
   }
 
   async function addOutlookAccount() {
@@ -884,6 +929,23 @@ export default function PrivateAccount() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {replitAccounts.filter(a => !a.warmedAt).length > 0 && (
+                <button
+                  onClick={handleWarmAccounts}
+                  disabled={warmRunning}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-xs font-semibold transition-all duration-150"
+                  style={{
+                    background: warmRunning ? "rgba(251,146,60,0.06)" : "rgba(251,146,60,0.12)",
+                    border: "1px solid rgba(251,146,60,0.35)",
+                    color: warmRunning ? "rgba(251,146,60,0.4)" : "#fb923c",
+                    cursor: warmRunning ? "not-allowed" : "pointer",
+                  }}
+                  data-testid="button-warm-accounts"
+                >
+                  <Zap className={`w-3 h-3 ${warmRunning ? "animate-pulse" : ""}`} />
+                  {warmRunning ? "warming..." : `Warm (${replitAccounts.filter(a => !a.warmedAt).length})`}
+                </button>
+              )}
               {replitAccounts.length > 0 && (
                 <button
                   onClick={() => window.open("/api/replit-accounts/export-csv", "_blank")}
@@ -905,6 +967,38 @@ export default function PrivateAccount() {
               </button>
             </div>
           </div>
+
+          {/* ── Warm log drawer ── */}
+          {warmLogs.length > 0 && (
+            <div style={{ borderTop: "1px solid rgba(251,146,60,0.15)", background: "rgba(0,0,0,0.6)" }}>
+              <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: "1px solid rgba(251,146,60,0.08)" }}>
+                <div className="flex items-center gap-2">
+                  <Zap className="w-3 h-3" style={{ color: warmRunning ? "#fb923c" : "rgba(251,146,60,0.4)" }} />
+                  <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: warmRunning ? "#fb923c" : "rgba(251,146,60,0.4)" }}>
+                    {warmRunning ? "warming_accounts" : "warmup_complete"}
+                  </span>
+                  {warmRunning && <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />}
+                </div>
+                <button
+                  onClick={() => { setWarmLogs([]); setWarmBatchId(null); }}
+                  className="text-[10px] font-mono"
+                  style={{ color: "rgba(255,255,255,0.2)" }}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="px-4 py-2 max-h-40 overflow-y-auto font-mono text-[10px] space-y-0.5">
+                {warmLogs.map((line, i) => (
+                  <div key={i} style={{
+                    color: line.includes("✅") ? "#4ade80" : line.includes("❌") ? "#f87171" : line.includes("⚠️") ? "#facc15" : "rgba(251,146,60,0.6)",
+                  }}>
+                    {line}
+                  </div>
+                ))}
+                <div ref={warmLogsEndRef} />
+              </div>
+            </div>
+          )}
 
           {/* ── Table ── */}
           {replitAccounts.length === 0 ? (
@@ -1024,6 +1118,20 @@ export default function PrivateAccount() {
                       <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.18)" }} title={formatDate(acct.createdAt)}>
                         {timeAgo(acct.createdAt)}
                       </span>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Zap
+                          className="w-2.5 h-2.5 flex-shrink-0"
+                          style={{ color: acct.warmedAt ? "#fb923c" : "rgba(255,255,255,0.15)" }}
+                        />
+                        <span
+                          className="text-[9px] font-mono"
+                          style={{ color: acct.warmedAt ? "rgba(251,146,60,0.7)" : "rgba(255,255,255,0.18)" }}
+                          title={acct.warmedAt ? `Warmed ${formatDate(acct.warmedAt)}` : "Not warmed"}
+                          data-testid={`text-warm-status-${acct.id}`}
+                        >
+                          {acct.warmedAt ? `warmed ${timeAgo(acct.warmedAt)}` : "not warmed"}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Password */}

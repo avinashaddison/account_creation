@@ -22,6 +22,7 @@ type ReplitAccount = {
   error: string | null;
   couponExtracted: boolean;
   couponCode: string | null;
+  warmedAt: string | null;
   createdAt: string;
 };
 
@@ -68,6 +69,10 @@ export default function ReplitCreate() {
   const [linksCount, setLinksCount] = useState(4);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
+  const [checkoutDelayMinutes, setCheckoutDelayMinutes] = useState(0);
+  const [checkoutDelaySaving, setCheckoutDelaySaving] = useState(false);
+  const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
+  useEffect(() => { if (checkoutDelayData?.minutes !== undefined) setCheckoutDelayMinutes(checkoutDelayData.minutes); }, [checkoutDelayData]);
 
   // ── ONBOARDING mode state ──
   const [onbEmail, setOnbEmail] = useState("");
@@ -330,6 +335,19 @@ export default function ReplitCreate() {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
       setRunning(false);
+    }
+  };
+
+  const handleSaveCheckoutDelay = async () => {
+    setCheckoutDelaySaving(true);
+    try {
+      await apiRequest("PUT", "/api/admin/replit-checkout-delay", { minutes: checkoutDelayMinutes });
+      qc.invalidateQueries({ queryKey: ["/api/settings/replit-checkout-delay"] });
+      toast({ title: "Saved", description: `Checkout spacing set to ${checkoutDelayMinutes} min` });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setCheckoutDelaySaving(false);
     }
   };
 
@@ -821,6 +839,40 @@ export default function ReplitCreate() {
                       <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.4) }}>
                         Auto-picks the next unused account → reads coupon + remaining slots → generates that many links → marks account as used in DB
                       </p>
+                    </div>
+
+                    {/* Checkout spacing setting */}
+                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${LA(0.14)}` }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Checkout Spacing</span>
+                        <span className="text-[9px] font-mono" style={{ color: LA(0.25) }}>delay between link gens</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0}
+                          max={480}
+                          value={checkoutDelayMinutes}
+                          onChange={e => setCheckoutDelayMinutes(Math.max(0, Math.min(480, parseInt(e.target.value) || 0)))}
+                          className="w-20 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
+                          style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
+                          data-testid="input-checkout-delay"
+                        />
+                        <span className="text-[10px] font-mono" style={{ color: LA(0.4) }}>min</span>
+                        <span className="text-[10px] font-mono flex-1" style={{ color: LA(0.25) }}>
+                          {checkoutDelayMinutes === 0 ? "no delay" : `~${Math.round(checkoutDelayMinutes * 3 / 60 * 10) / 10}h for 4 links`}
+                        </span>
+                        <button
+                          onClick={handleSaveCheckoutDelay}
+                          disabled={checkoutDelaySaving}
+                          className="px-2 py-1 rounded text-[10px] font-mono font-bold"
+                          style={{ background: LA(0.1), border: `1px solid ${LA(0.3)}`, color: L, cursor: checkoutDelaySaving ? "not-allowed" : "pointer" }}
+                          data-testid="button-save-checkout-delay"
+                        >
+                          <Save className="w-3 h-3 inline mr-1" />
+                          {checkoutDelaySaving ? "..." : "Save"}
+                        </button>
+                      </div>
                     </div>
 
                     <button
