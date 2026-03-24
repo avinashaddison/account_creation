@@ -14024,44 +14024,88 @@ export async function registerLovableAccount(
       // ── Try Firebase API verification first (avoids stale browser session) ──
       let apiVerified = false;
       const LOVABLE_FIREBASE_KEY = "AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw";
-      try {
-        const linkUrl = new URL(verificationLink);
-        const oobCode = linkUrl.searchParams.get("oobCode");
-        if (oobCode) {
+
+      async function tryFirebaseVerify(link: string): Promise<boolean> {
+        try {
+          const linkUrl = new URL(link);
+          const oobCode = linkUrl.searchParams.get("oobCode");
+          if (!oobCode) return false;
           log(`🔑 Applying email verification via Firebase API (oobCode: ${oobCode.substring(0, 20)}...)`);
           const verifyResp = await fetch(
             `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${LOVABLE_FIREBASE_KEY}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ oobCode }),
-            }
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ oobCode }) }
           );
           const verifyData = await verifyResp.json() as any;
           if (verifyResp.ok && verifyData.emailVerified) {
             log(`✅ Email verified via Firebase API! emailVerified=${verifyData.emailVerified}`);
-            apiVerified = true;
-            accountVerified = true;
-          } else {
-            log(`Firebase API verify response: ${JSON.stringify(verifyData).substring(0, 200)}`);
+            return true;
           }
+          log(`Firebase API verify response: ${JSON.stringify(verifyData).substring(0, 200)}`);
+          return false;
+        } catch (apiErr: any) {
+          log(`Firebase API verify error: ${(apiErr.message || "").substring(0, 100)}`);
+          return false;
         }
-      } catch (apiErr: any) {
-        log(`Firebase API verify error: ${(apiErr.message || "").substring(0, 100)}`);
       }
+
+      apiVerified = await tryFirebaseVerify(verificationLink);
+
+      // If INVALID_OOB_CODE — the link we found was from an older email, a newer resend
+      // generated a NEW oobCode that invalidated it. Send fresh email and re-scan OWA.
+      if (!apiVerified && capturedFirebaseIdToken) {
+        log("⚠️ Firebase verification failed — sending fresh email and re-scanning OWA for newest link...");
+        try {
+          const freshSend = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${LOVABLE_FIREBASE_KEY}`,
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: capturedFirebaseIdToken }) }
+          );
+          const freshSendBody = await freshSend.json() as any;
+          log(`Fresh email send: ${JSON.stringify(freshSendBody).substring(0, 120)}`);
+          if (freshSendBody?.email) {
+            log("⏳ Waiting 45s for fresh verification email to arrive...");
+            await waitMs(45000);
+            // Close stale OWA browser and open a fresh session to find newest link
+            if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
+            const freshOwaForRetry = await freshOwaPage("verif-code-retry");
+            const prevLink = verificationLink;
+            verificationLink = ""; // reset so extractLink can fill it fresh
+            let retryFound = await scanFolder(freshOwaForRetry, "https://outlook.live.com/mail/0/junkemail", "junk-newest");
+            if (!retryFound) retryFound = await scanInboxBothTabs(freshOwaForRetry);
+            if (!retryFound) retryFound = await searchOutlookForLovable(freshOwaForRetry, "newest-search");
+            if (verificationLink && verificationLink !== prevLink) {
+              log(`Found newer verification link: ${verificationLink.substring(0, 100)}`);
+              apiVerified = await tryFirebaseVerify(verificationLink);
+            } else if (!verificationLink) {
+              verificationLink = prevLink; // restore original if nothing new found
+              log("No newer link found — restoring original link for browser fallback");
+            }
+          }
+        } catch (resendErr: any) {
+          log(`Fresh email resend error: ${(resendErr.message || "").substring(0, 80)}`);
+        }
+      }
+
+      if (apiVerified) accountVerified = true;
 
       let vUrl = "";
       let vText = "";
 
       if (!apiVerified) {
-        // Fall back: try browser navigation (original ZenRows page, may be stale)
-        log("Navigating to verification link (browser fallback)...");
+        // Fall back: open a FRESH ZenRows browser (original page is stale after 6+ min)
+        log("Navigating to verification link with fresh ZenRows browser (original is stale)...");
+        let freshVerifBrowser: any = null;
+        let freshVerifPage: any = null;
         try {
-          await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
+          const { chromium } = await import("playwright");
+          const wsEndpoint = `wss://browser.zenrows.com?apikey=${process.env.ZENROWS_API_KEY || "16ad08cfa1bc9df048d189ed3fa18d1d86e5c83e"}&antibot=true`;
+          freshVerifBrowser = await chromium.connectOverCDP(wsEndpoint, { timeout: 30000 });
+          const vCtx = freshVerifBrowser.contexts()[0] || await freshVerifBrowser.newContext();
+          freshVerifPage = vCtx.pages()[0] || await vCtx.newPage();
+          await freshVerifPage.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
           await waitMs(5000);
-          if (await isCloudflarePage(page)) await waitForCloudflare(page, 15000);
-          vUrl = page.url();
-          vText = await page.evaluate(() => document.body?.innerText || "");
+          if (await isCloudflarePage(freshVerifPage)) await waitForCloudflare(freshVerifPage, 15000);
+          vUrl = freshVerifPage.url();
+          vText = await freshVerifPage.evaluate(() => document.body?.innerText || "");
           log(`After verification link — URL: ${vUrl.substring(0, 120)}`);
           // Handle Firebase email action page
           if (vUrl.includes("firebaseapp.com") || vUrl.includes("__/auth/action")) {
@@ -14069,16 +14113,16 @@ export async function registerLovableAccount(
             const firebaseText = vText.toLowerCase();
             if (firebaseText.includes("verified") || firebaseText.includes("confirmed") || firebaseText.includes("success")) {
               log("Firebase confirmed email verified");
-              const continueBtns = await page.$$('a[href*="lovable.dev"], button:has-text("Continue"), a:has-text("Continue")');
+              const continueBtns = await freshVerifPage.$$('a[href*="lovable.dev"], button:has-text("Continue"), a:has-text("Continue")');
               if (continueBtns.length > 0) {
                 await continueBtns[0].click({ timeout: 8000 }).catch(() => {});
                 await waitMs(5000);
               } else {
-                await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
+                await freshVerifPage.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
                 await waitMs(4000);
               }
-              vUrl = page.url();
-              vText = await page.evaluate(() => document.body?.innerText || "");
+              vUrl = freshVerifPage.url();
+              vText = await freshVerifPage.evaluate(() => document.body?.innerText || "");
               log(`After Firebase continue — URL: ${vUrl.substring(0, 120)}`);
             }
           }
@@ -14088,6 +14132,8 @@ export async function registerLovableAccount(
           log(`Verification result: ${accountVerified ? "✅ Success" : "⚠️ Not confirmed"} — URL: ${vUrl}`);
         } catch (gotoErr: any) {
           log(`Browser verification error: ${(gotoErr.message || "").substring(0, 100)}`);
+        } finally {
+          if (freshVerifBrowser) { try { await freshVerifBrowser.close(); } catch {} }
         }
       }
 
@@ -14260,6 +14306,20 @@ export async function registerLovableAccount(
     }
 
     if (!accountVerified) {
+      // If Firebase signup succeeded, save as pending_verification rather than hard fail
+      // (verification link was found/tried but could not be confirmed — stale oobCode, expired link, etc.)
+      if (capturedFirebaseRefreshToken) {
+        log(`⏳ Verification link found but could not be confirmed (stale oobCode or browser error). Saving as pending_verification.`);
+        return {
+          success: false,
+          pendingVerification: true,
+          email: outlookEmail,
+          password: generatedPassword || undefined,
+          refreshToken: capturedFirebaseRefreshToken,
+          firebaseUid: capturedFirebaseUid || undefined,
+          error: "Verification link found but could not be confirmed — will auto-complete when email is verified",
+        };
+      }
       return { success: false, error: "Verification link visited but dashboard not reached — account may still be valid, check manually" };
     }
 

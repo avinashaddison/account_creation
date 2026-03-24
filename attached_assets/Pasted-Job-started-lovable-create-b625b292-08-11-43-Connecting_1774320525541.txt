@@ -1,0 +1,256 @@
+Job started: lovable-create-b625b292
+08:11:43
+>
+Connecting to ZenRows browser: wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fa...
+08:11:44
++
+✅ Connected via ZenRows anti-bot browser — Cloudflare WAF bypassed
+08:11:44
+·
+Solving Turnstile via CapSolver in background (sitekey: 0x4AAAAAAChnKAZBY0iFpFHC, action: signup_email_password)...
+08:11:44
+>
+Navigating to https://lovable.dev/signup ...
+08:11:51
+·
+Page title: "Create account" | Has email input: true
+08:11:52
+·
+Filling email: michellegreen8536@outlook.com
+08:11:58
++
+✅ Background CapSolver solved! Token length: 1050
+08:12:00
+·
+Filled email via input[type="email"]
+08:12:01
+·
+Pre-Continue: fired 0 Turnstile callback(s) with token — button should be enabled
+08:12:02
+·
+Clicking Continue...
+08:12:05
+·
+Clicked Continue: "continue"
+08:12:05
+·
+Waiting for page response (7s)...
+08:12:06
+·
+[API 200] https://api.lovable.dev/auth/check-auth-provider → {"has_sso_provider":false,"has_email_password":false,"domain_lock":false}
+08:12:06
+·
+Fake Turnstile script served — render() callbacks queued until real CapSolver token
+08:12:12
+·
+URL after Continue: https://lovable.dev/signup
+08:12:12
+·
+Text snippet: We use cookies to enhance your development experience and keep your data secure. Privacy Policy Accept all Manage preferences Create your account Continue with Google Continue with GitHub OR Email E
+08:12:12
++
+✅ Password field detected — using email + password registration
+08:12:17
+·
+Filled password via input[type="password"]
+08:12:17
+·
+Generated password: vbm9AMpAcVDhAa1!
+08:12:18
+·
+Awaiting real CapSolver token to fire queued Turnstile callbacks...
+08:12:18
++
+✅ Got real CapSolver token (1050 chars) — firing queued Turnstile callbacks
+08:12:18
+·
+Fired 1 queued Turnstile callback(s) with real token
+08:12:18
+·
+Waiting 5s for Lovable to write token to Firestore...
+08:12:23
+·
+Buttons: "Accept all" disabled=false | "Deny Non-Essential" disabled=false | "Manage preferences" disabled=false | "Close Cookie Preferences" disabled=false | "Continue with Google" disabled=false | "Continue with GitHub" disabled=false | "Edit" disabled=false | "" disabled=false | "Create your account" disabled=false
+08:12:23
+·
+Submitting password form...
+08:12:25
+·
+Clicked Submit: "create your account"
+08:12:25
+·
+Waiting 18s for signup response...
+08:12:26
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","ldzDn4cHUfunB2aRS1CVMQ","",8,14,30000]]]
+08:12:28
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+08:12:31
+·
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#SignupNewUserResponse", "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjczMmNhOTY3MTNiMWRkMTcyMzg1MDg0Y2U5ZjQzODFhZDAwY2VjZTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vZ3B0LWVuZ2luZWVyLTM5MDYwNyIsImF1ZCI6ImdwdC1lbmdpbmVlci0zOTA2MDciLCJhdXRoX3RpbWUiOjE3NzQzMjAxNTAsInVzZXJfaWQiOiJTYVBFN01GZzV2YzBSWXk2Wmd4dk1leE9WQ2cyIiwic3ViIjoiU2FQRTdNRmc1dmMwUl
+08:12:31
++
+✅ Firebase idToken captured (length: 961)
+08:12:31
++
+✅ Firebase refreshToken captured
+08:12:31
++
+✅ Firebase UID captured: SaPE7MFg5vc0RYy6ZgxvMexOVCg2
+08:12:31
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "SaPE7MFg5vc0RYy6ZgxvMexOVCg2", "email": "michellegreen8536@outlook.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774320149036, "providerUserInfo": [ { "providerId": "password", "federatedId": "michellegreen8536@ou
+08:12:31
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 →
+08:12:32
+›
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetOobConfirmationCodeResponse", "email": "michellegreen8536@outlook.com" }
+08:12:34
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","brfK9hOCmHUwAZ3XRev8NQ","",8,14,30000]]]
+08:12:35
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+08:12:35
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 51 [[0,["c","9ZdcCJKCoDu6pit5pFP9PQ","",8,14,30000]]]
+08:12:37
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 9 [1,16,7]
+08:12:37
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 →
+08:12:43
+·
+URL after submit: https://lovable.dev/verify-email
+08:12:43
+›
+Text after submit: We use cookies to enhance your development experience and keep your data secure. Privacy Policy Accept all Manage preferences Sign out Check your inbox Click the link we sent to michellegreen8536@outl
+08:12:43
++
+✅ Firebase signup confirmed (idToken captured) — skipping retry, proceeding to email scan with Firebase resend
+08:12:43
+!
+Firebase immediate send response: {"error":{"code":400,"message":"TOO_MANY_ATTEMPTS_TRY_LATER","errors":[{"message":"TOO_MANY_ATTEMPTS_TRY_LATER","domain":"global","reason":"invalid"}]
+08:12:43
+›
+🔍 Testing if Lovable allows dashboard access without email verification...
+08:12:48
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "SaPE7MFg5vc0RYy6ZgxvMexOVCg2", "email": "michellegreen8536@outlook.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774320149036, "providerUserInfo": [ { "providerId": "password", "federatedId": "michellegreen8536@ou
+08:12:50
+·
+Bypass check → URL: https://lovable.dev/verify-email?redirect=%2Fgetting-started
+08:12:50
+›
+ℹ️ Email verification enforced (redirected to https://lovable.dev/verify-email?redirect=%2Fgetti) — proceeding with IMAP scan
+08:12:52
+·
+Waiting 35s before clicking Lovable Resend...
+08:12:56
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "SaPE7MFg5vc0RYy6ZgxvMexOVCg2", "email": "michellegreen8536@outlook.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774320149036, "providerUserInfo": [ { "providerId": "password", "federatedId": "michellegreen8536@ou
+08:12:57
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 51 [[0,["c","_vZQ4eBUD_ZG9BMQ0dL7Kg","",8,14,30000]]]
+08:12:58
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgpt-engineer-390 → 9 [1,16,7]
+08:13:29
++
+✅ Clicked Lovable Resend button — second email delivery triggered
+08:13:29
+›
+Waiting 50s more for verification email to arrive...
+08:13:30
+!
+[API 400] https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "error": { "code": 400, "message": "TOO_MANY_ATTEMPTS_TRY_LATER", "errors": [ { "message": "TOO_MANY_ATTEMPTS_TRY_LATER", "domain": "global", "reason": "invalid" } ] } }
+08:14:19
+>
+📬 Scanning Hotmail inbox via IMAP (bypasses browser anti-bot)...
+08:14:19
+·
+[IMAP/initial] Connecting to imap-mail.outlook.com:993...
+08:14:19
+!
+[IMAP/initial] IMAP connection failed: Command failed
+08:14:19
+·
+IMAP initial scan empty — waiting 30s and retrying...
+08:14:49
+·
+[IMAP/retry1] Connecting to imap-mail.outlook.com:993...
+08:14:50
+!
+[IMAP/retry1] IMAP connection failed: Command failed
+08:14:50
+·
+📤 Resending via Firebase API then waiting 60s...
+08:14:50
+›
+Firebase resend (IMAP path): {"kind":"identitytoolkit#GetOobConfirmationCodeResponse","email":"michellegreen8536@outlook.com"}
+08:15:25
+!
+[IMAP/initial] Socket error: read ECONNRESET
+08:15:50
+·
+[IMAP/retry2] Connecting to imap-mail.outlook.com:993...
+08:15:50
+!
+[IMAP/retry2] IMAP connection failed: Command failed
+08:15:57
+!
+[IMAP/retry1] Socket error: read ECONNRESET
+08:16:54
+!
+[IMAP/retry2] Socket error: read ECONNRESET
+08:17:20
+·
+[IMAP/retry3] Connecting to imap-mail.outlook.com:993...
+08:17:21
+!
+[IMAP/retry3] IMAP connection failed: Command failed
+08:17:21
+~
+⚠️ IMAP scan found nothing — attempting browser OWA as fallback...
+08:17:21
+>
+OWA: Launching local headless browser for Outlook (ZenRows blocks Microsoft domains)...
+08:17:26
+·
+Logging into Outlook Web...
+08:17:38
+·
+OWA login URL: https://account.live.com/proofs/Add?mkt=EN-US&uiflavor=web&id=292841&mpcxt=CATB&sn=550255&posturl=ht
+08:17:47
++
+✅ Logged into Outlook — scanning for Lovable verification email...
+08:17:47
+·
+OWA inbox snapshot: Outlook   现在开会   NF   文件 主页 查看 帮助  新邮件 创建新的电子邮件。 (N) 新邮件   删除 删除此消息。 (Delete) 删除   存档 将邮件移动到存档文件夹。 (E)  报告 将此邮件报告为网络钓鱼。 报告   移至 移至文件夹。 (V)   全部答复 按“全部答复”来答复此邮件。 (Shift+R / Ctrl+Shift+R) 全部答复   全部标记为已读 将此文件夹中的所有邮件标记为已读。  标记/取消标记 标记或取消标记此消息。 标记/取消标记   通过应用增强 Outlook。  发现组 浏览查找现有组
+08:17:57
+›
+Extracted lovable.dev link: https://lovable.dev/auth/action?mode=verifyEmail&oobCode=_T_9RsYPB2vskXwRt21Kk7PFXyqB1xL8Tqvu4cLDcNoAAAGdHbjvaA&apiKey=A
+08:17:57
+·
+junk: found via global page scan
+08:17:57
+›
+🔑 Applying email verification via Firebase API (oobCode: _T_9RsYPB2vskXwRt21K...)
+08:17:57
+!
+Firebase API verify response: {"error":{"code":400,"message":"INVALID_OOB_CODE","errors":[{"message":"INVALID_OOB_CODE","domain":"global","reason":"invalid"}]}}
+08:17:57
+›
+Navigating to verification link (browser fallback)...
+08:17:57
+!
+Browser verification error: page.goto: Target page, context or browser has been closed
+08:17:57
+!
+❌ Lovable creation failed: Verification link visited but dashboard not reached — account may still be valid, check manually
+08:18:23
+!
+[IMAP/retry3] Socket error: read ECONNRESET
