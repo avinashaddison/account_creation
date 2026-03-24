@@ -13190,7 +13190,7 @@ export async function registerLovableAccount(
       log(`Email ${outlookEmail} already has a Lovable account (redirected to login page)`);
       return { success: false, error: "Lovable account already exists for this email" };
     }
-    if (onDashboardNow) { log("✅ On dashboard instantly!"); return { success: true, email: outlookEmail }; }
+    if (onDashboardNow) { log("✅ On dashboard instantly!"); return { success: true, email: mailGwEmail }; }
 
     let generatedPassword: string | null = null;
 
@@ -13294,7 +13294,7 @@ export async function registerLovableAccount(
         postUrl.includes("/projects") || postText.toLowerCase().includes("what are you building");
       if (loggedIn) {
         log("✅ Account created and logged in directly — no email verification needed!");
-        return { success: true, email: outlookEmail, password: generatedPassword };
+        return { success: true, email: mailGwEmail, password: generatedPassword };
       }
 
       // If Firebase signup succeeded (idToken captured), skip false-positive "already exists" detection
@@ -13395,7 +13395,7 @@ export async function registerLovableAccount(
           const r2Dashboard = r2Url.includes("/builder") || r2Url.includes("/projects") || r2Text.toLowerCase().includes("what are you building");
           if (r2Dashboard) {
             log("✅ Retry succeeded — on dashboard immediately!");
-            return { success: true, email: outlookEmail };
+            return { success: true, email: mailGwEmail };
           } else if (r2HasPw) {
             log("✅ Retry succeeded — password field appeared, continuing with password registration");
             // Fall-through: hasPasswordField will be set but we are past that block.
@@ -13754,14 +13754,14 @@ export async function registerLovableAccount(
         try { if (page) await page.close(); } catch {}
         try { if (browser) await browser.close(); } catch {}
         browser = null; page = null;
-        const onboardResult = await loginAndCompleteOnboarding(outlookEmail, generatedPassword, log);
+        const onboardResult = await loginAndCompleteOnboarding(mailGwEmail, generatedPassword, log);
         if (onboardResult.success) {
-          log(`✅ Lovable account creation complete (API verified): ${outlookEmail}`);
-          return { success: true, email: outlookEmail, password: generatedPassword };
+          log(`✅ Lovable account creation complete (API verified): ${mailGwEmail}`);
+          return { success: true, email: mailGwEmail, password: generatedPassword };
         } else {
           // Onboarding failed but email IS verified — account is still usable
           log(`⚠️ Onboarding incomplete but email verified: ${onboardResult.error}`);
-          return { success: true, email: outlookEmail, password: generatedPassword };
+          return { success: true, email: mailGwEmail, password: generatedPassword };
         }
       }
 
@@ -13924,7 +13924,7 @@ export async function registerLovableAccount(
         return {
           success: false,
           pendingVerification: true,
-          email: outlookEmail,
+          email: mailGwEmail,
           password: generatedPassword || undefined,
           refreshToken: capturedFirebaseRefreshToken,
           firebaseUid: capturedFirebaseUid || undefined,
@@ -13934,8 +13934,8 @@ export async function registerLovableAccount(
       return { success: false, error: "Verification link visited but dashboard not reached — account may still be valid, check manually" };
     }
 
-    log(`✅ Lovable account creation complete: ${outlookEmail}`);
-    return { success: true, email: outlookEmail, password: generatedPassword || undefined };
+    log(`✅ Lovable account creation complete: ${mailGwEmail}`);
+    return { success: true, email: mailGwEmail, password: generatedPassword || undefined };
 
 
   } catch (err: any) {
