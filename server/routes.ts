@@ -3593,18 +3593,29 @@ export async function registerRoutes(
         broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
-        // Step 3: Generate links
+        // Step 3: Generate links (with 1 automatic retry on failure)
         const generatedLinks: { email: string; url: string }[] = [];
         for (let i = 0; i < toProcess.length; i++) {
           const acct = toProcess[i];
           broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
 
-          const result = await generateSingleCheckoutLink(
+          let result = await generateSingleCheckoutLink(
             acct.email,
             acct.password,
             coupon,
             (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
           );
+
+          // Auto-retry once on failure (new proxy session, fresh browser)
+          if (!result.success) {
+            broadcastLog(batchId, jobId, `  ↩️  Retrying with fresh proxy session...`, userId);
+            result = await generateSingleCheckoutLink(
+              acct.email,
+              acct.password,
+              coupon,
+              (msg) => broadcastLog(batchId, jobId, `  [retry] ${msg}`, userId)
+            );
+          }
 
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });

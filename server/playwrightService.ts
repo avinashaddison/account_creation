@@ -41,10 +41,13 @@ async function resolveProxyIp(
               const country = d.country || "";
               const org     = d.org     || "";
               const loc     = [city, region, country].filter(Boolean).join(", ");
+              // Detect if proxy leaked to a datacenter (Google, AWS, Azure, etc.)
+              const orgUpper = org.toUpperCase();
+              const isDatacenter = ["GOOGLE", "AMAZON", "MICROSOFT", "DIGITALOCEAN", "LINODE", "VULTR", "OVH", "CLOUDFLARE"].some(dc => orgUpper.includes(dc));
               log(`┌─── ${label} ACTIVE ───────────────────────────`);
               log(`│  Exit IP  : ${ip}`);
               if (loc) log(`│  Location : ${loc}`);
-              if (org) log(`│  Provider : ${org}`);
+              if (org) log(`│  Provider : ${org}${isDatacenter ? " ⚠️ DATACENTER — proxy may not be routing" : ""}`);
               log(`└────────────────────────────────────────────────`);
               resolve(ip);
             } catch {
@@ -18622,7 +18625,14 @@ export async function generateSingleCheckoutLink(
 
     const glLaunchOptions: any = {
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--disable-web-security", "--disable-features=IsolateOrigins,site-per-process"],
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage", "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--ignore-certificate-errors",          // tolerate proxy SSL interception
+        "--proxy-bypass-list=<-loopback>",      // ensure all traffic goes through proxy
+      ],
     };
     if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
     browser = await chromium.launch(glLaunchOptions);
@@ -18642,22 +18652,22 @@ export async function generateSingleCheckoutLink(
 
     // ── Login ──
     log(`🔐 Logging into Replit as ${email}...`);
-    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
     // Wait for and fill email/username field
     await page.waitForSelector(
       'input[name="username"], input[type="email"], input[name="email"]',
-      { timeout: 20000 }
+      { timeout: 25000 }
     );
     const emailInput = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
     await emailInput.click();
     await emailInput.fill(email);
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(800);
     // Wait for password field (may appear after email is entered)
-    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
+    await page.waitForSelector('input[type="password"]', { timeout: 25000 });
     const passInput = page.locator('input[type="password"]').first();
     await passInput.click();
     await passInput.fill(password);
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(600);
     // Try clicking the submit button first, fall back to Enter
     const submitBtn = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in")').first();
     const hasBtnVisible = await submitBtn.isVisible().catch(() => false);
