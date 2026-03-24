@@ -3873,6 +3873,44 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/lovable-accounts/:id/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.body;
+      if (!status) return res.status(400).json({ error: "status is required" });
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = await storage.getAllLovableAccounts();
+      const acct = accounts.find((a) => a.id === req.params.id);
+      if (!acct) return res.status(404).json({ error: "Account not found" });
+      if (role !== "superadmin" && acct.createdBy !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      await storage.updateLovableAccount(req.params.id, { status });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/lovable-accounts/export-csv", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin"
+        ? await storage.getAllLovableAccounts()
+        : await storage.getLovableAccountsByOwner(userId);
+      const header = "email,password,outlook_source,status,created_at\n";
+      const rows = accounts.map((a) =>
+        [a.email, a.password || "", a.outlookEmail || "", a.status, new Date(a.createdAt).toISOString()].join(",")
+      ).join("\n");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=lovable-accounts.csv");
+      res.send(header + rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.delete("/api/lovable-accounts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;

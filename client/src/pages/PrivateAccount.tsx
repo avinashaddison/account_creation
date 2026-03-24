@@ -1738,123 +1738,179 @@ export default function PrivateAccount() {
       {tab === "lovable" && (
         <Card className="border-pink-500/10 bg-black/20">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-mono text-zinc-300 flex items-center gap-2">
-              <Mail className="w-4 h-4 text-pink-400" />
-              Lovable Accounts
-              <Badge variant="outline" className="text-[9px] font-mono border-pink-500/15 text-pink-400/60 ml-2">{lovableAccounts.length} total</Badge>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-zinc-500 hover:text-zinc-300 ml-auto" onClick={fetchLovable} data-testid="button-refresh-lovable">
-                <RefreshCw className="w-3 h-3" />
-              </Button>
-            </CardTitle>
+            <div className="flex items-center justify-between flex-wrap gap-1">
+              <CardTitle className="text-sm font-mono text-zinc-300 flex items-center gap-2">
+                <Mail className="w-4 h-4 text-pink-400" />
+                Lovable Accounts
+                <Badge variant="outline" className="text-[9px] font-mono border-pink-500/15 text-pink-400/60 ml-2">{lovableAccounts.length} total</Badge>
+              </CardTitle>
+              <div className="flex items-center gap-1">
+                {lovableAccounts.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-zinc-400 hover:text-pink-400 hover:bg-pink-500/10 font-mono text-xs"
+                    onClick={() => window.open("/api/lovable-accounts/export-csv", "_blank")}
+                    data-testid="button-export-lovable-csv"
+                  >
+                    <Download className="w-3 h-3 mr-1" />
+                    CSV
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-zinc-500 hover:text-zinc-300" onClick={fetchLovable} data-testid="button-refresh-lovable">
+                  <RefreshCw className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {lovableAccounts.length === 0 ? (
               <div className="text-center py-12">
                 <Mail className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
                 <p className="text-zinc-600 text-sm font-mono">No Lovable accounts yet</p>
-                <p className="text-zinc-700 text-xs font-mono mt-1">Use the Create Server module to create accounts</p>
+                <p className="text-zinc-700 text-xs font-mono mt-1">Use the Lovable Create module to create accounts</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-pink-500/10">
-                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Email</TableHead>
-                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Password</TableHead>
-                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Outlook Source</TableHead>
-                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Status</TableHead>
-                      <TableHead className="text-[10px] font-mono text-zinc-500 uppercase">Created</TableHead>
-                      <TableHead className="text-right text-[10px] font-mono text-zinc-500 uppercase">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lovableAccounts.map((acct) => (
-                      <TableRow key={acct.id} className="border-pink-500/5 hover:bg-pink-500/[0.02]" data-testid={`row-lovable-${acct.id}`}>
-                        <TableCell className="py-2.5">
-                          <div className="flex items-center gap-2">
-                            <Mail className="w-3 h-3 text-pink-400/50 flex-shrink-0" />
-                            <span className="text-xs font-mono text-zinc-200">{acct.email}</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-5 w-5 p-0 text-zinc-600 hover:text-pink-400"
-                              onClick={() => copyToClipboard(acct.email, `lem-${acct.id}`)}
-                              data-testid={`button-copy-lovable-email-${acct.id}`}
-                            >
-                              {copied === `lem-${acct.id}` ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
-                            </Button>
+              <div className="rounded-xl overflow-hidden border border-white/5 shadow-xl">
+                {/* Google-Sheets-style header */}
+                <div className="grid font-mono font-bold text-white text-xs uppercase tracking-wide" style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.5fr" }}>
+                  <div className="px-2 py-3 text-center" style={{ background: "#111" }}>#</div>
+                  <div className="px-4 py-3" style={{ background: "#c0392b" }}>E-Mail Address</div>
+                  <div className="px-4 py-3" style={{ background: "#e67e22" }}>Password</div>
+                  <div className="px-4 py-3" style={{ background: "#27ae60" }}>Status</div>
+                  <div className="px-4 py-3 text-right" style={{ background: "#1a1a2e" }}>Actions</div>
+                </div>
+
+                {/* Rows */}
+                {lovableAccounts.map((acct, idx) => {
+                  const st = acct.status;
+                  const statusConfig: Record<string, { label: string; color: string; glow: string; bg: string; border: string }> = {
+                    created:              { label: "✅ Available",  color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
+                    pending_verification: { label: "⏳ Pending",    color: "#facc15", glow: "rgba(250,204,21,0.25)",  bg: "rgba(250,204,21,0.1)",   border: "#facc15" },
+                    verified:             { label: "✅ Verified",   color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
+                    failed:               { label: "🚫 Failed",     color: "#71717a", glow: "rgba(113,113,122,0.2)",  bg: "rgba(113,113,122,0.08)", border: "#52525b" },
+                  };
+                  const cfg = statusConfig[st] ?? statusConfig.pending_verification;
+                  const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.01)";
+                  return (
+                    <div
+                      key={acct.id}
+                      className="grid items-center border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors"
+                      style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.5fr", background: rowBg }}
+                      data-testid={`row-lovable-${acct.id}`}
+                    >
+                      {/* Row number */}
+                      <div className="px-2 py-3.5 text-center">
+                        <span className="text-xs font-mono text-zinc-600">{idx + 1}</span>
+                      </div>
+
+                      {/* Email — click to copy */}
+                      <div className="px-4 py-3.5 flex flex-col gap-0.5 min-w-0">
+                        <button
+                          onClick={() => copyToClipboard(acct.email, `le-${acct.id}`)}
+                          className="flex items-center gap-2 group text-left"
+                          title="Click to copy email"
+                          data-testid={`button-copy-lovable-email-${acct.id}`}
+                        >
+                          <span className="text-sm font-mono text-zinc-100 truncate max-w-[260px] group-hover:text-sky-300 transition-colors" data-testid={`text-lovable-email-${acct.id}`}>
+                            {copied === `le-${acct.id}` ? <span className="text-emerald-400">✓ Copied!</span> : acct.email}
+                          </span>
+                        </button>
+                        {acct.outlookEmail && acct.outlookEmail !== acct.email && (
+                          <div className="flex items-center gap-1">
+                            <Mail className="w-2.5 h-2.5 text-pink-400/40" />
+                            <span className="text-[11px] font-mono text-pink-400/40 truncate max-w-[220px]">{acct.outlookEmail}</span>
                           </div>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-mono text-zinc-400" data-testid={`text-lovable-pw-${acct.id}`}>
-                              {lovableShowPasswords[acct.id] ? (acct.password || "—") : "••••••••"}
-                            </span>
-                            <button
-                              onClick={() => setLovableShowPasswords((p) => ({ ...p, [acct.id]: !p[acct.id] }))}
-                              className="text-zinc-600 hover:text-pink-400 transition-colors"
-                              data-testid={`button-toggle-lovable-pw-${acct.id}`}
-                            >
-                              {lovableShowPasswords[acct.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                            </button>
-                            {acct.password && (
-                              <button
-                                onClick={() => copyToClipboard(acct.password!, `lpw-${acct.id}`)}
-                                className="text-zinc-600 hover:text-pink-400 transition-colors"
-                                data-testid={`button-copy-lovable-pw-${acct.id}`}
-                              >
-                                {copied === `lpw-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                              </button>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[140px] block">{acct.outlookEmail || "—"}</span>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <Badge
-                            variant="outline"
-                            className={`text-[9px] font-mono ${acct.status === "created" ? "border-emerald-500/30 text-emerald-400" : "border-zinc-700 text-zinc-500"}`}
+                        )}
+                      </div>
+
+                      {/* Password — click to copy, toggle visibility */}
+                      <div className="px-4 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => copyToClipboard(acct.password || "", `lp-${acct.id}`)}
+                            className="flex items-center gap-1.5 group text-left"
+                            title="Click to copy password"
+                            data-testid={`button-copy-lovable-pw-${acct.id}`}
                           >
-                            {acct.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <span className="text-[10px] text-zinc-600 font-mono">{new Date(acct.createdAt).toLocaleDateString()}</span>
-                        </TableCell>
-                        <TableCell className="py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
-                              onClick={() => copyToClipboard(`${acct.email}\n${acct.password || ""}`, `lall-${acct.id}`)}
-                              title="Copy email + password"
-                              data-testid={`button-copy-lovable-all-${acct.id}`}
-                            >
-                              {copied === `lall-${acct.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10"
-                              onClick={async () => {
-                                try {
-                                  await fetch(`/api/lovable-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
-                                  fetchLovable();
-                                  toast({ title: "Deleted", description: "Lovable account removed" });
-                                } catch {}
-                              }}
-                              data-testid={`button-delete-lovable-${acct.id}`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                            <span className="text-sm font-mono text-zinc-300 group-hover:text-sky-300 transition-colors" data-testid={`text-lovable-pw-${acct.id}`}>
+                              {copied === `lp-${acct.id}`
+                                ? <span className="text-emerald-400">✓ Copied!</span>
+                                : lovableShowPasswords[acct.id]
+                                  ? (acct.password || "—")
+                                  : "••••••••"}
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => setLovableShowPasswords((p) => ({ ...p, [acct.id]: !p[acct.id] }))}
+                            className="text-zinc-600 hover:text-pink-400 transition-colors flex-shrink-0"
+                            data-testid={`button-toggle-lovable-pw-${acct.id}`}
+                          >
+                            {lovableShowPasswords[acct.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Status — dropdown */}
+                      <div className="px-4 py-3.5">
+                        <select
+                          value={st}
+                          onChange={async (e) => {
+                            await fetch(`/api/lovable-accounts/${acct.id}/status`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              credentials: "include",
+                              body: JSON.stringify({ status: e.target.value }),
+                            });
+                            fetchLovable();
+                          }}
+                          className="w-full appearance-none rounded-lg px-3 py-2 text-sm font-mono font-semibold cursor-pointer focus:outline-none transition-all duration-150"
+                          style={{
+                            background: cfg.bg,
+                            border: `1.5px solid ${cfg.border}`,
+                            color: cfg.color,
+                            boxShadow: `0 0 10px ${cfg.glow}`,
+                          }}
+                          data-testid={`select-lovable-status-${acct.id}`}
+                        >
+                          <option value="created">✅ Available</option>
+                          <option value="pending_verification">⏳ Pending</option>
+                          <option value="verified">✅ Verified</option>
+                          <option value="failed">🚫 Failed</option>
+                        </select>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="px-4 py-3.5 flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
+                          onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password || ""}`, `lall-${acct.id}`)}
+                          title="Copy all"
+                          data-testid={`button-copy-lovable-all-${acct.id}`}
+                        >
+                          {copied === `lall-${acct.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-red-400/40 hover:text-red-400 hover:bg-red-500/10"
+                          onClick={async () => {
+                            try {
+                              await fetch(`/api/lovable-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
+                              fetchLovable();
+                              toast({ title: "Deleted", description: "Lovable account removed" });
+                            } catch {}
+                          }}
+                          data-testid={`button-delete-lovable-${acct.id}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>
