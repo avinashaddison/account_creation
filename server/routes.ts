@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3923,6 +3923,65 @@ export async function registerRoutes(
       }
       await storage.deleteLovableAccount(req.params.id);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/lovable-bulk-checkout-links", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
+    try {
+      const { coupon, count = 4 } = req.body;
+      if (!coupon) return res.status(400).json({ error: "coupon is required" });
+      const userId = req.session.userId;
+      const role = req.session.role;
+
+      const jobId = randomUUID().substring(0, 8);
+      const batchId = `lovable-links-${jobId}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId });
+
+      (async () => {
+        const allAccounts = role === "superadmin"
+          ? await storage.getAllLovableAccounts()
+          : await storage.getLovableAccountsByOwner(userId);
+
+        const available = allAccounts.filter(a => a.email && a.password && a.status === "created");
+        const toProcess = available.slice(0, Math.min(Number(count) || 4, 20));
+
+        if (toProcess.length === 0) {
+          broadcastLog(batchId, jobId, `❌ No eligible accounts found — only "created" (Available) accounts with a password can generate links`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} Lovable checkout link(s) — coupon: ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+
+        const generatedLinks: { email: string; url: string }[] = [];
+
+        for (let i = 0; i < toProcess.length; i++) {
+          const acct = toProcess[i];
+          broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
+
+          const result = await generateLovableCheckoutLink(
+            acct.email,
+            acct.password!,
+            coupon,
+            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+          );
+
+          if (result.success && result.stripeUrl) {
+            generatedLinks.push({ email: acct.email, url: result.stripeUrl });
+            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+          } else {
+            broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
+          }
+        }
+
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

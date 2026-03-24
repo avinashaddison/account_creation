@@ -18498,6 +18498,127 @@ export async function generateSingleCheckoutLink(
   }
 }
 
+// ── Lovable checkout link generator (login → billing → $25 Upgrade → Stripe URL) ──
+export async function generateLovableCheckoutLink(
+  email: string,
+  password: string,
+  couponCode: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
+  const { chromium } = await import("playwright");
+  let browser: any = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage", "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+      ],
+    });
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const context = await browser.newContext({
+      userAgent: ua, viewport: { width: 1440, height: 900 }, locale: "en-US",
+      timezoneId: "America/New_York", javaScriptEnabled: true,
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { app: {}, runtime: { id: undefined, connect: () => {}, sendMessage: () => {} }, loadTimes: () => ({}), csi: () => ({}) };
+    });
+    const page = await context.newPage();
+
+    // ── Login via Firebase email+password ──
+    log(`🔐 Logging into Lovable as ${email}...`);
+    await page.goto("https://lovable.dev/login", { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(2000);
+
+    // Fill email
+    const emailSel = 'input[type="email"], input[name="email"], input[placeholder*="email" i]';
+    await page.waitForSelector(emailSel, { timeout: 20000 });
+    await page.locator(emailSel).first().fill(email);
+    await page.waitForTimeout(500);
+
+    // Fill password
+    const pwSel = 'input[type="password"]';
+    await page.waitForSelector(pwSel, { timeout: 15000 });
+    await page.locator(pwSel).first().fill(password);
+    await page.waitForTimeout(400);
+
+    // Submit
+    const submitSel = 'button[type="submit"], button:has-text("Sign in"), button:has-text("Login"), button:has-text("Log in"), button:has-text("Continue")';
+    const submitBtn = page.locator(submitSel).first();
+    const hasSub = await submitBtn.isVisible().catch(() => false);
+    if (hasSub) await submitBtn.click();
+    else await page.locator(pwSel).first().press("Enter");
+
+    // Wait for navigation away from login
+    await page.waitForURL(
+      (u: URL) => !u.href.includes("/login") && !u.href.includes("/signup") && u.href.includes("lovable.dev"),
+      { timeout: 60000 }
+    );
+    if (page.url().includes("/login")) throw new Error("Login failed — still on login page");
+    log(`✅ Logged in successfully`);
+
+    // ── Navigate to billing settings ──
+    log(`💳 Navigating to billing settings...`);
+    await page.goto("https://lovable.dev/settings?tab=billing", { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(3000);
+
+    // ── Click the $25 Pro Upgrade button ──
+    log(`💰 Looking for $25 Pro Upgrade button...`);
+    // Try various selectors for the Upgrade button under the $25/Pro plan
+    const upgradeSelectors = [
+      'button:has-text("Upgrade"):near(:text("$25"))',
+      '//button[normalize-space()="Upgrade"][ancestor::*[.//text()[contains(., "25")]]]',
+      'button:has-text("Upgrade")',
+    ];
+    let clicked = false;
+    // First strategy: find all Upgrade buttons and click the first one (the $25 Pro)
+    const allUpgradeBtns = page.locator('button:has-text("Upgrade")');
+    const count = await allUpgradeBtns.count().catch(() => 0);
+    if (count > 0) {
+      await allUpgradeBtns.first().click();
+      clicked = true;
+      log(`🖱️ Clicked Upgrade button (${count} found, picked first = Pro $25)`);
+    }
+    if (!clicked) throw new Error("Could not find the Upgrade button on the billing page");
+
+    // ── Wait for Stripe checkout redirect ──
+    log(`⏳ Waiting for Stripe checkout redirect...`);
+    await page.waitForURL(
+      (u: URL) =>
+        u.href.includes("checkout.stripe.com") ||
+        u.href.includes("billing.stripe.com"),
+      { timeout: 60000 }
+    );
+    await page.waitForTimeout(1500);
+    let stripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
+
+    // ── Append coupon to URL if Stripe supports it ──
+    if (couponCode && stripeUrl.includes("checkout.stripe.com")) {
+      try {
+        const parsed = new URL(stripeUrl);
+        if (!parsed.searchParams.has("prefilled_promo_code")) {
+          parsed.searchParams.set("prefilled_promo_code", couponCode);
+          stripeUrl = parsed.toString();
+          log(`🎟️ Coupon appended to checkout URL`);
+        }
+      } catch {}
+    }
+
+    log(`✅ Checkout link ready: ${stripeUrl.substring(0, 80)}...`);
+    return { success: true, stripeUrl };
+  } catch (err: any) {
+    log(`❌ Error: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();
