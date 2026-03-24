@@ -10463,6 +10463,7 @@ export async function registerReplitAccount(
   let browser: any = null;
   let page: any = null;
   let zenrowsStripeBrowser: any = null; // separate ZenRows browser for Stripe checkout
+  let replitAnonymizedProxy: string | null = null;
 
   try {
     let zenrowsApiKey = "";
@@ -10477,35 +10478,81 @@ export async function registerReplitAccount(
     log("Launching stealth browser for Replit...");
     const { chromium } = await import("playwright");
 
+    // ── SOAX residential proxy — unique IP per account to prevent ban ──────────
+    try {
+      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const rawProxy = soaxTemplate || residentialUrl;
+      if (rawProxy) {
+        // Fresh session ID = fresh residential IP for every account created
+        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+        let rotatedProxy = rawProxy;
+        if (rawProxy.includes("sessionid-")) {
+          rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+        } else if (rawProxy.includes("sessid=")) {
+          rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+        } else if (rawProxy.includes("session-")) {
+          rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+        }
+        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+        // Strip SOAX web-browser-mode suffix (-opt-wb) — not needed for standard HTTP tunnelling
+        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
+        replitAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+        log(`🌐 SOAX proxy active → ${pUrl.hostname}:${pUrl.port} (session: ${sessionId.substring(0, 8)}...)`);
+      } else {
+        log("⚠️ No SOAX proxy configured — using direct connection (higher ban risk)");
+      }
+    } catch (proxyErr: any) {
+      log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
+    }
+
+    // ── Randomise fingerprint so each account looks like a different device ────
+    const VIEWPORTS = [
+      { width: 1280, height: 800 }, { width: 1366, height: 768 },
+      { width: 1440, height: 900 }, { width: 1536, height: 864 },
+      { width: 1920, height: 1080 },
+    ];
+    const TIMEZONES = [
+      "America/New_York", "America/Chicago", "America/Los_Angeles",
+      "America/Denver", "America/Phoenix", "America/Detroit",
+    ];
+    const CHROME_VERSIONS = ["120", "121", "122", "123", "124"];
+    const vp = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+    const tz = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
+    const cv = CHROME_VERSIONS[Math.floor(Math.random() * CHROME_VERSIONS.length)];
+
     let context: any;
     {
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-blink-features=AutomationControlled",
-          "--disable-dev-shm-usage",
-          "--disable-web-security",
-          "--allow-running-insecure-content",
-          "--disable-features=IsolateOrigins,site-per-process",
-          "--flag-switches-begin",
-          "--disable-site-isolation-trials",
-          "--flag-switches-end",
-        ],
-      });
-      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      const launchArgs = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-web-security",
+        "--allow-running-insecure-content",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--flag-switches-begin",
+        "--disable-site-isolation-trials",
+        "--flag-switches-end",
+      ];
+      const launchOptions: any = { headless: true, args: launchArgs };
+      if (replitAnonymizedProxy) {
+        launchOptions.proxy = { server: replitAnonymizedProxy };
+      }
+      browser = await chromium.launch(launchOptions);
+      const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
       context = await browser.newContext({
         userAgent: ua,
-        viewport: { width: 1366, height: 768 },
+        viewport: vp,
         locale: "en-US",
-        timezoneId: "America/New_York",
+        timezoneId: tz,
         javaScriptEnabled: true,
         acceptDownloads: false,
         extraHTTPHeaders: {
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "gzip, deflate, br",
-          "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+          "Sec-Ch-Ua": `"Chromium";v="${cv}", "Not(A:Brand";v="24", "Google Chrome";v="${cv}"`,
           "Sec-Ch-Ua-Mobile": "?0",
           "Sec-Ch-Ua-Platform": '"Windows"',
         },
@@ -12619,6 +12666,9 @@ export async function registerReplitAccount(
     try { if (page) await page.close(); } catch {}
     try { if (zenrowsStripeBrowser) await zenrowsStripeBrowser.close(); } catch {}
     try { if (browser) await browser.close(); } catch {}
+    if (replitAnonymizedProxy) {
+      try { await ProxyChain.closeAnonymizedProxy(replitAnonymizedProxy, true); } catch {}
+    }
   }
 }
 
