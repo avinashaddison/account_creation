@@ -17429,6 +17429,7 @@ export async function onboardingCheckoutReplitAccount(
   }
 
   let browser: any = null;
+  let checkoutAnonymizedProxy: string | null = null;
 
   try {
     log("═".repeat(55));
@@ -17437,8 +17438,43 @@ export async function onboardingCheckoutReplitAccount(
     log(`   Coupon : ${couponCode}`);
     log("═".repeat(55));
 
+    // ── SOAX residential proxy — unique IP per checkout to prevent Promo Abuse detection ──
+    try {
+      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const rawProxy = soaxTemplate || residentialUrl;
+      if (rawProxy) {
+        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+        let rotatedProxy = rawProxy;
+        if (rawProxy.includes("sessionid-")) rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+        else if (rawProxy.includes("sessid=")) rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+        else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
+        checkoutAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+        log(`🌐 SOAX proxy active → ${pUrl.hostname}:${pUrl.port} (session: ${sessionId.substring(0, 8)}...)`);
+      } else {
+        log("⚠️ No SOAX proxy configured — checkout using direct connection (higher ban risk)");
+      }
+    } catch (proxyErr: any) {
+      log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
+    }
+
+    // ── Randomise fingerprint so each checkout looks like a different device ──
+    const CO_VIEWPORTS = [
+      { width: 1280, height: 800 }, { width: 1366, height: 768 },
+      { width: 1440, height: 900 }, { width: 1536, height: 864 },
+      { width: 1920, height: 1080 },
+    ];
+    const CO_TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles", "America/Denver", "America/Phoenix", "America/Detroit"];
+    const CO_CHROME_VERSIONS = ["120", "121", "122", "123", "124"];
+    const coVp = CO_VIEWPORTS[Math.floor(Math.random() * CO_VIEWPORTS.length)];
+    const coTz = CO_TIMEZONES[Math.floor(Math.random() * CO_TIMEZONES.length)];
+    const coCv = CO_CHROME_VERSIONS[Math.floor(Math.random() * CO_CHROME_VERSIONS.length)];
+
     log(`🌐 Launching stealth browser...`);
-    browser = await chromium.launch({
+    const coLaunchOptions: any = {
       headless: true,
       args: [
         "--no-sandbox", "--disable-setuid-sandbox",
@@ -17448,20 +17484,22 @@ export async function onboardingCheckoutReplitAccount(
         "--disable-features=IsolateOrigins,site-per-process",
         "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
       ],
-    });
+    };
+    if (checkoutAnonymizedProxy) coLaunchOptions.proxy = { server: checkoutAnonymizedProxy };
+    browser = await chromium.launch(coLaunchOptions);
 
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${coCv}.0.0.0 Safari/537.36`;
     const context = await browser.newContext({
       userAgent: ua,
-      viewport: { width: 1366, height: 768 },
+      viewport: coVp,
       locale: "en-US",
-      timezoneId: "America/New_York",
+      timezoneId: coTz,
       javaScriptEnabled: true,
       acceptDownloads: false,
       extraHTTPHeaders: {
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
-        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        "Sec-Ch-Ua": `"Chromium";v="${coCv}", "Not(A:Brand";v="24", "Google Chrome";v="${coCv}"`,
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
       },
@@ -18319,6 +18357,9 @@ export async function onboardingCheckoutReplitAccount(
     return { success: false, couponConfirmed: false, error: msg };
   } finally {
     try { if (browser) await browser.close(); } catch {}
+    if (checkoutAnonymizedProxy) {
+      try { await ProxyChain.closeAnonymizedProxy(checkoutAnonymizedProxy, true); } catch {}
+    }
     log("🔒 Browser closed.");
   }
 }
