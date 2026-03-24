@@ -13003,6 +13003,10 @@ export async function registerLovableAccount(
               }
             } catch {}
           }
+          // Log Firebase 400 errors (EMAIL_EXISTS etc.) to help debug
+          if (rUrl.includes("identitytoolkit.googleapis.com") && status >= 400) {
+            log(`[Firebase ${status}] ${rUrl.substring(0, 80)} → ${body.substring(0, 200)}`);
+          }
           // Also capture refreshToken from accounts:lookup response
           if (rUrl.includes("identitytoolkit.googleapis.com") && rUrl.includes("accounts:lookup") && status === 200) {
             try {
@@ -13317,26 +13321,54 @@ export async function registerLovableAccount(
           log(`⚠️ Firebase immediate send failed: ${(ire.message || "").substring(0, 60)}`);
         }
       } else {
-        if (postText.toLowerCase().includes("already") &&
-            (postText.toLowerCase().includes("email") || postText.toLowerCase().includes("account"))) {
+        // IMPORTANT: "Already have an account? Log in" is ALWAYS on Lovable's signup page footer.
+        // Only flag as duplicate if we see specific Firebase/Lovable error strings — NOT the generic footer link.
+        const lpt = postText.toLowerCase();
+        const isDuplicateEmail =
+          (lpt.includes("email already in use") ||
+           lpt.includes("already registered") ||
+           lpt.includes("email is taken") ||
+           lpt.match(/email.*already.*use/i) ||
+           (lpt.includes("email") && lpt.includes("account") && lpt.includes("exists"))) &&
+          !lpt.includes("what are you building");
+        if (isDuplicateEmail) {
           return { success: false, error: "Lovable account already exists for this email" };
         }
         if (postText.toLowerCase().includes("verify") || postText.toLowerCase().includes("check your email") ||
             postText.toLowerCase().includes("we emailed") || postText.toLowerCase().includes("email sent")) {
           log("✅ Signup accepted — awaiting verification email");
         } else if (postUrl.includes("lovable.dev/signup")) {
-          log("Still on signup page — one more JS submit attempt...");
-          await page.evaluate(() => {
-            const b = (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).find((b) => {
-              const t = (b.textContent || "").toLowerCase();
-              return (t.includes("create") || t.includes("continue")) && !t.includes("google") && !t.includes("github");
+          // Still on signup — wait more then retry submit (Turnstile may still be processing)
+          log("Still on signup page — waiting 15s more then retrying form submit...");
+          await waitMs(15000);
+          const midUrl = page.url();
+          const midText = await page.evaluate(() => document.body?.innerText || "");
+          log(`After extra wait: ${midUrl} — ${midText.substring(0, 120).replace(/\s+/g, " ")}`);
+
+          const midLoggedIn = midUrl.includes("/builder") || midUrl.includes("/projects") ||
+            midUrl.includes("/getting-started") || midText.toLowerCase().includes("what are you building");
+          if (midLoggedIn) {
+            log("✅ Signup completed during extra wait!");
+          } else if (midUrl.includes("lovable.dev/signup") || midUrl.includes("verify-email")) {
+            log("Retrying form submit...");
+            await page.evaluate(() => {
+              (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
+                const t = (b.textContent || "").toLowerCase();
+                if ((t.includes("create") || t.includes("continue")) && !t.includes("google") && !t.includes("github")) {
+                  b.disabled = false; b.removeAttribute("disabled");
+                }
+              });
+              const btn = (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).find((b) => {
+                const t = (b.textContent || "").toLowerCase();
+                return (t.includes("create") || t.includes("continue")) && !t.includes("google") && !t.includes("github");
+              });
+              if (btn) btn.click();
             });
-            if (b) b.click();
-          });
-          await waitMs(10000);
-          const r2Url = page.url();
-          const r2Text = await page.evaluate(() => document.body?.innerText || "");
-          log(`After retry: ${r2Url} — ${r2Text.substring(0, 100).replace(/\s+/g, " ")}`);
+            await waitMs(12000);
+            const r2Url = page.url();
+            const r2Text = await page.evaluate(() => document.body?.innerText || "");
+            log(`After retry: ${r2Url} — ${r2Text.substring(0, 120).replace(/\s+/g, " ")}`);
+          }
         }
       }
     } else if (magicLinkSent) {
