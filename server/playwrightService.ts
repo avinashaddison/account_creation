@@ -13786,7 +13786,10 @@ export async function registerLovableAccount(
         try { if (page) await page.close(); } catch {}
         try { if (browser) await browser.close(); } catch {}
         browser = null; page = null;
-        const onboardResult = await loginAndCompleteOnboarding(mailGwEmail, generatedPassword, log);
+        const onboardResult = await loginAndCompleteOnboarding(mailGwEmail, generatedPassword, log, {
+          refreshToken: capturedFirebaseRefreshToken || undefined,
+          firebaseUid: capturedFirebaseUid || undefined,
+        });
         if (onboardResult.success) {
           log(`✅ Lovable account creation complete (API verified): ${mailGwEmail}`);
           return { success: true, email: mailGwEmail, password: generatedPassword };
@@ -13987,8 +13990,10 @@ process.on("SIGTERM", async () => {
 export async function loginAndCompleteOnboarding(
   lovableEmail: string,
   lovablePassword: string,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  opts?: { refreshToken?: string; firebaseUid?: string }
 ): Promise<{ success: boolean; error?: string }> {
+  const FIREBASE_API_KEY = "AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw";
   let browser: any = null;
   let page: any = null;
 
@@ -13996,28 +14001,225 @@ export async function loginAndCompleteOnboarding(
     await new Promise((r) => setTimeout(r, ms));
   }
 
-  try {
-    browser = await connectViaZenRows(log);
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    page = await ctx.newPage();
+  async function runOnboardingWizard(pg: any) {
+    const startUrl = pg.url();
+    log(`[Onboard] Running wizard — start URL: ${startUrl.substring(0, 100)}`);
+    for (let step = 1; step <= 10; step++) {
+      await waitMs(2500);
+      const curUrl = pg.url();
+      const isDone = !curUrl.includes("getting-started") && !curUrl.includes("onboarding") &&
+        (curUrl.includes("/projects") || curUrl.includes("/dashboard") || curUrl.includes("/builder") ||
+         curUrl.includes("lovable.dev/") && !curUrl.includes("/login") && !curUrl.includes("/signup"));
+      if (isDone) { log(`[Onboard] Wizard complete at step ${step} — URL: ${curUrl.substring(0, 100)}`); return true; }
+      if (!curUrl.includes("getting-started") && !curUrl.includes("onboarding")) { break; }
 
-    log(`[Onboard] Navigating to lovable.dev/login for ${lovableEmail}...`);
+      const curText: string = await pg.evaluate(() => document.body?.innerText || "").catch(() => "");
+      log(`[Onboard] Step ${step}: ${curText.substring(0, 120).replace(/\n/g, " ")}`);
+
+      // Pick your style — choose Dark
+      if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
+        await pg.locator('button:has-text("Dark"), [aria-label="Dark"], text=Dark').first().click({ timeout: 4000 }).catch(() => {});
+        await waitMs(600);
+      }
+      // What's your name
+      if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name") || curText.toLowerCase().includes("your name")) {
+        await pg.locator('input[type="text"], input[placeholder*="name" i]').first().fill("Alex Johnson").catch(() => {});
+        await waitMs(600);
+      }
+      // Role
+      if (curText.toLowerCase().includes("role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer") || curText.toLowerCase().includes("what best describes")) {
+        await pg.locator('button:has-text("Engineer"), button:has-text("Developer"), button:has-text("Founder")').first().click({ timeout: 3000 }).catch(() => {});
+        await waitMs(600);
+      }
+      // Use case
+      if (curText.toLowerCase().includes("personal") || curText.toLowerCase().includes("side project") || curText.toLowerCase().includes("how will you use")) {
+        await pg.locator('button:has-text("Personal"), button:has-text("Side project"), button:has-text("Hobby")').first().click({ timeout: 3000 }).catch(() => {});
+        await waitMs(600);
+      }
+      // Advance to next step
+      let advanced = false;
+      for (const label of ["Next", "Continue", "Start building", "Get started", "Finish", "Done", "Let's go"]) {
+        try {
+          const loc = pg.locator(`button:has-text("${label}")`).first();
+          if (await loc.isVisible({ timeout: 1500 }).catch(() => false)) {
+            await loc.click({ timeout: 5000 }); advanced = true; break;
+          }
+        } catch {}
+      }
+      if (!advanced) {
+        // Try any enabled primary button
+        await pg.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll("button")) as HTMLButtonElement[];
+          const primary = btns.find(b => !b.disabled && b.type === "submit");
+          if (primary) primary.click();
+        }).catch(() => {});
+        log(`[Onboard] Step ${step}: clicked fallback submit`);
+      }
+    }
+    return false;
+  }
+
+  try {
+    // ── STRATEGY 1: Firebase token injection (no Turnstile needed) ──────────
+    if (opts?.refreshToken) {
+      log(`[Onboard] Using Firebase refreshToken to skip login form...`);
+      let freshIdToken = "";
+      try {
+        const tokenResp = await fetch(
+          `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`,
+          { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(opts.refreshToken)}` }
+        );
+        const tokenData = await tokenResp.json();
+        freshIdToken = tokenData.id_token || tokenData.idToken || "";
+        if (freshIdToken) log(`[Onboard] Got fresh idToken (${freshIdToken.length} chars)`);
+        else log(`[Onboard] Token exchange response: ${JSON.stringify(tokenData).substring(0, 120)}`);
+      } catch (te: any) {
+        log(`[Onboard] Token exchange error: ${(te.message || "").substring(0, 80)}`);
+      }
+
+      if (freshIdToken) {
+        log(`[Onboard] Opening ZenRows browser and injecting Firebase auth state...`);
+        browser = await connectViaZenRows(log);
+        const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+        page = await ctx.newPage();
+
+        // Navigate to lovable.dev first to set localStorage on correct origin
+        await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 60000 });
+        await waitMs(3000);
+
+        // Inject Firebase auth state into localStorage
+        const expirationTime = Date.now() + 3600 * 1000;
+        const authState = {
+          uid: opts.firebaseUid || "",
+          email: lovableEmail,
+          emailVerified: true,
+          isAnonymous: false,
+          providerData: [{ providerId: "password", uid: lovableEmail, email: lovableEmail, displayName: null, photoURL: null, phoneNumber: null }],
+          stsTokenManager: { refreshToken: opts.refreshToken, accessToken: freshIdToken, expirationTime },
+          createdAt: String(Date.now()),
+          lastLoginAt: String(Date.now()),
+          apiKey: FIREBASE_API_KEY,
+          appName: "[DEFAULT]",
+        };
+        const lsKey = `firebase:authUser:${FIREBASE_API_KEY}:[DEFAULT]`;
+        await page.evaluate(({ key, value }: { key: string; value: string }) => {
+          localStorage.setItem(key, value);
+          // Also try IndexedDB path (some Firebase versions use this)
+          try {
+            const r = indexedDB.open("firebaseLocalStorageDb", 1);
+            r.onupgradeneeded = (e: any) => { e.target.result.createObjectStore("firebaseLocalStorage", { keyPath: "fbase_key" }); };
+            r.onsuccess = (e: any) => {
+              const db = e.target.result;
+              const tx = db.transaction("firebaseLocalStorage", "readwrite");
+              tx.objectStore("firebaseLocalStorage").put({ fbase_key: key, value: JSON.parse(value) });
+            };
+          } catch {}
+        }, { key: lsKey, value: JSON.stringify(authState) });
+
+        log(`[Onboard] Firebase auth injected — navigating to /getting-started...`);
+        await page.goto("https://lovable.dev/getting-started", { waitUntil: "domcontentloaded", timeout: 60000 });
+        await waitMs(5000);
+
+        const afterInjectUrl = page.url();
+        log(`[Onboard] URL after inject + navigate: ${afterInjectUrl.substring(0, 120)}`);
+
+        // Check if we're past login
+        if (afterInjectUrl.includes("/login") || afterInjectUrl.includes("/signup") || afterInjectUrl.includes("/verify-email")) {
+          log(`[Onboard] Token injection didn't work (redirected to auth). Trying /projects...`);
+          await page.goto("https://lovable.dev/projects", { waitUntil: "domcontentloaded", timeout: 30000 });
+          await waitMs(4000);
+          const projUrl = page.url();
+          log(`[Onboard] /projects URL: ${projUrl.substring(0, 100)}`);
+          if (projUrl.includes("/login") || projUrl.includes("/signup")) {
+            log(`[Onboard] Token injection failed — falling through to password login`);
+            try { if (page) await page.close(); } catch {}
+            try { if (browser) await browser.close(); } catch {}
+            browser = null; page = null;
+          }
+        }
+
+        if (page) {
+          const currentUrl = page.url();
+          if (currentUrl.includes("getting-started") || currentUrl.includes("onboarding")) {
+            await runOnboardingWizard(page);
+          }
+          const finalUrl = page.url();
+          log(`[Onboard] Final URL (token injection path): ${finalUrl.substring(0, 120)}`);
+          const onDashboard = finalUrl.includes("lovable.dev") &&
+            !finalUrl.includes("/login") && !finalUrl.includes("/signup") && !finalUrl.includes("/verify-email");
+          if (onDashboard) {
+            log(`✅ [Onboard] Complete via token injection for ${lovableEmail}`);
+            return { success: true };
+          }
+          log(`[Onboard] Token injection path incomplete — falling through to password login`);
+          try { if (page) await page.close(); } catch {}
+          try { if (browser) await browser.close(); } catch {}
+          browser = null; page = null;
+        }
+      }
+    }
+
+    // ── STRATEGY 2: Password-based login with Turnstile via CapSolver ────────
+    log(`[Onboard] Attempting password login for ${lovableEmail}...`);
+    browser = await connectViaZenRows(log);
+    const ctx2 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    page = await ctx2.newPage();
+
+    // Set up network interceptor to capture new idToken if login fires one
+    let capturedNewToken = "";
+    page.on("response", async (resp: any) => {
+      try {
+        const u = resp.url();
+        if (u.includes("identitytoolkit.googleapis.com") && u.includes("accounts:signInWithPassword") && resp.status() === 200) {
+          const body = await resp.text().catch(() => "");
+          const parsed = JSON.parse(body);
+          if (parsed.idToken) capturedNewToken = parsed.idToken;
+        }
+      } catch {}
+    });
+
+    // Navigate and fill the email field — Lovable login uses same 2-step flow
     await page.goto("https://lovable.dev/login", { waitUntil: "domcontentloaded", timeout: 60000 });
     await waitMs(4000);
 
-    // Fill email
     const emailSel = 'input[type="email"], input[name="email"], input[placeholder*="email" i]';
     const emailEl = await page.$(emailSel).catch(() => null);
     if (!emailEl) {
-      // Try going via signup path (some Lovable flows redirect)
       await page.goto("https://lovable.dev/", { waitUntil: "domcontentloaded", timeout: 30000 });
       await waitMs(3000);
     }
 
-    // Fill email + click Continue
     await page.locator(emailSel).first().fill(lovableEmail).catch(() => {});
     await waitMs(500);
-    for (const label of ["Continue", "Next", "Sign in"]) {
+
+    // Solve Turnstile via CapSolver to enable the login button
+    let tsToken = "";
+    try {
+      const tsResult = await solveAntiTurnstile("https://lovable.dev/login", "0x4AAAAAAChnKAZBY0iFpFHC");
+      tsToken = tsResult || "";
+      if (tsToken) log(`[Onboard] CapSolver login Turnstile: ${tsToken.length} chars`);
+    } catch (te: any) {
+      log(`[Onboard] Turnstile solve error: ${(te.message || "").substring(0, 80)}`);
+    }
+
+    if (tsToken) {
+      await page.evaluate((token: string) => {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        document.querySelectorAll('input[name="cf-turnstile-response"]').forEach((el: any) => {
+          if (nativeSetter) nativeSetter.call(el, token);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        const cbs: any[] = (window as any).__pendingTsCallbacks || [];
+        cbs.forEach((cb: any) => { try { cb(token); } catch {} });
+        (window as any).__pendingTsCallbacks = [];
+      }, tsToken);
+      await waitMs(1000);
+    }
+
+    // Click Continue to get to password field
+    for (const label of ["Continue", "Next"]) {
       try {
         const btn = page.locator(`button:has-text("${label}")`).first();
         if (await btn.isVisible({ timeout: 2000 })) { await btn.click(); break; }
@@ -14029,58 +14231,34 @@ export async function loginAndCompleteOnboarding(
     const passEl = await page.$('input[type="password"]').catch(() => null);
     if (passEl) {
       await passEl.fill(lovablePassword);
-      await waitMs(500);
-      // Click login/sign-in button
+      await waitMs(800);
+      // Enable any disabled buttons
+      await page.evaluate(() => {
+        (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
+          const t = (b.textContent || "").toLowerCase();
+          if ((t.includes("sign") || t.includes("log") || t.includes("continue")) && !t.includes("google") && !t.includes("github")) {
+            b.disabled = false; b.removeAttribute("disabled");
+          }
+        });
+      });
       for (const label of ["Sign in", "Log in", "Login", "Continue"]) {
         try {
           const btn = page.locator(`button:has-text("${label}")`).first();
           if (await btn.isVisible({ timeout: 2000 })) { await btn.click(); break; }
         } catch {}
       }
-      await waitMs(10000);
+      await waitMs(12000);
     }
 
     const loginUrl = page.url();
-    log(`[Onboard] After login: ${loginUrl.substring(0, 100)}`);
+    log(`[Onboard] After password login: ${loginUrl.substring(0, 100)}`);
 
     if (loginUrl.includes("/login") || loginUrl.includes("/signup")) {
       return { success: false, error: "Login failed — still on auth page after submit" };
     }
 
-    // Handle onboarding wizard if present
-    if (loginUrl.includes("getting-started")) {
-      log("[Onboard] Starting onboarding wizard...");
-      for (let step = 1; step <= 8; step++) {
-        await waitMs(2000);
-        const curUrl = page.url();
-        if (!curUrl.includes("getting-started")) { log(`[Onboard] Done at step ${step}`); break; }
-        const curText = await page.evaluate(() => document.body?.innerText || "");
-        log(`[Onboard] Step ${step}: ${curText.substring(0, 80).replace(/\n/g, " ")}`);
-        if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
-          await page.locator('button:has-text("Dark")').first().click({ timeout: 5000 }).catch(() => {});
-          await waitMs(500);
-        }
-        if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name")) {
-          await page.locator('input[type="text"]').first().fill("Alex Johnson").catch(() => {});
-          await waitMs(500);
-        }
-        if (curText.toLowerCase().includes("role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer")) {
-          await page.locator('button:has-text("Engineer"), button:has-text("Developer")').first().click({ timeout: 3000 }).catch(() => {});
-          await waitMs(500);
-        }
-        if (curText.toLowerCase().includes("personal") || curText.toLowerCase().includes("project")) {
-          await page.locator('button:has-text("Personal"), button:has-text("Side project")').first().click({ timeout: 3000 }).catch(() => {});
-          await waitMs(500);
-        }
-        let advanced = false;
-        for (const label of ["Next", "Continue", "Start building", "Get started", "Finish", "Done"]) {
-          try {
-            const loc = page.locator(`button:has-text("${label}")`).first();
-            if (await loc.isVisible().catch(() => false)) { await loc.click({ timeout: 5000 }); advanced = true; break; }
-          } catch {}
-        }
-        if (!advanced) { log(`[Onboard] No Next button on step ${step}`); break; }
-      }
+    if (loginUrl.includes("getting-started") || loginUrl.includes("onboarding")) {
+      await runOnboardingWizard(page);
     }
 
     const finalUrl = page.url();
