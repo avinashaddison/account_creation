@@ -13567,78 +13567,96 @@ export async function registerLovableAccount(
           const html = await p.evaluate(() => document.body?.innerHTML || "");
 
           // Priority 0: Microsoft Safelinks — Outlook wraps all junk URLs with safelinks.protection.outlook.com
-          // Extract and decode the real URL from inside the safelink wrapper
+          // IMPORTANT: In Outlook conversation view, messages appear oldest-first in the DOM.
+          // We MUST take the LAST match (newest message's oobCode), not the first (oldest/stale).
           const safelinkRe = /safelinks\.protection\.outlook\.com\/\?url=([^&"'\s>]+)/gi;
           let slm: RegExpExecArray | null;
+          let lastSafelinkHtml = "";
           while ((slm = safelinkRe.exec(html)) !== null) {
             try {
               const decoded = decodeURIComponent(slm[1]);
               if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
-                verificationLink = decoded.replace(/["'<>)]/g, "").trim();
-                log(`Extracted Lovable link via Safelinks decode: ${verificationLink.substring(0, 120)}`);
-                return true;
+                lastSafelinkHtml = decoded.replace(/["'<>)]/g, "").trim();
               }
             } catch {}
+          }
+          if (lastSafelinkHtml) {
+            verificationLink = lastSafelinkHtml;
+            log(`Extracted Lovable link via Safelinks decode (newest): ${verificationLink.substring(0, 120)}`);
+            return true;
           }
           // Also check body text for safelinks-encoded lovable URLs
           const safelinkBodyRe = /safelinks\.protection\.outlook\.com\/\?url=([^\s&]+)/gi;
           let slb: RegExpExecArray | null;
+          let lastSafelinkBody = "";
           while ((slb = safelinkBodyRe.exec(body)) !== null) {
             try {
               const decoded = decodeURIComponent(slb[1]);
               if (decoded.includes("lovable.dev") || decoded.includes("gpt-engineer-390607")) {
-                verificationLink = decoded.replace(/["'<>)]/g, "").trim();
-                log(`Extracted Lovable link via Safelinks (body text): ${verificationLink.substring(0, 120)}`);
-                return true;
+                lastSafelinkBody = decoded.replace(/["'<>)]/g, "").trim();
               }
             } catch {}
           }
+          if (lastSafelinkBody) {
+            verificationLink = lastSafelinkBody;
+            log(`Extracted Lovable link via Safelinks (body, newest): ${verificationLink.substring(0, 120)}`);
+            return true;
+          }
 
           // Priority 1: direct lovable.dev verification/auth links
+          // Use global regex and take the LAST match — in Outlook conversation view,
+          // messages are ordered oldest-first in the DOM. Last match = newest message's link.
           const lovablePatterns = [
-            /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/i,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/i,
-            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*/,
+            /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/g,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/gi,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/gi,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*/g,
           ];
           for (const pat of lovablePatterns) {
-            const m = body.match(pat) || html.match(pat);
-            if (m) {
-              const candidate = m[0].replace(/["'<>)]/g, "").trim();
+            const allBodyMatches = [...(body.matchAll(pat))].map(m => m[0]);
+            const allHtmlMatches = [...(html.matchAll(pat))].map(m => m[0]);
+            const allMatches = [...allBodyMatches, ...allHtmlMatches];
+            if (allMatches.length > 0) {
+              // Take the last match — newest oobCode in conversation thread
+              const candidate = allMatches[allMatches.length - 1].replace(/["'<>)]/g, "").trim();
               if (candidate.includes("lovable.dev")) {
                 verificationLink = candidate;
-                log(`Extracted lovable.dev link: ${verificationLink.substring(0, 120)}`);
+                log(`Extracted lovable.dev link (newest of ${allMatches.length}): ${verificationLink.substring(0, 120)}`);
                 return true;
               }
             }
           }
           // Priority 2: ONLY Lovable's specific Firebase project (gpt-engineer-390607)
           const firebasePatterns = [
-            /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/,
+            /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/g,
           ];
           for (const pat of firebasePatterns) {
-            const m = body.match(pat) || html.match(pat);
-            if (m) {
-              const candidate = m[0].replace(/["'<>)]/g, "").trim();
+            const allMatches = [...(body.matchAll(pat)), ...(html.matchAll(pat))].map(m => m[0]);
+            if (allMatches.length > 0) {
+              const candidate = allMatches[allMatches.length - 1].replace(/["'<>)]/g, "").trim();
               if (candidate.includes("gpt-engineer-390607")) {
                 verificationLink = candidate;
-                log(`Extracted Lovable Firebase link: ${verificationLink.substring(0, 120)}`);
+                log(`Extracted Lovable Firebase link (newest): ${verificationLink.substring(0, 120)}`);
                 return true;
               }
             }
           }
-          // Priority 3: scan hrefs from lovable.dev or gpt-engineer-390607 domains
+          // Priority 3: scan hrefs from lovable.dev or gpt-engineer-390607 domains — take LAST (newest)
           const hrefMatches = html.match(/href="(https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^"]*)"/gi) || [];
+          let lastHref = "";
           for (const hm of hrefMatches) {
             const urlMatch = hm.match(/href="(https?:\/\/[^"]+)"/i);
             if (urlMatch) {
               const url = urlMatch[1].trim();
               if (url.includes("lovable.dev") || url.includes("gpt-engineer-390607")) {
-                verificationLink = url;
-                log(`Extracted Lovable href link: ${verificationLink.substring(0, 120)}`);
-                return true;
+                lastHref = url; // keep updating — last one wins
               }
             }
+          }
+          if (lastHref) {
+            verificationLink = lastHref;
+            log(`Extracted Lovable href link (newest): ${verificationLink.substring(0, 120)}`);
+            return true;
           }
           // Only extract a 6-digit code if the email is clearly Lovable-related
           const isLovableEmail = body.toLowerCase().includes("lovable") ||
@@ -14057,10 +14075,12 @@ export async function registerLovableAccount(
 
       apiVerified = await tryFirebaseVerify(verificationLink);
 
-      // If INVALID_OOB_CODE — the link we found was from an older email, a newer resend
-      // generated a NEW oobCode that invalidated it. Send fresh email and re-scan OWA.
+      // If INVALID_OOB_CODE — the link we found was stale (older email in conversation).
+      // The "last match wins" fix in extractLink should prevent this going forward.
+      // If it still happens, send ONE fresh email and save as pending_verification (poller handles it).
+      // DO NOT chain further resends — each resend invalidates the previous oobCode.
       if (!apiVerified && capturedFirebaseIdToken) {
-        log("⚠️ Firebase verification failed — sending fresh email and re-scanning OWA for newest link...");
+        log("⚠️ Firebase verification failed (INVALID_OOB_CODE) — sending one fresh email then saving as pending_verification...");
         try {
           const freshSend = await fetch(
             `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${LOVABLE_FIREBASE_KEY}`,
@@ -14068,28 +14088,10 @@ export async function registerLovableAccount(
           );
           const freshSendBody = await freshSend.json() as any;
           log(`Fresh email send: ${JSON.stringify(freshSendBody).substring(0, 120)}`);
-          if (freshSendBody?.email) {
-            log("⏳ Waiting 45s for fresh verification email to arrive...");
-            await waitMs(45000);
-            // Close stale OWA browser and open a fresh session to find newest link
-            if (owaBrowser) { try { await owaBrowser.close(); } catch {} owaBrowser = null; }
-            const freshOwaForRetry = await freshOwaPage("verif-code-retry");
-            const prevLink = verificationLink;
-            verificationLink = ""; // reset so extractLink can fill it fresh
-            let retryFound = await scanFolder(freshOwaForRetry, "https://outlook.live.com/mail/0/junkemail", "junk-newest");
-            if (!retryFound) retryFound = await scanInboxBothTabs(freshOwaForRetry);
-            if (!retryFound) retryFound = await searchOutlookForLovable(freshOwaForRetry, "newest-search");
-            if (verificationLink && verificationLink !== prevLink) {
-              log(`Found newer verification link: ${verificationLink.substring(0, 100)}`);
-              apiVerified = await tryFirebaseVerify(verificationLink);
-            } else if (!verificationLink) {
-              verificationLink = prevLink; // restore original if nothing new found
-              log("No newer link found — restoring original link for browser fallback");
-            }
-          }
         } catch (resendErr: any) {
-          log(`Fresh email resend error: ${(resendErr.message || "").substring(0, 80)}`);
+          log(`Fresh email send error: ${(resendErr.message || "").substring(0, 80)}`);
         }
+        // Fall through to pending_verification — poller will detect emailVerified once user clicks link
       }
 
       if (apiVerified) accountVerified = true;
@@ -14098,14 +14100,12 @@ export async function registerLovableAccount(
       let vText = "";
 
       if (!apiVerified) {
-        // Fall back: open a FRESH ZenRows browser (original page is stale after 6+ min)
+        // Fall back: open a FRESH ZenRows browser via connectViaZenRows (uses stored API URL, no proxy param)
         log("Navigating to verification link with fresh ZenRows browser (original is stale)...");
         let freshVerifBrowser: any = null;
         let freshVerifPage: any = null;
         try {
-          const { chromium } = await import("playwright");
-          const wsEndpoint = `wss://browser.zenrows.com?apikey=${process.env.ZENROWS_API_KEY || "16ad08cfa1bc9df048d189ed3fa18d1d86e5c83e"}&antibot=true`;
-          freshVerifBrowser = await chromium.connectOverCDP(wsEndpoint, { timeout: 30000 });
+          freshVerifBrowser = await connectViaZenRows(log);
           const vCtx = freshVerifBrowser.contexts()[0] || await freshVerifBrowser.newContext();
           freshVerifPage = vCtx.pages()[0] || await vCtx.newPage();
           await freshVerifPage.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 35000 });
