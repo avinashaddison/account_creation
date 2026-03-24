@@ -367,6 +367,19 @@ export default function PrivateAccount() {
     });
   }
 
+  function timeAgo(d: string) {
+    const diff = Date.now() - new Date(d).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return "just now";
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const days = Math.floor(h / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
   function formatDate(d: string) {
     return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
   }
@@ -673,7 +686,7 @@ export default function PrivateAccount() {
                           </Badge>
                         </TableCell>
                         <TableCell className="py-2.5">
-                          <span className="text-[10px] text-zinc-600 font-mono">{formatDate(acc.createdAt)}</span>
+                          <span className="text-[10px] text-zinc-600 font-mono" title={formatDate(acc.createdAt)}>{timeAgo(acc.createdAt)}</span>
                         </TableCell>
                         <TableCell className="py-2.5 text-right">
                           <div className="flex items-center gap-1 justify-end">
@@ -811,7 +824,7 @@ export default function PrivateAccount() {
                           </Badge>
                         </TableCell>
                         <TableCell className="py-2.5">
-                          <span className="text-[10px] text-zinc-600 font-mono">{formatDate(key.createdAt)}</span>
+                          <span className="text-[10px] text-zinc-600 font-mono" title={formatDate(key.createdAt)}>{timeAgo(key.createdAt)}</span>
                         </TableCell>
                         <TableCell className="py-2.5 text-right">
                           <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteZenrows(key.id)} data-testid={`button-delete-zenrows-${key.id}`}>
@@ -1008,6 +1021,9 @@ export default function PrivateAccount() {
                           @{acct.username}
                         </span>
                       </div>
+                      <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.18)" }} title={formatDate(acct.createdAt)}>
+                        {timeAgo(acct.createdAt)}
+                      </span>
                     </div>
 
                     {/* Password */}
