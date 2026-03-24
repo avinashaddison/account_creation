@@ -13108,6 +13108,17 @@ export async function registerLovableAccount(
       log("⚠️ CapSolver token not ready in 8s — proceeding with Continue click anyway");
     }
 
+    // Check if ZenRows already set a Turnstile token in the hidden input
+    const existingTsToken: string | null = await page.evaluate(() => {
+      const inp = document.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement | null;
+      return inp ? inp.value : null;
+    });
+    if (existingTsToken) {
+      log(`ZenRows pre-set Turnstile token (${existingTsToken.length} chars) — no CapSolver injection needed`);
+    } else {
+      log("No pre-set Turnstile token in DOM — CapSolver injection required");
+    }
+
     // Force-enable the Continue button regardless
     await page.evaluate(() => {
       (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
@@ -13312,6 +13323,84 @@ export async function registerLovableAccount(
       log(`Page state unclear — URL: ${afterUrl} | text: ${afterText.substring(0, 120).replace(/\s+/g, " ")}`);
       if (!afterUrl.includes("lovable.dev")) {
         return { success: false, error: `Unexpected redirect after signup: ${afterUrl.substring(0, 80)}` };
+      }
+      // If still on signup page, ZenRows handled Turnstile internally but React has no token.
+      // Retry: wait for CapSolver token, inject it via native input setter (triggers React state update), re-submit.
+      if (afterUrl.includes("/signup")) {
+        log("Signup page stuck — trying token injection + re-submit...");
+        const retryToken = await Promise.race([capsolverTokenPromise, new Promise<null>((r) => setTimeout(() => r(null), 15000))]);
+        // Always retry the click; inject token if available
+        {
+          const injected = await page.evaluate((token: string | null) => {
+            // Only inject if we have a token
+            if (token) {
+              (window as any).__tsCurrentToken = token;
+              const cbs: any[] = (window as any).__pendingTsCallbacks || [];
+              let n = 0;
+              cbs.forEach((cb: any) => { try { cb(token); n++; } catch {} });
+              (window as any).__pendingTsCallbacks = [];
+              // Use native setter to set hidden Turnstile input (bypasses React's synthetic event check)
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+              document.querySelectorAll('input[name="cf-turnstile-response"]').forEach((el: any) => {
+                if (nativeSetter) nativeSetter.call(el, token);
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+              });
+            }
+            // Enable Continue button regardless
+            (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
+              const t = (b.textContent || "").toLowerCase();
+              if (t.includes("continue") && !t.includes("google") && !t.includes("github")) {
+                b.disabled = false; b.removeAttribute("disabled");
+              }
+            });
+            return token ? 1 : 0;
+          }, retryToken);
+          log(`Retry injection: fired ${injected} callbacks + set hidden input`);
+          await waitMs(1500);
+          // Re-fill email and re-click Continue
+          await fillInput(page, ['input[type="email"]', 'input[name="email"]'], outlookEmail, "email-retry");
+          await waitMs(500);
+          await clickButton(page, ['button:has-text("Continue")', 'button[type="submit"]'], "Continue-retry");
+          await waitMs(8000);
+          const r2Url = page.url();
+          const r2Content = await page.content();
+          const r2Text = await page.evaluate(() => document.body?.innerText || "");
+          log(`After retry: ${r2Url} — ${r2Text.substring(0, 120).replace(/\s+/g, " ")}`);
+          // If retry moved to password field, handle it now
+          const r2HasPw = r2Content.includes('type="password"') || r2Content.includes("type='password'");
+          const r2MagicLink = r2Text.toLowerCase().includes("check your email") || r2Text.toLowerCase().includes("magic link") || r2Text.toLowerCase().includes("we emailed");
+          const r2Dashboard = r2Url.includes("/builder") || r2Url.includes("/projects") || r2Text.toLowerCase().includes("what are you building");
+          if (r2Dashboard) {
+            log("✅ Retry succeeded — on dashboard immediately!");
+            return { success: true, email: outlookEmail };
+          } else if (r2HasPw) {
+            log("✅ Retry succeeded — password field appeared, continuing with password registration");
+            // Fall-through: hasPasswordField will be set but we are past that block.
+            // Re-enter password form path inline:
+            generatedPassword = randPass();
+            await fillInput(page, ['input[type="password"]', 'input[name="password"]'], generatedPassword, "password-retry");
+            log(`Generated password (retry): ${generatedPassword}`);
+            await waitMs(800);
+            await page.evaluate(() => {
+              (Array.from(document.querySelectorAll("button")) as HTMLButtonElement[]).forEach((b) => {
+                const t = (b.textContent || "").toLowerCase();
+                if ((t.includes("create") || t.includes("sign up") || t.includes("continue")) && !t.includes("google") && !t.includes("github")) {
+                  b.disabled = false; b.removeAttribute("disabled");
+                }
+              });
+            });
+            await clickButton(page, ['button:has-text("Create your account")', 'button:has-text("Create account")', 'button:has-text("Sign up")', 'button[type="submit"]'], "submit-retry");
+            await waitMs(8000);
+            const r3Url = page.url();
+            const r3Text = await page.evaluate(() => document.body?.innerText || "");
+            log(`After password submit (retry): ${r3Url} — ${r3Text.substring(0, 120).replace(/\s+/g, " ")}`);
+          } else if (r2MagicLink) {
+            log("✅ Retry succeeded — magic link sent!");
+          } else {
+            log(`⚠️ Retry did not change state — URL still ${r2Url.substring(0, 60)}`);
+          }
+        }
       }
     }
 
@@ -13620,59 +13709,99 @@ export async function registerLovableAccount(
             return true;
           }
 
+          // Helper: decode HTML entities iteratively (handles &amp;amp; double-encoding)
+          const decodeHtmlEntities = (s: string) => {
+            let prev = "";
+            while (prev !== s) { prev = s; s = s.replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'"); }
+            return s;
+          };
+
           // Priority 1: direct lovable.dev verification/auth links
-          // Use global regex and take the LAST match — in Outlook conversation view,
-          // messages are ordered oldest-first in the DOM. Last match = newest message's link.
-          const lovablePatterns = [
+          // IMPORTANT: Search body (innerText) FIRST — already HTML-decoded, no &amp; issues.
+          // Only fall back to html (innerHTML) if body has no matches, and decode entities from HTML.
+          // Take the LAST match in each source — in Outlook conversation view, newest message is last in DOM.
+          // Patterns for innerText (body) — & is a valid URL char, stop at whitespace/quotes
+          // Patterns for innerHTML (html) — stop at & too, because & in HTML indicates &amp; encoding
+          const lovablePatternsBody = [
             /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n)]*/g,
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*verify[^\s"'<>\r\n)]*/gi,
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*confirm[^\s"'<>\r\n)]*/gi,
             /https?:\/\/lovable\.dev\/[^\s"'<>\r\n)]*/g,
           ];
-          for (const pat of lovablePatterns) {
-            const allBodyMatches = [...(body.matchAll(pat))].map(m => m[0]);
-            const allHtmlMatches = [...(html.matchAll(pat))].map(m => m[0]);
-            const allMatches = [...allBodyMatches, ...allHtmlMatches];
-            if (allMatches.length > 0) {
-              // Take the last match — newest oobCode in conversation thread
-              const candidate = allMatches[allMatches.length - 1].replace(/["'<>)]/g, "").trim();
-              if (candidate.includes("lovable.dev")) {
-                verificationLink = candidate;
-                log(`Extracted lovable.dev link (newest of ${allMatches.length}): ${verificationLink.substring(0, 120)}`);
-                return true;
-              }
+          const lovablePatternsHtml = [
+            /https?:\/\/lovable\.dev\/auth\/action[^\s"'<>\r\n&)]*/g,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n&)]*verify[^\s"'<>\r\n&)]*/gi,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n&)]*confirm[^\s"'<>\r\n&)]*/gi,
+            /https?:\/\/lovable\.dev\/[^\s"'<>\r\n&)]*/g,
+          ];
+          const lovablePatterns = lovablePatternsBody; // used in Priority 1b below
+          for (let i = 0; i < lovablePatternsBody.length; i++) {
+            const bodyPat = lovablePatternsBody[i];
+            const htmlPat = lovablePatternsHtml[i];
+            // Try body (innerText) — decoded plain text, & is valid URL char here
+            const bodyMatches = [...(body.matchAll(bodyPat))].map(m => m[0].replace(/["'<>)]/g, "").trim());
+            const validBody = bodyMatches.filter(u => u.includes("lovable.dev") && u.includes("oobCode"));
+            if (validBody.length > 0) {
+              verificationLink = validBody[validBody.length - 1];
+              log(`Extracted lovable.dev link from body (newest of ${validBody.length}): ${verificationLink.substring(0, 120)}`);
+              return true;
+            }
+            // Fall back to HTML — stops at & to avoid &amp; fragments, then decode entities on partial URL
+            // Since the HTML pattern stops at &, we get "mode=verifyEmail" part; we need to get the oobCode from the full href attribute instead
+            // (handled in Priority 3 href scan below). Still try html scan in case oobCode appears before any &amp;
+            const htmlMatches = [...(html.matchAll(htmlPat))].map(m => {
+              // The HTML pattern stops at &, so m[0] may be truncated. Try to extend by looking at raw href
+              return decodeHtmlEntities(m[0].replace(/["'<>)]/g, "").trim());
+            });
+            const validHtml = htmlMatches.filter(u => u.includes("lovable.dev") && u.includes("oobCode"));
+            if (validHtml.length > 0) {
+              verificationLink = validHtml[validHtml.length - 1];
+              log(`Extracted lovable.dev link from html (newest of ${validHtml.length}): ${verificationLink.substring(0, 120)}`);
+              return true;
+            }
+          }
+          // Priority 1b: allow links without oobCode (e.g. dashboard/builder redirect)
+          for (const pat of lovablePatternsBody) {
+            const bodyMatches = [...(body.matchAll(pat))].map(m => m[0].replace(/["'<>)]/g, "").trim()).filter(u => u.includes("lovable.dev"));
+            if (bodyMatches.length > 0) {
+              verificationLink = bodyMatches[bodyMatches.length - 1];
+              log(`Extracted lovable.dev link (no oobCode, body, newest): ${verificationLink.substring(0, 120)}`);
+              return true;
             }
           }
           // Priority 2: ONLY Lovable's specific Firebase project (gpt-engineer-390607)
-          const firebasePatterns = [
-            /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/g,
-          ];
-          for (const pat of firebasePatterns) {
-            const allMatches = [...(body.matchAll(pat)), ...(html.matchAll(pat))].map(m => m[0]);
-            if (allMatches.length > 0) {
-              const candidate = allMatches[allMatches.length - 1].replace(/["'<>)]/g, "").trim();
-              if (candidate.includes("gpt-engineer-390607")) {
-                verificationLink = candidate;
-                log(`Extracted Lovable Firebase link (newest): ${verificationLink.substring(0, 120)}`);
-                return true;
-              }
+          // Body pattern allows & (URL param separator in decoded text)
+          const firebaseBodyPat = /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n)]*/g;
+          const firebaseHtmlPat = /https?:\/\/gpt-engineer-390607\.firebaseapp\.com\/__\/auth\/action[^\s"'<>\r\n&)]*/g;
+          {
+            const bodyMatches = [...(body.matchAll(firebaseBodyPat))].map(m => m[0].replace(/["'<>)]/g, "").trim()).filter(u => u.includes("gpt-engineer-390607") && u.includes("oobCode"));
+            if (bodyMatches.length > 0) {
+              verificationLink = bodyMatches[bodyMatches.length - 1];
+              log(`Extracted Lovable Firebase link (body, newest): ${verificationLink.substring(0, 120)}`);
+              return true;
+            }
+            const htmlMatches = [...(html.matchAll(firebaseHtmlPat))].map(m => decodeHtmlEntities(m[0].replace(/["'<>)]/g, "").trim())).filter(u => u.includes("gpt-engineer-390607") && u.includes("oobCode"));
+            if (htmlMatches.length > 0) {
+              verificationLink = htmlMatches[htmlMatches.length - 1];
+              log(`Extracted Lovable Firebase link (html, newest): ${verificationLink.substring(0, 120)}`);
+              return true;
             }
           }
-          // Priority 3: scan hrefs from lovable.dev or gpt-engineer-390607 domains — take LAST (newest)
+          // Priority 3: scan hrefs from lovable.dev or gpt-engineer-390607 domains — take LAST (newest), decode entities
           const hrefMatches = html.match(/href="(https?:\/\/(?:lovable\.dev|gpt-engineer-390607\.firebaseapp\.com)[^"]*)"/gi) || [];
           let lastHref = "";
           for (const hm of hrefMatches) {
             const urlMatch = hm.match(/href="(https?:\/\/[^"]+)"/i);
             if (urlMatch) {
-              const url = urlMatch[1].trim();
+              const url = decodeHtmlEntities(urlMatch[1].trim());
               if (url.includes("lovable.dev") || url.includes("gpt-engineer-390607")) {
-                lastHref = url; // keep updating — last one wins
+                lastHref = url;
               }
             }
           }
           if (lastHref) {
             verificationLink = lastHref;
-            log(`Extracted Lovable href link (newest): ${verificationLink.substring(0, 120)}`);
+            log(`Extracted Lovable href link (newest, decoded): ${verificationLink.substring(0, 120)}`);
             return true;
           }
           // Only extract a 6-digit code if the email is clearly Lovable-related
