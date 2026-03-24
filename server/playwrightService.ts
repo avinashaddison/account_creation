@@ -18629,9 +18629,9 @@ export async function generateSingleCheckoutLink(
         "--no-sandbox", "--disable-setuid-sandbox",
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage", "--disable-web-security",
+        "--allow-running-insecure-content",
         "--disable-features=IsolateOrigins,site-per-process",
-        "--ignore-certificate-errors",          // tolerate proxy SSL interception
-        "--proxy-bypass-list=<-loopback>",      // ensure all traffic goes through proxy
+        "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
       ],
     };
     if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
@@ -18641,57 +18641,92 @@ export async function generateSingleCheckoutLink(
     const context = await browser.newContext({
       userAgent: ua, viewport: glVp, locale: "en-US",
       timezoneId: glTz, javaScriptEnabled: true,
-      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9", "Sec-Ch-Ua": `"Chromium";v="${glCv}", "Not(A:Brand";v="24", "Google Chrome";v="${glCv}"`, "Sec-Ch-Ua-Mobile": "?0", "Sec-Ch-Ua-Platform": '"Windows"' },
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Ch-Ua": `"Chromium";v="${glCv}", "Not(A:Brand";v="24", "Google Chrome";v="${glCv}"`,
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+      },
     });
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
       Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
-      (window as any).chrome = { app: {}, runtime: { id: undefined, connect: () => {}, sendMessage: () => {} }, loadTimes: () => ({}), csi: () => ({}) };
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+      Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+      Object.defineProperty(navigator, "maxTouchPoints", { get: () => 0 });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+      Object.defineProperty(navigator, "connection", { get: () => ({ effectiveType: "4g", downlink: 10, rtt: 50 }) });
+      const pluginData = [
+        { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+        { name: "Native Client", filename: "internal-nacl-plugin", description: "" },
+      ];
+      Object.defineProperty(navigator, "plugins", {
+        get: () => Object.assign(pluginData, { item: (i: number) => pluginData[i], namedItem: (n: string) => pluginData.find(p => p.name === n) || null, length: pluginData.length }),
+      });
+      Object.defineProperty(navigator, "mimeTypes", { get: () => ({ length: 4 }) });
+      (window as any).chrome = {
+        app: { isInstalled: false },
+        runtime: { id: undefined, connect: () => {}, sendMessage: () => {} },
+        loadTimes: () => ({}), csi: () => ({}),
+      };
     });
     const page = await context.newPage();
 
-    // ── Login ──
+    // ── Login — uses pressSequentially (real keystrokes) so Cloudflare/Replit don't block ──
+    const glSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+    const glHumanType = async (locator: any, text: string) => {
+      await locator.focus();
+      await locator.fill("");
+      await locator.pressSequentially(text, { delay: 50 + Math.floor(Math.random() * 80) });
+    };
+
     log(`🔐 Logging into Replit as ${email}...`);
     await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
-    // Wait for and fill email/username field
-    await page.waitForSelector(
-      'input[name="username"], input[type="email"], input[name="email"]',
-      { timeout: 25000 }
-    );
-    const emailInput = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
-    await emailInput.click();
-    await emailInput.fill(email);
-    await page.waitForTimeout(800);
-    // Wait for password field (may appear after email is entered)
-    await page.waitForSelector('input[type="password"]', { timeout: 25000 });
-    const passInput = page.locator('input[type="password"]').first();
-    await passInput.click();
-    await passInput.fill(password);
-    await page.waitForTimeout(600);
-    // Try clicking the submit button first, fall back to Enter
-    const submitBtn = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in")').first();
-    const hasBtnVisible = await submitBtn.isVisible().catch(() => false);
-    if (hasBtnVisible) {
-      await submitBtn.click();
-    } else {
-      await passInput.press("Enter");
+    await glSleep(3000); // let page fully render + Cloudflare resolve
+
+    // Detect Cloudflare challenge
+    const cfContent = await page.content().catch(() => "");
+    if (cfContent.includes("Please enable cookies") || cfContent.includes("Checking your browser") || cfContent.includes("challenge-platform")) {
+      log(`  ⚠️ Cloudflare challenge — waiting up to 15s...`);
+      try {
+        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 });
+        log(`  ✅ Cloudflare resolved`);
+        await glSleep(2000);
+      } catch {
+        log(`  ⚠️ Cloudflare did not resolve — proceeding`);
+      }
     }
-    // Wait for redirect away from /login (up to 60s for slow accounts)
+
+    // Wait for form fields
+    await page.waitForSelector('input[name="username"], input[name="email"], input[type="email"], input[type="password"]', { timeout: 20000, state: "visible" });
+
+    const emailInput = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i]').first();
+    await glHumanType(emailInput, email);
+    await glSleep(600 + Math.floor(Math.random() * 400));
+
+    const passInput = page.locator('input[type="password"]').first();
+    await glHumanType(passInput, password);
+    await glSleep(500 + Math.floor(Math.random() * 400));
+
+    // Click submit via role-based locator (matches any login button regardless of text)
+    const loginBtn = page.getByRole("button", { name: /log in|sign in|continue/i }).first();
+    await loginBtn.click();
+
+    // Wait for redirect away from /login
     try {
       await page.waitForURL(
-        (u: URL) => !u.href.includes("replit.com/login"),
+        (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
         { timeout: 60000 }
       );
     } catch {
-      // Timeout — capture what Replit is actually showing to help diagnose
       const currentUrl = page.url();
       const pageTitle  = await page.title().catch(() => "");
-      const errorText  = await page.locator('[data-cy="error-message"], .error, [role="alert"], p.text-red-500').first().textContent({ timeout: 2000 }).catch(() => "");
-      const bodySnip   = await page.evaluate(() => document.body?.innerText?.substring(0, 200)).catch(() => "");
+      const bodySnip   = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
       log(`⚠️  Login stuck — URL: ${currentUrl.substring(0, 80)}`);
-      if (pageTitle)  log(`⚠️  Page title: ${pageTitle}`);
-      if (errorText)  log(`⚠️  Error msg : ${errorText.trim()}`);
-      if (bodySnip)   log(`⚠️  Page text : ${bodySnip.replace(/\n/g, " ").substring(0, 150)}`);
+      if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
+      if (bodySnip)  log(`⚠️  Page text : ${bodySnip.replace(/\n/g, " ").substring(0, 200)}`);
       throw new Error(`Login redirect timed out (stuck on: ${currentUrl.substring(0, 60)})`);
     }
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page");
