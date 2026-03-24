@@ -10974,11 +10974,22 @@ export async function registerReplitAccount(
     }
 
     log("Waiting for signup response...");
-    await page.waitForTimeout(6000);
+    // Wait for navigation to fully complete before reading page — avoids "page is navigating" error
+    await Promise.race([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => {}),
+      page.waitForTimeout(6000),
+    ]);
+    // Extra settle time in case of redirect chains
+    await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(1000);
 
     const currentUrl = page.url();
-    const pageContent = await page.content();
-    const pageText = await page.evaluate(() => document.body?.innerText || "");
+    const pageContent = await page.content().catch(async () => {
+      // If still navigating, wait a bit more and retry
+      await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
+      return page.content().catch(() => "");
+    });
+    const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists")) {
       const firstLine = pageText.split("\n").filter(l => l.trim().length > 5).slice(0, 5).join(" | ");
       log(`⚠️ Possible form error text: ${firstLine.substring(0, 200)}`);
@@ -13561,9 +13572,10 @@ export async function registerLovableAccount(
           await waitMs(500);
           await clickButton(page, ['button:has-text("Continue")', 'button[type="submit"]'], "Continue-retry");
           await waitMs(8000);
+          await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
           const r2Url = page.url();
-          const r2Content = await page.content();
-          const r2Text = await page.evaluate(() => document.body?.innerText || "");
+          const r2Content = await page.content().catch(() => "");
+          const r2Text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
           log(`After retry: ${r2Url} — ${r2Text.substring(0, 120).replace(/\s+/g, " ")}`);
           // If retry moved to password field, handle it now
           const r2HasPw = r2Content.includes('type="password"') || r2Content.includes("type='password'");
@@ -15623,8 +15635,9 @@ export async function registerAdobeAccount(
       }
 
       await waitMs(5000);
+      await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
       const finalUrl = page.url();
-      const finalContent = await page.content();
+      const finalContent = await page.content().catch(() => "");
       if (finalContent.toLowerCase().includes("verified") || finalContent.toLowerCase().includes("welcome") || finalContent.toLowerCase().includes("success") || !finalContent.toLowerCase().includes("verify")) {
         log(`✅ Verification successful! URL: ${finalUrl.substring(0, 100)}`);
       } else {

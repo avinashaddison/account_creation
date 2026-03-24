@@ -1,0 +1,93 @@
+23:14:46
+>
+🚀 Bulk job started — 49 account(s) queued [replit-bulk-e7583116]
+23:14:46
+>
+ZenRows browser mode enabled
+23:14:46
+>
+Launching stealth browser for Replit...
+23:14:46
+·
+🌐 SOAX connected — session: d4q8bg6orb4g | endpoint: proxy.soax.com:5000
+23:14:46
+·
+┌─── SOAX RESIDENTIAL ACTIVE ───────────────────────────
+23:14:46
+·
+│ Exit IP : 66.176.189.227
+23:14:46
+·
+│ Location : West Palm Beach, Florida, US
+23:14:46
+·
+│ Provider : AS7922 Comcast Cable Communications, LLC
+23:14:46
+·
+└────────────────────────────────────────────────
+23:14:46
+>
+Using stealth headless browser
+23:14:47
+·
+Visiting Replit homepage before signup...
+23:14:57
+>
+Homepage visited — navigating to signup...
+23:14:57
+>
+Navigating to https://replit.com/signup ...
+23:15:02
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+23:15:02
+·
+Page title: Sign Up - Replit
+23:15:02
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+23:15:02
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+23:15:02
+·
+Page idle after email button click
+23:15:02
+·
+Page HTML snippet: <div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_default _sdz_surface-bg _sdz_surface _sdz_switch-theme css-b2skly" id="main-content"><div class="css-1dp71ui"><div class=" useView-module__vOh_Ha__view css-13zqyyc"><main class="css-1u21y0c"><div class=" useView-module__vOh_Ha__view css-r9arcl" as="header"><a href="/" aria-label="Home" class="css-19tfcnj"><svg width="86.58823529411765
+23:15:02
+·
+Waiting for signup form fields to appear...
+23:15:02
+·
+Form fields detected
+23:15:02
+·
+Filling signup form...
+23:15:02
+~
+⚠️ Could not find username field
+23:15:04
+·
+Typed email into input[name="email"]
+23:15:05
+»
+Typed password into input[name="password"]
+23:15:06
+·
+Submitting signup form...
+23:15:06
+·
+Clicked submit button "Create Account" (button[type="submit"])
+23:15:06
+·
+Waiting for signup response...
+23:15:12
+!
+Error: page.content: Unable to retrieve content because the page is navigating and changing the content.
+23:15:12
+!
+❌ [1/49] Failed: page.content: Unable to retrieve content because the page is navigating and changing the content.
+23:15:12
+·
+⏳ Waiting 4 min before next account to avoid detection...
