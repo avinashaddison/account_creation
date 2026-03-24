@@ -13020,7 +13020,24 @@ export async function registerLovableAccount(
 
     // ── STEP 1: Navigate to signup page ───────────────────────────────────
     log("Navigating to https://lovable.dev/signup ...");
-    await page.goto("https://lovable.dev/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+    // ERR_CONNECTION_CLOSED is a transient Cloudflare/CDN reset — retry up to 3 times
+    let signupNavDone = false;
+    for (let signupAttempt = 0; signupAttempt < 3; signupAttempt++) {
+      try {
+        await page.goto("https://lovable.dev/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+        signupNavDone = true;
+        break;
+      } catch (navErr: any) {
+        const msg = (navErr.message || "").toLowerCase();
+        if (msg.includes("err_connection_closed") || msg.includes("err_connection_reset") || msg.includes("err_connection_refused")) {
+          log(`⚠️ Navigation attempt ${signupAttempt + 1} failed (${msg.substring(0, 60)}) — retrying in 5s...`);
+          await waitMs(5000);
+        } else {
+          throw navErr; // non-retryable error
+        }
+      }
+    }
+    if (!signupNavDone) throw new Error("Failed to navigate to lovable.dev/signup after 3 attempts (ERR_CONNECTION_CLOSED)");
     await waitMs(4000);
 
     // Handle Cloudflare challenge
