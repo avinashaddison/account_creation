@@ -86,6 +86,7 @@ export default function PrivateAccount() {
   const [warmLogs, setWarmLogs] = useState<string[]>([]);
   const [warmRunning, setWarmRunning] = useState(false);
   const [warmBatchId, setWarmBatchId] = useState<string | null>(null);
+  const [selectedReplitIds, setSelectedReplitIds] = useState<Set<string>>(new Set());
   const warmLogsEndRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
@@ -275,12 +276,18 @@ export default function PrivateAccount() {
   }
 
   async function handleWarmAccounts() {
-    const unwarmeds = replitAccounts.filter(a => !a.warmedAt && a.email && a.password);
-    if (unwarmeds.length === 0) {
-      toast({ title: "Nothing to warm", description: "All accounts are already warmed" });
+    const hasSelection = selectedReplitIds.size > 0;
+    const candidates = hasSelection
+      ? replitAccounts.filter(a => selectedReplitIds.has(a.id) && !a.warmedAt && a.email && a.password)
+      : replitAccounts.filter(a => !a.warmedAt && a.email && a.password);
+    if (candidates.length === 0) {
+      toast({
+        title: "Nothing to warm",
+        description: hasSelection ? "All selected accounts are already warmed" : "All accounts are already warmed",
+      });
       return;
     }
-    setWarmLogs([`🔥 Starting warmup for ${unwarmeds.length} account(s)...`]);
+    setWarmLogs([`Starting warmup for ${candidates.length} account(s)...`]);
     setWarmRunning(true);
     setWarmBatchId(null);
     try {
@@ -288,7 +295,7 @@ export default function PrivateAccount() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ accountIds: unwarmeds.map(a => a.id) }),
+        body: JSON.stringify({ accountIds: candidates.map(a => a.id) }),
       });
       const data = await res.json();
       if (!data.success) {
@@ -929,7 +936,7 @@ export default function PrivateAccount() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {replitAccounts.filter(a => !a.warmedAt).length > 0 && (
+              {(selectedReplitIds.size > 0 || replitAccounts.filter(a => !a.warmedAt).length > 0) && (
                 <button
                   onClick={handleWarmAccounts}
                   disabled={warmRunning}
@@ -943,7 +950,11 @@ export default function PrivateAccount() {
                   data-testid="button-warm-accounts"
                 >
                   <Zap className={`w-3 h-3 ${warmRunning ? "animate-pulse" : ""}`} />
-                  {warmRunning ? "warming..." : `Warm (${replitAccounts.filter(a => !a.warmedAt).length})`}
+                  {warmRunning
+                    ? "warming..."
+                    : selectedReplitIds.size > 0
+                      ? `Warm Selected (${selectedReplitIds.size})`
+                      : `Warm All Unwarmed (${replitAccounts.filter(a => !a.warmedAt).length})`}
                 </button>
               )}
               {replitAccounts.length > 0 && (
@@ -1014,7 +1025,26 @@ export default function PrivateAccount() {
                 className="grid font-mono text-[10px] font-black uppercase tracking-widest"
                 style={{ gridTemplateColumns: "40px 2fr 1.5fr 0.6fr 1.1fr 80px" }}
               >
-                <div className="px-3 py-2.5 text-center" style={{ background: "#0d0d1a", color: "#3f3f5c" }}>#</div>
+                <div
+                  className="px-3 py-2.5 flex items-center justify-center"
+                  style={{ background: "#0d0d1a", color: "#3f3f5c" }}
+                >
+                  <input
+                    type="checkbox"
+                    className="w-3 h-3 cursor-pointer"
+                    style={{ accentColor: "#a78bfa" }}
+                    checked={replitAccounts.length > 0 && selectedReplitIds.size === replitAccounts.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedReplitIds(new Set(replitAccounts.map(a => a.id)));
+                      } else {
+                        setSelectedReplitIds(new Set());
+                      }
+                    }}
+                    title="Select all"
+                    data-testid="checkbox-replit-select-all"
+                  />
+                </div>
                 <div
                   className="px-4 py-2.5 flex items-center gap-2"
                   style={{
@@ -1093,9 +1123,23 @@ export default function PrivateAccount() {
                     onMouseLeave={(e) => (e.currentTarget.style.background = isEven ? "rgba(255,255,255,0.018)" : "rgba(0,0,0,0.2)")}
                     data-testid={`row-replit-private-${acct.id}`}
                   >
-                    {/* Row # */}
-                    <div className="px-3 py-4 text-center">
-                      <span className="text-[11px] font-mono" style={{ color: "rgba(124,58,237,0.5)" }}>{idx + 1}</span>
+                    {/* Checkbox */}
+                    <div className="px-3 py-4 flex items-center justify-center">
+                      <input
+                        type="checkbox"
+                        className="w-3 h-3 cursor-pointer"
+                        style={{ accentColor: "#a78bfa" }}
+                        checked={selectedReplitIds.has(acct.id)}
+                        onChange={(e) => {
+                          setSelectedReplitIds(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(acct.id);
+                            else next.delete(acct.id);
+                            return next;
+                          });
+                        }}
+                        data-testid={`checkbox-replit-${acct.id}`}
+                      />
                     </div>
 
                     {/* Email */}

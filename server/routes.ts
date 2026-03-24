@@ -1025,7 +1025,7 @@ export async function registerRoutes(
   app.get("/api/settings/replit-checkout-delay", requireAuth, async (_req, res) => {
     try {
       const value = await storage.getSetting("replit_checkout_delay_minutes");
-      res.json({ minutes: parseInt(value || "0", 10) || 0 });
+      res.json({ minutes: parseInt(value || "60", 10) || 60 });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3664,7 +3664,7 @@ export async function registerRoutes(
         }
 
         // Read checkout spacing setting (default 0 = no delay for backwards compat)
-        const checkoutDelayMinutes = await storage.getSetting("replit_checkout_delay_minutes").then(v => parseInt(v || "0", 10) || 0).catch(() => 0);
+        const checkoutDelayMinutes = await storage.getSetting("replit_checkout_delay_minutes").then(v => parseInt(v || "60", 10) || 60).catch(() => 60);
         const checkoutDelayMs = checkoutDelayMinutes * 60 * 1000;
 
         // Warn about unwarmed accounts
