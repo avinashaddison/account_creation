@@ -134,7 +134,7 @@ export default function LovableCreate() {
     }
   };
 
-  const maxCount = 10;
+  const maxCount = 1000;
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 0;
 
   return (

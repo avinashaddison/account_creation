@@ -3694,7 +3694,7 @@ export async function registerRoutes(
   app.post("/api/lovable-create/bulk", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
     try {
       const { count = 1 } = req.body;
-      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 10);
+      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
       const allOutlook = await storage.getAllPrivateOutlooks();
