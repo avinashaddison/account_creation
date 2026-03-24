@@ -969,7 +969,7 @@ export default function PrivateAccount() {
                   created:    { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.35)", bg: "rgba(74,222,128,0.08)", border: "rgba(74,222,128,0.4)" },
                   available:  { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.35)", bg: "rgba(74,222,128,0.08)", border: "rgba(74,222,128,0.4)" },
                   working:    { label: "Working",    icon: "▶", color: "#f87171", glow: "rgba(248,113,113,0.4)", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.4)" },
-                  sold_out:   { label: "Sold Out",   icon: "⊘", color: "#52525b", glow: "rgba(82,82,91,0.2)",   bg: "rgba(82,82,91,0.07)",  border: "rgba(82,82,91,0.35)" },
+                  sold_out:   { label: "Sold Out",   icon: "⊘", color: "#f87171", glow: "rgba(248,113,113,0.3)", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.4)" },
                 };
                 const cfg = statusConfig[st] ?? statusConfig.processing;
                 const isEven = idx % 2 === 0;
