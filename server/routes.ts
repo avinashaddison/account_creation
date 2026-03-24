@@ -3201,6 +3201,15 @@ export async function registerRoutes(
 
         for (let i = 0; i < toUse.length; i++) {
           const acc = toUse[i];
+
+          // ── Inter-account delay — prevents velocity-based detection ──────────
+          if (i > 0) {
+            const delayMs = (3 * 60 + Math.floor(Math.random() * 4 * 60)) * 1000; // 3–7 min random
+            const delayMin = Math.round(delayMs / 60000);
+            broadcastLog(batchId, bulkId, `⏳ Waiting ${delayMin} min before next account to avoid detection...`, userId);
+            await new Promise(r => setTimeout(r, delayMs));
+          }
+
           broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
           try {
             const result = await registerReplitAccount(

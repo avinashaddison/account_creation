@@ -10453,8 +10453,24 @@ export async function registerReplitAccount(
   const randUpper = (n: number) => Array.from({ length: n }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
   const randSym = () => ["!", "@", "#", "$", "%"][Math.floor(Math.random() * 5)];
 
-  const emailPrefix = outlookEmail.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase().substring(0, 10);
-  const username = emailPrefix + rand(5);
+  // Natural-looking usernames — avoid predictable emailprefix+random pattern
+  const FIRST_NAMES = ["alex","james","ryan","chris","matt","jake","tyler","jordan","taylor","morgan","casey","drew","blake","riley","quinn","cameron","logan","mason","hunter","parker","avery","peyton","skyler","reese","rowan","sage","river","phoenix","dakota","hayden","kendall","charlie","sam","jamie","lee","ash","max","jesse","kai","ray"];
+  const WORDS = ["dev","coder","builder","maker","hacker","bytes","pixel","stack","code","data","cloud","node","loop","bit","hub","lab","works","craft","base","forge","wire","byte","grid","core","io","studio","api","fx","ui","app"];
+  const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const style = Math.floor(Math.random() * 4);
+  let username: string;
+  if (style === 0) {
+    username = pick(FIRST_NAMES) + pick(WORDS) + Math.floor(Math.random() * 99 + 1);
+  } else if (style === 1) {
+    username = pick(FIRST_NAMES) + Math.floor(Math.random() * 9999 + 100);
+  } else if (style === 2) {
+    username = pick(FIRST_NAMES) + "_" + pick(WORDS) + Math.floor(Math.random() * 9 + 1);
+  } else {
+    username = pick(WORDS) + pick(FIRST_NAMES) + Math.floor(Math.random() * 999 + 10);
+  }
+  // Ensure max 20 chars (Replit limit)
+  username = username.substring(0, 20).toLowerCase();
+
   const password = randUpper(2) + rand(6) + randSym() + Math.floor(Math.random() * 90 + 10);
 
   log(`Generated username: ${username}`);
@@ -10695,6 +10711,24 @@ export async function registerReplitAccount(
     }
     page = await context.newPage();
     page.setDefaultTimeout(30000);
+
+    // ── Pre-signup organic browsing — look like a real user discovering the site ──
+    log("Visiting Replit homepage before signup...");
+    try {
+      await page.goto("https://replit.com", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(2000 + Math.random() * 2000);
+      // Scroll down naturally then back up
+      await page.evaluate(() => window.scrollBy({ top: 300 + Math.random() * 400, behavior: "smooth" }));
+      await page.waitForTimeout(800 + Math.random() * 1200);
+      await page.evaluate(() => window.scrollBy({ top: -(100 + Math.random() * 150), behavior: "smooth" }));
+      await page.waitForTimeout(500 + Math.random() * 800);
+      // Move mouse to simulate reading
+      await page.mouse.move(200 + Math.random() * 600, 200 + Math.random() * 300, { steps: 8 });
+      await page.waitForTimeout(600 + Math.random() * 600);
+      log("Homepage visited — navigating to signup...");
+    } catch {
+      log("Homepage visit skipped — going directly to signup");
+    }
 
     log("Navigating to https://replit.com/signup ...");
     await page.goto("https://replit.com/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
