@@ -1,0 +1,227 @@
+20:38:27
+·
+🤖 Auto Coupon job started [replit-auto-mn4r1wex]
+20:38:27
+·
+👤 Using account: emilymccormick9056@outlook.com
+20:38:27
+·
+🔐 Logging into Replit as emilymccormick9056@outlook.com...
+20:38:35
++
+✅ Logged in
+20:38:35
+·
+🔗 Opening referral page...
+20:38:41
+·
+📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+20:38:41
++
+✅ Coupon: AGENT4B9A316525451
+20:38:41
+$
+🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+20:38:41
+·
+──────────────────────────────────────────────────
+20:38:41
+·
+🎟️ Coupon: AGENT4B9A316525451
+20:38:41
+·
+📊 Slots: 0/4 used — 4 remaining
+20:38:41
++
+💾 Coupon saved to account emilymccormick9056@outlook.com
+20:38:41
+·
+──────────────────────────────────────────────────
+20:38:41
+$
+🔗 Generating 4 checkout link(s) using coupon AGENT4B9A316525451
+20:38:41
+·
+📋 Accounts: balanbkeisssht@hotmail.com, reyezgtripicw@hotmail.com, courtneywilson7730@outlook.com, jeffreyjohnson6210@outlook.com
+20:38:41
+·
+──────────────────────────────────────────────────
+20:38:41
+·
+[1/4] 🚀 balanbkeisssht@hotmail.com
+20:38:41
+·
+🌐 SOAX connected — session: 1s00wt1vkglj | endpoint: proxy.soax.com:5000
+20:38:41
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+20:38:41
+·
+│ Exit IP : 162.197.121.34
+20:38:41
+·
+│ Location : Euless, Texas, US
+20:38:41
+·
+│ Provider : AS7018 AT&T Enterprises, LLC
+20:38:41
+·
+└────────────────────────────────────────────────
+20:38:41
+·
+🔐 Logging into Replit as balanbkeisssht@hotmail.com...
+20:39:02
++
+✅ Logged in
+20:39:02
+>
+💰 Navigating to checkout URL...
+20:39:04
+$
+⏳ Waiting for Stripe redirect...
+20:39:05
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1tGkkFtuQB3KXO5KjyTrevLS5T93L6el4R2N3...
+🔗 balanbkeisssht@hotmail.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1tGkkFtuQB3KXO5KjyTrevLS5T93L6el4R2N3...
+20:39:05
+·
+──────────────────────────────────────────────────
+20:39:05
+·
+[2/4] 🚀 reyezgtripicw@hotmail.com
+20:39:06
+·
+🌐 SOAX connected — session: a6c81cxxskds | endpoint: proxy.soax.com:5000
+20:39:06
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+20:39:06
+·
+│ Exit IP : 99.69.89.42
+20:39:06
+·
+│ Location : Cary, Illinois, US
+20:39:06
+·
+│ Provider : AS7018 AT&T Enterprises, LLC
+20:39:06
+·
+└────────────────────────────────────────────────
+20:39:06
+·
+🔐 Logging into Replit as reyezgtripicw@hotmail.com...
+20:39:25
++
+✅ Logged in
+20:39:25
+>
+💰 Navigating to checkout URL...
+20:39:27
+$
+⏳ Waiting for Stripe redirect...
+20:39:28
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1fUHIxAe0zt5PljpouD7UZP2aB3EM2rXsObWp...
+🔗 reyezgtripicw@hotmail.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1fUHIxAe0zt5PljpouD7UZP2aB3EM2rXsObWp...
+20:39:28
+·
+──────────────────────────────────────────────────
+20:39:28
+·
+[3/4] 🚀 courtneywilson7730@outlook.com
+20:39:29
+·
+🌐 SOAX connected — session: 1zv5oxz9jm0c | endpoint: proxy.soax.com:5000
+20:39:29
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+20:39:29
+·
+│ Exit IP : 97.206.61.16
+20:39:29
+·
+│ Location : Sunnyvale, California, US
+20:39:29
+·
+│ Provider : AS6167 Verizon Business
+20:39:29
+·
+└────────────────────────────────────────────────
+20:39:29
+·
+🔐 Logging into Replit as courtneywilson7730@outlook.com...
+20:39:53
++
+✅ Logged in
+20:39:54
+>
+💰 Navigating to checkout URL...
+20:39:56
+$
+⏳ Waiting for Stripe redirect...
+20:39:57
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a11AAWm3VlyiCvtdEDCn1I6EFgC0Ct8X2pAPSG...
+🔗 courtneywilson7730@outlook.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a11AAWm3VlyiCvtdEDCn1I6EFgC0Ct8X2pAPSG...
+20:39:57
+·
+──────────────────────────────────────────────────
+20:39:57
+·
+[4/4] 🚀 jeffreyjohnson6210@outlook.com
+20:39:57
+·
+🌐 SOAX connected — session: dnxyr3dvaavf | endpoint: proxy.soax.com:5000
+20:39:58
+·
+┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+20:39:58
+·
+│ Exit IP : 107.201.252.89
+20:39:58
+·
+│ Location : Houston, Texas, US
+20:39:58
+·
+│ Provider : AS7018 AT&T Enterprises, LLC
+20:39:58
+·
+└────────────────────────────────────────────────
+20:39:58
+·
+🔐 Logging into Replit as jeffreyjohnson6210@outlook.com...
+20:40:16
++
+✅ Logged in
+20:40:16
+>
+💰 Navigating to checkout URL...
+20:40:19
+$
+⏳ Waiting for Stripe redirect...
+20:40:20
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1wd2iEjLMk3PvJCqtLCMePY5MYSmSvTULhlGZ...
+🔗 jeffreyjohnson6210@outlook.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1wd2iEjLMk3PvJCqtLCMePY5MYSmSvTULhlGZ...
+20:40:20
+·
+──────────────────────────────────────────────────
+20:40:20
++
+✅ Done — 4/4 links generated
