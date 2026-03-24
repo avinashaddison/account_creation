@@ -5,6 +5,9 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import pg from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import path from "path";
 
 const app = express();
 const httpServer = createServer(app);
@@ -116,6 +119,17 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Run drizzle migrations on startup so all schema changes are applied
+  try {
+    const migratePool = new pg.Pool({ connectionString: effectiveDatabaseUrl });
+    const migrateDb = drizzle(migratePool);
+    await migrate(migrateDb, { migrationsFolder: path.join(process.cwd(), "migrations") });
+    await migratePool.end();
+    console.log("[Migration] Schema migrations applied");
+  } catch (err: any) {
+    console.warn("[Migration] Migration warning:", err.message);
+  }
+
   const store = await buildSessionStore();
 
   app.use(
