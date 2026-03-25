@@ -1,81 +1,56 @@
-// Popup script for Addison Panel Chrome Extension
+// Addison Panel Chrome Extension — popup.js (v2, Zero Omega edition)
 
-let settings = { panelUrl: "", sessionCookie: "" };
-let currentProxy = null;
+let cfg = { panelUrl: "", sessionCookie: "" };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const showMsg = (el, text, type = "ok") => { el.textContent = text; el.className = `msg ${type}`; };
 
-function $(id) { return document.getElementById(id); }
-
-function showMsg(el, text, type = "ok") {
-  el.textContent = text;
-  el.className = `msg ${type}`;
-}
-
-function apiFetch(path, opts = {}) {
-  const url = settings.panelUrl.replace(/\/$/, "") + path;
-  const headers = {
-    "Content-Type": "application/json",
-    ...(settings.sessionCookie ? { "Cookie": `connect.sid=${settings.sessionCookie}` } : {}),
-    ...(opts.headers || {}),
-  };
-  return fetch(url, { ...opts, headers, credentials: "include" });
-}
-
-// ── Proxy status ──────────────────────────────────────────────────────────────
-
-function updateProxyUI() {
-  const dot = $("proxyDot");
-  const label = $("proxyLabel");
-  const pill = $("proxyPill");
-  const info = $("proxyInfo");
-
-  chrome.runtime.sendMessage({ type: "GET_PROXY_STATUS" }, (resp) => {
-    if (resp && resp.mode === "fixed_servers") {
-      dot.className = "proxy-dot on";
-      label.textContent = "PROXY ON";
-      pill.className = "proxy-pill active";
-      if (currentProxy) {
-        info.textContent = `IP via ${currentProxy.host}:${currentProxy.port}`;
-        info.className = "proxy-info on";
-      }
-    } else {
-      dot.className = "proxy-dot";
-      label.textContent = "NO PROXY";
-      pill.className = "proxy-pill";
-      info.textContent = "";
-      info.className = "proxy-info";
-      currentProxy = null;
-    }
+// ── API ───────────────────────────────────────────────────────────────────────
+function api(path, opts = {}) {
+  if (!cfg.panelUrl) throw new Error("Panel URL not set — check Settings tab");
+  const url = cfg.panelUrl.replace(/\/$/, "") + path;
+  return fetch(url, {
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(cfg.sessionCookie ? { "Cookie": `connect.sid=${cfg.sessionCookie}` } : {}),
+    },
+    ...opts,
   });
 }
 
-// ── Load settings ─────────────────────────────────────────────────────────────
-
-function loadSettings() {
-  chrome.storage.local.get(["panelUrl", "sessionCookie"], (s) => {
-    settings.panelUrl = s.panelUrl || "";
-    settings.sessionCookie = s.sessionCookie || "";
-    if ($("panelUrl")) $("panelUrl").value = settings.panelUrl;
-    if ($("sessionCookie")) $("sessionCookie").value = settings.sessionCookie;
-    if (settings.panelUrl) loadQueue();
+// ── Settings ──────────────────────────────────────────────────────────────────
+function loadCfg(cb) {
+  chrome.storage.local.get(["panelUrl", "sessionCookie"], s => {
+    cfg.panelUrl = s.panelUrl || "";
+    cfg.sessionCookie = s.sessionCookie || "";
+    if ($("panelUrl")) $("panelUrl").value = cfg.panelUrl;
+    if ($("sessionCookie")) $("sessionCookie").value = cfg.sessionCookie;
+    if (cb) cb();
   });
 }
+
+$("saveBtn").addEventListener("click", () => {
+  const url = $("panelUrl").value.trim().replace(/\/$/, "");
+  const cookie = $("sessionCookie").value.trim();
+  cfg.panelUrl = url; cfg.sessionCookie = cookie;
+  chrome.storage.local.set({ panelUrl: url, sessionCookie: cookie }, () => {
+    showMsg($("saveMsg"), "// Connected — switch to Queue tab", "ok");
+    loadQueue();
+  });
+});
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
-
 async function loadQueue() {
-  const list = $("queueList");
-  list.innerHTML = '<div class="empty"><span class="spinner"></span> Loading...</div>';
+  const list = $("qList");
+  list.innerHTML = '<div class="empty"><span class="spin"></span> Loading...</div>';
   try {
-    const r = await apiFetch("/api/extension/queue");
-    if (!r.ok) throw new Error(`${r.status} — check session cookie`);
+    const r = await api("/api/extension/queue");
+    if (!r.ok) throw new Error(`HTTP ${r.status} — check settings`);
     const items = await r.json();
-    $("queueCount").textContent = items.length;
-    if (items.length === 0) {
-      list.innerHTML = '<div class="empty">// No checkout links queued</div>';
-      return;
-    }
+    $("qCount").textContent = items.length;
+    if (!items.length) { list.innerHTML = '<div class="empty">// Queue empty</div>'; return; }
     list.innerHTML = "";
     items.forEach(item => list.appendChild(buildEntry(item)));
   } catch (e) {
@@ -84,124 +59,103 @@ async function loadQueue() {
 }
 
 function buildEntry(item) {
-  const div = document.createElement("div");
-  div.className = "entry";
-  div.innerHTML = `
-    <div class="entry-top">
-      <div class="entry-email">${item.email}</div>
-      ${item.couponCode ? `<div class="entry-coupon">${item.couponCode}</div>` : ""}
+  const wrap = document.createElement("div");
+  wrap.className = "entry";
+  wrap.dataset.id = item.id;
+  wrap.innerHTML = `
+    <div class="e-row1">
+      <div class="e-email">${item.email}</div>
+      ${item.couponCode ? `<div class="e-coupon">${item.couponCode}</div>` : ""}
     </div>
-    <div class="entry-actions">
-      <button class="act-btn act-open" data-id="${item.id}" data-url="${item.checkoutUrl}">Set IP &amp; Open</button>
-      <button class="act-btn act-copy" data-copy="${item.checkoutUrl}">Copy URL</button>
-      <button class="act-btn act-paid" data-paid="${item.id}">Mark Paid</button>
+    <div class="e-url">${(item.checkoutUrl || "").substring(0, 80)}…</div>
+    <div class="e-actions">
+      <button class="xbtn xb-open"  data-action="open">Open URL</button>
+      <button class="xbtn xb-copy"  data-action="copy">Copy URL</button>
+      <button class="xbtn xb-paid"  data-action="paid">Mark Paid</button>
     </div>
-    <div class="entry-url">${(item.checkoutUrl || "").substring(0, 72)}…</div>
   `;
+  wrap.addEventListener("click", async e => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const id = item.id;
+    const url = item.checkoutUrl;
 
-  div.querySelector("[data-id]").addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
-    const url = btn.dataset.url;
-    btn.textContent = "Setting IP…";
-    btn.disabled = true;
-    try {
-      // 1. Get fresh proxy from panel
-      const pr = await apiFetch("/api/extension/proxy");
-      if (!pr.ok) throw new Error("Could not fetch proxy");
-      const proxy = await pr.json();
-      if (!proxy.host) throw new Error("Proxy missing host: " + JSON.stringify(proxy));
-
-      currentProxy = proxy;
-
-      // 2. Set proxy in background
-      await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          { type: "SET_PROXY", host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password },
-          (resp) => resp?.ok ? resolve() : reject(new Error("Proxy set failed"))
-        );
-      });
-
-      updateProxyUI();
-
-      // 3. Wait a beat then open checkout tab
-      await new Promise(r => setTimeout(r, 400));
+    if (action === "open") {
       chrome.tabs.create({ url, active: true });
-      btn.textContent = "Opened!";
-    } catch (err) {
-      btn.textContent = "Error";
-      setTimeout(() => { btn.textContent = "Set IP & Open"; btn.disabled = false; }, 2000);
-      alert(`Error: ${err.message}`);
+    }
+
+    if (action === "copy") {
+      try { await navigator.clipboard.writeText(url); } catch (_) {}
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = "Copy URL"; }, 1500);
+    }
+
+    if (action === "paid") {
+      btn.textContent = "Saving…";
+      btn.disabled = true;
+      try {
+        const r = await api(`/api/extension/mark-paid/${id}`, { method: "POST" });
+        if (!r.ok) throw new Error(await r.text());
+        wrap.remove();
+        $("qCount").textContent = Math.max(0, parseInt($("qCount").textContent) - 1);
+      } catch (err) {
+        btn.textContent = "Failed";
+        setTimeout(() => { btn.textContent = "Mark Paid"; btn.disabled = false; }, 2000);
+      }
     }
   });
-
-  div.querySelector("[data-copy]").addEventListener("click", async (e) => {
-    const url = e.currentTarget.dataset.copy;
-    try { await navigator.clipboard.writeText(url); } catch (_) {}
-    e.currentTarget.textContent = "Copied!";
-    setTimeout(() => { e.currentTarget.textContent = "Copy URL"; }, 1500);
-  });
-
-  div.querySelector("[data-paid]").addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
-    const id = btn.dataset.paid;
-    btn.textContent = "Saving…";
-    btn.disabled = true;
-    try {
-      const r = await apiFetch(`/api/extension/mark-paid/${id}`, { method: "POST" });
-      if (!r.ok) throw new Error(await r.text());
-      btn.closest(".entry").remove();
-      $("queueCount").textContent = parseInt($("queueCount").textContent || "1") - 1;
-    } catch (err) {
-      btn.textContent = "Failed";
-      setTimeout(() => { btn.textContent = "Mark Paid"; btn.disabled = false; }, 2000);
-    }
-  });
-
-  return div;
+  return wrap;
 }
-
-// ── Settings ──────────────────────────────────────────────────────────────────
-
-$("saveBtn").addEventListener("click", () => {
-  const url = $("panelUrl").value.trim().replace(/\/$/, "");
-  const cookie = $("sessionCookie").value.trim();
-  settings.panelUrl = url;
-  settings.sessionCookie = cookie;
-  chrome.storage.local.set({ panelUrl: url, sessionCookie: cookie }, () => {
-    showMsg($("saveMsg"), "// Settings saved", "ok");
-    loadQueue();
-  });
-});
-
-$("clearProxyBtn").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "CLEAR_PROXY" }, () => {
-    currentProxy = null;
-    updateProxyUI();
-  });
-});
-
-$("proxyPill").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "CLEAR_PROXY" }, () => {
-    currentProxy = null;
-    updateProxyUI();
-  });
-});
 
 $("refreshBtn").addEventListener("click", loadQueue);
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
+// ── Proxy tab ─────────────────────────────────────────────────────────────────
+async function fetchProxy() {
+  const msg = $("proxyMsg");
+  showMsg(msg, "Fetching fresh session…", "ok");
+  try {
+    const r = await api("/api/extension/proxy");
+    if (!r.ok) throw new Error(await r.text());
+    const p = await r.json();
+    if (p.host) {
+      $("pHost").value = p.host;
+      $("pPort").value = p.port;
+      $("pUser").value = p.username;
+      $("pPass").value = p.password;
+      $("pRaw").value  = p.raw;
+      showMsg(msg, "// Fresh session ready — paste into Zero Omega", "ok");
+    } else if (p.raw) {
+      $("pRaw").value = p.raw;
+      showMsg(msg, "// Raw URL ready (host parse failed — use Full URL)", "ok");
+    } else {
+      throw new Error(p.error || "No proxy configured in panel settings");
+    }
+  } catch (e) {
+    showMsg(msg, e.message, "err");
+  }
+}
 
+$("newSessionBtn").addEventListener("click", fetchProxy);
+
+$("copyProxyBtn").addEventListener("click", async () => {
+  const raw = $("pRaw").value;
+  if (!raw) { fetchProxy(); return; }
+  try { await navigator.clipboard.writeText(raw); } catch (_) {}
+  $("copyProxyBtn").textContent = "Copied!";
+  setTimeout(() => { $("copyProxyBtn").textContent = "Copy Full URL"; }, 1500);
+});
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
 document.querySelectorAll(".tab").forEach(tab => {
   tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
     tab.classList.add("active");
     $(`tab-${tab.dataset.tab}`).classList.add("active");
+    if (tab.dataset.tab === "proxy" && !$("pHost").value) fetchProxy();
   });
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-
-loadSettings();
-updateProxyUI();
-setInterval(updateProxyUI, 3000);
+loadCfg(() => { if (cfg.panelUrl) loadQueue(); });

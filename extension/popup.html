@@ -5,200 +5,228 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #07050a;
-      --bg2: #0d0a12;
-      --border: rgba(0,255,65,0.12);
+      --bg:    #07050a;
+      --bg2:   #0d0a12;
       --green: #00ff41;
-      --red: #ff3366;
+      --ga:    rgba(0,255,65,0.28);
+      --red:   #ff3366;
       --amber: #ffb000;
-      --dim: rgba(0,255,65,0.28);
-      --font: "Courier New", Courier, monospace;
+      --blue:  #00aaff;
+      --border: rgba(0,255,65,0.12);
+      --font:  "Courier New", Courier, monospace;
     }
-
     body {
-      width: 360px;
-      min-height: 200px;
-      background: var(--bg);
-      color: #d0d8d0;
-      font-family: var(--font);
-      font-size: 11px;
+      width: 370px; min-height: 180px;
+      background: var(--bg); color: #c8d8c8;
+      font-family: var(--font); font-size: 11px;
       border: 1px solid var(--border);
     }
 
     /* HEADER */
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 12px 9px;
-      border-bottom: 1px solid var(--border);
+    .hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; border-bottom: 1px solid var(--border);
       background: var(--bg2);
     }
-    .header-title { display: flex; align-items: center; gap: 7px; }
+    .hdr-left { display: flex; align-items: center; gap: 7px; }
     .logo {
-      width: 22px; height: 22px;
-      background: rgba(0,255,65,0.08);
-      border: 1px solid rgba(0,255,65,0.20);
-      border-radius: 4px;
+      width: 22px; height: 22px; border-radius: 4px;
+      background: rgba(0,255,65,0.08); border: 1px solid rgba(0,255,65,0.20);
       display: flex; align-items: center; justify-content: center;
-      font-size: 11px; color: var(--green);
-      text-shadow: 0 0 6px var(--green);
+      font-size: 11px; color: var(--green); text-shadow: 0 0 6px var(--green);
     }
-    .title { font-size: 12px; letter-spacing: 0.08em; color: #fff; }
+    .title { font-size: 12px; letter-spacing: 0.07em; color: #fff; }
     .title span { color: var(--green); }
-    .proxy-pill {
-      font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
-      padding: 2px 7px; border-radius: 3px;
-      background: rgba(0,255,65,0.06); border: 1px solid rgba(0,255,65,0.14);
-      color: var(--dim); cursor: pointer; transition: color 0.15s;
-      display: flex; align-items: center; gap: 4px;
-    }
-    .proxy-pill.active { color: var(--green); border-color: rgba(0,255,65,0.30); }
-    .proxy-dot { width: 5px; height: 5px; border-radius: 50%; background: #333; }
-    .proxy-dot.on { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .version { font-size: 9px; color: var(--ga); letter-spacing: 0.1em; }
 
     /* TABS */
-    .tabs {
-      display: flex;
-      border-bottom: 1px solid var(--border);
-    }
+    .tabs { display: flex; border-bottom: 1px solid var(--border); }
     .tab {
-      flex: 1; padding: 7px; text-align: center; cursor: pointer;
+      flex: 1; padding: 6px; text-align: center; cursor: pointer; border: none;
       font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--dim); border: none; background: none; font-family: var(--font);
+      color: var(--ga); background: none; font-family: var(--font);
       border-bottom: 2px solid transparent; transition: color 0.15s;
     }
     .tab.active { color: var(--green); border-bottom-color: var(--green); }
-    .tab:hover:not(.active) { color: rgba(0,255,65,0.55); }
 
     /* PANELS */
-    .panel { display: none; padding: 12px; }
+    .panel { display: none; padding: 11px 12px; }
     .panel.active { display: block; }
 
+    /* QUEUE */
+    .q-hdr {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px;
+    }
+    .q-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ga); }
+    .q-label b { color: var(--green); font-weight: normal; }
+
+    .entry {
+      padding: 8px 10px; margin-bottom: 5px; border-radius: 4px;
+      background: rgba(0,0,0,0.40); border: 1px solid rgba(0,255,65,0.08);
+      transition: border-color 0.15s;
+    }
+    .entry:hover { border-color: rgba(0,255,65,0.18); }
+
+    .e-row1 { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+    .e-email { color: #a8c8a8; font-size: 10.5px; }
+    .e-coupon { font-size: 9px; color: var(--amber); letter-spacing: 0.05em; }
+
+    .e-url {
+      font-size: 8.5px; color: rgba(0,255,65,0.22); word-break: break-all;
+      margin-bottom: 6px; line-height: 1.4;
+    }
+
+    .e-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+    .xbtn {
+      padding: 3px 8px; border-radius: 2px; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 9px; letter-spacing: 0.08em;
+      text-transform: uppercase; transition: opacity 0.15s;
+    }
+    .xbtn:hover { opacity: 0.75; }
+    .xbtn:disabled { opacity: 0.40; cursor: not-allowed; }
+    .xb-open { background: rgba(0,255,65,0.10); color: var(--green); border: 1px solid rgba(0,255,65,0.22); }
+    .xb-copy { background: rgba(0,170,255,0.08); color: var(--blue);  border: 1px solid rgba(0,170,255,0.18); }
+    .xb-paid { background: rgba(255,176,0,0.10);  color: var(--amber); border: 1px solid rgba(255,176,0,0.22); }
+
+    .empty { text-align: center; padding: 22px; color: var(--ga); font-size: 10px; letter-spacing: 0.1em; }
+
+    /* PROXY CARD (inside queue tab) */
+    .proxy-card {
+      margin-top: 10px; padding: 9px 10px; border-radius: 4px;
+      background: rgba(0,170,255,0.04); border: 1px solid rgba(0,170,255,0.14);
+    }
+    .proxy-card-title {
+      font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.14em;
+      color: rgba(0,170,255,0.55); margin-bottom: 7px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .proxy-card-title::before {
+      content: ">>"; color: var(--blue); font-size: 8px;
+    }
+    .proxy-row { display: flex; gap: 4px; margin-bottom: 4px; }
+    .proxy-field {
+      flex: 1; font-size: 9.5px; padding: 4px 6px; border-radius: 2px;
+      background: rgba(0,0,0,0.50); border: 1px solid rgba(0,170,255,0.16);
+      color: #a8c8d8; font-family: var(--font); outline: none; min-width: 0;
+      cursor: text; user-select: all;
+    }
+    .proxy-field.full { flex: none; width: 100%; }
+    .proxy-actions { display: flex; gap: 4px; margin-top: 5px; }
+    .xb-proxy { background: rgba(0,170,255,0.10); color: var(--blue); border: 1px solid rgba(0,170,255,0.22); }
+    .xb-refresh { background: rgba(0,255,65,0.08); color: var(--green); border: 1px solid rgba(0,255,65,0.18); }
+    .proxy-hint {
+      margin-top: 5px; font-size: 8.5px; color: rgba(0,170,255,0.35); line-height: 1.5;
+    }
+
     /* SETTINGS */
-    .field { margin-bottom: 10px; }
+    .field { margin-bottom: 9px; }
     .field label {
       display: block; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--dim); margin-bottom: 4px;
+      color: var(--ga); margin-bottom: 4px;
     }
     .field input {
-      width: 100%; padding: 6px 8px;
-      background: rgba(0,0,0,0.5); border: 1px solid rgba(0,255,65,0.14);
+      width: 100%; padding: 5px 7px;
+      background: rgba(0,0,0,0.50); border: 1px solid rgba(0,255,65,0.14);
       border-radius: 3px; color: #c8d8c8; font-family: var(--font); font-size: 11px;
       outline: none; transition: border-color 0.15s;
     }
     .field input:focus { border-color: rgba(0,255,65,0.35); }
+    .field .hint { font-size: 8px; color: var(--ga); margin-top: 3px; opacity: 0.7; }
 
-    .btn {
+    .save-btn {
       width: 100%; padding: 7px; border-radius: 3px; border: none; cursor: pointer;
       font-family: var(--font); font-size: 10px; letter-spacing: 0.1em;
-      text-transform: uppercase; transition: opacity 0.15s;
+      text-transform: uppercase;
+      background: rgba(0,255,65,0.10); color: var(--green);
+      border: 1px solid rgba(0,255,65,0.22); transition: opacity 0.15s;
     }
-    .btn:hover { opacity: 0.85; }
-    .btn-green { background: rgba(0,255,65,0.12); color: var(--green); border: 1px solid rgba(0,255,65,0.25); }
-    .btn-red   { background: rgba(255,51,102,0.10); color: var(--red);   border: 1px solid rgba(255,51,102,0.25); }
-    .btn-amber { background: rgba(255,176,0,0.10);  color: var(--amber); border: 1px solid rgba(255,176,0,0.25); }
+    .save-btn:hover { opacity: 0.80; }
 
     .msg {
-      margin-top: 8px; padding: 6px 8px; border-radius: 3px;
-      font-size: 10px; min-height: 22px;
+      margin-top: 7px; padding: 5px 8px; border-radius: 3px; font-size: 9.5px;
     }
-    .msg.ok  { background: rgba(0,255,65,0.06); color: var(--green); border: 1px solid rgba(0,255,65,0.15); }
-    .msg.err { background: rgba(255,51,102,0.06); color: var(--red); border: 1px solid rgba(255,51,102,0.15); }
+    .msg.ok  { background: rgba(0,255,65,0.05); color: var(--green); border: 1px solid rgba(0,255,65,0.14); }
+    .msg.err { background: rgba(255,51,102,0.05); color: var(--red); border: 1px solid rgba(255,51,102,0.14); }
 
-    /* QUEUE */
-    .queue-header {
-      display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
-    }
-    .queue-count {
-      font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--dim);
-    }
-    .queue-count span { color: var(--green); }
-
-    .entry {
-      padding: 8px 10px; margin-bottom: 6px;
-      background: rgba(0,0,0,0.40); border: 1px solid rgba(0,255,65,0.08);
-      border-radius: 4px;
-    }
-    .entry-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
-    .entry-email { color: #a8c8a8; font-size: 10.5px; }
-    .entry-coupon { font-size: 9px; color: var(--amber); letter-spacing: 0.06em; }
-
-    .entry-actions { display: flex; gap: 5px; }
-    .act-btn {
-      padding: 4px 8px; border-radius: 2px; border: none; cursor: pointer;
-      font-family: var(--font); font-size: 9px; letter-spacing: 0.08em;
-      text-transform: uppercase; transition: opacity 0.15s;
-    }
-    .act-btn:hover { opacity: 0.75; }
-    .act-open  { background: rgba(0,255,65,0.10); color: var(--green); border: 1px solid rgba(0,255,65,0.20); }
-    .act-paid  { background: rgba(255,176,0,0.10); color: var(--amber); border: 1px solid rgba(255,176,0,0.20); }
-    .act-copy  { background: rgba(0,170,255,0.08); color: #00aaff; border: 1px solid rgba(0,170,255,0.18); }
-
-    .entry-url {
-      font-size: 9px; color: rgba(0,255,65,0.30); word-break: break-all;
-      margin-top: 3px;
-    }
-
-    .empty { text-align: center; padding: 20px; color: var(--dim); font-size: 10px; letter-spacing: 0.1em; }
-
-    .spinner {
+    /* Spinner */
+    .spin {
       display: inline-block; width: 10px; height: 10px;
-      border: 1.5px solid rgba(0,255,65,0.2); border-top-color: var(--green);
-      border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle;
+      border: 1.5px solid rgba(0,255,65,0.18); border-top-color: var(--green);
+      border-radius: 50%; animation: sp 0.7s linear infinite; vertical-align: middle;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes sp { to { transform: rotate(360deg); } }
 
-    .proxy-info {
-      font-size: 9px; color: var(--dim); margin-top: 6px; text-align: center;
-      letter-spacing: 0.05em;
+    /* Zero Omega badge */
+    .zo-badge {
+      display: inline-block; padding: 2px 6px; border-radius: 2px; font-size: 8.5px;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      background: rgba(0,170,255,0.10); color: var(--blue);
+      border: 1px solid rgba(0,170,255,0.20);
     }
-    .proxy-info.on { color: rgba(0,255,65,0.55); }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="header-title">
+  <div class="hdr">
+    <div class="hdr-left">
       <div class="logo">A</div>
       <div class="title">Addison<span>_</span>Panel</div>
     </div>
-    <div class="proxy-pill" id="proxyPill" title="Click to clear proxy">
-      <div class="proxy-dot" id="proxyDot"></div>
-      <span id="proxyLabel">NO PROXY</span>
-    </div>
+    <span class="version">v2.0 + <span class="zo-badge">Zero Omega</span></span>
   </div>
 
   <div class="tabs">
-    <button class="tab active" data-tab="queue">Queue</button>
-    <button class="tab" data-tab="settings">Settings</button>
+    <button class="tab active" data-tab="queue">// Queue</button>
+    <button class="tab" data-tab="proxy">// Proxy</button>
+    <button class="tab" data-tab="settings">// Settings</button>
   </div>
 
-  <!-- QUEUE -->
+  <!-- QUEUE TAB -->
   <div class="panel active" id="tab-queue">
-    <div class="queue-header">
-      <div class="queue-count">Pending: <span id="queueCount">0</span></div>
-      <button class="act-btn act-open" id="refreshBtn">Refresh</button>
+    <div class="q-hdr">
+      <div class="q-label">Pending: <b id="qCount">0</b></div>
+      <button class="xbtn xb-open" id="refreshBtn">Refresh</button>
     </div>
-    <div id="queueList"><div class="empty">Loading...</div></div>
-    <div class="proxy-info" id="proxyInfo"></div>
+    <div id="qList"><div class="empty"><span class="spin"></span></div></div>
   </div>
 
-  <!-- SETTINGS -->
+  <!-- PROXY TAB -->
+  <div class="panel" id="tab-proxy">
+    <div class="proxy-card">
+      <div class="proxy-card-title">SOAX Proxy — for Zero Omega</div>
+      <div class="proxy-row">
+        <input class="proxy-field" id="pHost" readonly placeholder="proxy.soax.com" title="Host" />
+        <input class="proxy-field" id="pPort" readonly placeholder="5000" title="Port" style="max-width:70px" />
+      </div>
+      <div class="proxy-row">
+        <input class="proxy-field" id="pUser" readonly placeholder="username" title="Username" />
+        <input class="proxy-field" id="pPass" readonly placeholder="password" title="Password" />
+      </div>
+      <input class="proxy-field full" id="pRaw" readonly placeholder="http://user:pass@host:port" title="Full URL" style="margin-top:4px" />
+      <div class="proxy-actions">
+        <button class="xbtn xb-proxy" id="copyProxyBtn">Copy Full URL</button>
+        <button class="xbtn xb-refresh" id="newSessionBtn">New Session</button>
+      </div>
+      <div class="proxy-hint">
+        In Zero Omega: Profiles → SOAX → set Protocol=HTTP, Server=Host, Port above.
+        Username/Password from the fields. Click <b>New Session</b> to rotate IP.
+      </div>
+    </div>
+    <div class="msg" id="proxyMsg"></div>
+  </div>
+
+  <!-- SETTINGS TAB -->
   <div class="panel" id="tab-settings">
     <div class="field">
       <label>Panel URL</label>
       <input type="text" id="panelUrl" placeholder="https://your-panel.replit.app" />
     </div>
     <div class="field">
-      <label>Session Cookie (connect.sid)</label>
-      <input type="text" id="sessionCookie" placeholder="s%3A..." />
+      <label>Session Cookie (connect.sid value)</label>
+      <input type="text" id="sessionCookie" placeholder="s%3AeyJ..." />
+      <div class="hint">DevTools → Application → Cookies → connect.sid → copy the Value</div>
     </div>
-    <button class="btn btn-green" id="saveBtn">[ Save Settings ]</button>
+    <button class="save-btn" id="saveBtn">[ Save &amp; Connect ]</button>
     <div class="msg" id="saveMsg"></div>
-    <div style="margin-top: 10px;">
-      <button class="btn btn-red" id="clearProxyBtn">[ Clear Proxy ]</button>
-    </div>
   </div>
 
   <script src="popup.js"></script>
