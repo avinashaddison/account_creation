@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Addison Panel — Checkout",
+  "version": "1.0.0",
+  "description": "Rotate SOAX proxy IP and open Replit checkout links — no GoLogin needed.",
+  "permissions": ["proxy", "storage", "tabs", "webRequest"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Addison Checkout"
+  }
+}

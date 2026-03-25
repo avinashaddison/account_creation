@@ -176,6 +176,7 @@ export const replitAccounts = pgTable("replit_accounts", {
   error: text("error"),
   couponExtracted: boolean("coupon_extracted").notNull().default(false),
   couponCode: text("coupon_code"),
+  checkoutUrl: text("checkout_url"),
   warmedAt: timestamp("warmed_at"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

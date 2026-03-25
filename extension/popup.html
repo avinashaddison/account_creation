@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #07050a;
+      --bg2: #0d0a12;
+      --border: rgba(0,255,65,0.12);
+      --green: #00ff41;
+      --red: #ff3366;
+      --amber: #ffb000;
+      --dim: rgba(0,255,65,0.28);
+      --font: "Courier New", Courier, monospace;
+    }
+
+    body {
+      width: 360px;
+      min-height: 200px;
+      background: var(--bg);
+      color: #d0d8d0;
+      font-family: var(--font);
+      font-size: 11px;
+      border: 1px solid var(--border);
+    }
+
+    /* HEADER */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px 9px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+    .header-title { display: flex; align-items: center; gap: 7px; }
+    .logo {
+      width: 22px; height: 22px;
+      background: rgba(0,255,65,0.08);
+      border: 1px solid rgba(0,255,65,0.20);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--green);
+      text-shadow: 0 0 6px var(--green);
+    }
+    .title { font-size: 12px; letter-spacing: 0.08em; color: #fff; }
+    .title span { color: var(--green); }
+    .proxy-pill {
+      font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 3px;
+      background: rgba(0,255,65,0.06); border: 1px solid rgba(0,255,65,0.14);
+      color: var(--dim); cursor: pointer; transition: color 0.15s;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .proxy-pill.active { color: var(--green); border-color: rgba(0,255,65,0.30); }
+    .proxy-dot { width: 5px; height: 5px; border-radius: 50%; background: #333; }
+    .proxy-dot.on { background: var(--green); box-shadow: 0 0 5px var(--green); }
+
+    /* TABS */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      flex: 1; padding: 7px; text-align: center; cursor: pointer;
+      font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--dim); border: none; background: none; font-family: var(--font);
+      border-bottom: 2px solid transparent; transition: color 0.15s;
+    }
+    .tab.active { color: var(--green); border-bottom-color: var(--green); }
+    .tab:hover:not(.active) { color: rgba(0,255,65,0.55); }
+
+    /* PANELS */
+    .panel { display: none; padding: 12px; }
+    .panel.active { display: block; }
+
+    /* SETTINGS */
+    .field { margin-bottom: 10px; }
+    .field label {
+      display: block; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--dim); margin-bottom: 4px;
+    }
+    .field input {
+      width: 100%; padding: 6px 8px;
+      background: rgba(0,0,0,0.5); border: 1px solid rgba(0,255,65,0.14);
+      border-radius: 3px; color: #c8d8c8; font-family: var(--font); font-size: 11px;
+      outline: none; transition: border-color 0.15s;
+    }
+    .field input:focus { border-color: rgba(0,255,65,0.35); }
+
+    .btn {
+      width: 100%; padding: 7px; border-radius: 3px; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 10px; letter-spacing: 0.1em;
+      text-transform: uppercase; transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-green { background: rgba(0,255,65,0.12); color: var(--green); border: 1px solid rgba(0,255,65,0.25); }
+    .btn-red   { background: rgba(255,51,102,0.10); color: var(--red);   border: 1px solid rgba(255,51,102,0.25); }
+    .btn-amber { background: rgba(255,176,0,0.10);  color: var(--amber); border: 1px solid rgba(255,176,0,0.25); }
+
+    .msg {
+      margin-top: 8px; padding: 6px 8px; border-radius: 3px;
+      font-size: 10px; min-height: 22px;
+    }
+    .msg.ok  { background: rgba(0,255,65,0.06); color: var(--green); border: 1px solid rgba(0,255,65,0.15); }
+    .msg.err { background: rgba(255,51,102,0.06); color: var(--red); border: 1px solid rgba(255,51,102,0.15); }
+
+    /* QUEUE */
+    .queue-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+    }
+    .queue-count {
+      font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--dim);
+    }
+    .queue-count span { color: var(--green); }
+
+    .entry {
+      padding: 8px 10px; margin-bottom: 6px;
+      background: rgba(0,0,0,0.40); border: 1px solid rgba(0,255,65,0.08);
+      border-radius: 4px;
+    }
+    .entry-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+    .entry-email { color: #a8c8a8; font-size: 10.5px; }
+    .entry-coupon { font-size: 9px; color: var(--amber); letter-spacing: 0.06em; }
+
+    .entry-actions { display: flex; gap: 5px; }
+    .act-btn {
+      padding: 4px 8px; border-radius: 2px; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 9px; letter-spacing: 0.08em;
+      text-transform: uppercase; transition: opacity 0.15s;
+    }
+    .act-btn:hover { opacity: 0.75; }
+    .act-open  { background: rgba(0,255,65,0.10); color: var(--green); border: 1px solid rgba(0,255,65,0.20); }
+    .act-paid  { background: rgba(255,176,0,0.10); color: var(--amber); border: 1px solid rgba(255,176,0,0.20); }
+    .act-copy  { background: rgba(0,170,255,0.08); color: #00aaff; border: 1px solid rgba(0,170,255,0.18); }
+
+    .entry-url {
+      font-size: 9px; color: rgba(0,255,65,0.30); word-break: break-all;
+      margin-top: 3px;
+    }
+
+    .empty { text-align: center; padding: 20px; color: var(--dim); font-size: 10px; letter-spacing: 0.1em; }
+
+    .spinner {
+      display: inline-block; width: 10px; height: 10px;
+      border: 1.5px solid rgba(0,255,65,0.2); border-top-color: var(--green);
+      border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .proxy-info {
+      font-size: 9px; color: var(--dim); margin-top: 6px; text-align: center;
+      letter-spacing: 0.05em;
+    }
+    .proxy-info.on { color: rgba(0,255,65,0.55); }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-title">
+      <div class="logo">A</div>
+      <div class="title">Addison<span>_</span>Panel</div>
+    </div>
+    <div class="proxy-pill" id="proxyPill" title="Click to clear proxy">
+      <div class="proxy-dot" id="proxyDot"></div>
+      <span id="proxyLabel">NO PROXY</span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="queue">Queue</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </div>
+
+  <!-- QUEUE -->
+  <div class="panel active" id="tab-queue">
+    <div class="queue-header">
+      <div class="queue-count">Pending: <span id="queueCount">0</span></div>
+      <button class="act-btn act-open" id="refreshBtn">Refresh</button>
+    </div>
+    <div id="queueList"><div class="empty">Loading...</div></div>
+    <div class="proxy-info" id="proxyInfo"></div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="panel" id="tab-settings">
+    <div class="field">
+      <label>Panel URL</label>
+      <input type="text" id="panelUrl" placeholder="https://your-panel.replit.app" />
+    </div>
+    <div class="field">
+      <label>Session Cookie (connect.sid)</label>
+      <input type="text" id="sessionCookie" placeholder="s%3A..." />
+    </div>
+    <button class="btn btn-green" id="saveBtn">[ Save Settings ]</button>
+    <div class="msg" id="saveMsg"></div>
+    <div style="margin-top: 10px;">
+      <button class="btn btn-red" id="clearProxyBtn">[ Clear Proxy ]</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

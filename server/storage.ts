@@ -69,6 +69,8 @@ export interface IStorage {
   bulkUpdateReplitAccountStatus(status: string, ownerId?: string): Promise<number>;
   markReplitAccountWarmed(id: string): Promise<ReplitAccount>;
   markReplitCouponExtracted(id: string, couponCode: string): Promise<ReplitAccount>;
+  setReplitCheckoutUrl(id: string, checkoutUrl: string): Promise<ReplitAccount>;
+  clearReplitCheckoutUrl(id: string): Promise<ReplitAccount>;
   createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount>;
   updateLovableAccount(id: string, data: Partial<InsertLovableAccount>): Promise<LovableAccount>;
   getAllLovableAccounts(): Promise<LovableAccount[]>;
@@ -471,6 +473,22 @@ export class DatabaseStorage implements IStorage {
   async markReplitCouponExtracted(id: string, couponCode: string): Promise<ReplitAccount> {
     const [row] = await db.update(replitAccounts)
       .set({ couponExtracted: true, couponCode })
+      .where(eq(replitAccounts.id, id))
+      .returning();
+    return row;
+  }
+
+  async setReplitCheckoutUrl(id: string, checkoutUrl: string): Promise<ReplitAccount> {
+    const [row] = await db.update(replitAccounts)
+      .set({ checkoutUrl })
+      .where(eq(replitAccounts.id, id))
+      .returning();
+    return row;
+  }
+
+  async clearReplitCheckoutUrl(id: string): Promise<ReplitAccount> {
+    const [row] = await db.update(replitAccounts)
+      .set({ checkoutUrl: null, status: "subscribed" })
       .where(eq(replitAccounts.id, id))
       .returning();
     return row;

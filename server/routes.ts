@@ -3527,6 +3527,8 @@ export async function registerRoutes(
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             // Broadcast as special copyable format
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            // Store URL in DB so the Chrome extension can pick it up
+            await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
             // Mark as "working" — link has been generated, ready for checkout
             await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
@@ -4746,6 +4748,71 @@ export async function registerRoutes(
   // Run immediately then every 60 seconds
   setTimeout(checkPendingLovableVerifications, 10000);
   setInterval(checkPendingLovableVerifications, 60000);
+
+  // ── CHROME EXTENSION API ─────────────────────────────────────────────────
+
+  // GET /api/extension/queue — accounts with a stored checkoutUrl (need manual payment)
+  app.get("/api/extension/queue", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const all = await storage.getAllReplitAccounts();
+      const queue = all
+        .filter(a => a.checkoutUrl && a.status !== "subscribed")
+        .map(a => ({
+          id: a.id,
+          email: a.email,
+          username: a.username,
+          status: a.status,
+          couponCode: a.couponCode,
+          checkoutUrl: a.checkoutUrl,
+          createdAt: a.createdAt,
+        }));
+      res.json(queue);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/extension/proxy — fresh SOAX proxy credentials (unique session)
+  app.get("/api/extension/proxy", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const raw = await storage.getSetting("soax_proxy_template") ||
+                  await storage.getSetting("residential_proxy_url");
+      if (!raw) return res.status(404).json({ error: "No SOAX proxy configured in settings" });
+      const fresh = uniqueProxySession(raw);
+      // Parse into host/port/user/pass for the extension
+      const match = fresh.match(/^https?:\/\/([^:@]+):([^@]+)@([^:]+):(\d+)/) ||
+                    fresh.match(/^([^:@]+):([^@]+)@([^:]+):(\d+)/);
+      if (!match) return res.json({ raw: fresh });
+      const [, user, pass, host, port] = match;
+      res.json({ host, port: parseInt(port), username: user, password: pass, raw: fresh });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/extension/mark-paid/:id — mark an account as subscribed
+  app.post("/api/extension/mark-paid/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const acct = await storage.clearReplitCheckoutUrl(id);
+      res.json({ success: true, account: acct });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/extension/set-checkout-url/:id — store a checkout URL for an account
+  app.post("/api/extension/set-checkout-url/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { checkoutUrl } = req.body;
+      if (!checkoutUrl) return res.status(400).json({ error: "checkoutUrl required" });
+      const acct = await storage.setReplitCheckoutUrl(id, checkoutUrl);
+      res.json({ success: true, account: acct });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   return httpServer;
 }
