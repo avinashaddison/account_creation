@@ -18866,37 +18866,73 @@ export async function generateSingleCheckoutLink(
       }
     }
 
-    // Wait for form fields
-    await page.waitForSelector('input[name="username"], input[name="email"], input[type="email"], input[type="password"]', { timeout: 20000, state: "visible" });
+    // Wait for any input to appear
+    await page.waitForSelector('input', { timeout: 20000, state: "visible" });
 
-    const emailInput = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i]').first();
+    // ── Step 1: Enter email/username ──
+    const emailInput = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i], input[placeholder*="username" i]').first();
+    await emailInput.waitFor({ state: "visible", timeout: 15000 });
     await glHumanType(emailInput, email);
+    await glSleep(700 + Math.floor(Math.random() * 400));
+
+    // Check if password field is already visible (single-step form) or need to click Continue first
+    const passVisible = await page.locator('input[type="password"]').first().isVisible().catch(() => false);
+    if (!passVisible) {
+      // Two-step form — click Continue to reveal password field
+      log(`  → Two-step form detected — clicking Continue...`);
+      const continueBtn = page.getByRole("button", { name: /continue|next/i }).first();
+      await continueBtn.click();
+      await glSleep(1500 + Math.floor(Math.random() * 500));
+    }
+
+    // ── Step 2: Enter password ──
+    const passInput = page.locator('input[type="password"]').first();
+    await passInput.waitFor({ state: "visible", timeout: 15000 });
+    await glHumanType(passInput, password);
     await glSleep(600 + Math.floor(Math.random() * 400));
 
-    const passInput = page.locator('input[type="password"]').first();
-    await glHumanType(passInput, password);
-    await glSleep(500 + Math.floor(Math.random() * 400));
-
-    // Click submit via role-based locator (matches any login button regardless of text)
-    const loginBtn = page.getByRole("button", { name: /log in|sign in|continue/i }).first();
+    // Click Log In button
+    const loginBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
     await loginBtn.click();
+    log(`  → Login submitted — waiting for redirect...`);
+    await glSleep(2000); // small grace period before checking
 
-    // Wait for redirect away from /login
-    try {
-      await page.waitForURL(
-        (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
-        { timeout: 60000 }
-      );
-    } catch {
-      const currentUrl = page.url();
-      const pageTitle  = await page.title().catch(() => "");
-      const bodySnip   = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
-      log(`⚠️  Login stuck — URL: ${currentUrl.substring(0, 80)}`);
-      if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
-      if (bodySnip)  log(`⚠️  Page text : ${bodySnip.replace(/\n/g, " ").substring(0, 200)}`);
-      throw new Error(`Login redirect timed out (stuck on: ${currentUrl.substring(0, 60)})`);
+    // ── Detect common post-submit states before long timeout ──
+    await glSleep(3000);
+    const postUrl = page.url();
+    const postBody = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
+
+    if (postBody.toLowerCase().includes("incorrect password") || postBody.toLowerCase().includes("invalid credentials") || postBody.toLowerCase().includes("wrong password")) {
+      throw new Error(`Login failed — incorrect password for ${email}`);
     }
-    if (page.url().includes("/login")) throw new Error("Login failed — still on login page");
+    if (postBody.toLowerCase().includes("verify your email") || postBody.toLowerCase().includes("check your email") || postBody.toLowerCase().includes("confirmation code")) {
+      throw new Error(`Login failed — Replit requires email verification for ${email}. Log in manually once to clear this.`);
+    }
+    if (postBody.toLowerCase().includes("captcha") || postBody.toLowerCase().includes("i'm not a robot") || postBody.toLowerCase().includes("recaptcha")) {
+      throw new Error(`Login failed — CAPTCHA triggered for ${email}. Try again later or use a different account.`);
+    }
+
+    // If already redirected, proceed
+    if (!postUrl.includes("replit.com/login") && !postUrl.includes("replit.com/signup")) {
+      log(`✅ Logged in (fast redirect)`);
+    } else {
+      // Wait for redirect away from /login
+      try {
+        await page.waitForURL(
+          (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+          { timeout: 45000 }
+        );
+      } catch {
+        const currentUrl = page.url();
+        const pageTitle  = await page.title().catch(() => "");
+        const bodyFull   = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
+        log(`⚠️  Login stuck — URL: ${currentUrl.substring(0, 80)}`);
+        if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
+        if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 300)}`);
+        throw new Error(`Login timed out — page stuck. Check logs above for reason.`);
+      }
+    }
+    if (page.url().includes("/login")) throw new Error("Login failed — still on login page after redirect wait");
     log(`✅ Logged in`);
 
     // ── Navigate to direct checkout URL ──
