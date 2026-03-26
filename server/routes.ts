@@ -3746,9 +3746,21 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      const sources = allAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status !== "error").slice(0, count);
+      // ── Source selection: prefer stored coupons (no login needed), fall back to live extraction ──
+      // Pre-extracted: accounts with a stored coupon code (sold_out or processing that were used as sources before)
+      const preExtractedSources = allAccounts.filter(a =>
+        a.couponExtracted && a.couponCode && a.email && a.password && a.status !== "error"
+      ).slice(0, count);
+      // Fresh sources: accounts not yet extracted (need Playwright login)
+      const preExtractedIds = new Set(preExtractedSources.map(a => a.id));
+      const freshSources = allAccounts.filter(a =>
+        !a.couponExtracted && a.email && a.password && a.status !== "error" && !preExtractedIds.has(a.id)
+      ).slice(0, count - preExtractedSources.length);
+
+      // Pre-extracted first (fast, no login), then fresh (slow, requires browser)
+      const sources = [...preExtractedSources, ...freshSources].slice(0, count);
       if (sources.length === 0) {
-        return res.status(400).json({ error: "No unused agent accounts available for coupon extraction" });
+        return res.status(400).json({ error: "No source accounts available for coupon generation" });
       }
 
       const sourceIds = new Set(sources.map(a => a.id));
@@ -3761,37 +3773,51 @@ export async function registerRoutes(
       }
 
       const actualCount = Math.min(sources.length, targets.length);
+      const preExtractedCount = sources.slice(0, actualCount).filter(s => s.couponExtracted && s.couponCode).length;
+      const freshCount = actualCount - preExtractedCount;
       const batchId = `replit-batch-${Date.now().toString(36)}`;
       batchOwners.set(batchId, userId);
       res.json({ success: true, batchId, count: actualCount });
 
       (async () => {
-        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} job(s) — staggered 5s apart to avoid rate-limits`, userId);
+        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} job(s) [${preExtractedCount} stored coupon(s) + ${freshCount} live extraction(s)]`, userId);
         broadcastLog(batchId, "batch-init", `─`.repeat(50), userId);
 
         const jobs = sources.slice(0, actualCount).map((source, i) => {
           const target = targets[i];
           const jobId = `batch-job-${i}`;
           const tag = `[Job ${i + 1}]`;
+          const isPreExtracted = !!(source.couponExtracted && source.couponCode);
           return (async () => {
-            // Stagger job starts — 5 s apart so browsers don't all hit Replit login simultaneously
-            if (i > 0) await new Promise(r => setTimeout(r, i * 5000));
-            broadcastLog(batchId, jobId, `${tag} 🤖 Source: ${source.email} → Target: ${target.email}`, userId);
-            const couponResult = await extractCouponFromReplitAccount(
-              source.email, source.password,
-              (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
-            );
-            if (!couponResult.success || !couponResult.coupon) {
-              broadcastLog(batchId, jobId, `${tag} ❌ Coupon extraction failed: ${couponResult.error}`, userId);
-              // Mark source as error if credentials are wrong so it's skipped in future batches
-              if (/wrong password|invalid username|invalid credentials/i.test(couponResult.error || "")) {
-                await storage.updateReplitAccountStatus(source.id, "error").catch(() => {});
-                broadcastLog(batchId, jobId, `${tag} 🚫 Source ${source.email} marked as ERROR (bad credentials)`, userId);
-              }
-              return { success: false, source: source.email, target: target.email };
+            // Stagger only live-extraction jobs — stored-coupon jobs start immediately
+            if (!isPreExtracted && freshCount > 1) {
+              const freshIndex = sources.slice(0, i + 1).filter(s => !(s.couponExtracted && s.couponCode)).length - 1;
+              if (freshIndex > 0) await new Promise(r => setTimeout(r, freshIndex * 5000));
             }
-            const coupon = couponResult.coupon;
-            await storage.markReplitCouponExtracted(source.id, coupon).catch(() => {});
+            broadcastLog(batchId, jobId, `${tag} 🤖 Source: ${source.email} → Target: ${target.email}`, userId);
+
+            let coupon: string;
+            if (isPreExtracted) {
+              // Fast path: use the stored coupon code — no browser needed
+              coupon = source.couponCode!;
+              broadcastLog(batchId, jobId, `${tag} 🎟️ Using stored coupon: ${coupon}`, userId);
+            } else {
+              // Slow path: launch browser and log in to extract coupon
+              const couponResult = await extractCouponFromReplitAccount(
+                source.email, source.password,
+                (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
+              );
+              if (!couponResult.success || !couponResult.coupon) {
+                broadcastLog(batchId, jobId, `${tag} ❌ Coupon extraction failed: ${couponResult.error}`, userId);
+                if (/wrong password|invalid username|invalid credentials/i.test(couponResult.error || "")) {
+                  await storage.updateReplitAccountStatus(source.id, "error").catch(() => {});
+                  broadcastLog(batchId, jobId, `${tag} 🚫 Source ${source.email} marked as ERROR (bad credentials)`, userId);
+                }
+                return { success: false, source: source.email, target: target.email };
+              }
+              coupon = couponResult.coupon;
+              await storage.markReplitCouponExtracted(source.id, coupon).catch(() => {});
+            }
             broadcastLog(batchId, jobId, `${tag} 🎟️ Coupon: ${coupon}`, userId);
 
             let result = await generateSingleCheckoutLink(
