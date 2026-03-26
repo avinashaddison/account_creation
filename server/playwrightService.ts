@@ -12890,7 +12890,8 @@ export async function checkGmailAccount(
 export async function registerLovableAccount(
   outlookEmail: string,
   outlookPassword: string,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  proxyUrl?: string
 ): Promise<{ success: boolean; email?: string; password?: string; error?: string; pendingVerification?: boolean; refreshToken?: string; firebaseUid?: string }> {
   let browser: any = null;
   let page: any = null;
@@ -12994,10 +12995,14 @@ export async function registerLovableAccount(
 
     if (zenrowsApiKey) {
       try {
-        // Use the stored URL directly from DB (do NOT append extra params — they break the connection)
         const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
         const storedZrUrl = zrUrlRow.rows.length > 0 ? (zrUrlRow.rows[0].value as string) : "";
-        const wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
+        let wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
+        // Append SOAX proxy to non-ZenRows CDP endpoints (ZenRows cloud handles proxy internally)
+        if (proxyUrl && proxyUrl !== "local" && !wsEndpoint.includes("browser.zenrows.com")) {
+          wsEndpoint = buildCDPUrlWithProxy(wsEndpoint, proxyUrl);
+          log(`Using SOAX proxy via CDP endpoint`);
+        }
         log(`Connecting to ZenRows browser: ${wsEndpoint.substring(0, 60)}...`);
         const { chromium: vanillaChromium } = await import("playwright");
         browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
@@ -13023,7 +13028,7 @@ export async function registerLovableAccount(
         ],
       });
       const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-      context = await browser.newContext({
+      const contextOpts: any = {
         userAgent: ua,
         viewport: { width: 1366, height: 768 },
         locale: "en-US",
@@ -13034,7 +13039,14 @@ export async function registerLovableAccount(
           "Sec-Ch-Ua-Mobile": "?0",
           "Sec-Ch-Ua-Platform": '"Windows"',
         },
-      });
+      };
+      // Inject SOAX residential proxy into the stealth browser context
+      if (proxyUrl && proxyUrl !== "local") {
+        const proxyServer = proxyUrl.startsWith("http") ? proxyUrl : `http://${proxyUrl}`;
+        contextOpts.proxy = { server: proxyServer };
+        log(`Using SOAX residential proxy for stealth browser`);
+      }
+      context = await browser.newContext(contextOpts);
       log("Using stealth headless browser (playwright-extra + StealthPlugin)");
     }
 

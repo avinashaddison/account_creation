@@ -3993,14 +3993,23 @@ export async function registerRoutes(
         let successCount = 0;
         let failCount = 0;
 
+        // Fetch SOAX proxy once for the whole batch
+        const soaxTemplate = await storage.getSetting("soax_proxy_template");
+        const residentialProxy = await storage.getSetting("residential_proxy_url");
+        const baseProxy = soaxTemplate || residentialProxy || "";
+
         for (let i = 0; i < toUse.length; i++) {
           const acc = toUse[i];
+          // Rotate proxy session per account
+          const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
+          if (rotatedProxy) broadcastLog(batchId, bulkId, `Using SOAX residential proxy (rotated session)`, userId);
           broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
           try {
             const result = await registerLovableAccount(
               acc.email,
               acc.password,
-              (msg) => broadcastLog(batchId, bulkId, msg, userId)
+              (msg) => broadcastLog(batchId, bulkId, msg, userId),
+              rotatedProxy || undefined
             );
             if (result.success) {
               try {
@@ -4080,10 +4089,18 @@ export async function registerRoutes(
       (async () => {
         broadcastLog(batchId, createId, `Starting Lovable account creation for ${outlookEmail}...`, userId);
         try {
+          // Fetch and rotate SOAX proxy for this creation session
+          const soaxTemplate = await storage.getSetting("soax_proxy_template");
+          const residentialProxy = await storage.getSetting("residential_proxy_url");
+          const baseProxy = soaxTemplate || residentialProxy || "";
+          const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
+          if (rotatedProxy) broadcastLog(batchId, createId, `Using SOAX residential proxy (rotated session)`, userId);
+
           const result = await registerLovableAccount(
             outlookEmail,
             outlookPassword,
-            (msg) => broadcastLog(batchId, createId, msg, userId)
+            (msg) => broadcastLog(batchId, createId, msg, userId),
+            rotatedProxy || undefined
           );
 
           if (result.success) {
