@@ -192,6 +192,7 @@ export const lovableAccounts = pgTable("lovable_accounts", {
   password: text("password"),
   outlookEmail: text("outlook_email"),
   status: text("status").notNull().default("created"),
+  credits: integer("credits").default(5),
   error: text("error"),
   refreshToken: text("refresh_token"),
   firebaseUid: text("firebase_uid"),

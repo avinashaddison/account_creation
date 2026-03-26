@@ -1309,11 +1309,12 @@ export default function PrivateAccount() {
             ) : (
               <div className="rounded-xl overflow-hidden border border-white/5 shadow-xl">
                 {/* Google-Sheets-style header */}
-                <div className="grid font-mono font-bold text-white text-xs uppercase tracking-wide" style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.5fr" }}>
+                <div className="grid font-mono font-bold text-white text-xs uppercase tracking-wide" style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.6fr 0.5fr" }}>
                   <div className="px-2 py-3 text-center" style={{ background: "#111" }}>#</div>
                   <div className="px-4 py-3" style={{ background: "#c0392b" }}>E-Mail Address</div>
                   <div className="px-4 py-3" style={{ background: "#e67e22" }}>Password</div>
                   <div className="px-4 py-3" style={{ background: "#27ae60" }}>Status</div>
+                  <div className="px-4 py-3" style={{ background: "#7e22ce" }}>Credits</div>
                   <div className="px-4 py-3 text-right" style={{ background: "#1a1a2e" }}>Actions</div>
                 </div>
 
@@ -1332,7 +1333,7 @@ export default function PrivateAccount() {
                     <div
                       key={acct.id}
                       className="grid items-center border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors"
-                      style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.5fr", background: rowBg }}
+                      style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.6fr 0.5fr", background: rowBg }}
                       data-testid={`row-lovable-${acct.id}`}
                     >
                       {/* Row number */}
@@ -1408,6 +1409,17 @@ export default function PrivateAccount() {
                           <option value="verified">✅ Verified</option>
                           <option value="failed">🚫 Failed</option>
                         </select>
+                      </div>
+
+                      {/* Credits */}
+                      <div className="px-4 py-3.5">
+                        <span
+                          className="font-mono text-sm font-bold tabular-nums"
+                          style={{ color: acct.credits != null && acct.credits >= 20 ? "#a855f7" : "#00ff41" }}
+                          data-testid={`text-lovable-credits-${acct.id}`}
+                        >
+                          {acct.credits ?? 5}
+                        </span>
                       </div>
 
                       {/* Actions */}

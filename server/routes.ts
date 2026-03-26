@@ -4026,6 +4026,7 @@ export async function registerRoutes(
                   password: result.password || null,
                   outlookEmail: acc.email,
                   status: "created",
+                  credits: referralUrl ? 20 : 5,
                   createdBy: userId,
                 });
                 successCount++;
@@ -4041,6 +4042,7 @@ export async function registerRoutes(
                   password: result.password || null,
                   outlookEmail: acc.email,
                   status: "pending_verification",
+                  credits: referralUrl ? 20 : 5,
                   error: result.error || null,
                   refreshToken: result.refreshToken || null,
                   firebaseUid: result.firebaseUid || null,
@@ -4124,6 +4126,7 @@ export async function registerRoutes(
                 password: result.password || null,
                 outlookEmail,
                 status: "created",
+                credits: referralUrl ? 20 : 5,
                 createdBy: userId,
               });
               broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
@@ -4139,6 +4142,7 @@ export async function registerRoutes(
                 password: result.password || null,
                 outlookEmail,
                 status: "pending_verification",
+                credits: referralUrl ? 20 : 5,
                 error: result.error || null,
                 refreshToken: result.refreshToken || null,
                 firebaseUid: result.firebaseUid || null,
@@ -4203,9 +4207,9 @@ export async function registerRoutes(
       const accounts = role === "superadmin"
         ? await storage.getAllLovableAccounts()
         : await storage.getLovableAccountsByOwner(userId);
-      const header = "email,password,outlook_source,status,created_at\n";
+      const header = "email,password,outlook_source,status,credits,created_at\n";
       const rows = accounts.map((a) =>
-        [a.email, a.password || "", a.outlookEmail || "", a.status, new Date(a.createdAt).toISOString()].join(",")
+        [a.email, a.password || "", a.outlookEmail || "", a.status, a.credits ?? 5, new Date(a.createdAt).toISOString()].join(",")
       ).join("\n");
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=lovable-accounts.csv");
