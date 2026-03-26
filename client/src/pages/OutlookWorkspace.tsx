@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Copy, RefreshCw, Zap, Square, Inbox, Trash2, Send,
   AlertTriangle, Mail, ChevronDown, AtSign, Archive,
-  Clock, Shield, User, FileText,
+  Clock, Shield, User, FileText, Terminal, CheckCircle,
+  XCircle, Info, Eye, EyeOff,
 } from "lucide-react";
 import { sounds } from "@/lib/sounds";
 
@@ -23,11 +24,13 @@ interface OEmail {
   otp: string | null; isNew: boolean; id: string;
 }
 interface FolderInfo { imap: string; display: string; count: number; }
+interface LogEntry { time: string; msg: string; level: "info" | "warn" | "error" | "ok"; }
 interface Payload {
   messages: OEmail[]; folders: FolderInfo[];
   newCount: number; email: string | null;
   status: string; error: string | null;
   lastPollAt: string | null; startedAt: string | null;
+  logs?: LogEntry[];
 }
 interface Account { id: string; email: string; status: string; }
 
@@ -41,6 +44,9 @@ function timeAgo(iso: string): string {
 }
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtLogTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 function initials(name: string): string {
   return name.split(/\s+/).map(w => w[0] || "").join("").toUpperCase().substring(0, 2) || "?";
@@ -69,15 +75,6 @@ function ScanBar() {
   );
 }
 
-function Avatar({ name, size = 32 }: { name: string; size?: number }) {
-  const c = `hsl(${name.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360},50%,50%)`;
-  return (
-    <div style={{ width: size, height: size, borderRadius: 6, background: `${c}22`, border: `1px solid ${c}55`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.35, fontFamily: "monospace", fontWeight: 700, color: c, flexShrink: 0 }}>
-      {initials(name)}
-    </div>
-  );
-}
-
 function OtpChip({ code, large }: { code: string; large?: boolean }) {
   const [copied, setCopied] = useState(false);
   const copy = () => { navigator.clipboard.writeText(code); setCopied(true); sounds.click(); setTimeout(() => setCopied(false), 1800); };
@@ -99,6 +96,61 @@ function OtpChip({ code, large }: { code: string; large?: boolean }) {
   );
 }
 
+/* ─── Live Log Panel ────────────────────────────────────────── */
+function LiveLogPanel({ logs }: { logs: LogEntry[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs.length]);
+
+  const levelColor = (level: LogEntry["level"]) => {
+    switch (level) {
+      case "ok": return G;
+      case "warn": return "#ffaa00";
+      case "error": return R;
+      default: return "rgba(0,255,65,0.5)";
+    }
+  };
+
+  const LevelIcon = ({ level }: { level: LogEntry["level"] }) => {
+    const sz = { width: 9, height: 9, flexShrink: 0 as const };
+    switch (level) {
+      case "ok": return <CheckCircle style={{ ...sz, color: G }} />;
+      case "warn": return <AlertTriangle style={{ ...sz, color: "#ffaa00" }} />;
+      case "error": return <XCircle style={{ ...sz, color: R }} />;
+      default: return <Info style={{ ...sz, color: GA(0.4) }} />;
+    }
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "8px 0", fontFamily: "monospace" }}>
+      {logs.length === 0 && (
+        <div style={{ padding: "12px 14px", fontSize: 9, color: GA(0.25), letterSpacing: "0.1em" }}>
+          Waiting for connection logs...
+        </div>
+      )}
+      {logs.map((log, i) => (
+        <div key={i} style={{
+          display: "flex", alignItems: "flex-start", gap: 7,
+          padding: "3px 14px",
+          borderBottom: `1px solid ${GA(0.04)}`,
+          background: log.level === "error" ? RA(0.03) : log.level === "warn" ? "rgba(255,170,0,0.02)" : "transparent",
+        }}>
+          <span style={{ fontSize: 8, color: GA(0.25), flexShrink: 0, marginTop: 1, letterSpacing: "0.02em" }}>
+            {fmtLogTime(log.time)}
+          </span>
+          <LevelIcon level={log.level} />
+          <span style={{ fontSize: 9, color: levelColor(log.level), flex: 1, lineHeight: 1.5, wordBreak: "break-all" }}>
+            {log.msg}
+          </span>
+        </div>
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+}
+
 /* ─── Main page ─────────────────────────────────────────────── */
 export default function OutlookWorkspace() {
   const [data, setData] = useState<Payload | null>(null);
@@ -109,13 +161,14 @@ export default function OutlookWorkspace() {
   const [showAccPicker, setShowAccPicker] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
   const [scanCount, setScanCount] = useState(0);
+  const [showLogs, setShowLogs] = useState(true);
+  const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   function showToast(msg: string, kind: "ok" | "err" = "ok") {
     setToast({ msg, kind }); setTimeout(() => setToast(null), 3000);
   }
 
-  /* Close picker on outside click */
   useEffect(() => {
     const h = (e: MouseEvent) => { if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowAccPicker(false); };
     document.addEventListener("mousedown", h);
@@ -129,6 +182,13 @@ export default function OutlookWorkspace() {
       const d: Payload = await r.json();
       setData(d);
       setScanCount(n => n + 1);
+      if (d.logs && d.logs.length > 0) {
+        setAllLogs(prev => {
+          const existingTimes = new Set(prev.map(l => l.time + l.msg));
+          const newEntries = d.logs!.filter(l => !existingTimes.has(l.time + l.msg));
+          return [...prev, ...newEntries].slice(-200);
+        });
+      }
       if (d.newCount > 0) { sounds.notification(); showToast(`+${d.newCount} new message${d.newCount > 1 ? "s" : ""}`, "ok"); }
     } catch {}
   }, []);
@@ -142,6 +202,7 @@ export default function OutlookWorkspace() {
 
   async function activate(id?: string) {
     setActivating(true); setShowAccPicker(false); sounds.generate();
+    setAllLogs([]);
     try {
       const r = await fetch(id ? `/api/outlook-workspace/activate/${id}` : "/api/outlook-workspace/activate", { method: "POST" });
       const d = await r.json();
@@ -152,7 +213,7 @@ export default function OutlookWorkspace() {
 
   async function stopSession() {
     await fetch("/api/outlook-workspace/stop", { method: "POST" });
-    setData(null); setSelectedId(null); showToast("Session terminated", "ok"); sounds.toggle();
+    setData(null); setSelectedId(null); setAllLogs([]); showToast("Session terminated", "ok"); sounds.toggle();
   }
 
   function copyEmail() {
@@ -175,6 +236,8 @@ export default function OutlookWorkspace() {
     { imap: "ALL", display: "All Mail", count: data?.messages?.length || 0 },
     ...(data?.folders || []),
   ];
+
+  const logPanelWidth = showLogs ? 280 : 0;
 
   /* ── Layout ── */
   return (
@@ -207,11 +270,10 @@ export default function OutlookWorkspace() {
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 800, color: G, letterSpacing: "0.2em", textShadow: `0 0 10px ${GA(0.6)}` }}>MAIL_INTERCEPT</div>
-              <div style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.15em" }}>OUTLOOK WORKSPACE v2.1</div>
+              <div style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.15em" }}>OUTLOOK WORKSPACE v3.0</div>
             </div>
           </div>
 
-          {/* Divider */}
           <div style={{ width: 1, height: 30, background: GA(0.12), marginRight: 20 }} />
 
           {/* Active session info */}
@@ -223,7 +285,11 @@ export default function OutlookWorkspace() {
                   {data?.email}
                 </div>
                 <div style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.12em" }}>
-                  {statusConn ? "LAUNCHING BROWSER & LOGGING IN..." : statusErr ? `ERR: ${(data?.error || "").substring(0, 40)}` : `ACTIVE [BROWSER] · SCAN #${scanCount} · ${data?.messages?.length || 0} MSGS`}
+                  {statusConn
+                    ? "LAUNCHING BROWSER — LOGGING IN..."
+                    : statusErr
+                    ? `ERR: ${(data?.error || "").substring(0, 50)}`
+                    : `ACTIVE · SCAN #${scanCount} · ${data?.messages?.length || 0} MSGS`}
                 </div>
               </div>
             </div>
@@ -241,6 +307,14 @@ export default function OutlookWorkspace() {
                 <RefreshCw style={{ width: 9, height: 9, animation: "spin 3s linear infinite" }} />
                 {timeAgo(data.lastPollAt)}
               </div>
+            )}
+
+            {/* Log toggle */}
+            {isActive && (
+              <button onClick={() => setShowLogs(v => !v)} data-testid="button-toggle-logs"
+                style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 5, background: showLogs ? GA(0.12) : GA(0.04), border: `1px solid ${showLogs ? GA(0.35) : GA(0.12)}`, color: showLogs ? G : GA(0.45), fontSize: 9, fontFamily: "monospace", fontWeight: 700, cursor: "pointer", letterSpacing: "0.1em" }}>
+                <Terminal style={{ width: 10, height: 10 }} /> LOGS
+              </button>
             )}
 
             {isActive && (
@@ -316,10 +390,11 @@ export default function OutlookWorkspace() {
           <div style={{ display: "flex", gap: 24 }}>
             {[
               { icon: Shield, label: "OTP EXTRACTION", sub: "Auto-detect verification codes" },
-              { icon: RefreshCw, label: "LIVE SCANNING", sub: "All folders every 4 seconds" },
+              { icon: RefreshCw, label: "LIVE SCANNING", sub: "All folders every 30 seconds" },
               { icon: Clock, label: "FULL HISTORY", sub: "Inbox, Junk, Spam, Sent" },
+              { icon: Terminal, label: "REAL-TIME LOGS", sub: "Live connection progress" },
             ].map(({ icon: Icon, label, sub }) => (
-              <div key={label} style={{ textAlign: "center", padding: "12px 16px", borderRadius: 8, background: GA(0.03), border: `1px solid ${GA(0.08)}`, minWidth: 140 }}>
+              <div key={label} style={{ textAlign: "center", padding: "12px 16px", borderRadius: 8, background: GA(0.03), border: `1px solid ${GA(0.08)}`, minWidth: 130 }}>
                 <Icon style={{ width: 18, height: 18, color: GA(0.4), margin: "0 auto 6px" }} />
                 <div style={{ fontSize: 9, fontWeight: 800, color: GA(0.5), letterSpacing: "0.15em", marginBottom: 4 }}>{label}</div>
                 <div style={{ fontSize: 8, color: GA(0.25) }}>{sub}</div>
@@ -328,11 +403,11 @@ export default function OutlookWorkspace() {
           </div>
         </div>
       ) : (
-        /* ── Three-column email client ── */
+        /* ── Four-panel email client ── */
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
           {/* ─ LEFT: Folder sidebar ──────────────────────────── */}
-          <div style={{ width: 168, flexShrink: 0, background: BG1, borderRight: `1px solid ${GA(0.1)}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ width: 160, flexShrink: 0, background: BG1, borderRight: `1px solid ${GA(0.1)}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ padding: "10px 12px 6px", fontSize: 8, fontWeight: 800, letterSpacing: "0.25em", color: GA(0.35) }}>// FOLDERS</div>
             <div style={{ flex: 1, overflowY: "auto" }}>
               {allFolders.map(f => {
@@ -364,7 +439,6 @@ export default function OutlookWorkspace() {
 
           {/* ─ CENTER: Email list ─────────────────────────────── */}
           <div style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${GA(0.1)}`, overflow: "hidden" }}>
-            {/* List header */}
             <div style={{ padding: "0 14px", height: 38, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${GA(0.1)}`, background: BG2, flexShrink: 0 }}>
               <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.2em", color: GA(0.45) }}>
                 MESSAGES ({filtered.length})
@@ -379,6 +453,11 @@ export default function OutlookWorkspace() {
                   <span style={{ fontSize: 9, color: GA(0.25), letterSpacing: "0.15em" }}>
                     {statusConn ? "BROWSER LOADING..." : "NO MESSAGES"}
                   </span>
+                  {statusConn && (
+                    <span style={{ fontSize: 8, color: GA(0.18), letterSpacing: "0.08em", textAlign: "center", maxWidth: 180, lineHeight: 1.5 }}>
+                      Check the log panel for progress
+                    </span>
+                  )}
                 </div>
               ) : (
                 filtered.map(msg => {
@@ -388,7 +467,6 @@ export default function OutlookWorkspace() {
                       data-testid={`email-row-${msg.id}`}
                       style={{ width: "100%", display: "flex", flexDirection: "column", padding: "10px 14px", background: isSel ? GA(0.1) : msg.isNew ? GA(0.04) : "transparent", border: "none", borderBottom: `1px solid ${GA(0.07)}`, borderLeft: isSel ? `2px solid ${G}` : msg.isNew ? `2px solid ${GA(0.35)}` : "2px solid transparent", cursor: "pointer", textAlign: "left", transition: "all 0.12s", flexShrink: 0 }}>
 
-                      {/* Row 1: from + time */}
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
                           {msg.isNew && (
@@ -401,12 +479,10 @@ export default function OutlookWorkspace() {
                         <span style={{ fontSize: 9, color: GA(0.35), flexShrink: 0, marginLeft: 6 }}>{timeAgo(msg.date)}</span>
                       </div>
 
-                      {/* Row 2: subject */}
                       <div style={{ fontSize: 10, color: isSel ? GA(0.9) : "rgba(255,255,255,0.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 5, letterSpacing: "0.01em" }}>
                         {msg.subject}
                       </div>
 
-                      {/* Row 3: OTP or snippet */}
                       {msg.otp ? (
                         <OtpChip code={msg.otp} />
                       ) : (
@@ -452,10 +528,8 @@ export default function OutlookWorkspace() {
                     </div>
                   )}
 
-                  {/* Subject */}
                   <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.9)", marginBottom: 12, lineHeight: 1.3 }}>{selected.subject}</div>
 
-                  {/* Meta grid */}
                   <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "4px 12px", alignItems: "center" }}>
                     {[
                       ["FROM", `${selected.from}${selected.fromEmail && selected.fromEmail !== selected.from ? ` <${selected.fromEmail}>` : ""}`],
@@ -480,6 +554,35 @@ export default function OutlookWorkspace() {
               </>
             )}
           </div>
+
+          {/* ─ RIGHTMOST: Live Log Panel ──────────────────────── */}
+          {showLogs && (
+            <div style={{ width: 280, flexShrink: 0, background: "#060110", borderLeft: `1px solid ${GA(0.12)}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              {/* Log panel header */}
+              <div style={{ flexShrink: 0, height: 38, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${GA(0.1)}`, background: BG2 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <Terminal style={{ width: 10, height: 10, color: GA(0.5) }} />
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.2em", color: GA(0.45) }}>CONNECTION LOGS</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {statusConn && <Blink color="#ffaa00" />}
+                  {statusOk && <Blink color={G} />}
+                  <button onClick={() => setAllLogs([])}
+                    style={{ fontSize: 8, color: GA(0.25), background: "transparent", border: "none", cursor: "pointer", letterSpacing: "0.1em", fontFamily: "monospace" }}>
+                    CLR
+                  </button>
+                </div>
+              </div>
+
+              {/* Logs */}
+              <LiveLogPanel logs={allLogs} />
+
+              {/* Footer */}
+              <div style={{ flexShrink: 0, padding: "6px 14px", borderTop: `1px solid ${GA(0.08)}`, fontSize: 8, color: GA(0.2), letterSpacing: "0.1em" }}>
+                {allLogs.length} ENTRIES · AUTO-SCROLL
+              </div>
+            </div>
+          )}
         </div>
       )}
 

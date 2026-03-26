@@ -215,6 +215,8 @@ function DataReadout({ label, value, accent = false }: { label: string; value: s
   );
 }
 
+const FULLSCREEN_ROUTES = ["/admin/outlook-workspace", "/admin/email-workspace"];
+
 export default function Layout({ children, user, onLogout, onPanelNameChange }: LayoutProps) {
   const [location] = useLocation();
   const [isEditing, setIsEditing] = useState(false);
@@ -283,7 +285,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
   ];
 
   return (
-    <div className="min-h-screen flex" style={{ background: "#07050a" }}>
+    <div className="h-screen flex overflow-hidden" style={{ background: "#07050a" }}>
       {/* ── SIDEBAR ── */}
       <aside
         className="w-[285px] flex flex-col shrink-0 h-screen sticky top-0 overflow-hidden"
@@ -544,9 +546,15 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
       </aside>
 
       {/* ── MAIN ── */}
-      <main className="flex-1 overflow-auto" style={{ background: "#07050a" }}>
-        <div className="p-7 max-w-[1400px] mx-auto">{children}</div>
-      </main>
+      {FULLSCREEN_ROUTES.some(r => location.startsWith(r)) ? (
+        <main className="flex-1 overflow-hidden flex flex-col" style={{ background: "#07050a", height: "100vh" }}>
+          {children}
+        </main>
+      ) : (
+        <main className="flex-1 overflow-auto" style={{ background: "#07050a" }}>
+          <div className="p-7 max-w-[1400px] mx-auto">{children}</div>
+        </main>
+      )}
 
       <style>{`
         @keyframes scanbeam {
