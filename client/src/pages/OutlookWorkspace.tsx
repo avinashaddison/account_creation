@@ -223,7 +223,7 @@ export default function OutlookWorkspace() {
                   {data?.email}
                 </div>
                 <div style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.12em" }}>
-                  {statusConn ? "CONNECTING..." : statusErr ? `ERR: ${(data?.error || "").substring(0, 40)}` : `ACTIVE · SCAN #${scanCount} · ${data?.messages?.length || 0} MSGS`}
+                  {statusConn ? "LAUNCHING BROWSER & LOGGING IN..." : statusErr ? `ERR: ${(data?.error || "").substring(0, 40)}` : `ACTIVE [BROWSER] · SCAN #${scanCount} · ${data?.messages?.length || 0} MSGS`}
                 </div>
               </div>
             </div>
@@ -354,8 +354,9 @@ export default function OutlookWorkspace() {
             <div style={{ padding: "8px 12px", borderTop: `1px solid ${GA(0.08)}`, fontSize: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 5, color: GA(0.3), marginBottom: 3 }}>
                 <RefreshCw style={{ width: 8, height: 8, animation: statusOk ? "spin 3s linear infinite" : "none" }} />
-                {statusErr ? <span style={{ color: R }}>ERR</span> : statusConn ? "CONNECTING" : "LIVE"}
+                {statusErr ? <span style={{ color: R }}>ERR</span> : statusConn ? <span style={{ color: "#ffaa00" }}>LAUNCHING...</span> : "LIVE"}
               </div>
+              {statusConn && <div style={{ color: "#ffaa00", fontSize: 7, marginTop: 1 }}>~60s first scan</div>}
               {data?.lastPollAt && <div style={{ color: GA(0.25) }}>SCANNED {timeAgo(data.lastPollAt)} AGO</div>}
               {statusErr && <div style={{ color: R, marginTop: 2, wordBreak: "break-all" }}>{(data?.error || "").substring(0, 50)}</div>}
             </div>
@@ -376,7 +377,7 @@ export default function OutlookWorkspace() {
                 <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
                   <Mail style={{ width: 24, height: 24, color: GA(0.15) }} />
                   <span style={{ fontSize: 9, color: GA(0.25), letterSpacing: "0.15em" }}>
-                    {statusConn ? "CONNECTING..." : "NO MESSAGES"}
+                    {statusConn ? "BROWSER LOADING..." : "NO MESSAGES"}
                   </span>
                 </div>
               ) : (
