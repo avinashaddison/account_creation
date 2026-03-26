@@ -3968,6 +3968,9 @@ export async function registerRoutes(
     try {
       const { count = 1, referralUrl } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
+      if (referralUrl && !referralUrl.startsWith("https://lovable.dev/signup")) {
+        return res.status(400).json({ error: "referralUrl must be a lovable.dev/signup URL" });
+      }
       const userId = req.session.userId;
 
       const allOutlook = await storage.getAllPrivateOutlooks();
@@ -4076,6 +4079,9 @@ export async function registerRoutes(
       const { outlookEmail, outlookPassword, referralUrl } = req.body;
       if (!outlookEmail || !outlookPassword) {
         return res.status(400).json({ error: "Outlook email and password are required" });
+      }
+      if (referralUrl && !referralUrl.startsWith("https://lovable.dev/signup")) {
+        return res.status(400).json({ error: "referralUrl must be a lovable.dev/signup URL" });
       }
 
       const existingAccts = await storage.getAllLovableAccounts();
