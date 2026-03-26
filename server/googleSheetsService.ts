@@ -407,44 +407,41 @@ export async function syncReplitAccountsToSheet(
     },
   });
 
-  // ── PIE CHART (donut): Status breakdown ──
+  // ── COLUMN CHART: Status counts with numbers on bars ──
   const totalSummaryRows = summaryRows.length;
+  const CHART_DARK  = rgb(18, 18, 28);
+  const CHART_BLUE  = rgb(99, 179, 237);
 
+  // Chart 1: Donut pie — percentages
   requests.push({
     addChart: {
       chart: {
         spec: {
-          title: "Account Status Distribution",
-          titleTextFormat: { bold: true, fontSize: 14, fontFamily: "Arial Black", foregroundColor: DARK_BG },
+          title: "Status Split (%)",
+          titleTextFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: WHITE },
+          backgroundColor: CHART_DARK,
           pieChart: {
-            legendPosition: "RIGHT_LEGEND",
-            pieHole: 0.45,
-            // series = ChartData pointing at the counts column (G)
+            legendPosition: "LABELED_LEGEND",
+            pieHole: 0.5,
             series: {
               sourceRange: {
                 sources: [{
                   sheetId,
-                  startRowIndex: 2,
-                  endRowIndex: 2 + totalSummaryRows,
-                  startColumnIndex: 6,
-                  endColumnIndex: 7,
+                  startRowIndex: 2, endRowIndex: 2 + totalSummaryRows,
+                  startColumnIndex: 6, endColumnIndex: 7,
                 }],
               },
             },
-            // domain = ChartData pointing at the label column (F)
             domain: {
               sourceRange: {
                 sources: [{
                   sheetId,
-                  startRowIndex: 2,
-                  endRowIndex: 2 + totalSummaryRows,
-                  startColumnIndex: 5,
-                  endColumnIndex: 6,
+                  startRowIndex: 2, endRowIndex: 2 + totalSummaryRows,
+                  startColumnIndex: 5, endColumnIndex: 6,
                 }],
               },
             },
           },
-          backgroundColor: WHITE,
           fontName: "Arial",
         },
         position: {
@@ -452,8 +449,79 @@ export async function syncReplitAccountsToSheet(
             anchorCell: { sheetId, rowIndex: summaryRows.length + 3, columnIndex: 5 },
             offsetXPixels: 0,
             offsetYPixels: 10,
-            widthPixels: 480,
-            heightPixels: 340,
+            widthPixels: 460,
+            heightPixels: 300,
+          },
+        },
+      },
+    },
+  });
+
+  // Chart 2: Column bar chart — actual counts with numbers on top
+  requests.push({
+    addChart: {
+      chart: {
+        spec: {
+          title: "Accounts per Status (Count)",
+          titleTextFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: WHITE },
+          backgroundColor: CHART_DARK,
+          basicChart: {
+            chartType: "COLUMN",
+            legendPosition: "NO_LEGEND",
+            headerCount: 0,
+            axis: [
+              {
+                position: "BOTTOM_AXIS",
+                title: "Status",
+                titleTextPosition: { horizontalAlignment: "CENTER" },
+                format: { bold: true, fontSize: 10, fontFamily: "Arial", foregroundColor: rgb(200, 210, 230) },
+              },
+              {
+                position: "LEFT_AXIS",
+                title: "Count",
+                titleTextPosition: { horizontalAlignment: "CENTER" },
+                format: { bold: true, fontSize: 10, fontFamily: "Arial", foregroundColor: rgb(200, 210, 230) },
+              },
+            ],
+            domains: [{
+              domain: {
+                sourceRange: {
+                  sources: [{
+                    sheetId,
+                    startRowIndex: 2, endRowIndex: 2 + totalSummaryRows,
+                    startColumnIndex: 5, endColumnIndex: 6,
+                  }],
+                },
+              },
+            }],
+            series: [{
+              series: {
+                sourceRange: {
+                  sources: [{
+                    sheetId,
+                    startRowIndex: 2, endRowIndex: 2 + totalSummaryRows,
+                    startColumnIndex: 6, endColumnIndex: 7,
+                  }],
+                },
+              },
+              targetAxis: "LEFT_AXIS",
+              colorStyle: { rgbColor: CHART_BLUE },
+              dataLabel: {
+                type: "DATA",
+                textFormat: { bold: true, fontSize: 11, fontFamily: "Arial Black", foregroundColor: WHITE },
+                placement: "INSIDE_END",
+              },
+            }],
+          },
+          fontName: "Arial",
+        },
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex: summaryRows.length + 3, columnIndex: 5 },
+            offsetXPixels: 0,
+            offsetYPixels: 330,
+            widthPixels: 460,
+            heightPixels: 300,
           },
         },
       },
