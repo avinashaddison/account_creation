@@ -1,0 +1,164 @@
+14:36:18
+>
+🚀 Parallel batch started — 5 job(s) running simultaneously [replit-batch-mn78zvx6]
+14:36:18
+·
+[Job 1] 🔐 Logging into Replit as daakekmasalpbz@hotmail.com...
+PROCESSING
+14:36:23
+·
+[Job 2] 🤖 Source: bazykqaaylaunz@hotmail.com → Target: weiheqirsikqgc@hotmail.com
+PROCESSING
+14:36:24
+·
+[Job 2] 🔐 Logging into Replit as bazykqaaylaunz@hotmail.com...
+PROCESSING
+14:36:29
+·
+[Job 3] 🤖 Source: christopherstrickland9578@outlook.com → Target: amaadnkalusym@hotmail.com
+PROCESSING
+14:36:29
+·
+[Job 3] 🔐 Logging into Replit as christopherstrickland9578@outlook.com...
+PROCESSING
+14:36:33
+·
+[Job 4] 🤖 Source: rachelhays1215@outlook.com → Target: pescejbietzpyon@hotmail.com
+PROCESSING
+14:36:33
+·
+[Job 4] 🔐 Logging into Replit as rachelhays1215@outlook.com...
+PROCESSING
+14:36:38
+·
+[Job 5] 🤖 Source: susanwhitney6677@outlook.com → Target: jeffreyjohnson6210@outlook.com
+PROCESSING
+14:36:38
+·
+[Job 5] 🔐 Logging into Replit as susanwhitney6677@outlook.com...
+PROCESSING
+14:36:40
++
+[Job 4] ✅ Logged in
+14:36:40
+·
+[Job 4] 🔗 Opening referral page...
+14:36:45
++
+[Job 5] ✅ Logged in
+14:36:45
+·
+[Job 5] 🔗 Opening referral page...
+14:36:45
+·
+[Job 4] 📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+14:36:45
++
+[Job 4] ✅ Coupon: AGENT431204E905126
+14:36:45
+$
+[Job 4] 🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+14:36:46
+·
+[Job 4] 🎟️ Coupon: AGENT431204E905126
+14:36:46
+·
+[Job 4] 🌐 SOAX connected — session: wah5jrpr9usx | endpoint: proxy.soax.com:5000
+14:36:46
+·
+[Job 4] ┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+14:36:46
+·
+[Job 4] │ Exit IP : 68.43.119.21
+14:36:46
+·
+[Job 4] │ Location : Sterling Heights, Michigan, US
+14:36:46
+·
+[Job 4] │ Provider : AS7922 Comcast Cable Communications, LLC
+14:36:46
+·
+[Job 4] └────────────────────────────────────────────────
+14:36:46
+·
+[Job 4] 🔐 Logging into Replit as pescejbietzpyon@hotmail.com...
+WORKING
+14:36:51
+·
+[Job 5] 📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+14:36:51
++
+[Job 5] ✅ Coupon: AGENT4CE84C52AEC8F
+14:36:51
+$
+[Job 5] 🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+14:36:51
+·
+[Job 5] 🎟️ Coupon: AGENT4CE84C52AEC8F
+14:36:51
+·
+[Job 5] 🌐 SOAX connected — session: f2fc38vftg5c | endpoint: proxy.soax.com:5000
+14:36:51
+·
+[Job 5] ┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+14:36:52
+·
+[Job 5] │ Exit IP : 23.240.185.230
+14:36:52
+·
+[Job 5] │ Location : San Diego, California, US
+14:36:52
+·
+[Job 5] │ Provider : AS20001 Charter Communications Inc
+14:36:52
+·
+[Job 5] └────────────────────────────────────────────────
+14:36:52
+·
+[Job 5] 🔐 Logging into Replit as jeffreyjohnson6210@outlook.com...
+WORKING
+14:36:55
+·
+[Job 4] → Login submitted — waiting for redirect...
+14:37:02
++
+[Job 4] ✅ Logged in
+14:37:02
+>
+[Job 4] 💰 Navigating to checkout URL...
+14:37:06
+$
+[Job 4] ⏳ Waiting for Stripe redirect...
+14:37:08
++
+[Job 4] ✅ Checkout link ready: https://billing.stripe.com/p/session/live_YWNjdF8xNVlwTnNKQW1uWVZPdmZuLF9VRGI0bG...
+🔗 pescejbietzpyon@hotmail.com
+open link
+download
+copy link
+https://billing.stripe.com/p/session/live_YWNjdF8xNVlwTnNKQW1uWVZPdmZuLF9VRGI0bG...
+14:37:08
++
+[Job 4] ✅ Done — link generated for pescejbietzpyon@hotmail.com
+WORKING
+14:37:11
+·
+[Job 5] → Login submitted — waiting for redirect...
+14:37:16
+~
+[Job 1] ⚠️ Still on login (attempt 1) — url: https://replit.com/login — page: "Log in to your account Invalid username or password. EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Co"
+14:37:19
+·
+[Job 1] ↩️ Retry 1/1...
+14:37:21
+~
+[Job 2] ⚠️ Still on login (attempt 1) — url: https://replit.com/login — page: "Log in to your account Invalid username or password. EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Co"
+14:37:24
+·
+[Job 2] ↩️ Retry 1/1...
+14:37:26
+~
+[Job 3] ⚠️ Still on login (attempt 1) — url: https://replit.com/login — page: "Log in to your account Invalid username or password. EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Co"
+14:37:29
+·
+[Job 3] ↩️ Retry 1/1...

@@ -18520,8 +18520,8 @@ export async function extractCouponFromReplitAccount(
         const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 600) || "").catch(() => "");
         const currentUrl = page.url();
         log(`⚠️ Still on login (attempt ${attempt + 1}) — url: ${currentUrl.substring(0, 60)} — page: "${pageText.replace(/\s+/g, " ").substring(0, 120)}"`);
-        if (/wrong password|incorrect password|invalid credentials|doesn.t match/i.test(pageText))
-          throw new Error(`Wrong password for ${email}`);
+        if (/wrong password|incorrect password|invalid credentials|invalid username or password|doesn.t match|email or password/i.test(pageText))
+          throw new Error(`Wrong password for ${email} — Replit says: "${pageText.substring(0, 80).replace(/\s+/g, " ").trim()}"`);
         if (/captcha|hcaptcha|verify you are human|i am not a robot/i.test(pageText))
           throw new Error(`CAPTCHA detected — Replit is blocking automated login for this IP`);
         if (/too many|rate.?limit|try again later/i.test(pageText))

@@ -3746,14 +3746,14 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      const sources = allAccounts.filter(a => !a.couponExtracted && a.email && a.password).slice(0, count);
+      const sources = allAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status !== "error").slice(0, count);
       if (sources.length === 0) {
         return res.status(400).json({ error: "No unused agent accounts available for coupon extraction" });
       }
 
       const sourceIds = new Set(sources.map(a => a.id));
       const targets = allAccounts
-        .filter(a => !sourceIds.has(a.id) && a.email && a.password && a.status === "processing")
+        .filter(a => !sourceIds.has(a.id) && a.email && a.password && a.status === "processing" && !a.checkoutUrl)
         .slice(0, sources.length);
 
       if (targets.length === 0) {
@@ -3783,6 +3783,11 @@ export async function registerRoutes(
             );
             if (!couponResult.success || !couponResult.coupon) {
               broadcastLog(batchId, jobId, `${tag} ❌ Coupon extraction failed: ${couponResult.error}`, userId);
+              // Mark source as error if credentials are wrong so it's skipped in future batches
+              if (/wrong password|invalid username|invalid credentials/i.test(couponResult.error || "")) {
+                await storage.updateReplitAccountStatus(source.id, "error").catch(() => {});
+                broadcastLog(batchId, jobId, `${tag} 🚫 Source ${source.email} marked as ERROR (bad credentials)`, userId);
+              }
               return { success: false, source: source.email, target: target.email };
             }
             const coupon = couponResult.coupon;
@@ -3802,6 +3807,7 @@ export async function registerRoutes(
             }
             if (result.success && result.stripeUrl) {
               broadcastLog(batchId, jobId, `CHECKOUT_URL|${target.email}|${result.stripeUrl}`, userId);
+              await storage.setReplitCheckoutUrl(target.id, result.stripeUrl).catch(() => {});
               await storage.updateReplitAccountStatus(target.id, "working").catch(() => {});
               broadcastLog(batchId, jobId, `${tag} ✅ Done — link generated for ${target.email}`, userId);
               return { success: true, source: source.email, target: target.email, url: result.stripeUrl };
