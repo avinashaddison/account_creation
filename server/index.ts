@@ -165,6 +165,15 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
+    // Force browsers to always revalidate assets in dev — prevents stale cached JS
+    app.use((req, res, next) => {
+      if (!req.path.startsWith("/api")) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      }
+      next();
+    });
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
