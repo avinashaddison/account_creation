@@ -52,6 +52,20 @@ const STATUSES: { value: string; label: string; color: string; bg: string; borde
 function statusMeta(s: string) {
   return STATUSES.find(x => x.value === s) ?? { value: s, label: s.toUpperCase(), color: "rgba(255,255,255,0.4)", bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.15)" };
 }
+// Solid fill color for spreadsheet-style status cell (no transparency)
+function statusSolid(s: string): string {
+  switch (s) {
+    case "available":  return "rgb(34,197,94)";   // green
+    case "working":    return "rgb(249,115,22)";   // orange
+    case "processing": return "rgb(59,130,246)";   // blue
+    case "sold_out":   return "rgb(220,38,38)";    // red
+    case "completed":  return "rgb(13,148,136)";   // teal
+    case "warmed":     return "rgb(124,58,237)";   // purple
+    case "error":      return "rgb(139,0,0)";      // dark red
+    case "subscribed": return "rgb(109,40,217)";   // deep purple
+    default:           return "rgb(55,65,81)";     // gray
+  }
+}
 
 function getLogStyle(text: string): { color: string; prefix: string } {
   if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
@@ -1504,117 +1518,131 @@ export default function ReplitCreate() {
             </div>
           </div>
 
-          {/* Table header */}
-          <div className="grid px-5 py-2 text-[8px] font-mono uppercase tracking-widest" style={{ gridTemplateColumns: "1fr 1.4fr 1fr 80px 90px 48px", color: GA(0.25), borderBottom: `1px solid ${GA(0.07)}` }}>
-            <span>Username</span>
-            <span>Email</span>
-            <span>Outlook</span>
-            <span>Coupon</span>
-            <span>Status</span>
-            <span></span>
-          </div>
+          {/* ── Spreadsheet-style table ── */}
+          <div className="overflow-hidden" style={{ borderTop: `1px solid ${GA(0.1)}` }}>
 
-          {/* Rows */}
-          <div className="overflow-y-auto" style={{ maxHeight: "340px" }}>
-            {filteredAccounts.length === 0 ? (
-              <div className="flex items-center justify-center py-10">
-                <p className="text-[10px] font-mono" style={{ color: GA(0.25) }}>no accounts with status "{statusFilter}"</p>
+            {/* Title banner — row 1 */}
+            <div className="flex items-center justify-center py-3" style={{ background: "#000", borderBottom: "2px solid #111" }}>
+              <span className="text-[15px] font-black tracking-widest uppercase" style={{ color: "#00ff41", fontFamily: "Arial Black, monospace", textShadow: "0 0 18px rgba(0,255,65,0.5)" }}>
+                REPLIT CORE $20 — ACCOUNTS
+              </span>
+            </div>
+
+            {/* Column headers — row 2 */}
+            <div className="grid text-[11px] font-black uppercase tracking-wider" style={{ gridTemplateColumns: "44px 1fr 180px 90px 200px 44px" }}>
+              <div className="flex items-center justify-center py-2.5" style={{ background: "#111", borderRight: "1px solid #222" }}>
+                <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 9 }}>#</span>
               </div>
-            ) : (
-              filteredAccounts.map((acct, idx) => {
-                const sm = statusMeta(acct.status);
-                const isPickerOpen = statusPickerOpen === acct.id;
-                return (
-                  <div
-                    key={acct.id}
-                    className="grid items-center px-5 py-2.5 transition-all"
-                    style={{
-                      gridTemplateColumns: "1fr 1.4fr 1fr 80px 90px 48px",
-                      borderBottom: idx < filteredAccounts.length - 1 ? `1px solid ${GA(0.05)}` : "none",
-                      background: isPickerOpen ? GA(0.03) : "transparent",
-                    }}
-                    data-testid={`row-replit-account-${acct.id}`}
-                  >
-                    {/* Username */}
-                    <div className="min-w-0 pr-3">
-                      <p className="text-[11px] font-mono font-bold truncate" style={{ color: G }}>@{acct.username}</p>
-                      <p className="text-[8px] font-mono truncate" style={{ color: GA(0.25) }}>{new Date(acct.createdAt).toLocaleDateString()}</p>
-                    </div>
+              <div className="flex items-center px-3 py-2.5" style={{ background: "rgb(192,0,0)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
+                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>E-Mail Address</span>
+              </div>
+              <div className="flex items-center px-3 py-2.5" style={{ background: "rgb(0,135,0)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
+                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>PASSWORD</span>
+              </div>
+              <div className="flex items-center justify-center px-2 py-2.5" style={{ background: "rgb(210,100,0)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
+                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>CREDITS</span>
+              </div>
+              <div className="flex items-center px-3 py-2.5" style={{ background: "rgb(0,70,190)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
+                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>Status</span>
+              </div>
+              <div className="flex items-center justify-center py-2.5" style={{ background: "#111" }}>
+                <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 9 }}></span>
+              </div>
+            </div>
 
-                    {/* Email */}
-                    <div className="min-w-0 pr-3">
-                      <p className="text-[10px] font-mono truncate" style={{ color: GA(0.6) }}>{acct.email}</p>
-                      {acct.error && (
-                        <p className="text-[8px] font-mono truncate" style={{ color: "#f87171" }} title={acct.error}>{acct.error.substring(0, 40)}</p>
-                      )}
-                    </div>
+            {/* Data rows */}
+            <div className="overflow-y-auto" style={{ maxHeight: "420px" }}>
+              {filteredAccounts.length === 0 ? (
+                <div className="flex items-center justify-center py-10">
+                  <p className="text-[10px] font-mono" style={{ color: GA(0.25) }}>no accounts with status "{statusFilter}"</p>
+                </div>
+              ) : (
+                filteredAccounts.map((acct, idx) => {
+                  const sm = statusMeta(acct.status);
+                  const isPickerOpen = statusPickerOpen === acct.id;
+                  const isEven = idx % 2 === 0;
+                  const rowBg = isEven ? "rgb(14,14,22)" : "rgb(10,10,16)";
+                  const cellBorder = "1px solid rgba(255,255,255,0.04)";
+                  return (
+                    <div
+                      key={acct.id}
+                      className="grid items-stretch transition-all"
+                      style={{ gridTemplateColumns: "44px 1fr 180px 90px 200px 44px", background: isPickerOpen ? "rgba(0,255,65,0.03)" : rowBg, borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                      data-testid={`row-replit-account-${acct.id}`}
+                    >
+                      {/* Row number */}
+                      <div className="flex items-center justify-center" style={{ borderRight: cellBorder }}>
+                        <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.18)" }}>{idx + 3}</span>
+                      </div>
 
-                    {/* Outlook */}
-                    <div className="min-w-0 pr-3">
-                      <p className="text-[9px] font-mono truncate" style={{ color: acct.outlookEmail ? "rgba(0,200,255,0.55)" : GA(0.18) }}>
-                        {acct.outlookEmail ? acct.outlookEmail.split("@")[0] : "—"}
-                      </p>
-                    </div>
+                      {/* Email */}
+                      <div className="flex flex-col justify-center px-3 py-2 min-w-0" style={{ borderRight: cellBorder }}>
+                        <p className="text-[11px] font-bold truncate" style={{ color: "rgba(255,255,255,0.9)", fontFamily: "Arial, sans-serif" }}>{acct.email}</p>
+                        <p className="text-[8px] font-mono truncate" style={{ color: "rgba(255,255,255,0.3)" }}>@{acct.username}</p>
+                        {acct.error && (
+                          <p className="text-[8px] font-mono truncate" style={{ color: "#f87171" }} title={acct.error}>{acct.error.substring(0, 45)}</p>
+                        )}
+                      </div>
 
-                    {/* Coupon */}
-                    <div className="min-w-0 pr-2">
-                      {acct.couponCode ? (
-                        <span className="text-[8px] font-mono px-1.5 py-0.5 rounded inline-block" style={{ background: LA(0.08), border: `1px solid ${LA(0.2)}`, color: L, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {acct.couponCode}
+                      {/* Password */}
+                      <div className="flex items-center px-3 py-2 min-w-0" style={{ borderRight: cellBorder }}>
+                        <p className="text-[10px] font-mono truncate" style={{ color: "rgba(220,220,220,0.75)" }}>{acct.password ?? "—"}</p>
+                      </div>
+
+                      {/* Credits */}
+                      <div className="flex items-center justify-center px-2 py-2" style={{ borderRight: cellBorder }}>
+                        <span className="text-[11px] font-black" style={{ color: "#22c55e", fontFamily: "Arial Black, sans-serif" }}>
+                          {acct.credits ? `${acct.credits}$` : "20$"}
                         </span>
-                      ) : (
-                        <span className="text-[8px] font-mono" style={{ color: GA(0.18) }}>—</span>
-                      )}
-                    </div>
+                      </div>
 
-                    {/* Status pill with dropdown */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setStatusPickerOpen(isPickerOpen ? null : acct.id)}
-                        className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold w-full"
-                        style={{ background: sm.bg, border: `1px solid ${sm.border}`, color: sm.color, cursor: "pointer" }}
-                        data-testid={`button-status-pill-${acct.id}`}
-                      >
-                        <span className="flex-1 text-left truncate">{sm.label}</span>
-                        <ChevronDown className="w-2.5 h-2.5 flex-shrink-0" />
-                      </button>
-                      {isPickerOpen && (
-                        <div className="absolute left-0 top-full mt-1 z-50 rounded-lg overflow-hidden shadow-2xl" style={{ background: "#0a0a0a", border: "1px solid rgba(0,255,65,0.25)", minWidth: 120 }}>
-                          {STATUSES.map(s => (
-                            <button
-                              key={s.value}
-                              onClick={() => statusMutation.mutate({ id: acct.id, status: s.value })}
-                              disabled={statusMutation.isPending}
-                              className="w-full text-left px-3 py-2 text-[9px] font-mono font-bold flex items-center gap-2 transition-all"
-                              style={{ color: s.color, background: acct.status === s.value ? s.bg : "transparent" }}
-                              data-testid={`button-change-status-${s.value}-${acct.id}`}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
-                              {s.label}
-                              {acct.status === s.value && <span style={{ color: s.color, opacity: 0.6, marginLeft: "auto" }}>✓</span>}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                      {/* Status cell — full solid fill like a spreadsheet cell */}
+                      <div className="relative flex items-stretch" style={{ borderRight: cellBorder }}>
+                        <button
+                          onClick={() => setStatusPickerOpen(isPickerOpen ? null : acct.id)}
+                          className="flex items-center justify-between w-full px-3"
+                          style={{ background: statusSolid(acct.status), cursor: "pointer", minHeight: 38 }}
+                          data-testid={`button-status-pill-${acct.id}`}
+                        >
+                          <span className="text-[10px] font-black uppercase tracking-wide truncate" style={{ color: "#fff", fontFamily: "Arial Black, sans-serif", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{sm.label}</span>
+                          <ChevronDown className="w-3 h-3 flex-shrink-0 ml-1" style={{ color: "rgba(255,255,255,0.7)" }} />
+                        </button>
+                        {isPickerOpen && (
+                          <div className="absolute left-0 top-full mt-0.5 z-50 overflow-hidden shadow-2xl" style={{ background: "#0d0d14", border: "1px solid rgba(255,255,255,0.12)", minWidth: 210, borderRadius: 4 }}>
+                            {STATUSES.map(s => (
+                              <button
+                                key={s.value}
+                                onClick={() => statusMutation.mutate({ id: acct.id, status: s.value })}
+                                disabled={statusMutation.isPending}
+                                className="w-full text-left px-3 py-2 text-[10px] font-black flex items-center gap-2.5 uppercase tracking-wide"
+                                style={{ fontFamily: "Arial Black, sans-serif", color: "#fff", background: acct.status === s.value ? statusSolid(s.value) : "transparent", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                                data-testid={`button-change-status-${s.value}-${acct.id}`}
+                              >
+                                <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: statusSolid(s.value) }} />
+                                {s.label}
+                                {acct.status === s.value && <span className="ml-auto opacity-80">✓</span>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
-                    {/* Delete */}
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => {
-                          if (confirm(`Delete @${acct.username}?`)) deleteMutation.mutate(acct.id);
-                        }}
-                        className="p-1.5 rounded transition-all"
-                        style={{ color: "rgba(248,113,113,0.4)", cursor: "pointer" }}
-                        data-testid={`button-delete-account-${acct.id}`}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      {/* Delete */}
+                      <div className="flex items-center justify-center">
+                        <button
+                          onClick={() => { if (confirm(`Delete @${acct.username}?`)) deleteMutation.mutate(acct.id); }}
+                          className="p-1.5 rounded transition-all"
+                          style={{ color: "rgba(248,113,113,0.35)", cursor: "pointer" }}
+                          data-testid={`button-delete-account-${acct.id}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })
-            )}
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
