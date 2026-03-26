@@ -1326,6 +1326,7 @@ export default function PrivateAccount() {
                     pending_verification: { label: "⏳ Pending",    color: "#facc15", glow: "rgba(250,204,21,0.25)",  bg: "rgba(250,204,21,0.1)",   border: "#facc15" },
                     verified:             { label: "✅ Verified",   color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
                     failed:               { label: "🚫 Failed",     color: "#71717a", glow: "rgba(113,113,122,0.2)",  bg: "rgba(113,113,122,0.08)", border: "#52525b" },
+                    sold_out:             { label: "Sold Out",       color: "#ef4444", glow: "rgba(239,68,68,0.3)",   bg: "rgba(239,68,68,0.12)",   border: "#ef4444" },
                   };
                   const cfg = statusConfig[st] ?? statusConfig.pending_verification;
                   const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.01)";
@@ -1408,6 +1409,7 @@ export default function PrivateAccount() {
                           <option value="pending_verification">⏳ Pending</option>
                           <option value="verified">✅ Verified</option>
                           <option value="failed">🚫 Failed</option>
+                          <option value="sold_out">Sold Out</option>
                         </select>
                       </div>
 
