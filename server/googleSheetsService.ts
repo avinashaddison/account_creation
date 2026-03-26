@@ -187,7 +187,8 @@ export async function syncReplitAccountsToSheet(
   });
 
   // ── Column widths ──
-  const colWidths = [300, 155, 80, 145, 30, 145, 80]; // A B C D E(gap) F G
+  // E = wide breathing gap, F = Status label, G = Count
+  const colWidths = [300, 155, 80, 145, 90, 200, 120]; // A B C D E(gap) F G
   colWidths.forEach((px, i) => {
     requests.push({
       updateDimensionProperties: {
@@ -446,18 +447,19 @@ export async function syncReplitAccountsToSheet(
         },
         position: {
           overlayPosition: {
-            anchorCell: { sheetId, rowIndex: summaryRows.length + 3, columnIndex: 5 },
+            // Anchor below summary table, left side — pie chart
+            anchorCell: { sheetId, rowIndex: summaryRows.length + 4, columnIndex: 5 },
             offsetXPixels: 0,
-            offsetYPixels: 10,
-            widthPixels: 460,
-            heightPixels: 300,
+            offsetYPixels: 20,
+            widthPixels: 480,
+            heightPixels: 360,
           },
         },
       },
     },
   });
 
-  // Chart 2: Column bar chart — actual counts with numbers on top
+  // Chart 2: Column bar chart — actual counts with numbers on top (side-by-side with pie)
   requests.push({
     addChart: {
       chart: {
@@ -517,11 +519,12 @@ export async function syncReplitAccountsToSheet(
         },
         position: {
           overlayPosition: {
-            anchorCell: { sheetId, rowIndex: summaryRows.length + 3, columnIndex: 5 },
-            offsetXPixels: 0,
-            offsetYPixels: 330,
-            widthPixels: 460,
-            heightPixels: 300,
+            // Same row anchor as pie chart, but shifted right by 510px (480 + 30 gap)
+            anchorCell: { sheetId, rowIndex: summaryRows.length + 4, columnIndex: 5 },
+            offsetXPixels: 510,
+            offsetYPixels: 20,
+            widthPixels: 480,
+            heightPixels: 360,
           },
         },
       },
