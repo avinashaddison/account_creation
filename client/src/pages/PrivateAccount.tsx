@@ -1533,16 +1533,18 @@ export default function PrivateAccount() {
 
                       {/* Actions */}
                       <div className="px-4 py-3.5 flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
-                          onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password || ""}`, `lall-${acct.id}`)}
-                          title="Copy all"
-                          data-testid={`button-copy-lovable-all-${acct.id}`}
-                        >
-                          {copied === `lall-${acct.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        </Button>
+                        {st === "created" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
+                            onClick={() => copyToClipboard(`Email 📧 : ${acct.email}\nPassword 🗝️ : ${acct.password || ""}`, `lall-${acct.id}`)}
+                            title="Copy credentials"
+                            data-testid={`button-copy-lovable-all-${acct.id}`}
+                          >
+                            {copied === `lall-${acct.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
