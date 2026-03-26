@@ -25,10 +25,10 @@ async function resolveProxyIp(
 ): Promise<string> {
   return new Promise<string>((resolve) => {
     try {
-      const agent = new HttpsProxyAgent(anonymizedProxy);
+      const agent = anonymizedProxy ? new HttpsProxyAgent(anonymizedProxy) : undefined;
       const req = https.get(
         "https://ipinfo.io/json",
-        { agent: agent as any, timeout: 10000 },
+        { ...(agent ? { agent: agent as any } : {}), timeout: 10000 },
         (res) => {
           let body = "";
           res.on("data", (c) => (body += c));
@@ -13053,18 +13053,12 @@ export async function registerLovableAccount(
     page = await context.newPage();
     page.setDefaultTimeout(35000);
 
-    // ── Show exit IP (proxy verification) ────────────────────────────────────
-    try {
-      const ipPage = await context.newPage();
-      ipPage.setDefaultTimeout(8000);
-      const ipRes = await ipPage.goto("https://api.ipify.org?format=json", { timeout: 8000 });
-      if (ipRes && ipRes.ok()) {
-        const ipJson = await ipRes.json();
-        log(`🌐 Exit IP: ${ipJson.ip || "unknown"}${proxyUrl ? " (SOAX residential)" : " (datacenter/direct)"}`);
-      }
-      await ipPage.close().catch(() => {});
-    } catch {
-      log(`🌐 Exit IP: (unable to determine)`);
+    // ── Show exit IP via server-side request (same method as Replit creation) ──
+    if (proxyUrl && proxyUrl !== "local") {
+      await resolveProxyIp(proxyUrl, log, "SOAX PROXY");
+    } else {
+      // No proxy — direct server-side check to show datacenter IP
+      await resolveProxyIp("", log, "DIRECT");
     }
 
     // Capture browser console logs for debugging
