@@ -535,3 +535,104 @@ export async function syncReplitAccountsToSheet(
     sheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
   };
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  BIDIRECTIONAL SYNC HELPERS
+// ══════════════════════════════════════════════════════════════════
+
+const SHEET_ID = "1iwwFquXt3cqSEIlQYaDkERPjwXTFpCefQ2lE-_yphio";
+
+// Reverse-map sheet label → DB status key
+function dbStatus(sheetLabel: string): string {
+  switch ((sheetLabel || "").toUpperCase().trim()) {
+    case "STOCK OUT":  return "sold_out";
+    case "PROCESSING": return "processing";
+    case "WORKING":    return "working";
+    case "ERROR":      return "error";
+    case "WARMED":     return "warmed";
+    case "COMPLETED":  return "completed";
+    case "AVAILABLE":  return "available";
+    case "SUBSCRIBED": return "subscribed";
+    default:           return sheetLabel.toLowerCase().replace(/\s+/g, "_");
+  }
+}
+
+// Read email→status map from the sheet (skips title row & header row)
+export async function readSheetStatuses(
+  spreadsheetId: string = SHEET_ID
+): Promise<{ email: string; status: string }[]> {
+  const sheets = await getUncachableGoogleSheetClient();
+  const meta   = await sheets.spreadsheets.get({ spreadsheetId });
+  const title  = meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
+
+  // Rows: A1=title banner, A2=header, A3+=data → read from row 3 onward
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${title}!A3:D`,
+  });
+
+  const sheetRows = resp.data.values ?? [];
+  return sheetRows
+    .filter((r) => r[0] && r[3])
+    .map((r) => ({ email: (r[0] as string).trim(), status: dbStatus(r[3] as string) }));
+}
+
+// ── Panel → Sheet: debounced auto-sync ──
+let _syncTimer: ReturnType<typeof setTimeout> | null = null;
+let _syncStorage: any = null;
+export let lastAutoSyncAt: Date | null = null;
+export let autoSyncEnabled = true;
+
+export function scheduleAutoSync(storageInstance: any, delayMs = 4000) {
+  _syncStorage = storageInstance;
+  if (_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(async () => {
+    try {
+      const accounts = await _syncStorage.getAllReplitAccounts();
+      await syncReplitAccountsToSheet(SHEET_ID, accounts);
+      lastAutoSyncAt = new Date();
+      console.log(`[Sheets] Auto-synced ${accounts.length} accounts → Google Sheet`);
+    } catch (err: any) {
+      console.error("[Sheets] Auto-sync failed:", err.message);
+    }
+  }, delayMs);
+}
+
+// ── Sheet → Panel: poll the sheet and push status changes into DB ──
+let _pollTimer: ReturnType<typeof setInterval> | null = null;
+export let lastPollAt: Date | null = null;
+export let lastPollChanges = 0;
+
+export function startSheetPolling(storageInstance: any, intervalMs = 60_000) {
+  if (_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(async () => {
+    try {
+      const sheetStatuses = await readSheetStatuses(SHEET_ID);
+      const dbAccounts    = await storageInstance.getAllReplitAccounts();
+      const byEmail       = new Map(dbAccounts.map((a: any) => [a.email.toLowerCase(), a]));
+
+      let changes = 0;
+      for (const { email, status } of sheetStatuses) {
+        const acct = byEmail.get(email.toLowerCase());
+        if (!acct) continue;
+        if (acct.status !== status) {
+          await storageInstance.updateReplitAccountStatus(acct.id, status);
+          changes++;
+        }
+      }
+
+      lastPollAt = new Date();
+      lastPollChanges = changes;
+      if (changes > 0) {
+        console.log(`[Sheets] Poll: synced ${changes} status change(s) from sheet → DB`);
+      }
+    } catch (err: any) {
+      console.error("[Sheets] Poll error:", err.message);
+    }
+  }, intervalMs);
+  console.log(`[Sheets] Sheet→Panel polling started (every ${intervalMs / 1000}s)`);
+}
+
+export function stopSheetPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}

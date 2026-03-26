@@ -3926,6 +3926,7 @@ export async function registerRoutes(
       const ownerId = role === "superadmin" ? undefined : req.session.userId;
       const count = await storage.bulkUpdateReplitAccountStatus(normalizedStatus, ownerId);
       res.json({ success: true, updated: count });
+      import("./googleSheetsService.js").then(({ scheduleAutoSync }) => scheduleAutoSync(storage)).catch(() => {});
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3937,6 +3938,7 @@ export async function registerRoutes(
       if (!status) return res.status(400).json({ error: "status required" });
       const row = await storage.updateReplitAccountStatus(req.params.id, status);
       res.json(row);
+      import("./googleSheetsService.js").then(({ scheduleAutoSync }) => scheduleAutoSync(storage)).catch(() => {});
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3946,8 +3948,19 @@ export async function registerRoutes(
     try {
       await storage.deleteReplitAccount(req.params.id);
       res.json({ success: true });
+      import("./googleSheetsService.js").then(({ scheduleAutoSync }) => scheduleAutoSync(storage)).catch(() => {});
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Sync status endpoint — used by the frontend to show last sync/poll times
+  app.get("/api/replit-accounts/sync-status", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const { lastAutoSyncAt, lastPollAt, lastPollChanges } = await import("./googleSheetsService.js");
+      res.json({ lastAutoSyncAt, lastPollAt, lastPollChanges });
+    } catch {
+      res.json({ lastAutoSyncAt: null, lastPollAt: null, lastPollChanges: 0 });
     }
   });
 
@@ -4931,6 +4944,11 @@ export async function registerRoutes(
       res.status(500).json({ error: err.message });
     }
   });
+
+  // ── Start Google Sheet → Panel polling (60s interval) ──
+  import("./googleSheetsService.js")
+    .then(({ startSheetPolling }) => startSheetPolling(storage, 60_000))
+    .catch((err) => console.warn("[Sheets] Could not start polling:", err.message));
 
   return httpServer;
 }

@@ -87,6 +87,11 @@ export default function ReplitCreate() {
   const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
   useEffect(() => { if (checkoutDelayData?.minutes !== undefined) setCheckoutDelayMinutes(checkoutDelayData.minutes); }, [checkoutDelayData]);
 
+  const { data: syncStatus } = useQuery<{ lastAutoSyncAt: string | null; lastPollAt: string | null; lastPollChanges: number }>({
+    queryKey: ["/api/replit-accounts/sync-status"],
+    refetchInterval: 15_000,
+  });
+
   // ── ONBOARDING mode state ──
   const [onbEmail, setOnbEmail] = useState("");
   const [onbPassword, setOnbPassword] = useState("");
@@ -1439,17 +1444,32 @@ export default function ReplitCreate() {
               <Layers className="w-3.5 h-3.5" style={{ color: G, filter: `drop-shadow(0 0 6px ${G})` }} />
               <span className="text-[10px] font-mono uppercase tracking-widest font-bold" style={{ color: GA(0.7) }}>replit_accounts</span>
               <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ background: GA(0.08), border: `1px solid ${GA(0.25)}`, color: G }}>{replitAccounts.length} total</span>
-              <button
-                onClick={() => syncSheetMutation.mutate(statusFilter)}
-                disabled={syncSheetMutation.isPending}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
-                style={{ background: "rgba(15,157,88,0.12)", border: "1px solid rgba(15,157,88,0.35)", color: syncSheetMutation.isPending ? "rgba(15,157,88,0.35)" : "rgba(15,157,88,0.85)", cursor: syncSheetMutation.isPending ? "not-allowed" : "pointer" }}
-                data-testid="button-sync-google-sheets"
-                title={`Sync ${statusFilter === "all" ? "all" : `"${statusFilter}"`} accounts to Google Sheets`}
-              >
-                <FileSpreadsheet className="w-3 h-3" />
-                {syncSheetMutation.isPending ? "SYNCING..." : "SYNC TO SHEET"}
-              </button>
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => syncSheetMutation.mutate(statusFilter)}
+                  disabled={syncSheetMutation.isPending}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                  style={{ background: "rgba(15,157,88,0.12)", border: "1px solid rgba(15,157,88,0.35)", color: syncSheetMutation.isPending ? "rgba(15,157,88,0.35)" : "rgba(15,157,88,0.85)", cursor: syncSheetMutation.isPending ? "not-allowed" : "pointer" }}
+                  data-testid="button-sync-google-sheets"
+                  title={`Sync ${statusFilter === "all" ? "all" : `"${statusFilter}"`} accounts to Google Sheets`}
+                >
+                  <FileSpreadsheet className="w-3 h-3" />
+                  {syncSheetMutation.isPending ? "SYNCING..." : "SYNC TO SHEET"}
+                </button>
+                {/* Bidirectional sync status */}
+                <div className="flex flex-col gap-0.5 px-0.5">
+                  <span className="text-[7px] font-mono" style={{ color: "rgba(15,157,88,0.45)" }}>
+                    <span style={{ color: "rgba(15,157,88,0.6)" }}>↑ panel→sheet:</span>{" "}
+                    {syncStatus?.lastAutoSyncAt ? new Date(syncStatus.lastAutoSyncAt).toLocaleTimeString() : "waiting…"}
+                  </span>
+                  <span className="text-[7px] font-mono" style={{ color: "rgba(100,180,255,0.45)" }}>
+                    <span style={{ color: "rgba(100,180,255,0.6)" }}>↓ sheet→panel:</span>{" "}
+                    {syncStatus?.lastPollAt
+                      ? `${new Date(syncStatus.lastPollAt).toLocaleTimeString()}${syncStatus.lastPollChanges > 0 ? ` · ${syncStatus.lastPollChanges} update(s)` : ""}`
+                      : "polling…"}
+                  </span>
+                </div>
+              </div>
             </div>
             {/* Status filter tabs */}
             <div className="flex items-center gap-1 flex-wrap">
