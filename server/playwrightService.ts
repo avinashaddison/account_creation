@@ -13055,7 +13055,9 @@ export async function registerLovableAccount(
 
     // ── Show exit IP via server-side request (same method as Replit creation) ──
     if (proxyUrl && proxyUrl !== "local") {
-      await resolveProxyIp(proxyUrl, log, "SOAX PROXY");
+      // Normalize URL scheme — SOAX templates may be stored without "http://"
+      const normalizedProxy = proxyUrl.startsWith("http") ? proxyUrl : `http://${proxyUrl}`;
+      await resolveProxyIp(normalizedProxy, log, "SOAX PROXY");
     } else {
       // No proxy — direct server-side check to show datacenter IP
       await resolveProxyIp("", log, "DIRECT");
