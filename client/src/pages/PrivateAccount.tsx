@@ -84,6 +84,7 @@ export default function PrivateAccount() {
   const [lovableShowPasswords, setLovableShowPasswords] = useState<Record<string, boolean>>({});
   const [lovableAccounts, setLovableAccounts] = useState<LovableAccount[]>([]);
   const [bulkCopyCount, setBulkCopyCount] = useState(10);
+  const [bulkCopyCredits, setBulkCopyCredits] = useState<"any" | "5" | "20">("any");
   const [bulkCopiedIds, setBulkCopiedIds] = useState<string[] | null>(null);
   const [bulkStatusTarget, setBulkStatusTarget] = useState("sold_out");
   const [bulkApplying, setBulkApplying] = useState(false);
@@ -1316,21 +1317,44 @@ export default function PrivateAccount() {
                   className="w-16 h-7 rounded-md px-2 text-xs font-mono text-center bg-black/40 border border-pink-500/20 text-pink-300 focus:outline-none focus:border-pink-500/50"
                   data-testid="input-bulk-copy-count"
                 />
+                {/* Credits filter toggle */}
+                <div className="flex items-center rounded-md overflow-hidden border border-pink-500/20" data-testid="toggle-bulk-copy-credits">
+                  {(["any", "5", "20"] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => setBulkCopyCredits(opt)}
+                      className="h-7 px-2.5 text-[10px] font-mono transition-colors"
+                      style={{
+                        background: bulkCopyCredits === opt ? "rgba(236,72,153,0.2)" : "rgba(0,0,0,0.4)",
+                        color: bulkCopyCredits === opt ? "#f9a8d4" : "rgba(255,255,255,0.3)",
+                        borderRight: opt !== "20" ? "1px solid rgba(236,72,153,0.2)" : "none",
+                      }}
+                      data-testid={`button-credits-filter-${opt}`}
+                    >
+                      {opt === "any" ? "any" : `${opt} cr`}
+                    </button>
+                  ))}
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 px-3 text-pink-400 hover:text-pink-300 hover:bg-pink-500/10 font-mono text-xs border border-pink-500/20"
                   onClick={() => {
-                    const eligible = lovableAccounts.filter((a) => a.status === "created");
+                    const eligible = lovableAccounts.filter((a) => {
+                      if (a.status !== "created") return false;
+                      if (bulkCopyCredits === "5") return (a.credits ?? 5) === 5;
+                      if (bulkCopyCredits === "20") return (a.credits ?? 5) >= 20;
+                      return true;
+                    });
                     const slice = eligible.slice(0, bulkCopyCount);
                     if (slice.length === 0) {
-                      toast({ title: "No accounts", description: "No Account Created accounts available to copy" });
+                      toast({ title: "No accounts", description: `No Account Created accounts with ${bulkCopyCredits === "any" ? "any" : bulkCopyCredits} credits available` });
                       return;
                     }
                     const text = slice.map((a) => `Email 📧 : ${a.email}\nPassword 🗝️ : ${a.password || ""}`).join("\n\n");
                     navigator.clipboard.writeText(text).then(() => {
                       setBulkCopiedIds(slice.map((a) => a.id));
-                      toast({ title: `Copied ${slice.length} accounts`, description: "Email + Password format copied" });
+                      toast({ title: `Copied ${slice.length} accounts`, description: `${bulkCopyCredits === "any" ? "Any credits" : `${bulkCopyCredits} credits`} · Email + Password format` });
                     }).catch(() => {
                       toast({ title: "Clipboard error", description: "Could not write to clipboard — check browser permissions", variant: "destructive" });
                     });
@@ -1338,10 +1362,20 @@ export default function PrivateAccount() {
                   data-testid="button-bulk-copy"
                 >
                   <Copy className="w-3 h-3 mr-1" />
-                  Copy {Math.min(bulkCopyCount, lovableAccounts.filter((a) => a.status === "created").length)}
+                  Copy {Math.min(bulkCopyCount, lovableAccounts.filter((a) => {
+                    if (a.status !== "created") return false;
+                    if (bulkCopyCredits === "5") return (a.credits ?? 5) === 5;
+                    if (bulkCopyCredits === "20") return (a.credits ?? 5) >= 20;
+                    return true;
+                  }).length)}
                 </Button>
                 <span className="text-[10px] font-mono text-zinc-600">
-                  {lovableAccounts.filter((a) => a.status === "created").length} ready
+                  {lovableAccounts.filter((a) => {
+                    if (a.status !== "created") return false;
+                    if (bulkCopyCredits === "5") return (a.credits ?? 5) === 5;
+                    if (bulkCopyCredits === "20") return (a.credits ?? 5) >= 20;
+                    return true;
+                  }).length} ready
                 </span>
               </div>
             )}
