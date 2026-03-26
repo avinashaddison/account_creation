@@ -93,39 +93,62 @@ export default function LovableCreate() {
     setTimeout(() => setCopiedUrl(null), 2500);
   }
 
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-    wsRef.current = ws;
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.batchId && data.batchId === activeBatchId.current) {
-          if (data.type === "log") {
-            addLog(data.message);
-          } else if (data.type === "batch_complete") {
-            setRunning(false);
-            sounds.complete();
-            qc.invalidateQueries({ queryKey: ["/api/lovable-accounts"] });
-          } else if (data.type === "lovable_create_result") {
-            if (data.success) {
-              setCompletedCount((p) => p + 1);
-              sounds.success();
-              toast({ title: "✅ Account Created", description: data.email });
-            } else if (data.pending) {
-              setCompletedCount((p) => p + 1);
-              toast({ title: "⏳ Pending Verification", description: data.email });
-            } else {
-              sounds.error();
-              toast({ title: "❌ Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
+  useEffect(() => {
+    let dead = false;
+
+    function connect() {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.batchId && data.batchId === activeBatchId.current) {
+            if (data.type === "log") {
+              addLog(data.message);
+            } else if (data.type === "batch_complete") {
+              setRunning(false);
+              sounds.complete();
+              qc.invalidateQueries({ queryKey: ["/api/lovable-accounts"] });
+            } else if (data.type === "lovable_create_result") {
+              // Use server-authoritative index so dropped messages don't de-sync counter
+              if (data.index) setCompletedCount(data.index);
+              if (data.total) setTotalCount(data.total);
+              if (data.success) {
+                sounds.success();
+                toast({ title: "✅ Account Created", description: data.email });
+              } else if (data.pending) {
+                toast({ title: "⏳ Pending Verification", description: data.email });
+              } else {
+                sounds.error();
+                toast({ title: "❌ Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
+              }
             }
           }
-        }
-      } catch {}
-    };
+        } catch {}
+      };
 
-    return () => ws.close();
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (!dead) {
+          // Auto-reconnect after 2s
+          reconnectTimer.current = setTimeout(connect, 2000);
+        }
+      };
+
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+
+    return () => {
+      dead = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      wsRef.current?.close();
+    };
   }, []);
 
   const handleStop = async () => {
