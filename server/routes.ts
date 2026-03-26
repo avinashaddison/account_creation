@@ -3966,7 +3966,7 @@ export async function registerRoutes(
 
   app.post("/api/lovable-create/bulk", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
     try {
-      const { count = 1 } = req.body;
+      const { count = 1, referralUrl } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
@@ -4013,7 +4013,8 @@ export async function registerRoutes(
               acc.email,
               acc.password,
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
-              rotatedProxy || undefined
+              rotatedProxy || undefined,
+              referralUrl || undefined
             );
             if (result.success) {
               try {
@@ -4072,7 +4073,7 @@ export async function registerRoutes(
 
   app.post("/api/lovable-create", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword } = req.body;
+      const { outlookEmail, outlookPassword, referralUrl } = req.body;
       if (!outlookEmail || !outlookPassword) {
         return res.status(400).json({ error: "Outlook email and password are required" });
       }
@@ -4106,7 +4107,8 @@ export async function registerRoutes(
             outlookEmail,
             outlookPassword,
             (msg) => broadcastLog(batchId, createId, msg, userId),
-            rotatedProxy || undefined
+            rotatedProxy || undefined,
+            referralUrl || undefined
           );
 
           if (result.success) {

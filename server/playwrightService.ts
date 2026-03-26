@@ -12891,10 +12891,13 @@ export async function registerLovableAccount(
   outlookEmail: string,
   outlookPassword: string,
   log: (msg: string) => void,
-  proxyUrl?: string
+  proxyUrl?: string,
+  referralUrl?: string
 ): Promise<{ success: boolean; email?: string; password?: string; error?: string; pendingVerification?: boolean; refreshToken?: string; firebaseUid?: string }> {
   let browser: any = null;
   let page: any = null;
+
+  const signupUrl = referralUrl || "https://lovable.dev/signup";
 
   // ── helpers ────────────────────────────────────────────────────────────────
   function randPass(): string {
@@ -13086,7 +13089,7 @@ export async function registerLovableAccount(
     const capsolverTokenPromise: Promise<string | null> = new Promise((res) => { capsolverTokenResolve = res; });
     (async () => {
       log(`Solving Turnstile via CapSolver in background (sitekey: ${LOVABLE_SITEKEY}, action: signup_email_password)...`);
-      const tsResult = await solveAntiTurnstile("https://lovable.dev/signup", LOVABLE_SITEKEY, undefined, "signup_email_password");
+      const tsResult = await solveAntiTurnstile(signupUrl, LOVABLE_SITEKEY, undefined, "signup_email_password");
       if (tsResult.success && tsResult.token) {
         log(`✅ Background CapSolver solved! Token length: ${tsResult.token.length}`);
         capsolverTokenResolve!(tsResult.token);
@@ -13222,12 +13225,13 @@ export async function registerLovableAccount(
     }
 
     // ── STEP 1: Navigate to signup page ───────────────────────────────────
-    log("Navigating to https://lovable.dev/signup ...");
+    log(`🔗 Signup URL: ${signupUrl}`);
+    log(`Navigating to ${signupUrl} ...`);
     // ERR_CONNECTION_CLOSED is a transient Cloudflare/CDN reset — retry up to 3 times
     let signupNavDone = false;
     for (let signupAttempt = 0; signupAttempt < 3; signupAttempt++) {
       try {
-        await page.goto("https://lovable.dev/signup", { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.goto(signupUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
         signupNavDone = true;
         break;
       } catch (navErr: any) {
@@ -13249,7 +13253,7 @@ export async function registerLovableAccount(
       if (!usingZenRows) {
         log("Attempting CapSolver Turnstile bypass...");
         const cfSitekey = "0x4AAAAAAChnKAZBY0iFpFHC";
-        const cfResult = await solveAntiTurnstile("https://lovable.dev/signup", cfSitekey);
+        const cfResult = await solveAntiTurnstile(signupUrl, cfSitekey);
         if (cfResult.success && cfResult.token) {
           log("CapSolver token received — injecting to bypass Cloudflare...");
           await page.evaluate((token: string) => {
