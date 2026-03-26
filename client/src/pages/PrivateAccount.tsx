@@ -1327,10 +1327,10 @@ export default function PrivateAccount() {
                       toast({ title: "No accounts", description: "No Account Created accounts available to copy" });
                       return;
                     }
-                    const text = slice.map((a) => `${a.email}:${a.password || ""}`).join("\n");
+                    const text = slice.map((a) => `Email 📧 : ${a.email}\nPassword 🗝️ : ${a.password || ""}`).join("\n\n");
                     navigator.clipboard.writeText(text).then(() => {
                       setBulkCopiedIds(slice.map((a) => a.id));
-                      toast({ title: `Copied ${slice.length} accounts`, description: "email:password — one per line" });
+                      toast({ title: `Copied ${slice.length} accounts`, description: "Email + Password format copied" });
                     }).catch(() => {
                       toast({ title: "Clipboard error", description: "Could not write to clipboard — check browser permissions", variant: "destructive" });
                     });
