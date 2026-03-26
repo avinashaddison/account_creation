@@ -405,6 +405,22 @@ export async function syncReplitAccountsToSheet(
     },
   });
 
+  // ── Status dropdown validation on column D (data rows only) ──
+  const STATUS_OPTIONS = ["STOCK OUT", "PROCESSING", "WORKING", "ERROR", "WARMED", "COMPLETED", "AVAILABLE", "SUBSCRIBED"];
+  requests.push({
+    setDataValidation: {
+      range: { sheetId, startRowIndex: 2, endRowIndex: rows.length + 2, startColumnIndex: 3, endColumnIndex: 4 },
+      rule: {
+        condition: {
+          type: "ONE_OF_LIST",
+          values: STATUS_OPTIONS.map(v => ({ userEnteredValue: v })),
+        },
+        showCustomUi: true,
+        strict: true,
+      },
+    },
+  });
+
   // ── COLUMN CHART: Status counts with numbers on bars ──
   const totalSummaryRows = summaryRows.length;
   const CHART_DARK  = rgb(18, 18, 28);
