@@ -83,6 +83,10 @@ export default function PrivateAccount() {
   const [replitAccounts, setReplitAccounts] = useState<ReplitAccount[]>([]);
   const [lovableShowPasswords, setLovableShowPasswords] = useState<Record<string, boolean>>({});
   const [lovableAccounts, setLovableAccounts] = useState<LovableAccount[]>([]);
+  const [bulkCopyCount, setBulkCopyCount] = useState(10);
+  const [bulkCopiedIds, setBulkCopiedIds] = useState<string[] | null>(null);
+  const [bulkStatusTarget, setBulkStatusTarget] = useState("sold_out");
+  const [bulkApplying, setBulkApplying] = useState(false);
   const [warmLogs, setWarmLogs] = useState<string[]>([]);
   const [warmRunning, setWarmRunning] = useState(false);
   const [warmBatchId, setWarmBatchId] = useState<string | null>(null);
@@ -1298,6 +1302,107 @@ export default function PrivateAccount() {
                 </Button>
               </div>
             </div>
+
+            {/* Bulk copy toolbar */}
+            {lovableAccounts.filter((a) => a.status === "created").length > 0 && (
+              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-pink-500/10 flex-wrap">
+                <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Bulk Copy</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={bulkCopyCount}
+                  onChange={(e) => setBulkCopyCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-16 h-7 rounded-md px-2 text-xs font-mono text-center bg-black/40 border border-pink-500/20 text-pink-300 focus:outline-none focus:border-pink-500/50"
+                  data-testid="input-bulk-copy-count"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-3 text-pink-400 hover:text-pink-300 hover:bg-pink-500/10 font-mono text-xs border border-pink-500/20"
+                  onClick={() => {
+                    const eligible = lovableAccounts.filter((a) => a.status === "created");
+                    const slice = eligible.slice(0, bulkCopyCount);
+                    if (slice.length === 0) {
+                      toast({ title: "No accounts", description: "No Account Created accounts available to copy" });
+                      return;
+                    }
+                    const text = slice.map((a) => `${a.email}:${a.password || ""}`).join("\n");
+                    navigator.clipboard.writeText(text).then(() => {
+                      setBulkCopiedIds(slice.map((a) => a.id));
+                      toast({ title: `Copied ${slice.length} accounts`, description: "email:password — one per line" });
+                    });
+                  }}
+                  data-testid="button-bulk-copy"
+                >
+                  <Copy className="w-3 h-3 mr-1" />
+                  Copy {Math.min(bulkCopyCount, lovableAccounts.filter((a) => a.status === "created").length)}
+                </Button>
+                <span className="text-[10px] font-mono text-zinc-600">
+                  {lovableAccounts.filter((a) => a.status === "created").length} ready
+                </span>
+              </div>
+            )}
+
+            {/* Post-copy status bar */}
+            {bulkCopiedIds && (
+              <div className="flex items-center gap-2 mt-2 px-3 py-2.5 rounded-lg flex-wrap" style={{ background: "rgba(236,72,153,0.06)", border: "1px solid rgba(236,72,153,0.2)" }}>
+                <span className="text-[11px] font-mono text-pink-300 font-semibold">
+                  {bulkCopiedIds.length} copied
+                </span>
+                <span className="text-[10px] font-mono text-zinc-500">· set status:</span>
+                <select
+                  value={bulkStatusTarget}
+                  onChange={(e) => setBulkStatusTarget(e.target.value)}
+                  className="h-7 rounded-md px-2 text-xs font-mono bg-black/40 border border-pink-500/20 text-pink-200 focus:outline-none"
+                  data-testid="select-bulk-status-target"
+                >
+                  <option value="created">Account Created</option>
+                  <option value="pending_verification">Pending Verification</option>
+                  <option value="verified">Verified</option>
+                  <option value="failed">Failed</option>
+                  <option value="sold_out">Sold Out</option>
+                </select>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={bulkApplying}
+                  className="h-7 px-3 text-pink-400 hover:text-pink-300 hover:bg-pink-500/10 font-mono text-xs border border-pink-500/25"
+                  onClick={async () => {
+                    setBulkApplying(true);
+                    try {
+                      const res = await fetch("/api/lovable-accounts/bulk-status", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ ids: bulkCopiedIds, status: bulkStatusTarget }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || "Failed");
+                      toast({ title: `Updated ${data.updated} accounts`, description: `Status set to ${bulkStatusTarget.replace("_", " ")}` });
+                      setBulkCopiedIds(null);
+                      fetchLovable();
+                    } catch (err: any) {
+                      toast({ title: "Error", description: err.message, variant: "destructive" });
+                    } finally {
+                      setBulkApplying(false);
+                    }
+                  }}
+                  data-testid="button-bulk-status-apply"
+                >
+                  {bulkApplying ? "Applying..." : "Apply"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-zinc-600 hover:text-zinc-400"
+                  onClick={() => setBulkCopiedIds(null)}
+                  data-testid="button-bulk-status-dismiss"
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
           </CardHeader>
           <CardContent className="pt-0">
             {lovableAccounts.length === 0 ? (

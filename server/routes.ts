@@ -4220,6 +4220,29 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/lovable-accounts/bulk-status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { ids, status } = req.body;
+      if (!status) return res.status(400).json({ error: "status is required" });
+      if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids must be a non-empty array" });
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = await storage.getAllLovableAccounts();
+      const accountMap = new Map(accounts.map((a) => [a.id, a]));
+      let updated = 0;
+      for (const id of ids) {
+        const acct = accountMap.get(id);
+        if (!acct) continue;
+        if (role !== "superadmin" && acct.createdBy !== userId) continue;
+        await storage.updateLovableAccount(id, { status });
+        updated++;
+      }
+      res.json({ success: true, updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/lovable-accounts/export-csv", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
