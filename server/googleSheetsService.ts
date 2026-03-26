@@ -47,15 +47,27 @@ const WHITE      = rgb(255, 255, 255);
 const DARK_BG    = rgb(15,  15,  20);
 const NEAR_BLACK = rgb(28,  28,  35);
 
+// Sort priority for status labels in the sheet summary
+const SHEET_STATUS_SORT: Record<string, number> = {
+  "VERIFIED ACCOUNT": 1,
+  "WORKING NOW":      2,
+  "ACCOUNT CREATED":  3,
+  "STOCK OUT":        4,
+  "SUBSCRIBED":       5,
+  "COMPLETED":        6,
+  "WARMED":           7,
+  "ERROR":            8,
+};
+
 function statusLabel(status: string): string {
   switch ((status || "").toLowerCase()) {
     case "sold_out":   return "STOCK OUT";
-    case "processing": return "PROCESSING";
-    case "working":    return "WORKING";
+    case "processing": return "ACCOUNT CREATED";
+    case "working":    return "WORKING NOW";
     case "error":      return "ERROR";
     case "warmed":     return "WARMED";
     case "completed":  return "COMPLETED";
-    case "available":  return "AVAILABLE";
+    case "available":  return "VERIFIED ACCOUNT";
     case "subscribed": return "SUBSCRIBED";
     default:           return (status || "").toUpperCase();
   }
@@ -63,28 +75,28 @@ function statusLabel(status: string): string {
 
 function statusStyle(label: string): { bg: any; fg: any } {
   switch (label) {
-    case "STOCK OUT":  return { bg: rgb(220, 38,  38),  fg: WHITE };
-    case "PROCESSING": return { bg: rgb(234, 88,  12),  fg: WHITE };
-    case "WORKING":    return { bg: rgb(22,  163, 74),  fg: WHITE };
-    case "ERROR":      return { bg: rgb(100, 0,   0),   fg: rgb(255, 160, 160) };
-    case "WARMED":     return { bg: rgb(67,  56,  202), fg: WHITE };
-    case "COMPLETED":  return { bg: rgb(13,  148, 136), fg: WHITE };
-    case "AVAILABLE":  return { bg: rgb(2,   132, 199), fg: WHITE };
-    case "SUBSCRIBED": return { bg: rgb(124, 58,  237), fg: WHITE };
-    default:           return { bg: rgb(55,  65,  81),  fg: WHITE };
+    case "STOCK OUT":        return { bg: rgb(220, 38,  38),  fg: WHITE };
+    case "ACCOUNT CREATED":  return { bg: rgb(59,  130, 246), fg: WHITE };
+    case "WORKING NOW":      return { bg: rgb(249, 115, 22),  fg: WHITE };
+    case "ERROR":            return { bg: rgb(100, 0,   0),   fg: rgb(255, 160, 160) };
+    case "WARMED":           return { bg: rgb(67,  56,  202), fg: WHITE };
+    case "COMPLETED":        return { bg: rgb(13,  148, 136), fg: WHITE };
+    case "VERIFIED ACCOUNT": return { bg: rgb(34,  197, 94),  fg: WHITE };
+    case "SUBSCRIBED":       return { bg: rgb(124, 58,  237), fg: WHITE };
+    default:                 return { bg: rgb(55,  65,  81),  fg: WHITE };
   }
 }
 
 // Colors used in the pie chart slices — matching status styles above
 const STATUS_CHART_COLORS: Record<string, any> = {
-  "STOCK OUT":  rgb(220, 38,  38),
-  "PROCESSING": rgb(234, 88,  12),
-  "WORKING":    rgb(22,  163, 74),
-  "ERROR":      rgb(100, 0,   0),
-  "WARMED":     rgb(67,  56,  202),
-  "COMPLETED":  rgb(13,  148, 136),
-  "AVAILABLE":  rgb(2,   132, 199),
-  "SUBSCRIBED": rgb(124, 58,  237),
+  "STOCK OUT":        rgb(220, 38,  38),
+  "ACCOUNT CREATED":  rgb(59,  130, 246),
+  "WORKING NOW":      rgb(249, 115, 22),
+  "ERROR":            rgb(100, 0,   0),
+  "WARMED":           rgb(67,  56,  202),
+  "COMPLETED":        rgb(13,  148, 136),
+  "VERIFIED ACCOUNT": rgb(34,  197, 94),
+  "SUBSCRIBED":       rgb(124, 58,  237),
 };
 
 // ── Main sync ──
@@ -108,7 +120,11 @@ export async function syncReplitAccountsToSheet(
   rows.forEach(([, , , status]) => {
     countMap[status] = (countMap[status] || 0) + 1;
   });
-  const summaryRows = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
+  const summaryRows = Object.entries(countMap).sort((a, b) => {
+    const pa = SHEET_STATUS_SORT[a[0]] ?? 99;
+    const pb = SHEET_STATUS_SORT[b[0]] ?? 99;
+    return pa !== pb ? pa - pb : b[1] - a[1];
+  });
 
   // Sheet layout:
   // Col A-D: main accounts table (rows 0=title, 1=header, 2+=data)
@@ -406,7 +422,7 @@ export async function syncReplitAccountsToSheet(
   });
 
   // ── Status dropdown validation on column D (data rows only) ──
-  const STATUS_OPTIONS = ["STOCK OUT", "PROCESSING", "WORKING", "ERROR", "WARMED", "COMPLETED", "AVAILABLE", "SUBSCRIBED"];
+  const STATUS_OPTIONS = ["VERIFIED ACCOUNT", "WORKING NOW", "ACCOUNT CREATED", "STOCK OUT", "SUBSCRIBED", "COMPLETED", "WARMED", "ERROR"];
   requests.push({
     setDataValidation: {
       range: { sheetId, startRowIndex: 2, endRowIndex: rows.length + 2, startColumnIndex: 3, endColumnIndex: 4 },
@@ -561,15 +577,19 @@ const SHEET_ID = "1iwwFquXt3cqSEIlQYaDkERPjwXTFpCefQ2lE-_yphio";
 // Reverse-map sheet label → DB status key
 function dbStatus(sheetLabel: string): string {
   switch ((sheetLabel || "").toUpperCase().trim()) {
-    case "STOCK OUT":  return "sold_out";
-    case "PROCESSING": return "processing";
-    case "WORKING":    return "working";
-    case "ERROR":      return "error";
-    case "WARMED":     return "warmed";
-    case "COMPLETED":  return "completed";
-    case "AVAILABLE":  return "available";
-    case "SUBSCRIBED": return "subscribed";
-    default:           return sheetLabel.toLowerCase().replace(/\s+/g, "_");
+    case "STOCK OUT":        return "sold_out";
+    case "ACCOUNT CREATED":  return "processing";
+    case "WORKING NOW":      return "working";
+    case "VERIFIED ACCOUNT": return "available";
+    case "ERROR":            return "error";
+    case "WARMED":           return "warmed";
+    case "COMPLETED":        return "completed";
+    case "SUBSCRIBED":       return "subscribed";
+    // legacy fallbacks
+    case "PROCESSING":       return "processing";
+    case "WORKING":          return "working";
+    case "AVAILABLE":        return "available";
+    default:                 return sheetLabel.toLowerCase().replace(/\s+/g, "_");
   }
 }
 
@@ -612,7 +632,11 @@ export async function updateSheetValuesOnly(
   // Build summary counts
   const countMap: Record<string, number> = {};
   rows.forEach(([, , , status]) => { countMap[status] = (countMap[status] || 0) + 1; });
-  const summaryRows = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
+  const summaryRows = Object.entries(countMap).sort((a, b) => {
+    const pa = SHEET_STATUS_SORT[a[0]] ?? 99;
+    const pb = SHEET_STATUS_SORT[b[0]] ?? 99;
+    return pa !== pb ? pa - pb : b[1] - a[1];
+  });
 
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const sheetTitle = meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";

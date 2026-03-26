@@ -37,13 +37,17 @@ const PA = (a: number) => `rgba(190,120,255,${a})`;
 const L = "rgba(255,185,50,1)";
 const LA = (a: number) => `rgba(255,185,50,${a})`;
 
+// Sort priority matches sheet: Verified Account → Working Now → Account Created → Stock Out → rest
+const STATUS_SORT_ORDER = ["available", "working", "processing", "sold_out", "subscribed", "completed", "warmed", "error"];
+
 const STATUSES: { value: string; label: string; color: string; bg: string; border: string }[] = [
-  { value: "processing", label: "PROCESSING", color: "#facc15", bg: "rgba(250,204,21,0.1)", border: "rgba(250,204,21,0.35)" },
-  { value: "available",  label: "AVAILABLE",  color: "#00ff41", bg: "rgba(0,255,65,0.1)",  border: "rgba(0,255,65,0.35)" },
-  { value: "working",    label: "WORKING",    color: "#60a5fa", bg: "rgba(96,165,250,0.1)",  border: "rgba(96,165,250,0.35)" },
-  { value: "completed",  label: "COMPLETED",  color: "#34d399", bg: "rgba(52,211,153,0.1)", border: "rgba(52,211,153,0.35)" },
-  { value: "warmed",     label: "WARMED",     color: "#c084fc", bg: "rgba(192,132,252,0.1)", border: "rgba(192,132,252,0.35)" },
-  { value: "error",      label: "ERROR",      color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.35)" },
+  { value: "available",  label: "VERIFIED ACCOUNT", color: "#22c55e", bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.4)" },
+  { value: "working",    label: "WORKING NOW",       color: "#f97316", bg: "rgba(249,115,22,0.12)",  border: "rgba(249,115,22,0.4)" },
+  { value: "processing", label: "ACCOUNT CREATED",   color: "#3b82f6", bg: "rgba(59,130,246,0.12)",  border: "rgba(59,130,246,0.4)" },
+  { value: "sold_out",   label: "STOCK OUT",         color: "#ef4444", bg: "rgba(239,68,68,0.12)",   border: "rgba(239,68,68,0.4)" },
+  { value: "completed",  label: "COMPLETED",         color: "#34d399", bg: "rgba(52,211,153,0.12)",  border: "rgba(52,211,153,0.35)" },
+  { value: "warmed",     label: "WARMED",            color: "#c084fc", bg: "rgba(192,132,252,0.12)", border: "rgba(192,132,252,0.35)" },
+  { value: "error",      label: "ERROR",             color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.35)" },
 ];
 function statusMeta(s: string) {
   return STATUSES.find(x => x.value === s) ?? { value: s, label: s.toUpperCase(), color: "rgba(255,255,255,0.4)", bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.15)" };
@@ -480,10 +484,15 @@ export default function ReplitCreate() {
   // Quick regex to extract emails from a log line
   const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 
-  // Filtered accounts list
-  const filteredAccounts = statusFilter === "all"
-    ? replitAccounts
-    : replitAccounts.filter(a => a.status === statusFilter);
+  // Filtered + sorted accounts list (priority: Verified Account → Working Now → Account Created → Stock Out → rest)
+  const filteredAccounts = (statusFilter === "all"
+    ? [...replitAccounts]
+    : replitAccounts.filter(a => a.status === statusFilter)
+  ).sort((a, b) => {
+    const ai = STATUS_SORT_ORDER.indexOf(a.status);
+    const bi = STATUS_SORT_ORDER.indexOf(b.status);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
 
   // Status count summary
   const statusCounts = STATUSES.map(s => ({ ...s, count: replitAccounts.filter(a => a.status === s.value).length }));
@@ -983,7 +992,7 @@ export default function ReplitCreate() {
                           data-testid="input-batch-count"
                         />
                         <span className="text-[10px] font-mono flex-1" style={{ color: LA(0.4) }}>
-                          accounts in parallel · {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length)} available sources · {replitAccounts.filter(a => a.status === "processing").length} targets
+                          accounts in parallel · {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length)} available sources · {replitAccounts.filter(a => a.status === "processing").length} Account Created targets
                         </span>
                       </div>
                       <button
@@ -1069,10 +1078,10 @@ export default function ReplitCreate() {
 
                   <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
                     <p className="text-[9px] font-mono" style={{ color: LA(0.45) }}>
-                      Picks {linksCount} processing account(s) → generates Stripe checkout URL with coupon
+                      Picks {linksCount} Account Created account(s) → generates Stripe checkout URL with coupon
                     </p>
                     <p className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
-                      Account status: processing → <span style={{ color: "#ef4444" }}>working</span>
+                      Account status: Account Created → <span style={{ color: "#f97316" }}>Working Now</span>
                     </p>
                   </div>
 
