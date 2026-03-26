@@ -19,39 +19,33 @@ async function getAccessToken() {
     ? "depl " + process.env.WEB_REPL_RENEWAL
     : null;
 
-  if (!xReplitToken) {
-    throw new Error("X-Replit-Token not found for repl/depl");
-  }
+  if (!xReplitToken) throw new Error("X-Replit-Token not found for repl/depl");
 
   connectionSettings = await fetch(
     "https://" + hostname + "/api/v2/connection?include_secrets=true&connector_names=google-sheet",
-    {
-      headers: {
-        Accept: "application/json",
-        "X-Replit-Token": xReplitToken,
-      },
-    }
-  )
-    .then((res) => res.json())
-    .then((data) => data.items?.[0]);
+    { headers: { Accept: "application/json", "X-Replit-Token": xReplitToken } }
+  ).then((r) => r.json()).then((d) => d.items?.[0]);
 
   const accessToken =
     connectionSettings?.settings?.access_token ||
     connectionSettings?.settings?.oauth?.credentials?.access_token;
 
-  if (!connectionSettings || !accessToken) {
-    throw new Error("Google Sheet not connected");
-  }
+  if (!connectionSettings || !accessToken) throw new Error("Google Sheet not connected");
   return accessToken;
 }
 
-// WARNING: Never cache this client. Tokens expire.
 export async function getUncachableGoogleSheetClient() {
   const accessToken = await getAccessToken();
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: accessToken });
   return google.sheets({ version: "v4", auth: oauth2Client });
 }
+
+// ── Helpers ──
+const rgb = (r: number, g: number, b: number) => ({ red: r / 255, green: g / 255, blue: b / 255 });
+const WHITE      = rgb(255, 255, 255);
+const DARK_BG    = rgb(15,  15,  20);
+const NEAR_BLACK = rgb(28,  28,  35);
 
 function statusLabel(status: string): string {
   switch ((status || "").toLowerCase()) {
@@ -67,26 +61,21 @@ function statusLabel(status: string): string {
   }
 }
 
-// ── Color helpers ──
-const rgb = (r: number, g: number, b: number) => ({ red: r / 255, green: g / 255, blue: b / 255 });
-const WHITE = rgb(255, 255, 255);
-
-// Per-status cell style: { bg, fg }
-function statusCellStyle(label: string) {
+function statusStyle(label: string): { bg: any; fg: any } {
   switch (label) {
-    case "STOCK OUT":   return { bg: rgb(220, 38,  38),  fg: WHITE };   // bold red
-    case "PROCESSING":  return { bg: rgb(234, 88,  12),  fg: WHITE };   // orange
-    case "WORKING":     return { bg: rgb(22,  163, 74),  fg: WHITE };   // green
-    case "ERROR":       return { bg: rgb(127, 29,  29),  fg: rgb(255, 150, 150) }; // dark red / pink text
-    case "WARMED":      return { bg: rgb(79,  70,  229), fg: WHITE };   // indigo
-    case "COMPLETED":   return { bg: rgb(15,  118, 110), fg: WHITE };   // teal
-    case "AVAILABLE":   return { bg: rgb(14,  165, 233), fg: WHITE };   // sky blue
-    case "SUBSCRIBED":  return { bg: rgb(139, 92,  246), fg: WHITE };   // purple
-    default:            return { bg: rgb(55,  65,  81),  fg: WHITE };   // grey
+    case "STOCK OUT":  return { bg: rgb(220, 38,  38),  fg: WHITE };
+    case "PROCESSING": return { bg: rgb(234, 88,  12),  fg: WHITE };
+    case "WORKING":    return { bg: rgb(22,  163, 74),  fg: WHITE };
+    case "ERROR":      return { bg: rgb(100, 0,   0),   fg: rgb(255, 160, 160) };
+    case "WARMED":     return { bg: rgb(67,  56,  202), fg: WHITE };
+    case "COMPLETED":  return { bg: rgb(13,  148, 136), fg: WHITE };
+    case "AVAILABLE":  return { bg: rgb(2,   132, 199), fg: WHITE };
+    case "SUBSCRIBED": return { bg: rgb(124, 58,  237), fg: WHITE };
+    default:           return { bg: rgb(55,  65,  81),  fg: WHITE };
   }
 }
 
-// ── Main sync function ──
+// ── Main sync ──
 export async function syncReplitAccountsToSheet(
   spreadsheetId: string,
   accounts: any[]
@@ -102,61 +91,111 @@ export async function syncReplitAccountsToSheet(
     statusLabel(a.status),
   ]);
 
-  const values = [HEADERS, ...rows];
+  // Row 0 = title banner (merged), Row 1 = column headers, Row 2+ = data
+  const sheetValues = [
+    ["REPLIT CORE $20 — ACCOUNTS", "", "", ""],
+    HEADERS,
+    ...rows,
+  ];
 
-  // Get first sheet tab
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const firstSheet = meta.data.sheets?.[0];
-  const sheetId = firstSheet?.properties?.sheetId ?? 0;
-  const sheetTitle = firstSheet?.properties?.title ?? "Sheet1";
+  const sheetId    = firstSheet?.properties?.sheetId ?? 0;
+  const sheetTitle = firstSheet?.properties?.title   ?? "Sheet1";
 
-  // Clear and write fresh data
   await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${sheetTitle}!A:Z` });
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range: `${sheetTitle}!A1`,
     valueInputOption: "USER_ENTERED",
-    requestBody: { values },
+    requestBody: { values: sheetValues },
   });
 
   const requests: any[] = [];
 
-  // ── 1. Freeze header row ──
+  // ── Freeze top 2 rows ──
   requests.push({
     updateSheetProperties: {
-      properties: {
-        sheetId,
-        gridProperties: { frozenRowCount: 1 },
-      },
+      properties: { sheetId, gridProperties: { frozenRowCount: 2 } },
       fields: "gridProperties.frozenRowCount",
     },
   });
 
-  // ── 2. Header row height (taller = 36px) ──
+  // ── Row heights ──
+  // Row 0: title banner 56px
   requests.push({
     updateDimensionProperties: {
       range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 },
-      properties: { pixelSize: 36 },
+      properties: { pixelSize: 56 },
+      fields: "pixelSize",
+    },
+  });
+  // Row 1: column headers 42px
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 2 },
+      properties: { pixelSize: 42 },
+      fields: "pixelSize",
+    },
+  });
+  // Data rows: 32px each
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "ROWS", startIndex: 2, endIndex: rows.length + 2 },
+      properties: { pixelSize: 32 },
       fields: "pixelSize",
     },
   });
 
-  // ── 3. Colored header cells ──
-  const headerColors = [
-    rgb(192, 0,   0),   // A: Deep red   — E-Mail Address
-    rgb(0,   128, 0),   // B: Green      — PASSWORD
-    rgb(230, 108, 0),   // C: Orange     — CREDITS
-    rgb(0,   70,  179), // D: Blue       — Status
-  ];
+  // ── Explicit column widths (px) ──
+  const colWidths = [300, 155, 80, 145]; // A, B, C, D
+  colWidths.forEach((px, i) => {
+    requests.push({
+      updateDimensionProperties: {
+        range: { sheetId, dimension: "COLUMNS", startIndex: i, endIndex: i + 1 },
+        properties: { pixelSize: px },
+        fields: "pixelSize",
+      },
+    });
+  });
 
+  // ── Title banner: merge A1:D1, dark background, large white bold centered text ──
+  requests.push({
+    mergeCells: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
+      mergeType: "MERGE_ALL",
+    },
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: DARK_BG,
+          textFormat: { bold: true, fontSize: 18, fontFamily: "Arial Black", foregroundColor: rgb(0, 230, 100) },
+          horizontalAlignment: "CENTER",
+          verticalAlignment: "MIDDLE",
+        },
+      },
+      fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+    },
+  });
+
+  // ── Column header row (row index 1) ──
+  const headerColors = [
+    rgb(192, 0,   0),   // A: Deep red
+    rgb(0,   135, 0),   // B: Green
+    rgb(210, 100, 0),   // C: Orange
+    rgb(0,   70,  190), // D: Blue
+  ];
   headerColors.forEach((color, colIndex) => {
     requests.push({
       repeatCell: {
-        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
+        range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
         cell: {
           userEnteredFormat: {
             backgroundColor: color,
-            textFormat: { bold: true, foregroundColor: WHITE, fontSize: 11, fontFamily: "Arial" },
+            textFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: WHITE },
             horizontalAlignment: "CENTER",
             verticalAlignment: "MIDDLE",
           },
@@ -166,39 +205,53 @@ export async function syncReplitAccountsToSheet(
     });
   });
 
-  // ── 4. Alternating row stripes + base font for all data rows ──
-  const STRIPE_EVEN = rgb(245, 245, 245); // very light grey
-  const STRIPE_ODD  = WHITE;
+  // ── Data rows ──
+  const ROW_EVEN = rgb(240, 242, 246);
+  const ROW_ODD  = WHITE;
 
   for (let i = 0; i < rows.length; i++) {
-    const rowIdx = i + 1; // 0-indexed, row 0 is header
-    const bg = i % 2 === 0 ? STRIPE_EVEN : STRIPE_ODD;
+    const rowIdx = i + 2; // 0=title 1=headers 2+=data
+    const stripe = i % 2 === 0 ? ROW_EVEN : ROW_ODD;
 
-    // Cols A-C (email, password, credits) — base style
+    // Cols A–C base style
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 0, endColumnIndex: 3 },
         cell: {
           userEnteredFormat: {
-            backgroundColor: bg,
-            textFormat: { fontSize: 10, fontFamily: "Courier New", bold: false, foregroundColor: rgb(30, 30, 30) },
+            backgroundColor: stripe,
+            textFormat: { fontSize: 11, fontFamily: "Courier New", bold: false, foregroundColor: NEAR_BLACK },
             verticalAlignment: "MIDDLE",
+            horizontalAlignment: "LEFT",
           },
         },
-        fields: "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)",
+        fields: "userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)",
       },
     });
 
-    // Col D — status cell with its own color
-    const statusText = rows[i][3] as string;
-    const { bg: statusBg, fg: statusFg } = statusCellStyle(statusText);
+    // Col A: bold email
+    requests.push({
+      repeatCell: {
+        range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 0, endColumnIndex: 1 },
+        cell: {
+          userEnteredFormat: {
+            textFormat: { bold: true, fontSize: 11, fontFamily: "Arial", foregroundColor: rgb(10, 10, 40) },
+          },
+        },
+        fields: "userEnteredFormat(textFormat)",
+      },
+    });
+
+    // Col D: status chip
+    const label = rows[i][3] as string;
+    const { bg, fg } = statusStyle(label);
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 3, endColumnIndex: 4 },
         cell: {
           userEnteredFormat: {
-            backgroundColor: statusBg,
-            textFormat: { bold: true, fontSize: 10, fontFamily: "Arial", foregroundColor: statusFg },
+            backgroundColor: bg,
+            textFormat: { bold: true, fontSize: 11, fontFamily: "Arial Black", foregroundColor: fg },
             horizontalAlignment: "CENTER",
             verticalAlignment: "MIDDLE",
           },
@@ -208,36 +261,30 @@ export async function syncReplitAccountsToSheet(
     });
   }
 
-  // ── 5. Bold emails (col A) ──
-  requests.push({
-    repeatCell: {
-      range: { sheetId, startRowIndex: 1, endRowIndex: rows.length + 1, startColumnIndex: 0, endColumnIndex: 1 },
-      cell: {
-        userEnteredFormat: {
-          textFormat: { bold: true },
-        },
-      },
-      fields: "userEnteredFormat(textFormat.bold)",
-    },
-  });
-
-  // ── 6. Auto-resize all 4 columns ──
-  requests.push({
-    autoResizeDimensions: {
-      dimensions: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: 4 },
-    },
-  });
-
-  // ── 7. Thin outside border around the whole table ──
+  // ── Borders: full table (rows 0 to end) ──
   requests.push({
     updateBorders: {
-      range: { sheetId, startRowIndex: 0, endRowIndex: rows.length + 1, startColumnIndex: 0, endColumnIndex: 4 },
-      top:    { style: "SOLID_MEDIUM", color: rgb(60, 60, 60) },
-      bottom: { style: "SOLID_MEDIUM", color: rgb(60, 60, 60) },
-      left:   { style: "SOLID_MEDIUM", color: rgb(60, 60, 60) },
-      right:  { style: "SOLID_MEDIUM", color: rgb(60, 60, 60) },
-      innerHorizontal: { style: "SOLID", color: rgb(200, 200, 200) },
-      innerVertical:   { style: "SOLID", color: rgb(200, 200, 200) },
+      range: { sheetId, startRowIndex: 0, endRowIndex: rows.length + 2, startColumnIndex: 0, endColumnIndex: 4 },
+      top:             { style: "SOLID_THICK", color: DARK_BG },
+      bottom:          { style: "SOLID_THICK", color: DARK_BG },
+      left:            { style: "SOLID_THICK", color: DARK_BG },
+      right:           { style: "SOLID_THICK", color: DARK_BG },
+      innerHorizontal: { style: "SOLID",       color: rgb(200, 205, 215) },
+      innerVertical:   { style: "SOLID_MEDIUM", color: rgb(160, 165, 175) },
+    },
+  });
+
+  // ── Credits column: center-align ──
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 2, endRowIndex: rows.length + 2, startColumnIndex: 2, endColumnIndex: 3 },
+      cell: {
+        userEnteredFormat: {
+          horizontalAlignment: "CENTER",
+          textFormat: { bold: true, fontSize: 11, fontFamily: "Arial", foregroundColor: rgb(30, 100, 30) },
+        },
+      },
+      fields: "userEnteredFormat(horizontalAlignment,textFormat)",
     },
   });
 
