@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save, Zap, ChevronDown, Trash2 } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save, Zap, ChevronDown, Trash2, FileSpreadsheet } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -131,6 +131,23 @@ export default function ReplitCreate() {
       apiRequest("DELETE", `/api/replit-accounts/${id}`).then(r => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] }),
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const syncSheetMutation = useMutation({
+    mutationFn: (statusFilter: string) =>
+      apiRequest("POST", "/api/replit-accounts/sync-sheet", { statusFilter }).then(r => r.json()),
+    onSuccess: (data: any) => {
+      if (data.error) {
+        toast({ title: "Sync failed", description: data.error, variant: "destructive" });
+        return;
+      }
+      toast({
+        title: "Synced to Google Sheets",
+        description: `${data.updated} rows written (${data.total} accounts)`,
+      });
+      window.open(data.sheetUrl, "_blank");
+    },
+    onError: (err: any) => toast({ title: "Sync failed", description: err.message, variant: "destructive" }),
   });
 
   // ── Shared ──
@@ -1422,6 +1439,17 @@ export default function ReplitCreate() {
               <Layers className="w-3.5 h-3.5" style={{ color: G, filter: `drop-shadow(0 0 6px ${G})` }} />
               <span className="text-[10px] font-mono uppercase tracking-widest font-bold" style={{ color: GA(0.7) }}>replit_accounts</span>
               <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ background: GA(0.08), border: `1px solid ${GA(0.25)}`, color: G }}>{replitAccounts.length} total</span>
+              <button
+                onClick={() => syncSheetMutation.mutate(statusFilter)}
+                disabled={syncSheetMutation.isPending}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                style={{ background: "rgba(15,157,88,0.12)", border: "1px solid rgba(15,157,88,0.35)", color: syncSheetMutation.isPending ? "rgba(15,157,88,0.35)" : "rgba(15,157,88,0.85)", cursor: syncSheetMutation.isPending ? "not-allowed" : "pointer" }}
+                data-testid="button-sync-google-sheets"
+                title={`Sync ${statusFilter === "all" ? "all" : `"${statusFilter}"`} accounts to Google Sheets`}
+              >
+                <FileSpreadsheet className="w-3 h-3" />
+                {syncSheetMutation.isPending ? "SYNCING..." : "SYNC TO SHEET"}
+              </button>
             </div>
             {/* Status filter tabs */}
             <div className="flex items-center gap-1 flex-wrap">

@@ -3897,6 +3897,26 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/replit-accounts/sync-sheet", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { spreadsheetId, statusFilter } = req.body;
+      const sheetId = (spreadsheetId as string) || "1iwwFquXt3cqSEIlQYaDkERPjwXTFpCefQ2lE-_yphio";
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const allAccounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+      const accounts = statusFilter && statusFilter !== "all"
+        ? allAccounts.filter(a => a.status === statusFilter)
+        : allAccounts;
+      const { syncReplitAccountsToSheet } = await import("./googleSheetsService.js");
+      const result = await syncReplitAccountsToSheet(sheetId, accounts);
+      res.json({ success: true, updated: result.updated, total: accounts.length, sheetUrl: result.sheetUrl });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/replit-accounts/bulk-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const { status } = req.body;
