@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save, Zap } from "lucide-react";
+import { Code2, Play, Mail, Key, Hash, Layers, ChevronRight, Cpu, Radio, Tag, ExternalLink, CreditCard, ShoppingCart, User, Link2, Save, Zap, ChevronDown, Trash2 } from "lucide-react";
 
 type OutlookAccount = {
   id: string;
@@ -36,6 +36,18 @@ const P = "rgba(190,120,255,1)";
 const PA = (a: number) => `rgba(190,120,255,${a})`;
 const L = "rgba(255,185,50,1)";
 const LA = (a: number) => `rgba(255,185,50,${a})`;
+
+const STATUSES: { value: string; label: string; color: string; bg: string; border: string }[] = [
+  { value: "processing", label: "PROCESSING", color: "#facc15", bg: "rgba(250,204,21,0.1)", border: "rgba(250,204,21,0.35)" },
+  { value: "available",  label: "AVAILABLE",  color: "#00ff41", bg: "rgba(0,255,65,0.1)",  border: "rgba(0,255,65,0.35)" },
+  { value: "working",    label: "WORKING",    color: "#60a5fa", bg: "rgba(96,165,250,0.1)",  border: "rgba(96,165,250,0.35)" },
+  { value: "completed",  label: "COMPLETED",  color: "#34d399", bg: "rgba(52,211,153,0.1)", border: "rgba(52,211,153,0.35)" },
+  { value: "warmed",     label: "WARMED",     color: "#c084fc", bg: "rgba(192,132,252,0.1)", border: "rgba(192,132,252,0.35)" },
+  { value: "error",      label: "ERROR",      color: "#f87171", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.35)" },
+];
+function statusMeta(s: string) {
+  return STATUSES.find(x => x.value === s) ?? { value: s, label: s.toUpperCase(), color: "rgba(255,255,255,0.4)", bg: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.15)" };
+}
 
 function getLogStyle(text: string): { color: string; prefix: string } {
   if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
@@ -99,6 +111,27 @@ export default function ReplitCreate() {
   const [nopeKey, setNopeKey] = useState("");
   const [nopeKeyDirty, setNopeKeyDirty] = useState(false);
   const [nopeKeySaving, setNopeKeySaving] = useState(false);
+
+  // ── Status changer ──
+  const [statusPickerOpen, setStatusPickerOpen] = useState<string | null>(null); // accountId
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      apiRequest("PATCH", `/api/replit-accounts/${id}/status`, { status }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
+      setStatusPickerOpen(null);
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest("DELETE", `/api/replit-accounts/${id}`).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] }),
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
 
   // ── Shared ──
   const [logs, setLogs] = useState<LogLine[]>([]);
@@ -417,6 +450,21 @@ export default function ReplitCreate() {
   const maxCount = Math.min(1000, availableOutlookAccounts.length || 1);
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
   const selectedReplitAccount = replitAccounts.find((a) => a.id === selectedReplitId);
+
+  // Email → replit account lookup (for inline log status pills)
+  const emailToAccount = new Map<string, ReplitAccount>(
+    replitAccounts.map(a => [a.email.toLowerCase(), a])
+  );
+  // Quick regex to extract emails from a log line
+  const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+
+  // Filtered accounts list
+  const filteredAccounts = statusFilter === "all"
+    ? replitAccounts
+    : replitAccounts.filter(a => a.status === statusFilter);
+
+  // Status count summary
+  const statusCounts = STATUSES.map(s => ({ ...s, count: replitAccounts.filter(a => a.status === s.value).length }));
 
   // Extract coupon from promo URL for display
   let urlCoupon = "";
@@ -1269,11 +1317,48 @@ export default function ReplitCreate() {
                   }
                   const { color, prefix } = getLogStyle(line.text);
                   const isSeparator = line.text.startsWith("━━━") || line.text.startsWith("---") || line.text.startsWith("─");
+
+                  // Find any replit account email in this log line
+                  const emailMatches = [...line.text.matchAll(new RegExp(EMAIL_RE.source, "g"))];
+                  const matchedAccount = emailMatches.map(m => emailToAccount.get(m[0].toLowerCase())).find(Boolean);
+
                   return (
                     <div key={i} className={`flex items-start gap-2 min-w-0 ${isSeparator ? "mt-2 mb-1 opacity-30" : "py-px"}`}>
                       <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: GA(0.22) }}>{line.time}</span>
                       <span className="text-[10px] flex-shrink-0 mt-0.5 w-3 text-center font-bold" style={{ color }}>{prefix}</span>
-                      <span className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden" style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}>{line.text}</span>
+                      <span className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden flex-1" style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}>{line.text}</span>
+                      {matchedAccount && (() => {
+                        const sm = statusMeta(matchedAccount.status);
+                        const isOpen = statusPickerOpen === matchedAccount.id;
+                        return (
+                          <div className="relative flex-shrink-0">
+                            <button
+                              onClick={() => setStatusPickerOpen(isOpen ? null : matchedAccount.id)}
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold"
+                              style={{ background: sm.bg, border: `1px solid ${sm.border}`, color: sm.color, cursor: "pointer" }}
+                              data-testid={`button-log-status-${i}`}
+                            >
+                              {sm.label}
+                              <ChevronDown className="w-2 h-2" />
+                            </button>
+                            {isOpen && (
+                              <div className="absolute right-0 top-full mt-1 z-50 rounded-lg overflow-hidden shadow-2xl" style={{ background: "#0d0d0d", border: "1px solid rgba(0,255,65,0.2)", minWidth: 110 }}>
+                                {STATUSES.map(s => (
+                                  <button
+                                    key={s.value}
+                                    onClick={() => statusMutation.mutate({ id: matchedAccount.id, status: s.value })}
+                                    className="w-full text-left px-3 py-1.5 text-[9px] font-mono font-bold transition-all"
+                                    style={{ color: s.color, background: matchedAccount.status === s.value ? s.bg : "transparent" }}
+                                    data-testid={`button-set-status-${s.value}-${i}`}
+                                  >
+                                    {s.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })
@@ -1327,6 +1412,155 @@ export default function ReplitCreate() {
           )}
         </div>
       </div>
+
+      {/* ══ BULK ACCOUNTS LIST ══ */}
+      {replitAccounts.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.14)}` }}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-3 flex-wrap gap-2" style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.1)}` }}>
+            <div className="flex items-center gap-2.5">
+              <Layers className="w-3.5 h-3.5" style={{ color: G, filter: `drop-shadow(0 0 6px ${G})` }} />
+              <span className="text-[10px] font-mono uppercase tracking-widest font-bold" style={{ color: GA(0.7) }}>replit_accounts</span>
+              <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ background: GA(0.08), border: `1px solid ${GA(0.25)}`, color: G }}>{replitAccounts.length} total</span>
+            </div>
+            {/* Status filter tabs */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setStatusFilter("all")}
+                className="px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                style={{ background: statusFilter === "all" ? GA(0.12) : "transparent", border: `1px solid ${statusFilter === "all" ? GA(0.4) : GA(0.12)}`, color: statusFilter === "all" ? G : GA(0.35) }}
+                data-testid="button-filter-all"
+              >
+                ALL ({replitAccounts.length})
+              </button>
+              {statusCounts.filter(s => s.count > 0).map(s => (
+                <button
+                  key={s.value}
+                  onClick={() => setStatusFilter(s.value)}
+                  className="px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
+                  style={{ background: statusFilter === s.value ? s.bg : "transparent", border: `1px solid ${statusFilter === s.value ? s.border : "rgba(255,255,255,0.07)"}`, color: statusFilter === s.value ? s.color : "rgba(255,255,255,0.25)" }}
+                  data-testid={`button-filter-${s.value}`}
+                >
+                  {s.label} ({s.count})
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Table header */}
+          <div className="grid px-5 py-2 text-[8px] font-mono uppercase tracking-widest" style={{ gridTemplateColumns: "1fr 1.4fr 1fr 80px 90px 48px", color: GA(0.25), borderBottom: `1px solid ${GA(0.07)}` }}>
+            <span>Username</span>
+            <span>Email</span>
+            <span>Outlook</span>
+            <span>Coupon</span>
+            <span>Status</span>
+            <span></span>
+          </div>
+
+          {/* Rows */}
+          <div className="overflow-y-auto" style={{ maxHeight: "340px" }}>
+            {filteredAccounts.length === 0 ? (
+              <div className="flex items-center justify-center py-10">
+                <p className="text-[10px] font-mono" style={{ color: GA(0.25) }}>no accounts with status "{statusFilter}"</p>
+              </div>
+            ) : (
+              filteredAccounts.map((acct, idx) => {
+                const sm = statusMeta(acct.status);
+                const isPickerOpen = statusPickerOpen === acct.id;
+                return (
+                  <div
+                    key={acct.id}
+                    className="grid items-center px-5 py-2.5 transition-all"
+                    style={{
+                      gridTemplateColumns: "1fr 1.4fr 1fr 80px 90px 48px",
+                      borderBottom: idx < filteredAccounts.length - 1 ? `1px solid ${GA(0.05)}` : "none",
+                      background: isPickerOpen ? GA(0.03) : "transparent",
+                    }}
+                    data-testid={`row-replit-account-${acct.id}`}
+                  >
+                    {/* Username */}
+                    <div className="min-w-0 pr-3">
+                      <p className="text-[11px] font-mono font-bold truncate" style={{ color: G }}>@{acct.username}</p>
+                      <p className="text-[8px] font-mono truncate" style={{ color: GA(0.25) }}>{new Date(acct.createdAt).toLocaleDateString()}</p>
+                    </div>
+
+                    {/* Email */}
+                    <div className="min-w-0 pr-3">
+                      <p className="text-[10px] font-mono truncate" style={{ color: GA(0.6) }}>{acct.email}</p>
+                      {acct.error && (
+                        <p className="text-[8px] font-mono truncate" style={{ color: "#f87171" }} title={acct.error}>{acct.error.substring(0, 40)}</p>
+                      )}
+                    </div>
+
+                    {/* Outlook */}
+                    <div className="min-w-0 pr-3">
+                      <p className="text-[9px] font-mono truncate" style={{ color: acct.outlookEmail ? "rgba(0,200,255,0.55)" : GA(0.18) }}>
+                        {acct.outlookEmail ? acct.outlookEmail.split("@")[0] : "—"}
+                      </p>
+                    </div>
+
+                    {/* Coupon */}
+                    <div className="min-w-0 pr-2">
+                      {acct.couponCode ? (
+                        <span className="text-[8px] font-mono px-1.5 py-0.5 rounded inline-block" style={{ background: LA(0.08), border: `1px solid ${LA(0.2)}`, color: L, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {acct.couponCode}
+                        </span>
+                      ) : (
+                        <span className="text-[8px] font-mono" style={{ color: GA(0.18) }}>—</span>
+                      )}
+                    </div>
+
+                    {/* Status pill with dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setStatusPickerOpen(isPickerOpen ? null : acct.id)}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold w-full"
+                        style={{ background: sm.bg, border: `1px solid ${sm.border}`, color: sm.color, cursor: "pointer" }}
+                        data-testid={`button-status-pill-${acct.id}`}
+                      >
+                        <span className="flex-1 text-left truncate">{sm.label}</span>
+                        <ChevronDown className="w-2.5 h-2.5 flex-shrink-0" />
+                      </button>
+                      {isPickerOpen && (
+                        <div className="absolute left-0 top-full mt-1 z-50 rounded-lg overflow-hidden shadow-2xl" style={{ background: "#0a0a0a", border: "1px solid rgba(0,255,65,0.25)", minWidth: 120 }}>
+                          {STATUSES.map(s => (
+                            <button
+                              key={s.value}
+                              onClick={() => statusMutation.mutate({ id: acct.id, status: s.value })}
+                              disabled={statusMutation.isPending}
+                              className="w-full text-left px-3 py-2 text-[9px] font-mono font-bold flex items-center gap-2 transition-all"
+                              style={{ color: s.color, background: acct.status === s.value ? s.bg : "transparent" }}
+                              data-testid={`button-change-status-${s.value}-${acct.id}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                              {s.label}
+                              {acct.status === s.value && <span style={{ color: s.color, opacity: 0.6, marginLeft: "auto" }}>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Delete */}
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete @${acct.username}?`)) deleteMutation.mutate(acct.id);
+                        }}
+                        className="p-1.5 rounded transition-all"
+                        style={{ color: "rgba(248,113,113,0.4)", cursor: "pointer" }}
+                        data-testid={`button-delete-account-${acct.id}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
