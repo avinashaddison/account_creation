@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Archive, Receipt, LogOut, User, Mail, Users,
   Wallet, Server, Pencil, Check, X, TrendingUp, Terminal,
   Settings, Shield, Ticket, Search, Bell, Bookmark,
-  SlidersHorizontal, CreditCard, ShoppingCart, ChevronDown,
+  SlidersHorizontal, CreditCard, ShoppingCart, ChevronDown, MailOpen,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -270,6 +270,7 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
     { href: "/admin/create-server", label: "Create Account", icon: Server, tag: "OPS" },
     { href: "/admin/accounts", label: "Account Stock", icon: Archive, tag: "DB" },
     { href: "/admin/email-workspace", label: "Email Workspace", icon: Mail, tag: "NET" },
+    { href: "/admin/outlook-workspace", label: "Outlook Workspace", icon: MailOpen, tag: "NET" },
     { href: "/admin/billing", label: "Billing", icon: Receipt, tag: "FIN" },
     { href: "/admin/wallet", label: "Wallet", icon: Wallet, tag: "FIN" },
     { href: "/admin/checkout-cards", label: "Checkout Cards", icon: ShoppingCart, tag: "CRD" },

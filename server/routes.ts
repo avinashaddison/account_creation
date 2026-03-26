@@ -13,6 +13,7 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
+import { activateOutlookSession, stopOutlookSession, getOutlookMessages, getOutlookSessionInfo } from "./outlookWorkspaceService";
 import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
 import { getFivesimBalance } from "./fivesimService";
 import { clearZenrowsApiKeyCache } from "./playwrightService";
@@ -4809,6 +4810,69 @@ export async function registerRoutes(
       if (!checkoutUrl) return res.status(400).json({ error: "checkoutUrl required" });
       const acct = await storage.setReplitCheckoutUrl(id, checkoutUrl);
       res.json({ success: true, account: acct });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── OUTLOOK WORKSPACE ───────────────────────────────────────────────────────
+
+  // GET /api/outlook-workspace/session
+  app.get("/api/outlook-workspace/session", requireAuth, async (req: any, res) => {
+    const userId = req.session?.userId;
+    const info = getOutlookSessionInfo(userId);
+    res.json(info);
+  });
+
+  // POST /api/outlook-workspace/activate — pick random Outlook account + start IMAP
+  app.post("/api/outlook-workspace/activate", requireAuth, async (req: any, res) => {
+    const userId = req.session?.userId;
+    try {
+      const accounts = await storage.getAllPrivateOutlooks();
+      const active = accounts.filter((a: any) => a.status === "active" && a.password);
+      if (active.length === 0) return res.status(404).json({ error: "No active Outlook accounts found in database" });
+      const chosen = active[Math.floor(Math.random() * active.length)];
+      await activateOutlookSession(userId, chosen.email, chosen.password);
+      res.json({ success: true, email: chosen.email });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/outlook-workspace/activate/:id — activate specific account by ID
+  app.post("/api/outlook-workspace/activate/:id", requireAuth, async (req: any, res) => {
+    const userId = req.session?.userId;
+    try {
+      const { id } = req.params;
+      const accounts = await storage.getAllPrivateOutlooks();
+      const chosen = accounts.find((a: any) => a.id === id);
+      if (!chosen) return res.status(404).json({ error: "Account not found" });
+      await activateOutlookSession(userId, chosen.email, chosen.password);
+      res.json({ success: true, email: chosen.email });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/outlook-workspace/stop
+  app.post("/api/outlook-workspace/stop", requireAuth, async (req: any, res) => {
+    const userId = req.session?.userId;
+    stopOutlookSession(userId);
+    res.json({ success: true });
+  });
+
+  // GET /api/outlook-workspace/messages
+  app.get("/api/outlook-workspace/messages", requireAuth, async (req: any, res) => {
+    const userId = req.session?.userId;
+    const data = getOutlookMessages(userId);
+    res.json(data);
+  });
+
+  // GET /api/outlook-workspace/accounts — list available Outlook accounts
+  app.get("/api/outlook-workspace/accounts", requireAuth, async (req: any, res) => {
+    try {
+      const accounts = await storage.getAllPrivateOutlooks();
+      res.json(accounts.map((a: any) => ({ id: a.id, email: a.email, status: a.status })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
