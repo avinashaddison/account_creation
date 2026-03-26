@@ -1,0 +1,204 @@
+
+🚀 Starting 1 Lovable account via mail.gw [lovable-bulk-5783b6d3]
+19:00:34
+·
+Using SOAX residential proxy (rotated session)
+19:00:34
+━━━ [1/1] brandonmartinez8198@outlook.com ━━━
+19:00:34
+>
+ZenRows browser mode enabled
+19:00:34
+>
+Connecting to ZenRows browser: wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fa...
+19:00:36
++
+✅ Connected via ZenRows anti-bot browser — Cloudflare WAF bypassed
+19:00:36
+·
+Solving Turnstile via CapSolver in background (sitekey: 0x4AAAAAAChnKAZBY0iFpFHC, action: signup_email_password)...
+19:00:37
++
+✅ mail.gw account created: freesky6651@oakon.com
+19:00:37
+>
+Navigating to https://lovable.dev/signup ...
+19:00:44
+·
+[API 200] https://api.lovable.dev/consent/policy → {"$schema":"https://api.lovable.dev/ConsentPolicyResponse.json","bucket":"rest"}
+19:00:44
+·
+Page title: "Create account" | Has email input: true
+19:00:44
+·
+Filling email: freesky6651@oakon.com
+19:00:48
+·
+Filled email via input[type="email"]
+19:00:49
++
+✅ Background CapSolver solved! Token length: 1050
+19:00:49
+·
+Pre-Continue: fired 0 Turnstile callback(s) with token — button should be enabled
+19:00:51
+·
+No pre-set Turnstile token in DOM — CapSolver injection required
+19:00:51
+·
+Clicking Continue...
+19:00:51
+·
+Clicked Continue: "continue"
+19:00:51
+·
+Waiting for page response (7s)...
+19:00:54
+·
+[API 200] https://api.lovable.dev/auth/check-auth-provider → {"has_sso_provider":false,"has_email_password":false,"domain_lock":false}
+19:00:54
+·
+Fake Turnstile script served — render() callbacks queued until real CapSolver token
+19:00:59
+·
+URL after Continue: https://lovable.dev/signup
+19:00:59
+·
+Text snippet: Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password must contain: at least 8 characters a number (0-9) By continuing, you agree to the Te
+19:00:59
++
+✅ Password field detected — using email + password registration
+19:01:01
+·
+Filled password via input[type="password"]
+19:01:01
+·
+Generated password: 56C4EHKdgYPZAa1!
+19:01:02
+·
+Awaiting real CapSolver token to fire queued Turnstile callbacks...
+19:01:02
++
+✅ Got real CapSolver token (1050 chars) — firing queued Turnstile callbacks
+19:01:02
+·
+Fired 1 queued Turnstile callback(s) with real token
+19:01:02
+·
+Waiting 5s for Lovable to write token to Firestore...
+19:01:07
+·
+Buttons: "Continue with Google" disabled=false | "Continue with GitHub" disabled=false | "Edit" disabled=false | "" disabled=false | "Create your account" disabled=false
+19:01:08
+·
+Submitting password form...
+19:01:08
+·
+Clicked Submit: "create your account"
+19:01:08
+·
+Waiting 18s for signup response...
+19:01:26
+·
+URL after submit: https://lovable.dev/signup
+19:01:26
+·
+Text after submit: Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password meets all requirements By continuing, you agree to the Terms of Service and Privacy Pol
+19:01:26
+·
+Still on signup page — waiting 15s more then retrying form submit...
+19:01:29
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","scOL5G0rcrKB1A8KVTheVw","",8,14,30000]]]
+19:01:32
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+19:01:36
+·
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#SignupNewUserResponse", "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjczMmNhOTY3MTNiMWRkMTcyMzg1MDg0Y2U5ZjQzODFhZDAwY2VjZTQiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vZ3B0LWVuZ2luZWVyLTM5MDYwNyIsImF1ZCI6ImdwdC1lbmdpbmVlci0zOTA2MDciLCJhdXRoX3RpbWUiOjE3NzQ1MzE4OTUsInVzZXJfaWQiOiIxUjl4eHM5SXlyVFR1SnFaNlN4eEs5UHpNeWIyIiwic3ViIjoiMVI5eHhzOUl5clRUdU
+19:01:36
++
+✅ Firebase idToken captured (length: 940)
+19:01:36
++
+✅ Firebase refreshToken captured
+19:01:36
++
+✅ Firebase UID captured: 1R9xxs9IyrTTuJqZ6SxxK9PzMyb2
+19:01:36
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "1R9xxs9IyrTTuJqZ6SxxK9PzMyb2", "email": "freesky6651@oakon.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774531893622, "providerUserInfo": [ { "providerId": "password", "federatedId": "freesky6651@oakon.com",
+19:01:38
+›
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetOobConfirmationCodeResponse", "email": "freesky6651@oakon.com" }
+19:01:40
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","KJAlIqlocwiv-Uf50auSKQ","",8,14,30000]]]
+19:01:41
+·
+After extra wait: https://lovable.dev/signup — Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password meets a
+19:01:41
++
+✅ Firebase signup completed during extra wait (idToken captured) — proceeding to email verification, skipping retry
+19:01:41
+·
+📬 Polling mail.gw inbox for verification email (up to 45s — mail.gw is near-instant)...
+19:01:42
+·
+📧 Got email: "Verify your email for Lovable.dev" from noreply@lovable.dev
+19:01:42
++
+✅ mail.gw: Lovable verification link: https://lovable.dev/auth/action?mode=verifyEmail&oobCode=hcL7oNJuGhq1xaw66RCVPYWymI0DMMbnQYmiv2lH8GcAAAGdKlfrZg&apiKey=A
+19:01:42
+›
+🔑 Applying email verification via Firebase API (oobCode: hcL7oNJuGhq1xaw66RCV...)
+19:01:43
++
+✅ Email verified via Firebase API! emailVerified=true
+19:01:43
+>
+🚀 Starting onboarding with fresh browser (Firebase API verified)...
+19:01:43
+·
+[Onboard] Using Firebase refreshToken to skip login form...
+19:01:43
+·
+[Onboard] Got fresh idToken (938 chars)
+19:01:43
+>
+[Onboard] Opening ZenRows browser and injecting Firebase auth state...
+19:01:43
+·
+Connecting via Addison Proxy...
+19:01:45
+·
+Addison Proxy connected.
+19:01:50
+>
+[Onboard] Firebase auth injected — navigating to /getting-started...
+19:01:59
+>
+[Onboard] URL after inject + navigate: https://lovable.dev/login?redirect=%2Fgetting-started
+19:01:59
+·
+[Onboard] Token injection didn't work (redirected to auth). Trying /projects...
+19:02:03
+·
+[Onboard] /projects URL: https://lovable.dev/projects
+19:02:03
+·
+[Onboard] Final URL (token injection path): https://lovable.dev/projects
+19:02:03
++
+✅ [Onboard] Complete via token injection for freesky6651@oakon.com
+19:02:03
++
+✅ Lovable account creation complete (API verified): freesky6651@oakon.com
+19:02:04
++
+✅ [1/1] Saved — freesky6651@oakon.com
+19:02:04
+>
+🏁 Done — 1 created, 0 failed
+addison@panel:~$
+ready
