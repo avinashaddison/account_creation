@@ -52,6 +52,7 @@ export default function LovableCreate() {
 
   // ── CREATE mode state ──
   const [count, setCount] = useState(1);
+  const [concurrency, setConcurrency] = useState(3);
   const [referralUrl, setReferralUrl] = useState("");
 
   // ── BULK LINKS mode state ──
@@ -169,7 +170,7 @@ export default function LovableCreate() {
     setCompletedCount(0);
     setTotalCount(count);
     try {
-      const res = await apiRequest("POST", "/api/lovable-create/bulk", { count, referralUrl: referralUrl || undefined });
+      const res = await apiRequest("POST", "/api/lovable-create/bulk", { count, concurrency, referralUrl: referralUrl || undefined });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start");
       activeBatchId.current = data.batchId;
@@ -337,6 +338,37 @@ export default function LovableCreate() {
                 )}
               </div>
 
+              {/* Concurrency slider */}
+              <div>
+                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: PA(0.4) }}>
+                  <Layers className="w-3 h-3" />
+                  Parallel Browsers
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="range"
+                      min={1}
+                      max={10}
+                      value={concurrency}
+                      onChange={(e) => { sounds.toggle(); setConcurrency(parseInt(e.target.value)); }}
+                      className="w-full h-1.5 rounded-full cursor-pointer appearance-none"
+                      style={{ background: `linear-gradient(to right, ${PA(0.65)} ${((concurrency - 1) / 9) * 100}%, rgba(255,255,255,0.07) ${((concurrency - 1) / 9) * 100}%)`, accentColor: P }}
+                      data-testid="input-concurrency-slider"
+                    />
+                  </div>
+                  <div
+                    className="w-11 h-8 rounded-lg flex items-center justify-center text-base font-mono font-bold flex-shrink-0"
+                    style={{ background: PA(0.1), border: `1px solid ${PA(0.35)}`, color: P, textShadow: `0 0 10px ${P}`, boxShadow: `0 0 12px ${PA(0.1)} inset` }}
+                  >
+                    {concurrency}x
+                  </div>
+                </div>
+                <p className="text-[9px] font-mono mt-1.5 flex items-center gap-1" style={{ color: PA(0.28) }}>
+                  {concurrency === 1 ? "sequential — 1 browser at a time" : `${concurrency} browsers running simultaneously — ~${Math.ceil(1 / concurrency * 10) / 10}x faster`}
+                </p>
+              </div>
+
               {/* Count slider */}
               <div>
                 <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: PA(0.4) }}>
@@ -366,7 +398,9 @@ export default function LovableCreate() {
                 {count > 1 && (
                   <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: PA(0.32) }}>
                     <Layers className="w-3 h-3" />
-                    bulk mode — {count} accounts, each gets a unique mail.gw address
+                    {concurrency > 1
+                      ? `${concurrency}x parallel — ${count} accounts across ${concurrency} simultaneous browsers`
+                      : `bulk mode — ${count} accounts, each gets a unique mail.gw address`}
                   </p>
                 )}
               </div>

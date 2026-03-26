@@ -3966,8 +3966,9 @@ export async function registerRoutes(
 
   app.post("/api/lovable-create/bulk", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
     try {
-      const { count = 1, referralUrl } = req.body;
+      const { count = 1, referralUrl, concurrency: concurrencyRaw } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
+      const concurrency = Math.min(Math.max(1, parseInt(concurrencyRaw) || 1), 10);
       if (referralUrl && !referralUrl.startsWith("https://lovable.dev/")) {
         return res.status(400).json({ error: "referralUrl must be a lovable.dev URL" });
       }
@@ -3984,89 +3985,108 @@ export async function registerRoutes(
 
       const shuffled = [...available].sort(() => Math.random() - 0.5);
       const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
+      const total = toUse.length;
 
       const bulkId = randomUUID().substring(0, 8);
       const batchId = `lovable-bulk-${bulkId}`;
 
       batchOwners.set(batchId, userId);
-      res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
+      res.json({ success: true, bulkId, batchId, count: total, concurrency, message: `Starting bulk creation for ${total} account(s) with ${concurrency}x concurrency` });
 
       (async () => {
-        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} Lovable account(s) queued`, userId);
-        let successCount = 0;
-        let failCount = 0;
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${total} account(s) · ${concurrency}x parallel browsers`, userId);
 
-        // Fetch SOAX proxy once for the whole batch
+        // Fetch SOAX proxy template once
         const soaxTemplate = await storage.getSetting("soax_proxy_template");
         const residentialProxy = await storage.getSetting("residential_proxy_url");
         const baseProxy = soaxTemplate || residentialProxy || "";
 
-        for (let i = 0; i < toUse.length; i++) {
-          if (cancelledBatches.has(batchId)) {
-            broadcastLog(batchId, bulkId, `🛑 Batch cancelled — stopping after account ${i}/${toUse.length}`, userId);
-            break;
-          }
-          const acc = toUse[i];
-          // Rotate proxy session per account
-          const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
-          if (rotatedProxy) broadcastLog(batchId, bulkId, `Using SOAX residential proxy (rotated session)`, userId);
-          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
-          try {
-            const result = await registerLovableAccount(
-              acc.email,
-              acc.password,
-              (msg) => broadcastLog(batchId, bulkId, msg, userId),
-              rotatedProxy || undefined,
-              referralUrl || undefined
-            );
-            if (result.success) {
-              try {
-                await storage.createLovableAccount({
-                  email: result.email!,
-                  password: result.password || null,
-                  outlookEmail: acc.email,
-                  status: "created",
-                  credits: referralUrl ? 20 : 5,
-                  createdBy: userId,
-                });
-                successCount++;
-                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — ${result.email}`, userId);
-              } catch (dbErr: any) {
-                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+        // Shared atomic counters (safe in single-threaded JS event loop)
+        let queueIndex = 0;
+        let processedCount = 0;
+        let successCount = 0;
+        let failCount = 0;
+
+        async function processOne() {
+          while (true) {
+            if (cancelledBatches.has(batchId)) break;
+            const i = queueIndex++;
+            if (i >= total) break;
+
+            const acc = toUse[i];
+            const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
+            if (rotatedProxy) broadcastLog(batchId, bulkId, `[W${i % concurrency + 1}] Using SOAX proxy (rotated session)`, userId);
+            broadcastLog(batchId, bulkId, `━━━ [slot ${i + 1}/${total}] ${acc.email} ━━━`, userId);
+
+            try {
+              const result = await registerLovableAccount(
+                acc.email,
+                acc.password,
+                (msg) => broadcastLog(batchId, bulkId, msg, userId),
+                rotatedProxy || undefined,
+                referralUrl || undefined
+              );
+
+              const completedIdx = ++processedCount;
+
+              if (result.success) {
+                try {
+                  await storage.createLovableAccount({
+                    email: result.email!,
+                    password: result.password || null,
+                    outlookEmail: acc.email,
+                    status: "created",
+                    credits: referralUrl ? 20 : 5,
+                    createdBy: userId,
+                  });
+                  successCount++;
+                  broadcastLog(batchId, bulkId, `✅ [${completedIdx}/${total}] Saved — ${result.email}`, userId);
+                } catch (dbErr: any) {
+                  broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+                }
+                broadcast({ type: "lovable_create_result", bulkId, batchId, success: true, email: result.email, index: completedIdx, total }, userId);
+              } else if (result.pendingVerification) {
+                try {
+                  await storage.createLovableAccount({
+                    email: result.email!,
+                    password: result.password || null,
+                    outlookEmail: acc.email,
+                    status: "pending_verification",
+                    credits: referralUrl ? 20 : 5,
+                    error: result.error || null,
+                    refreshToken: result.refreshToken || null,
+                    firebaseUid: result.firebaseUid || null,
+                    createdBy: userId,
+                  });
+                  successCount++;
+                  broadcastLog(batchId, bulkId, `⏳ [${completedIdx}/${total}] Pending verification — ${result.email}`, userId);
+                } catch (dbErr: any) {
+                  broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
+                }
+                broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, pending: true, email: result.email, index: completedIdx, total }, userId);
+              } else {
+                failCount++;
+                broadcastLog(batchId, bulkId, `❌ [${completedIdx}/${total}] Failed: ${result.error || "Unknown"}`, userId);
+                broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, error: result.error, index: completedIdx, total }, userId);
               }
-              broadcast({ type: "lovable_create_result", bulkId, batchId, success: true, email: result.email, index: i + 1, total: toUse.length }, userId);
-            } else if (result.pendingVerification) {
-              try {
-                await storage.createLovableAccount({
-                  email: result.email!,
-                  password: result.password || null,
-                  outlookEmail: acc.email,
-                  status: "pending_verification",
-                  credits: referralUrl ? 20 : 5,
-                  error: result.error || null,
-                  refreshToken: result.refreshToken || null,
-                  firebaseUid: result.firebaseUid || null,
-                  createdBy: userId,
-                });
-                successCount++;
-                broadcastLog(batchId, bulkId, `⏳ [${i + 1}/${toUse.length}] Pending verification — ${result.email}`, userId);
-              } catch (dbErr: any) {
-                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
-              }
-              broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, pending: true, email: result.email, index: i + 1, total: toUse.length }, userId);
-            } else {
+            } catch (err: any) {
+              const completedIdx = ++processedCount;
               failCount++;
-              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
-              broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: toUse.length }, userId);
+              broadcastLog(batchId, bulkId, `❌ [${completedIdx}/${total}] Error: ${(err.message || "").substring(0, 100)}`, userId);
+              broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, error: err.message, index: completedIdx, total }, userId);
             }
-          } catch (err: any) {
-            failCount++;
-            broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Error: ${(err.message || "").substring(0, 100)}`, userId);
-            broadcast({ type: "lovable_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: toUse.length }, userId);
           }
         }
 
-        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
+        // Launch N parallel workers
+        const workers = Array.from({ length: concurrency }, () => processOne());
+        await Promise.allSettled(workers);
+
+        if (cancelledBatches.has(batchId)) {
+          broadcastLog(batchId, bulkId, `🛑 Batch cancelled — ${successCount} created before stop`, userId);
+        } else {
+          broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
+        }
         broadcastBatchComplete(batchId, userId);
         cancelledBatches.delete(batchId);
         batchOwners.delete(batchId);
