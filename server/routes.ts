@@ -4227,16 +4227,20 @@ export async function registerRoutes(
       if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids must be a non-empty array" });
       const userId = req.session.userId;
       const role = req.session.role;
-      const accounts = await storage.getAllLovableAccounts();
-      const accountMap = new Map(accounts.map((a) => [a.id, a]));
-      let updated = 0;
+
+      // Validate ALL requested IDs exist and are owned by caller before touching any row
+      const allAccounts = await storage.getAllLovableAccounts();
+      const accountMap = new Map(allAccounts.map((a) => [a.id, a]));
       for (const id of ids) {
         const acct = accountMap.get(id);
-        if (!acct) continue;
-        if (role !== "superadmin" && acct.createdBy !== userId) continue;
-        await storage.updateLovableAccount(id, { status });
-        updated++;
+        if (!acct) return res.status(404).json({ error: `Account not found: ${id}` });
+        if (role !== "superadmin" && acct.createdBy !== userId) {
+          return res.status(403).json({ error: `Forbidden: account ${id} does not belong to you` });
+        }
       }
+
+      // All IDs validated — perform single atomic UPDATE ... WHERE id IN (...)
+      const updated = await storage.bulkUpdateLovableStatus(ids, status);
       res.json({ success: true, updated });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts } from "@shared/schema";
 import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount } from "@shared/schema";
-import { eq, desc, sql, count, and, or } from "drizzle-orm";
+import { eq, desc, sql, count, and, or, inArray } from "drizzle-orm";
 import pg from "pg";
 
 export interface IStorage {
@@ -73,6 +73,7 @@ export interface IStorage {
   clearReplitCheckoutUrl(id: string): Promise<ReplitAccount>;
   createLovableAccount(data: InsertLovableAccount): Promise<LovableAccount>;
   updateLovableAccount(id: string, data: Partial<InsertLovableAccount>): Promise<LovableAccount>;
+  bulkUpdateLovableStatus(ids: string[], status: string): Promise<number>;
   getAllLovableAccounts(): Promise<LovableAccount[]>;
   getLovableAccountsByOwner(ownerId: string): Promise<LovableAccount[]>;
   getLovableAccountsPendingVerification(): Promise<LovableAccount[]>;
@@ -502,6 +503,16 @@ export class DatabaseStorage implements IStorage {
   async updateLovableAccount(id: string, data: Partial<InsertLovableAccount>): Promise<LovableAccount> {
     const [row] = await db.update(lovableAccounts).set(data).where(eq(lovableAccounts.id, id)).returning();
     return row;
+  }
+
+  async bulkUpdateLovableStatus(ids: string[], status: string): Promise<number> {
+    if (ids.length === 0) return 0;
+    const rows = await db
+      .update(lovableAccounts)
+      .set({ status } as Partial<InsertLovableAccount>)
+      .where(inArray(lovableAccounts.id, ids))
+      .returning({ id: lovableAccounts.id });
+    return rows.length;
   }
 
   async getAllLovableAccounts(): Promise<LovableAccount[]> {
