@@ -1,0 +1,192 @@
+13:20:05
+>
+🚀 Parallel batch started — 5 job(s) running simultaneously [replit-batch-mn769v78]
+13:20:05
+·
+[Job 3] 🤖 Source: christopherstrickland9578@outlook.com → Target: amaadnkalusym@hotmail.com
+PROCESSING
+13:20:05
+·
+[Job 4] 🤖 Source: annchase5710@outlook.com → Target: tveitfbanfibrr@hotmail.com
+PROCESSING
+13:20:05
+·
+[Job 5] 🤖 Source: erinburch4826@outlook.com → Target: ammiegardryddmd@hotmail.com
+SOLD_OUT
+13:20:05
+·
+[Job 1] 🔐 Logging into Replit as daakekmasalpbz@hotmail.com...
+PROCESSING
+13:20:05
+·
+[Job 4] 🔐 Logging into Replit as annchase5710@outlook.com...
+PROCESSING
+13:20:05
+·
+[Job 3] 🔐 Logging into Replit as christopherstrickland9578@outlook.com...
+PROCESSING
+13:20:05
+·
+[Job 2] 🔐 Logging into Replit as bazykqaaylaunz@hotmail.com...
+PROCESSING
+13:20:05
+·
+[Job 5] 🔐 Logging into Replit as erinburch4826@outlook.com...
+SOLD_OUT
+13:20:16
++
+[Job 4] ✅ Logged in
+13:20:16
+·
+[Job 4] 🔗 Opening referral page...
+13:20:17
++
+[Job 5] ✅ Logged in
+13:20:17
+·
+[Job 5] 🔗 Opening referral page...
+13:20:22
+·
+[Job 4] 📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+13:20:22
++
+[Job 4] ✅ Coupon: AGENT47627E36ED69D
+13:20:22
+$
+[Job 4] 🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+13:20:22
+·
+[Job 4] 🎟️ Coupon: AGENT47627E36ED69D
+13:20:23
+·
+[Job 4] 🌐 SOAX connected — session: wm71lo30k3ss | endpoint: proxy.soax.com:5000
+13:20:23
+·
+[Job 4] ┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+13:20:23
+·
+[Job 4] │ Exit IP : 69.9.141.22
+13:20:23
+·
+[Job 4] │ Location : Medford, Oregon, US
+13:20:23
+·
+[Job 4] │ Provider : AS36012 HUNTER COMMUNICATIONS
+13:20:23
+·
+[Job 4] └────────────────────────────────────────────────
+13:20:23
+·
+[Job 4] 🔐 Logging into Replit as tveitfbanfibrr@hotmail.com...
+WORKING
+PROCESSINGAVAILABLEWORKINGCOMPLETEDWARMEDERROR
+13:20:23
+·
+[Job 5] 📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+13:20:23
++
+[Job 5] ✅ Coupon: AGENT493DC709E0CA8
+13:20:23
+$
+[Job 5] 🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+13:20:23
+·
+[Job 5] 🎟️ Coupon: AGENT493DC709E0CA8
+13:20:23
+·
+[Job 5] 🌐 SOAX connected — session: 1fx9oz6p308a | endpoint: proxy.soax.com:5000
+13:20:23
+·
+[Job 5] ┌─── SOAX LINK-GEN ACTIVE ───────────────────────────
+13:20:23
+·
+[Job 5] │ Exit IP : 162.155.107.106
+13:20:23
+·
+[Job 5] │ Location : Greenville, Ohio, US
+13:20:23
+·
+[Job 5] │ Provider : AS10796 Charter Communications Inc
+13:20:23
+·
+[Job 5] └────────────────────────────────────────────────
+13:20:23
+·
+[Job 5] 🔐 Logging into Replit as ammiegardryddmd@hotmail.com...
+WORKING
+13:20:36
+·
+[Job 4] → Login submitted — waiting for redirect...
+13:20:39
+·
+[Job 5] → Login submitted — waiting for redirect...
+13:20:44
++
+[Job 4] ✅ Logged in
+13:20:44
+>
+[Job 4] 💰 Navigating to checkout URL...
+13:20:44
++
+[Job 5] ✅ Logged in (fast redirect)
+13:20:45
++
+[Job 5] ✅ Logged in
+13:20:45
+>
+[Job 5] 💰 Navigating to checkout URL...
+13:20:47
+$
+[Job 5] ⏳ Waiting for Stripe redirect...
+13:20:49
++
+[Job 5] ✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a14etHL8OmnjnCjEsgz3tv3e7VUY7IWAwtICQR...
+🔗 ammiegardryddmd@hotmail.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a14etHL8OmnjnCjEsgz3tv3e7VUY7IWAwtICQR...
+13:20:49
++
+[Job 5] ✅ Done — link generated for ammiegardryddmd@hotmail.com
+WORKING
+13:20:51
+$
+[Job 4] ⏳ Waiting for Stripe redirect...
+13:20:52
++
+[Job 4] ✅ Checkout link ready: https://billing.stripe.com/p/session/live_YWNjdF8xNVlwTnNKQW1uWVZPdmZuLF9VRFpxYz...
+🔗 tveitfbanfibrr@hotmail.com
+open link
+download
+copy link
+https://billing.stripe.com/p/session/live_YWNjdF8xNVlwTnNKQW1uWVZPdmZuLF9VRFpxYz...
+13:20:53
++
+[Job 4] ✅ Done — link generated for tveitfbanfibrr@hotmail.com
+WORKING
+PROCESSINGAVAILABLEWORKINGCOMPLETEDWARMEDERROR
+13:21:12
+!
+[Job 1] ❌ Error: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/login" ============================================================
+13:21:12
+!
+[Job 1] ❌ Coupon extraction failed: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/login" ============================================================
+13:21:12
+!
+[Job 3] ❌ Error: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/login" ============================================================
+13:21:12
+!
+[Job 3] ❌ Coupon extraction failed: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/login" ============================================================
+13:21:13
+!
+[Job 2] ❌ Error: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/login" ============================================================
+13:21:13
+!
+[Job 2] ❌ Coupon extraction failed: page.waitForURL: Timeout 60000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/login" ============================================================
+13:21:13
+·
+──────────────────────────────────────────────────
+13:21:13
++
+✅ Batch complete — 2/5 links generated
