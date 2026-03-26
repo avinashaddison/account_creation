@@ -1,0 +1,97 @@
+13:32:33
+>
+🚀 Parallel batch started — 5 job(s) running simultaneously [replit-batch-mn76pwcr]
+13:32:33
+·
+[Job 4] 🌐 SOAX proxy assigned — session: 6ip116th1io | proxy.soax.com:5000
+13:32:33
+·
+[Job 5] 🌐 SOAX proxy assigned — session: mnt5oca84hr | proxy.soax.com:5000
+13:32:33
+·
+[Job 1] 🔐 Logging into Replit as daakekmasalpbz@hotmail.com...
+PROCESSING
+13:32:33
+·
+[Job 3] 🔐 Logging into Replit as christopherstrickland9578@outlook.com...
+PROCESSING
+13:32:33
+·
+[Job 5] 🔐 Logging into Replit as laurawalker3454@outlook.com...
+SOLD_OUT
+13:32:33
+·
+[Job 2] 🔐 Logging into Replit as bazykqaaylaunz@hotmail.com...
+PROCESSING
+13:32:33
+·
+[Job 4] 🔐 Logging into Replit as michaelmurphy6180@outlook.com...
+SOLD_OUT
+13:32:57
+~
+[Job 1] ⚠️ Login timeout — retrying (1/2)...
+13:32:57
+~
+[Job 4] ⚠️ Login timeout — retrying (1/2)...
+13:32:58
+~
+[Job 5] ⚠️ Login timeout — retrying (1/2)...
+13:32:58
+~
+[Job 3] ⚠️ Login timeout — retrying (1/2)...
+13:33:06
+~
+[Job 2] ⚠️ Login timeout — retrying (1/2)...
+13:33:21
+~
+[Job 1] ⚠️ Login timeout — retrying (2/2)...
+13:33:21
+~
+[Job 4] ⚠️ Login timeout — retrying (2/2)...
+13:33:23
+~
+[Job 3] ⚠️ Login timeout — retrying (2/2)...
+13:33:23
+~
+[Job 5] ⚠️ Login timeout — retrying (2/2)...
+13:33:33
+~
+[Job 2] ⚠️ Login timeout — retrying (2/2)...
+13:33:44
+!
+[Job 1] ❌ Error: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:44
+!
+[Job 1] ❌ Coupon extraction failed: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:45
+!
+[Job 4] ❌ Error: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:45
+!
+[Job 4] ❌ Coupon extraction failed: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:46
+!
+[Job 3] ❌ Error: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:46
+!
+[Job 3] ❌ Coupon extraction failed: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:46
+!
+[Job 5] ❌ Error: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:33:47
+!
+[Job 5] ❌ Coupon extraction failed: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:34:01
+!
+[Job 2] ❌ Error: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:34:01
+!
+[Job 2] ❌ Coupon extraction failed: Login timed out after 3 attempts — Replit may be blocking this IP/account
+13:34:01
+·
+──────────────────────────────────────────────────
+13:34:01
++
+✅ Batch complete — 0/5 links generated
+addison@panel:~$
+ready

@@ -3766,7 +3766,7 @@ export async function registerRoutes(
       res.json({ success: true, batchId, count: actualCount });
 
       (async () => {
-        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} job(s) starting simultaneously`, userId);
+        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} job(s) — staggered 5s apart to avoid rate-limits`, userId);
         broadcastLog(batchId, "batch-init", `─`.repeat(50), userId);
 
         const jobs = sources.slice(0, actualCount).map((source, i) => {
@@ -3774,6 +3774,8 @@ export async function registerRoutes(
           const jobId = `batch-job-${i}`;
           const tag = `[Job ${i + 1}]`;
           return (async () => {
+            // Stagger job starts — 5 s apart so browsers don't all hit Replit login simultaneously
+            if (i > 0) await new Promise(r => setTimeout(r, i * 5000));
             broadcastLog(batchId, jobId, `${tag} 🤖 Source: ${source.email} → Target: ${target.email}`, userId);
             const couponResult = await extractCouponFromReplitAccount(
               source.email, source.password,

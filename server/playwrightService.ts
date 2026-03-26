@@ -18468,27 +18468,6 @@ export async function extractCouponFromReplitAccount(
   const { chromium } = await import("playwright");
   let browser: any = null;
   try {
-    // ── SOAX residential proxy — unique IP per extraction to avoid Replit rate-limits ──
-    const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-    const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-    const rawProxy = soaxTemplate || residentialUrl;
-    let proxyConfig: { server: string; username: string; password: string } | undefined;
-    if (rawProxy) {
-      const sessionId = Math.random().toString(36).substring(2, 16);
-      const proxied = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`).replace(/-opt-wb/, "");
-      try {
-        const pUrl = new URL(proxied.startsWith("http") ? proxied : `http://${proxied}`);
-        proxyConfig = {
-          server: `http://${pUrl.hostname}:${pUrl.port}`,
-          username: pUrl.username ? decodeURIComponent(pUrl.username) : "",
-          password: pUrl.password ? decodeURIComponent(pUrl.password) : "",
-        };
-        log(`🌐 SOAX proxy assigned — session: ${sessionId.substring(0, 12)} | ${pUrl.hostname}:${pUrl.port}`);
-      } catch { log(`⚠️ Proxy parse failed — falling back to direct connection`); }
-    } else {
-      log(`⚠️ No SOAX proxy configured — using direct connection (higher rate-limit risk)`);
-    }
-
     browser = await chromium.launch({
       headless: true,
       args: [
@@ -18504,7 +18483,6 @@ export async function extractCouponFromReplitAccount(
       timezoneId: "America/New_York", javaScriptEnabled: true,
       permissions: ["clipboard-read", "clipboard-write"],
       extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
-      ...(proxyConfig ? { proxy: proxyConfig } : {}),
     });
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -18513,73 +18491,48 @@ export async function extractCouponFromReplitAccount(
     });
     const page = await context.newPage();
 
-    // ── Login with error detection ──
-    log(`🔐 Logging into Replit as ${email}...`);
-    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForSelector('input[name="username"], input[type="email"], input[name="email"]', { timeout: 20000 });
-    const emailInput = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
-    await emailInput.click(); await emailInput.fill(email);
-    await page.waitForTimeout(600);
-    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
-    const passInput = page.locator('input[type="password"]').first();
-    await passInput.click(); await passInput.fill(password);
-    await page.waitForTimeout(400);
-    const submitBtn = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in")').first();
-    if (await submitBtn.isVisible().catch(() => false)) await submitBtn.click();
-    else await passInput.press("Enter");
+    // ── Login ──
+    const doLogin = async (pg: any, attempt: number) => {
+      await pg.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 45000 });
+      await pg.waitForSelector('input[name="username"], input[type="email"], input[name="email"]', { timeout: 20000 });
+      const ei = pg.locator('input[name="username"], input[type="email"], input[name="email"]').first();
+      await ei.click(); await ei.fill(email);
+      await pg.waitForTimeout(700 + attempt * 300);
+      await pg.waitForSelector('input[type="password"]', { timeout: 15000 });
+      const pi = pg.locator('input[type="password"]').first();
+      await pi.click(); await pi.fill(password);
+      await pg.waitForTimeout(500 + attempt * 200);
+      const sb = pg.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in")').first();
+      if (await sb.isVisible({ timeout: 3000 }).catch(() => false)) await sb.click();
+      else await pi.press("Enter");
+    };
 
-    // ── Wait for navigation with early error detection ──
+    log(`🔐 Logging into Replit as ${email}...`);
     let loggedIn = false;
-    for (let attempt = 0; attempt < 3 && !loggedIn; attempt++) {
+    for (let attempt = 0; attempt < 2 && !loggedIn; attempt++) {
+      if (attempt > 0) log(`↩️  Retry ${attempt}/1...`);
+      await doLogin(page, attempt);
       try {
-        await page.waitForURL((u: URL) => !u.href.includes("replit.com/login"), { timeout: 20000 });
+        await page.waitForURL((u: URL) => !u.href.includes("replit.com/login"), { timeout: 55000 });
         loggedIn = true;
       } catch {
-        // Check for page-level errors before giving up
-        const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-        if (/wrong password|incorrect password|invalid credentials|password is incorrect/i.test(pageText)) {
-          throw new Error(`Login failed — wrong password for ${email}`);
-        }
-        if (/too many attempts|rate.?limit|try again later|too many requests/i.test(pageText)) {
-          if (attempt < 2) {
-            log(`⚠️ Rate-limited — waiting 15s before retry ${attempt + 1}/2...`);
-            await page.waitForTimeout(15000);
-            // Re-submit
-            const passInput2 = page.locator('input[type="password"]').first();
-            await passInput2.click(); await passInput2.fill(password);
-            const submitBtn2 = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login")').first();
-            if (await submitBtn2.isVisible().catch(() => false)) await submitBtn2.click();
-            else await passInput2.press("Enter");
-            continue;
-          }
-          throw new Error(`Rate-limited by Replit — too many concurrent logins from this IP`);
-        }
-        if (/captcha|hcaptcha|cloudflare|verify you are human/i.test(pageText)) {
-          throw new Error(`Blocked by CAPTCHA — Replit is detecting bot activity on this IP`);
-        }
-        if (/account.*disabled|account.*suspended|account.*banned/i.test(pageText)) {
-          throw new Error(`Account disabled or suspended: ${email}`);
-        }
-        if (attempt < 2) {
-          log(`⚠️ Login timeout — retrying (${attempt + 1}/2)...`);
-          // Navigate again fresh
-          await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
-          await page.waitForSelector('input[name="username"], input[type="email"], input[name="email"]', { timeout: 15000 });
-          const ei2 = page.locator('input[name="username"], input[type="email"], input[name="email"]').first();
-          await ei2.click(); await ei2.fill(email);
-          await page.waitForTimeout(800);
-          const pi2 = page.locator('input[type="password"]').first();
-          await pi2.click(); await pi2.fill(password);
-          await page.waitForTimeout(600);
-          const sb2 = page.locator('button[type="submit"], button:has-text("Log in"), button:has-text("Login")').first();
-          if (await sb2.isVisible().catch(() => false)) await sb2.click();
-          else await pi2.press("Enter");
-        } else {
-          throw new Error(`Login timed out after 3 attempts — Replit may be blocking this IP/account`);
-        }
+        // Diagnose what the page actually shows
+        const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 600) || "").catch(() => "");
+        const currentUrl = page.url();
+        log(`⚠️ Still on login (attempt ${attempt + 1}) — url: ${currentUrl.substring(0, 60)} — page: "${pageText.replace(/\s+/g, " ").substring(0, 120)}"`);
+        if (/wrong password|incorrect password|invalid credentials|doesn.t match/i.test(pageText))
+          throw new Error(`Wrong password for ${email}`);
+        if (/captcha|hcaptcha|verify you are human|i am not a robot/i.test(pageText))
+          throw new Error(`CAPTCHA detected — Replit is blocking automated login for this IP`);
+        if (/too many|rate.?limit|try again later/i.test(pageText))
+          throw new Error(`Rate-limited by Replit — too many login attempts from this IP`);
+        if (/disabled|suspended|banned|deactivated/i.test(pageText))
+          throw new Error(`Account ${email} is disabled or banned`);
+        if (attempt >= 1)
+          throw new Error(`Login timed out — Replit did not redirect after 2 attempts`);
+        await page.waitForTimeout(3000);
       }
     }
-    if (!loggedIn) throw new Error(`Could not log in to Replit as ${email}`);
     log(`✅ Logged in`);
 
     // ── Navigate to referral page ──
