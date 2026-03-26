@@ -1321,7 +1321,7 @@ export default function PrivateAccount() {
                 {lovableAccounts.map((acct, idx) => {
                   const st = acct.status;
                   const statusConfig: Record<string, { label: string; color: string; glow: string; bg: string; border: string }> = {
-                    created:              { label: "✅ Available",  color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
+                    created:              { label: "Account Created", color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
                     pending_verification: { label: "⏳ Pending",    color: "#facc15", glow: "rgba(250,204,21,0.25)",  bg: "rgba(250,204,21,0.1)",   border: "#facc15" },
                     verified:             { label: "✅ Verified",   color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
                     failed:               { label: "🚫 Failed",     color: "#71717a", glow: "rgba(113,113,122,0.2)",  bg: "rgba(113,113,122,0.08)", border: "#52525b" },
@@ -1403,7 +1403,7 @@ export default function PrivateAccount() {
                           }}
                           data-testid={`select-lovable-status-${acct.id}`}
                         >
-                          <option value="created">✅ Available</option>
+                          <option value="created">Account Created</option>
                           <option value="pending_verification">⏳ Pending</option>
                           <option value="verified">✅ Verified</option>
                           <option value="failed">🚫 Failed</option>

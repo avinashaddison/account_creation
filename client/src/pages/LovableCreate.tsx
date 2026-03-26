@@ -420,10 +420,10 @@ export default function LovableCreate() {
               {/* Info box */}
               <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
                 <p className="text-[9px] font-mono" style={{ color: LA(0.45) }}>
-                  Picks {linksCount} "Available" account(s) → logs into Lovable → opens billing page → clicks $25 Upgrade → captures Stripe checkout URL with coupon
+                  Picks {linksCount} "Account Created" account(s) → logs into Lovable → opens billing page → clicks $25 Upgrade → captures Stripe checkout URL with coupon
                 </p>
                 <p className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
-                  Requires accounts with status: <span style={{ color: "#22c55e" }}>Available</span> + stored password
+                  Requires accounts with status: <span style={{ color: "#22c55e" }}>Account Created</span> + stored password
                 </p>
               </div>
 
