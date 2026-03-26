@@ -1,14 +1,14 @@
 /**
- * Outlook Workspace Service — Playwright-based web scraping
- * 
- * Microsoft has blocked basic-auth IMAP (BasicAuthBlocked) and ROPC
- * Graph API for personal outlook.com/hotmail.com accounts.
- * This service uses Playwright to log into Outlook Web and scrape emails.
+ * Outlook Workspace Service — Playwright + Response Interception
+ *
+ * Microsoft blocks basic-auth IMAP (BasicAuthBlocked) for personal accounts.
+ * We log in via Playwright, then intercept the Outlook SPA's own API responses
+ * to capture emails. This works regardless of which Outlook API version is used.
  */
 
 import { chromium } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, Page, Response } from "playwright";
 
 chromium.use(StealthPlugin());
 
@@ -72,215 +72,220 @@ function extractOtp(text: string): string | null {
 
 /* ─── Launch browser ──────────────────────────────────────── */
 async function launchBrowser(): Promise<Browser> {
-  const args = [
-    "--no-sandbox", "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage", "--disable-gpu",
-    "--disable-background-timer-throttling",
-    "--disable-renderer-backgrounding",
-  ];
-  return chromium.launch({ headless: true, args });
+  return chromium.launch({
+    headless: true,
+    args: [
+      "--no-sandbox", "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage", "--disable-gpu",
+      "--disable-background-timer-throttling",
+    ],
+  });
 }
 
 /* ─── Microsoft Login ─────────────────────────────────────── */
 async function loginToMicrosoft(page: Page, email: string, password: string): Promise<void> {
   console.log(`[OutlookWS] Starting login for ${email}`);
+  await page.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
 
-  await page.goto("https://outlook.live.com/", {
-    waitUntil: "domcontentloaded",
-    timeout: 30000,
-  });
+  await page.waitForSelector('input[type="email"], #i0116', { timeout: 15000 });
+  await page.fill('input[type="email"], #i0116', email);
+  await Promise.all([
+    page.waitForNavigation({ timeout: 15000, waitUntil: "domcontentloaded" }).catch(() => {}),
+    page.click('input[type="submit"], #idSIButton9').catch(() => page.keyboard.press("Enter")),
+  ]);
 
-  // Already logged in?
-  if (page.url().includes("outlook.live.com/mail")) {
-    console.log(`[OutlookWS] Already logged in for ${email}`);
-    return;
+  await page.waitForSelector('input[type="password"], #i0118', { timeout: 15000 });
+  await page.fill('input[type="password"], #i0118', password);
+  await Promise.all([
+    page.waitForNavigation({ timeout: 20000, waitUntil: "domcontentloaded" }).catch(() => {}),
+    page.click('input[type="submit"], #idSIButton9').catch(() => page.keyboard.press("Enter")),
+  ]);
+
+  // "Stay signed in?" → No
+  try {
+    await page.waitForSelector('#idBtn_Back, #declineButton', { timeout: 5000 });
+    await page.click('#idBtn_Back, #declineButton').catch(() => {});
+    await page.waitForNavigation({ timeout: 10000, waitUntil: "domcontentloaded" }).catch(() => {});
+  } catch {}
+
+  await page.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForTimeout(4000);
+
+  const url = page.url();
+  console.log(`[OutlookWS] Logged in, at: ${url}`);
+  if (!url.includes("outlook.live.com")) {
+    throw new Error(`Login failed — ended up at: ${url}`);
   }
-
-  // Click "Sign in" button on landing page
-  try {
-    const signInBtn = page.locator('a[data-bi-id="HeroSignIn"]').first();
-    if (await signInBtn.isVisible({ timeout: 3000 })) {
-      await signInBtn.click();
-    }
-  } catch {}
-
-  // Try sign-in from the header
-  try {
-    await page.click('a[href*="login.live.com"], a[href*="login.microsoftonline"]', { timeout: 3000 });
-  } catch {}
-
-  // If still not on login page, navigate directly
-  if (!page.url().includes("login.live.com") && !page.url().includes("microsoftonline")) {
-    await page.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 20000 });
-  }
-
-  // Enter email
-  await page.waitForSelector('input[type="email"], input[name="loginfmt"], #i0116', { timeout: 15000 });
-  await page.fill('input[type="email"], input[name="loginfmt"], #i0116', email);
-  await page.click('input[type="submit"], button[type="submit"], #idSIButton9').catch(() => {});
-  await page.keyboard.press("Enter").catch(() => {});
-
-  // Enter password
-  await page.waitForSelector('input[type="password"], input[name="passwd"], #i0118', { timeout: 15000 });
-  await page.fill('input[type="password"], input[name="passwd"], #i0118', password);
-  await page.click('input[type="submit"], button[type="submit"], #idSIButton9').catch(() => {});
-  await page.keyboard.press("Enter").catch(() => {});
-
-  // Handle "Stay signed in?" prompt — click No
-  try {
-    await page.waitForSelector('#idBtn_Back, [id*="Stay"]', { timeout: 5000 });
-    await page.click('#idBtn_Back').catch(() => {});
-  } catch {}
-
-  // Handle "Don't show this again" type prompts
-  try {
-    const declineBtn = page.locator('input[value*="No"], input[value*="no"], button:has-text("No")').first();
-    if (await declineBtn.isVisible({ timeout: 2000 })) await declineBtn.click();
-  } catch {}
-
-  // Wait for Outlook to load
-  await page.waitForURL("**/mail/**", { timeout: 30000 });
-  console.log(`[OutlookWS] Login successful for ${email}, URL: ${page.url()}`);
 }
 
-/* ─── Folder navigation URLs ──────────────────────────────── */
-const FOLDER_URLS: { name: string; display: string; url: string }[] = [
-  { name: "inbox", display: "Inbox", url: "https://outlook.live.com/mail/0/inbox" },
-  { name: "junkemail", display: "Junk", url: "https://outlook.live.com/mail/0/junkemail" },
-  { name: "sentitems", display: "Sent", url: "https://outlook.live.com/mail/0/sentitems" },
+/* ─── Parse any email item shape ─────────────────────────── */
+function parseEmailItem(m: any, folder: string, display: string, idx: number): OutlookEmail {
+  // Graph API / OWS v1
+  const fromGrp = m.from?.emailAddress || m.From?.EmailAddress || {};
+  const fromName = fromGrp.name || fromGrp.Name || fromGrp.address || fromGrp.Address || m.SenderName || "Unknown";
+  const fromEmail = fromGrp.address || fromGrp.Address || m.SenderEmailAddress || "";
+  const subject = m.subject || m.Subject || m.NormalizedSubject || "(no subject)";
+  const date = m.receivedDateTime || m.ReceivedDateTime || m.DateTimeReceived || new Date().toISOString();
+  const preview = m.bodyPreview || m.BodyPreview || m.Preview || "";
+  const otp = extractOtp(`${subject} ${preview}`);
+  const msgId = m.id || m.Id || m.ItemId?.Id || `${folder}-${idx}`;
+
+  return {
+    uid: idx,
+    folder,
+    folderDisplay: display,
+    from: fromName,
+    fromEmail,
+    subject,
+    date,
+    snippet: preview.substring(0, 300),
+    body: preview.substring(0, 5000),
+    otp,
+    isNew: false,
+    id: `api::${folder}::${msgId}`,
+  };
+}
+
+/* ─── Direct OWS/Graph API call via page.evaluate ─────────── */
+const OWS_FOLDER_URLS = [
+  { folder: "inbox",       imap: "inbox",       display: "Inbox" },
+  { folder: "junkemail",   imap: "junkemail",   display: "Junk"  },
+  { folder: "sentitems",   imap: "sentitems",   display: "Sent"  },
+  { folder: "deleteditems",imap: "deleteditems",display: "Trash" },
 ];
 
-/* ─── Scrape email list from current page ─────────────────── */
-async function scrapeEmailList(page: Page, folderName: string, display: string): Promise<OutlookEmail[]> {
-  // Wait for email list to appear
-  await page.waitForLoadState("domcontentloaded");
+async function fetchViaOwsApi(page: Page, folder: string, display: string): Promise<OutlookEmail[]> {
+  const result = await page.evaluate(async (args: { folder: string }) => {
+    const endpoints = [
+      `https://outlook.live.com/ows/v1.0/me/mailFolders/${args.folder}/messages?$top=25&$select=id,from,subject,receivedDateTime,bodyPreview&$orderby=receivedDateTime%20desc`,
+      `https://outlook.live.com/ows/v2.0/me/mailFolders/${args.folder}/messages?$top=25&$select=id,from,subject,receivedDateTime,bodyPreview&$orderby=receivedDateTime%20desc`,
+      `/ows/v1.0/me/mailFolders/${args.folder}/messages?$top=25&$select=id,from,subject,receivedDateTime,bodyPreview&$orderby=receivedDateTime%20desc`,
+    ];
 
-  // Try to wait for at least one email row (or empty state)
-  try {
-    await page.waitForSelector(
-      '[role="option"], [data-convid], [aria-label*="Message from"], .customScrollBar > div > div > div',
-      { timeout: 8000 }
-    );
-  } catch {}
-
-  const emails = await page.evaluate((args: { folderName: string; display: string }) => {
-    const results: any[] = [];
-
-    // Strategy 1: [data-convid] — Outlook uses this on conversation rows
-    const convItems = document.querySelectorAll('[data-convid]');
-    if (convItems.length > 0) {
-      convItems.forEach((item, idx) => {
-        const convId = item.getAttribute('data-convid') || `conv-${idx}`;
-        const textContent = item.textContent || '';
-        const allText = textContent.replace(/\s+/g, ' ').trim();
-
-        // Try specific child elements
-        const spans = Array.from(item.querySelectorAll('span, div')).map(el => el.textContent?.trim()).filter(Boolean);
-
-        // Subject is usually a prominent text element
-        let subject = '';
-        let from = '';
-        let snippet = '';
-
-        // Look for aria-label hints
-        const ariaLabel = item.getAttribute('aria-label') || '';
-        if (ariaLabel) {
-          const parts = ariaLabel.split(';').map((s: string) => s.trim());
-          if (parts.length >= 2) {
-            from = parts[0] || '';
-            subject = parts[1] || '';
-            snippet = parts[2] || '';
-          }
+    const log: string[] = [];
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, {
+          credentials: "include",
+          headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        });
+        const status = r.status;
+        log.push(`${url.substring(0, 80)}: HTTP ${status}`);
+        if (r.ok) {
+          const data = await r.json();
+          const items = data.value || data.Messages || [];
+          return { items, error: null, log };
+        } else {
+          const text = await r.text().catch(() => "");
+          log.push(`  body: ${text.substring(0, 120)}`);
         }
-
-        // Fallback: use the first few meaningful spans
-        if (!from && spans.length > 0) from = spans[0] || '';
-        if (!subject && spans.length > 1) subject = spans[1] || '';
-        if (!snippet && spans.length > 2) snippet = spans.slice(2, 5).join(' ');
-
-        if (!subject) subject = allText.substring(0, 80);
-
-        results.push({
-          id: `web::${args.folderName}::${convId}`,
-          uid: idx,
-          folder: args.folderName,
-          folderDisplay: args.display,
-          from: from.substring(0, 100),
-          fromEmail: '',
-          subject: subject.substring(0, 200),
-          date: new Date().toISOString(),
-          snippet: snippet.substring(0, 300),
-          body: allText.substring(0, 1000),
-          rawText: allText,
-        });
-      });
-      return results;
+      } catch (e: any) {
+        log.push(`  error: ${e.message}`);
+      }
     }
+    return { items: [], error: "All OWS endpoints failed", log };
+  }, { folder });
 
-    // Strategy 2: [role="option"] — sometimes used in message list
-    const optionItems = document.querySelectorAll('[role="option"], [role="listitem"]');
-    if (optionItems.length > 0) {
-      optionItems.forEach((item, idx) => {
-        const ariaLabel = item.getAttribute('aria-label') || '';
-        const text = (item.textContent || '').replace(/\s+/g, ' ').trim();
-        results.push({
-          id: `web::${args.folderName}::opt-${idx}`,
-          uid: idx,
-          folder: args.folderName,
-          folderDisplay: args.display,
-          from: ariaLabel.split(';')[0]?.trim() || 'Unknown',
-          fromEmail: '',
-          subject: text.substring(0, 100),
-          date: new Date().toISOString(),
-          snippet: text.substring(0, 300),
-          body: text.substring(0, 1000),
-          rawText: text,
-        });
+  if (result.log?.length) {
+    console.log(`[OutlookWS] ${display} API probe:\n${result.log.join("\n")}`);
+  }
+
+  if (result.error && (!result.items || result.items.length === 0)) {
+    return [];
+  }
+
+  return result.items.map((m: any, idx: number) => parseEmailItem(m, folder, display, idx));
+}
+
+/* ─── Interception-based fetch: navigate & capture responses ─ */
+const FOLDER_URLS: Record<string, string> = {
+  inbox:        "https://outlook.live.com/mail/0/inbox",
+  junkemail:    "https://outlook.live.com/mail/0/junk",
+  sentitems:    "https://outlook.live.com/mail/0/sentitems",
+  deleteditems: "https://outlook.live.com/mail/0/deleteditems",
+};
+
+async function fetchViaInterception(page: Page, folder: string, display: string): Promise<OutlookEmail[]> {
+  const captured: any[] = [];
+  let captureEndpoint = "";
+
+  const handler = async (response: Response) => {
+    try {
+      const url = response.url();
+      const ct = response.headers()["content-type"] || "";
+      if (!ct.includes("application/json") && !ct.includes("application/x-javascript")) return;
+
+      // Look for email list API responses
+      const isEmailEndpoint =
+        (url.includes("mailFolders") && url.includes("messages")) ||
+        url.includes("FindItem") || url.includes("FindConversation") ||
+        url.includes("GetConversationItems") || url.includes("Sync") ||
+        (url.includes("messages") && !url.includes(".js"));
+
+      if (!isEmailEndpoint) return;
+
+      const data = await response.json().catch(() => null);
+      if (!data) return;
+
+      const items = data.value || data.Messages || data.Body?.Messages || [];
+      if (Array.isArray(items) && items.length > 0) {
+        const first = items[0];
+        // Check if this looks like email data
+        if (first.subject !== undefined || first.Subject !== undefined ||
+            first.from !== undefined || first.SenderName !== undefined) {
+          captured.push(...items);
+          captureEndpoint = url.substring(0, 100);
+          console.log(`[OutlookWS] Intercepted ${items.length} emails from: ${captureEndpoint}`);
+        }
+      }
+    } catch {}
+  };
+
+  page.on("response", handler);
+  try {
+    const navUrl = FOLDER_URLS[folder] || `https://outlook.live.com/mail/0/inbox`;
+    await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+    await page.waitForTimeout(4000);
+  } finally {
+    page.off("response", handler);
+  }
+
+  return captured.map((m, idx) => parseEmailItem(m, folder, display, idx));
+}
+
+/* ─── Combined folder fetch ───────────────────────────────── */
+async function fetchFolder(page: Page, folder: string, display: string): Promise<OutlookEmail[]> {
+  // Try direct OWS API first (fast, no navigation needed)
+  const owsEmails = await fetchViaOwsApi(page, folder, display);
+  if (owsEmails.length > 0) {
+    console.log(`[OutlookWS] ${display}: ${owsEmails.length} via OWS API`);
+    return owsEmails;
+  }
+
+  // Fallback: navigate and intercept responses
+  console.log(`[OutlookWS] ${display}: OWS API empty, trying navigation+interception`);
+  const intercepted = await fetchViaInterception(page, folder, display);
+  console.log(`[OutlookWS] ${display}: ${intercepted.length} via interception`);
+  return intercepted;
+}
+
+/* ─── Full message body fetch ─────────────────────────────── */
+async function fetchMessageBody(page: Page, messageId: string): Promise<string> {
+  const result = await page.evaluate(async (msgId: string) => {
+    try {
+      const r = await fetch(`https://outlook.live.com/ows/v1.0/me/messages/${msgId}?$select=body`, {
+        credentials: "include",
+        headers: { "Accept": "application/json" },
       });
-      return results;
-    }
-
-    // Strategy 3: Extract anything that looks like email rows from the page text
-    const allVisibleText = document.body.innerText || '';
-    results.push({
-      id: `web::${args.folderName}::fallback`,
-      uid: 0,
-      folder: args.folderName,
-      folderDisplay: args.display,
-      from: 'Page Text',
-      fromEmail: '',
-      subject: `(${args.display} folder loaded — ${optionItems.length} items found)`,
-      date: new Date().toISOString(),
-      snippet: allVisibleText.substring(0, 500),
-      body: allVisibleText.substring(0, 3000),
-      rawText: allVisibleText,
-    });
-
-    return results;
-  }, { folderName, display });
-
-  // Post-process: extract OTPs and clean up
-  const result: OutlookEmail[] = emails.map((e, idx) => {
-    const combinedText = `${e.subject} ${e.snippet} ${e.rawText || ''}`;
-    const otp = extractOtp(combinedText.substring(0, 800));
-    return {
-      uid: idx,
-      folder: e.folder,
-      folderDisplay: e.folderDisplay,
-      from: e.from || 'Unknown',
-      fromEmail: e.fromEmail || '',
-      subject: e.subject || '(no subject)',
-      date: e.date,
-      snippet: e.snippet || '',
-      body: e.body || '',
-      otp,
-      isNew: false,
-      id: e.id,
-    };
-  }).filter(e => e.subject && !e.subject.includes('folder loaded'));
-
-  console.log(`[OutlookWS] Scraped ${result.length} emails from ${display}`);
-  return result;
+      if (!r.ok) return "";
+      const data = await r.json();
+      const content = data.body?.content || data.Body?.Content || "";
+      const div = document.createElement("div");
+      div.innerHTML = content;
+      return div.textContent || div.innerText || "";
+    } catch { return ""; }
+  }, messageId);
+  return result || "";
 }
 
 /* ─── Main poll ───────────────────────────────────────────── */
@@ -290,7 +295,6 @@ async function runPoll(userId: string): Promise<void> {
   session.pollLock = true;
 
   try {
-    // Launch browser if needed
     if (!session.browser || !session.browser.isConnected()) {
       console.log(`[OutlookWS] Launching browser for ${session.email}`);
       session.browser = await launchBrowser();
@@ -298,6 +302,7 @@ async function runPoll(userId: string): Promise<void> {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         viewport: { width: 1280, height: 900 },
         locale: "en-US",
+        extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
       });
       session.page = await session.context.newPage();
       session.loggedIn = false;
@@ -305,29 +310,42 @@ async function runPoll(userId: string): Promise<void> {
 
     const page = session.page!;
 
-    // Login if needed
     if (!session.loggedIn) {
       await loginToMicrosoft(page, session.email, session.password);
       session.loggedIn = true;
     }
 
-    // Scrape each folder
     const allMessages: OutlookEmail[] = [];
     const folderInfos: FolderInfo[] = [];
 
-    for (const { name, display, url } of FOLDER_URLS) {
+    for (const { folder, imap, display } of OWS_FOLDER_URLS) {
       try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-        const msgs = await scrapeEmailList(page, name, display);
-        folderInfos.push({ imap: name, display, count: msgs.length });
+        const msgs = await fetchFolder(page, folder, display);
+        folderInfos.push({ imap, display, count: msgs.length });
         allMessages.push(...msgs);
       } catch (err: any) {
         console.log(`[OutlookWS] Folder ${display} error: ${err.message}`);
-        folderInfos.push({ imap: name, display, count: 0 });
+        folderInfos.push({ imap, display, count: 0 });
       }
     }
 
-    // Mark new messages
+    // Fetch full body for OTP candidates
+    const otpCandidates = allMessages.filter(m => m.otp);
+    if (otpCandidates.length > 0) {
+      const bodyFetches = otpCandidates.slice(0, 5).map(async (m) => {
+        const rawId = m.id.replace(/^api::[^:]+::/, "");
+        if (rawId && rawId.length > 5) {
+          const fullBody = await fetchMessageBody(page, rawId).catch(() => "");
+          if (fullBody) {
+            m.body = fullBody.substring(0, 5000);
+            const newOtp = extractOtp(`${m.subject} ${fullBody.substring(0, 800)}`);
+            if (newOtp) m.otp = newOtp;
+          }
+        }
+      });
+      await Promise.allSettled(bodyFetches);
+    }
+
     let newCount = 0;
     const isFirstPoll = session.seenIds.size === 0;
     for (const msg of allMessages) {
@@ -348,7 +366,6 @@ async function runPoll(userId: string): Promise<void> {
     console.error(`[OutlookWS] Poll error for ${session.email}: ${err.message}`);
     session.error = err.message;
     session.status = "error";
-    // Kill browser so next poll starts fresh
     try { await session.browser?.close(); } catch {}
     session.browser = null;
     session.context = null;
@@ -383,10 +400,8 @@ export async function activateOutlookSession(userId: string, email: string, pass
   };
   sessions.set(userId, session);
 
-  // Fire first poll in background
   runPoll(userId).catch(() => {});
 
-  // Poll every 30 seconds (browser-based is slower than IMAP)
   const s = sessions.get(userId);
   if (s) {
     s.pollTimer = setInterval(() => runPoll(userId).catch(() => {}), 30000);
@@ -397,7 +412,6 @@ export function stopOutlookSession(userId: string): void {
   const session = sessions.get(userId);
   if (!session) return;
   if (session.pollTimer) clearInterval(session.pollTimer);
-  // Close browser asynchronously
   session.browser?.close().catch(() => {});
   sessions.delete(userId);
 }
@@ -428,7 +442,7 @@ export function getOutlookMessages(userId: string): {
     error: session.error,
     lastPollAt: session.lastPollAt?.toISOString() || null,
     startedAt: session.startedAt.toISOString(),
-    method: "playwright",
+    method: "playwright+ows",
   };
 }
 
