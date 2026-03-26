@@ -75,6 +75,18 @@ function statusStyle(label: string): { bg: any; fg: any } {
   }
 }
 
+// Colors used in the pie chart slices — matching status styles above
+const STATUS_CHART_COLORS: Record<string, any> = {
+  "STOCK OUT":  rgb(220, 38,  38),
+  "PROCESSING": rgb(234, 88,  12),
+  "WORKING":    rgb(22,  163, 74),
+  "ERROR":      rgb(100, 0,   0),
+  "WARMED":     rgb(67,  56,  202),
+  "COMPLETED":  rgb(13,  148, 136),
+  "AVAILABLE":  rgb(2,   132, 199),
+  "SUBSCRIBED": rgb(124, 58,  237),
+};
+
 // ── Main sync ──
 export async function syncReplitAccountsToSheet(
   spreadsheetId: string,
@@ -91,17 +103,47 @@ export async function syncReplitAccountsToSheet(
     statusLabel(a.status),
   ]);
 
-  // Row 0 = title banner (merged), Row 1 = column headers, Row 2+ = data
+  // ── Status summary counts ──
+  const countMap: Record<string, number> = {};
+  rows.forEach(([, , , status]) => {
+    countMap[status] = (countMap[status] || 0) + 1;
+  });
+  const summaryRows = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
+
+  // Sheet layout:
+  // Col A-D: main accounts table (rows 0=title, 1=header, 2+=data)
+  // Col F-G: summary table (row 0=title, 1=header, 2+=counts)
   const sheetValues = [
-    ["REPLIT CORE $20 — ACCOUNTS", "", "", ""],
-    HEADERS,
-    ...rows,
+    ["REPLIT CORE $20 — ACCOUNTS", "", "", "", "", "ACCOUNT STATUS BREAKDOWN", ""],
+    HEADERS.concat(["", "Status", "Count"]),
+    ...rows.map((r, i) => {
+      const summary = summaryRows[i];
+      return [...r, "", summary ? summary[0] : "", summary ? summary[1] : ""];
+    }),
   ];
+
+  // Fill in remaining summary rows beyond data length
+  for (let i = rows.length; i < summaryRows.length; i++) {
+    sheetValues.push(["", "", "", "", "", summaryRows[i][0], summaryRows[i][1]]);
+  }
 
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const firstSheet = meta.data.sheets?.[0];
   const sheetId    = firstSheet?.properties?.sheetId ?? 0;
   const sheetTitle = firstSheet?.properties?.title   ?? "Sheet1";
+
+  // Remove any existing charts so we can re-add cleanly
+  const existingCharts = firstSheet?.charts ?? [];
+  const deleteChartRequests = existingCharts.map((c: any) => ({
+    deleteEmbeddedObject: { objectId: c.chartId },
+  }));
+
+  if (deleteChartRequests.length > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests: deleteChartRequests },
+    });
+  }
 
   await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${sheetTitle}!A:Z` });
   await sheets.spreadsheets.values.update({
@@ -122,7 +164,6 @@ export async function syncReplitAccountsToSheet(
   });
 
   // ── Row heights ──
-  // Row 0: title banner 56px
   requests.push({
     updateDimensionProperties: {
       range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 },
@@ -130,7 +171,6 @@ export async function syncReplitAccountsToSheet(
       fields: "pixelSize",
     },
   });
-  // Row 1: column headers 42px
   requests.push({
     updateDimensionProperties: {
       range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 2 },
@@ -138,17 +178,16 @@ export async function syncReplitAccountsToSheet(
       fields: "pixelSize",
     },
   });
-  // Data rows: 32px each
   requests.push({
     updateDimensionProperties: {
-      range: { sheetId, dimension: "ROWS", startIndex: 2, endIndex: rows.length + 2 },
+      range: { sheetId, dimension: "ROWS", startIndex: 2, endIndex: Math.max(rows.length, summaryRows.length) + 2 },
       properties: { pixelSize: 32 },
       fields: "pixelSize",
     },
   });
 
-  // ── Explicit column widths (px) ──
-  const colWidths = [300, 155, 80, 145]; // A, B, C, D
+  // ── Column widths ──
+  const colWidths = [300, 155, 80, 145, 30, 145, 80]; // A B C D E(gap) F G
   colWidths.forEach((px, i) => {
     requests.push({
       updateDimensionProperties: {
@@ -159,7 +198,7 @@ export async function syncReplitAccountsToSheet(
     });
   });
 
-  // ── Title banner: merge A1:D1, dark background, large white bold centered text ──
+  // ── Title banner A1:D1 merge ──
   requests.push({
     mergeCells: {
       range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
@@ -181,13 +220,98 @@ export async function syncReplitAccountsToSheet(
     },
   });
 
-  // ── Column header row (row index 1) ──
-  const headerColors = [
-    rgb(192, 0,   0),   // A: Deep red
-    rgb(0,   135, 0),   // B: Green
-    rgb(210, 100, 0),   // C: Orange
-    rgb(0,   70,  190), // D: Blue
-  ];
+  // ── Summary title F1:G1 merge ──
+  requests.push({
+    mergeCells: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 5, endColumnIndex: 7 },
+      mergeType: "MERGE_ALL",
+    },
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 5, endColumnIndex: 7 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: rgb(30, 30, 50),
+          textFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: rgb(150, 120, 255) },
+          horizontalAlignment: "CENTER",
+          verticalAlignment: "MIDDLE",
+        },
+      },
+      fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+    },
+  });
+
+  // ── Summary column headers (F2:G2) ──
+  const summaryHeaderColors = [rgb(60, 40, 120), rgb(40, 60, 120)];
+  [5, 6].forEach((colIndex, i) => {
+    requests.push({
+      repeatCell: {
+        range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: summaryHeaderColors[i],
+            textFormat: { bold: true, fontSize: 12, fontFamily: "Arial Black", foregroundColor: WHITE },
+            horizontalAlignment: "CENTER",
+            verticalAlignment: "MIDDLE",
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+      },
+    });
+  });
+
+  // ── Summary data rows F3:G(n) — colored per status ──
+  summaryRows.forEach(([label, count], i) => {
+    const rowIdx = i + 2;
+    const { bg, fg } = statusStyle(label);
+    // Status label cell (col F)
+    requests.push({
+      repeatCell: {
+        range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 5, endColumnIndex: 6 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: bg,
+            textFormat: { bold: true, fontSize: 11, fontFamily: "Arial Black", foregroundColor: fg },
+            horizontalAlignment: "CENTER",
+            verticalAlignment: "MIDDLE",
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+      },
+    });
+    // Count cell (col G)
+    requests.push({
+      repeatCell: {
+        range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 6, endColumnIndex: 7 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: rgb(240, 240, 255),
+            textFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: bg },
+            horizontalAlignment: "CENTER",
+            verticalAlignment: "MIDDLE",
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+      },
+    });
+  });
+
+  // ── Summary table border ──
+  requests.push({
+    updateBorders: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: summaryRows.length + 2, startColumnIndex: 5, endColumnIndex: 7 },
+      top:             { style: "SOLID_THICK",  color: rgb(30, 30, 50) },
+      bottom:          { style: "SOLID_THICK",  color: rgb(30, 30, 50) },
+      left:            { style: "SOLID_THICK",  color: rgb(30, 30, 50) },
+      right:           { style: "SOLID_THICK",  color: rgb(30, 30, 50) },
+      innerHorizontal: { style: "SOLID",        color: rgb(180, 180, 200) },
+      innerVertical:   { style: "SOLID_MEDIUM", color: rgb(140, 140, 180) },
+    },
+  });
+
+  // ── Main accounts table: header row (row 1) ──
+  const headerColors = [rgb(192, 0, 0), rgb(0, 135, 0), rgb(210, 100, 0), rgb(0, 70, 190)];
   headerColors.forEach((color, colIndex) => {
     requests.push({
       repeatCell: {
@@ -210,10 +334,10 @@ export async function syncReplitAccountsToSheet(
   const ROW_ODD  = WHITE;
 
   for (let i = 0; i < rows.length; i++) {
-    const rowIdx = i + 2; // 0=title 1=headers 2+=data
+    const rowIdx = i + 2;
     const stripe = i % 2 === 0 ? ROW_EVEN : ROW_ODD;
 
-    // Cols A–C base style
+    // Cols A–C
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 0, endColumnIndex: 3 },
@@ -228,21 +352,30 @@ export async function syncReplitAccountsToSheet(
         fields: "userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)",
       },
     });
-
-    // Col A: bold email
+    // Col A bold email
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 0, endColumnIndex: 1 },
         cell: {
-          userEnteredFormat: {
-            textFormat: { bold: true, fontSize: 11, fontFamily: "Arial", foregroundColor: rgb(10, 10, 40) },
-          },
+          userEnteredFormat: { textFormat: { bold: true, fontSize: 11, fontFamily: "Arial", foregroundColor: rgb(10, 10, 40) } },
         },
         fields: "userEnteredFormat(textFormat)",
       },
     });
-
-    // Col D: status chip
+    // Credits center + green bold
+    requests.push({
+      repeatCell: {
+        range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 2, endColumnIndex: 3 },
+        cell: {
+          userEnteredFormat: {
+            horizontalAlignment: "CENTER",
+            textFormat: { bold: true, fontSize: 11, fontFamily: "Arial", foregroundColor: rgb(30, 100, 30) },
+          },
+        },
+        fields: "userEnteredFormat(horizontalAlignment,textFormat)",
+      },
+    });
+    // Col D status
     const label = rows[i][3] as string;
     const { bg, fg } = statusStyle(label);
     requests.push({
@@ -261,30 +394,69 @@ export async function syncReplitAccountsToSheet(
     });
   }
 
-  // ── Borders: full table (rows 0 to end) ──
+  // ── Main table border ──
   requests.push({
     updateBorders: {
       range: { sheetId, startRowIndex: 0, endRowIndex: rows.length + 2, startColumnIndex: 0, endColumnIndex: 4 },
-      top:             { style: "SOLID_THICK", color: DARK_BG },
-      bottom:          { style: "SOLID_THICK", color: DARK_BG },
-      left:            { style: "SOLID_THICK", color: DARK_BG },
-      right:           { style: "SOLID_THICK", color: DARK_BG },
-      innerHorizontal: { style: "SOLID",       color: rgb(200, 205, 215) },
+      top:             { style: "SOLID_THICK",  color: DARK_BG },
+      bottom:          { style: "SOLID_THICK",  color: DARK_BG },
+      left:            { style: "SOLID_THICK",  color: DARK_BG },
+      right:           { style: "SOLID_THICK",  color: DARK_BG },
+      innerHorizontal: { style: "SOLID",        color: rgb(200, 205, 215) },
       innerVertical:   { style: "SOLID_MEDIUM", color: rgb(160, 165, 175) },
     },
   });
 
-  // ── Credits column: center-align ──
+  // ── PIE CHART (donut): Status breakdown ──
+  const totalSummaryRows = summaryRows.length;
+
   requests.push({
-    repeatCell: {
-      range: { sheetId, startRowIndex: 2, endRowIndex: rows.length + 2, startColumnIndex: 2, endColumnIndex: 3 },
-      cell: {
-        userEnteredFormat: {
-          horizontalAlignment: "CENTER",
-          textFormat: { bold: true, fontSize: 11, fontFamily: "Arial", foregroundColor: rgb(30, 100, 30) },
+    addChart: {
+      chart: {
+        spec: {
+          title: "Account Status Distribution",
+          titleTextFormat: { bold: true, fontSize: 14, fontFamily: "Arial Black", foregroundColor: DARK_BG },
+          pieChart: {
+            legendPosition: "RIGHT_LEGEND",
+            pieHole: 0.45,
+            // series = ChartData pointing at the counts column (G)
+            series: {
+              sourceRange: {
+                sources: [{
+                  sheetId,
+                  startRowIndex: 2,
+                  endRowIndex: 2 + totalSummaryRows,
+                  startColumnIndex: 6,
+                  endColumnIndex: 7,
+                }],
+              },
+            },
+            // domain = ChartData pointing at the label column (F)
+            domain: {
+              sourceRange: {
+                sources: [{
+                  sheetId,
+                  startRowIndex: 2,
+                  endRowIndex: 2 + totalSummaryRows,
+                  startColumnIndex: 5,
+                  endColumnIndex: 6,
+                }],
+              },
+            },
+          },
+          backgroundColor: WHITE,
+          fontName: "Arial",
+        },
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex: summaryRows.length + 3, columnIndex: 5 },
+            offsetXPixels: 0,
+            offsetYPixels: 10,
+            widthPixels: 480,
+            heightPixels: 340,
+          },
         },
       },
-      fields: "userEnteredFormat(horizontalAlignment,textFormat)",
     },
   });
 
