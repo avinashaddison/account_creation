@@ -593,7 +593,61 @@ export async function readSheetStatuses(
     .map((r) => ({ email: (r[0] as string).trim(), status: dbStatus(r[3] as string) }));
 }
 
-// ── Panel → Sheet: debounced auto-sync ──
+// ── VALUES-ONLY update: preserves all manual formatting the user applied in the sheet ──
+// Used by auto-sync so manual design changes survive data refreshes.
+// Only the manual "SYNC TO SHEET" button runs the full formatting sync.
+export async function updateSheetValuesOnly(
+  spreadsheetId: string,
+  accounts: any[]
+): Promise<void> {
+  const sheets = await getUncachableGoogleSheetClient();
+
+  const rows = accounts.map((a) => [
+    a.email ?? "",
+    a.password ?? "",
+    a.credits ? `${a.credits}` : "20$",
+    statusLabel(a.status),
+  ]);
+
+  // Build summary counts
+  const countMap: Record<string, number> = {};
+  rows.forEach(([, , , status]) => { countMap[status] = (countMap[status] || 0) + 1; });
+  const summaryRows = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheetTitle = meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
+
+  // Build the value grid (same layout, no format requests)
+  // Row 1: title row (keep existing merged cells, just refresh values)
+  // Row 2: headers
+  // Rows 3+: data + summary side-by-side
+  const sheetValues: any[][] = [
+    ["REPLIT CORE $20 — ACCOUNTS", "", "", "", "", "ACCOUNT STATUS BREAKDOWN", ""],
+    ["E-Mail Address", "PASSWORD", "CREDITS", "Status", "", "Status", "Count"],
+  ];
+
+  const maxRows = Math.max(rows.length, summaryRows.length);
+  for (let i = 0; i < maxRows; i++) {
+    const dataRow = rows[i] ?? ["", "", "", ""];
+    const sumEntry = summaryRows[i];
+    sheetValues.push([
+      ...dataRow,
+      "",
+      sumEntry ? sumEntry[0] : "",
+      sumEntry ? sumEntry[1] : "",
+    ]);
+  }
+
+  // Write values only — no format/batchUpdate calls → manual design is untouched
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${sheetTitle}!A1`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: sheetValues },
+  });
+}
+
+// ── Panel → Sheet: debounced auto-sync (values-only — preserves manual design) ──
 let _syncTimer: ReturnType<typeof setTimeout> | null = null;
 let _syncStorage: any = null;
 export let lastAutoSyncAt: Date | null = null;
@@ -605,9 +659,9 @@ export function scheduleAutoSync(storageInstance: any, delayMs = 4000) {
   _syncTimer = setTimeout(async () => {
     try {
       const accounts = await _syncStorage.getAllReplitAccounts();
-      await syncReplitAccountsToSheet(SHEET_ID, accounts);
+      await updateSheetValuesOnly(SHEET_ID, accounts);
       lastAutoSyncAt = new Date();
-      console.log(`[Sheets] Auto-synced ${accounts.length} accounts → Google Sheet`);
+      console.log(`[Sheets] Auto-synced ${accounts.length} accounts → Google Sheet (values only)`);
     } catch (err: any) {
       console.error("[Sheets] Auto-sync failed:", err.message);
     }
