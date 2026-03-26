@@ -13827,45 +13827,9 @@ export async function registerLovableAccount(
         !bypassConfirmUrl.includes("/signup");
       log(`Bypass confirmation: accountVerified=${accountVerified} URL=${bypassConfirmUrl.substring(0, 80)}`);
 
-      // Handle getting-started onboarding if we landed there
+      // Onboarding skipped — account is usable as soon as it lands on getting-started
       if (accountVerified && bypassConfirmUrl.includes("getting-started")) {
-        log("Starting onboarding wizard (dashboard bypass path)...");
-        for (let step = 1; step <= 8; step++) {
-          await waitMs(2000);
-          const curUrl = page.url();
-          if (!curUrl.includes("getting-started")) { log(`Onboarding done — URL: ${curUrl.substring(0,80)}`); break; }
-          const curText = await page.evaluate(() => document.body?.innerText || "");
-          log(`Onboarding step ${step}: ${curText.substring(0, 80).replace(/\n/g, " ")}`);
-          // Dark theme
-          if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
-            await page.locator('button:has-text("Dark")').first().click({ timeout: 5000 }).catch(() => {});
-            await waitMs(500);
-          }
-          // Name
-          if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name")) {
-            await page.locator('input[type="text"]').first().fill("Alex Johnson").catch(() => {});
-            await waitMs(500);
-          }
-          // Role
-          if (curText.toLowerCase().includes("role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer")) {
-            await page.locator('button:has-text("Engineer"), button:has-text("Developer")').first().click({ timeout: 3000 }).catch(() => {});
-            await waitMs(500);
-          }
-          // Use case
-          if (curText.toLowerCase().includes("personal") || curText.toLowerCase().includes("project")) {
-            await page.locator('button:has-text("Personal"), button:has-text("Side project")').first().click({ timeout: 3000 }).catch(() => {});
-            await waitMs(500);
-          }
-          // Next/Continue
-          let advanced = false;
-          for (const label of ["Next", "Continue", "Start building", "Get started", "Finish", "Done"]) {
-            try {
-              const loc = page.locator(`button:has-text("${label}")`).first();
-              if (await loc.isVisible().catch(() => false)) { await loc.click({ timeout: 5000 }); advanced = true; break; }
-            } catch {}
-          }
-          if (!advanced) { log(`No Next button on step ${step}`); break; }
-        }
+        log("✅ Account verified — onboarding skipped, account is ready");
       }
     } else if (verificationLink) {
       // ── Try Firebase API verification first (avoids stale browser session) ──
@@ -13966,160 +13930,18 @@ export async function registerLovableAccount(
         }
       }
 
-      // If verified via Firebase API, use fresh browser for onboarding
+      // Email verified via Firebase API — account is ready, skip onboarding entirely
       if (apiVerified && generatedPassword) {
-        log("🚀 Starting onboarding with fresh browser (Firebase API verified)...");
+        log(`✅ Lovable account ready — email verified, onboarding skipped: ${mailGwEmail}`);
         try { if (page) await page.close(); } catch {}
         try { if (browser) await browser.close(); } catch {}
         browser = null; page = null;
-        const onboardResult = await loginAndCompleteOnboarding(mailGwEmail, generatedPassword, log, {
-          refreshToken: capturedFirebaseRefreshToken || undefined,
-          firebaseUid: capturedFirebaseUid || undefined,
-        });
-        if (onboardResult.success) {
-          log(`✅ Lovable account creation complete (API verified): ${mailGwEmail}`);
-          return { success: true, email: mailGwEmail, password: generatedPassword };
-        } else {
-          // Onboarding failed but email IS verified — account is still usable
-          log(`⚠️ Onboarding incomplete but email verified: ${onboardResult.error}`);
-          return { success: true, email: mailGwEmail, password: generatedPassword };
-        }
+        return { success: true, email: mailGwEmail, password: generatedPassword };
       }
 
-      // ── STEP 6b: Complete onboarding (getting-started flow) ────────────────
+      // Onboarding skipped — account is ready once email is verified
       if (accountVerified && vUrl.includes("getting-started")) {
-        log("Starting onboarding wizard...");
-
-        async function clickLocator(selector: string, label: string): Promise<boolean> {
-          try {
-            const loc = page.locator(selector).first();
-            await loc.waitFor({ state: "visible", timeout: 3000 });
-            await loc.click({ timeout: 5000 });
-            log(label);
-            await waitMs(800);
-            return true;
-          } catch { return false; }
-        }
-
-        for (let step = 1; step <= 8; step++) {
-          await waitMs(2000);
-          const curUrl = page.url();
-          if (!curUrl.includes("getting-started")) {
-            log(`Onboarding complete — landed on: ${curUrl}`);
-            break;
-          }
-          const curText = await page.evaluate(() => document.body?.innerText || "");
-          log(`Onboarding step ${step}: ${curText.substring(0, 100).replace(/\n/g, " ")}`);
-
-          // Step 1: Pick your style — choose Dark (card is a div, not a button)
-          if (curText.toLowerCase().includes("pick your style") || (curText.toLowerCase().includes("light") && curText.toLowerCase().includes("dark"))) {
-            const darkSelected = await clickLocator('button:has-text("Dark")', "Selected Dark theme (button)")
-              || await clickLocator('[aria-label="Dark"]', "Selected Dark theme (aria)")
-              || await clickLocator('text=Dark', "Selected Dark theme (text)")
-              || await clickLocator('div:has-text("Dark"):last-of-type', "Selected Dark theme (div last)");
-            if (!darkSelected) {
-              // Try clicking on the second card (Dark is always second)
-              try {
-                const cards = await page.$$('[class*="cursor-pointer"], figure, [role="button"]');
-                if (cards.length >= 2) { await cards[1].click(); log("Selected Dark theme (2nd card)"); await waitMs(500); }
-              } catch {}
-            }
-          }
-
-          // Step: "What's your name?" — type a realistic name
-          if (curText.toLowerCase().includes("what's your name") || curText.toLowerCase().includes("full name")) {
-            try {
-              const nameInput = page.locator('input[type="text"], input[placeholder*="name" i], input[name*="name" i]').first();
-              const visible = await nameInput.isVisible().catch(() => false);
-              if (visible) {
-                await nameInput.fill("Alex Johnson");
-                log("Filled name: Alex Johnson");
-                await waitMs(500);
-              }
-            } catch {}
-          }
-
-          // Step: "Which role fits you best?" or "What best describes you?" — pick Engineer/Developer
-          if (curText.toLowerCase().includes("role fits you") || curText.toLowerCase().includes("describes you") || curText.toLowerCase().includes("what is your role") || curText.toLowerCase().includes("founder") || curText.toLowerCase().includes("engineer")) {
-            const roleClicked = await clickLocator('button:has-text("Engineer")', "Selected Engineer role")
-              || await clickLocator('button:has-text("Developer")', "Selected Developer role")
-              || await clickLocator('text=Engineer', "Selected Engineer role (text)")
-              || await clickLocator('text=Developer', "Selected Developer role (text)");
-            if (roleClicked) {
-              await waitMs(2000);
-              const afterRoleUrl = page.url();
-              if (!afterRoleUrl.includes("getting-started")) { log(`Role click advanced to: ${afterRoleUrl}`); break; }
-              // Role selected — skip Next button check and advance to next step
-              log("Role selected — continuing to next onboarding step");
-              continue;
-            }
-          }
-
-          // Step: "How many people work at your company?" — pick Solo
-          if (curText.toLowerCase().includes("how many people") || curText.toLowerCase().includes("company") || curText.toLowerCase().includes("solo")) {
-            const companyClicked = await clickLocator('button:has-text("Solo")', "Selected Solo company size")
-              || await clickLocator('text=Solo', "Selected Solo (text)");
-            if (companyClicked) {
-              await waitMs(2000);
-              const afterUrl = page.url();
-              if (!afterUrl.includes("getting-started")) { log(`Company step advanced to: ${afterUrl}`); break; }
-              log("Company size selected — continuing to next onboarding step");
-              continue;
-            }
-          }
-
-          // Step: "What will you use Lovable for?" — pick Personal projects
-          if (curText.toLowerCase().includes("use lovable for") || curText.toLowerCase().includes("what will you") || curText.toLowerCase().includes("building")) {
-            const purposeClicked = await clickLocator('button:has-text("Personal")', "Selected Personal projects")
-              || await clickLocator('[role="option"]:has-text("Personal")', "Selected Personal (option)")
-              || await clickLocator('text=Personal', "Selected Personal (text)");
-            if (purposeClicked) {
-              await waitMs(2000);
-              const afterUrl = page.url();
-              if (!afterUrl.includes("getting-started")) { log(`Purpose step advanced to: ${afterUrl}`); break; }
-              log("Purpose selected — continuing to next onboarding step");
-              continue;
-            }
-          }
-
-          // Step: "How did you hear about us?" — pick Social media
-          if (curText.toLowerCase().includes("hear about") || curText.toLowerCase().includes("how did you")) {
-            const referralClicked = await clickLocator('button:has-text("Social media")', "Selected Social media")
-              || await clickLocator('[role="option"]:has-text("Social media")', "Selected Social media (option)")
-              || await clickLocator('text=Social media', "Selected Social media (text)");
-            if (referralClicked) {
-              await waitMs(2000);
-              const afterUrl = page.url();
-              if (!afterUrl.includes("getting-started")) { log(`Referral step advanced to: ${afterUrl}`); break; }
-              log("Referral selected — continuing to next onboarding step");
-              continue;
-            }
-          }
-
-          // Click Next / Continue / Start building / Finish — use fresh locator every time
-          const nextLabels = ["Next", "Continue", "Start building", "Get started", "Finish", "Done"];
-          let clicked = false;
-          for (const label of nextLabels) {
-            try {
-              const loc = page.locator(`button:has-text("${label}")`).first();
-              const visible = await loc.isVisible().catch(() => false);
-              if (visible) {
-                await loc.click({ timeout: 8000 });
-                log(`Clicked "${label}" — proceeding`);
-                clicked = true;
-                break;
-              }
-            } catch {}
-          }
-          if (!clicked) {
-            log(`No Next button found on step ${step} — onboarding may be complete`);
-            break;
-          }
-        }
-        // Final check
-        await waitMs(2000);
-        const finalUrl = page.url();
-        log(`Post-onboarding URL: ${finalUrl}`);
+        log("✅ Account verified — onboarding skipped, account is ready");
       }
     } else if (verificationCode) {
       log(`Entering 6-digit code: ${verificationCode}`);
