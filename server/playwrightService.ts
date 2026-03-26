@@ -12888,8 +12888,6 @@ export async function checkGmailAccount(
 }
 
 export async function registerLovableAccount(
-  outlookEmail: string,
-  outlookPassword: string,
   log: (msg: string) => void,
   proxyUrl?: string,
   referralUrl?: string
@@ -13209,7 +13207,7 @@ export async function registerLovableAccount(
     });
 
     // ── MAIL.GW SETUP: Generate fresh temp email for Lovable signup ───────
-    let mailGwEmail = outlookEmail; // fallback to outlookEmail if mail.gw fails
+    let mailGwEmail = "";
     let mailGwPassword = "MailGw@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
     let mailGwProvider: "mail.gw" | "mail.tm" = "mail.gw";
     try {
@@ -13225,8 +13223,11 @@ export async function registerLovableAccount(
       await createTempEmail(mailGwEmail, mailGwPassword);
       log(`✅ mail.gw account created: ${mailGwEmail}`);
     } catch (gwErr: any) {
-      log(`⚠️ mail.gw setup failed (${(gwErr.message || "").substring(0, 80)}) — falling back to outlookEmail`);
-      mailGwEmail = outlookEmail;
+      log(`⚠️ mail.gw setup failed: ${(gwErr.message || "").substring(0, 80)}`);
+      return { success: false, error: `mail.gw email creation failed: ${(gwErr.message || "").substring(0, 80)}` };
+    }
+    if (!mailGwEmail) {
+      return { success: false, error: "Could not generate a mail.gw email address" };
     }
 
     // ── STEP 1: Navigate to signup page ───────────────────────────────────
@@ -13377,7 +13378,7 @@ export async function registerLovableAccount(
        (afterText.toLowerCase().includes("log in") || afterText.toLowerCase().includes("sign in")));
 
     if (alreadyExists || onLoginPage) {
-      log(`Email ${outlookEmail} already has a Lovable account (redirected to login page)`);
+      log(`Email ${mailGwEmail} already has a Lovable account (redirected to login page)`);
       return { success: false, error: "Lovable account already exists for this email" };
     }
     if (onDashboardNow) { log("✅ On dashboard instantly!"); return { success: true, email: mailGwEmail }; }
@@ -13607,7 +13608,7 @@ export async function registerLovableAccount(
           log(`Retry injection: fired ${injected} callbacks + set hidden input`);
           await waitMs(1500);
           // Re-fill email and re-click Continue
-          await fillInput(page, ['input[type="email"]', 'input[name="email"]'], outlookEmail, "email-retry");
+          await fillInput(page, ['input[type="email"]', 'input[name="email"]'], mailGwEmail, "email-retry");
           await waitMs(500);
           await clickButton(page, ['button:has-text("Continue")', 'button[type="submit"]'], "Continue-retry");
           await waitMs(8000);

@@ -3973,19 +3973,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "referralUrl must be a lovable.dev URL" });
       }
       const userId = req.session.userId;
-
-      const allOutlook = await storage.getAllPrivateOutlooks();
-      const lovableAccts = await storage.getAllLovableAccounts();
-      const usedEmails = new Set(lovableAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
-      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
-
-      if (available.length === 0) {
-        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Lovable" });
-      }
-
-      const shuffled = [...available].sort(() => Math.random() - 0.5);
-      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
-      const total = toUse.length;
+      const total = actualCount;
 
       const bulkId = randomUUID().substring(0, 8);
       const batchId = `lovable-bulk-${bulkId}`;
@@ -4013,15 +4001,12 @@ export async function registerRoutes(
             const i = queueIndex++;
             if (i >= total) break;
 
-            const acc = toUse[i];
             const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
             if (rotatedProxy) broadcastLog(batchId, bulkId, `[W${i % concurrency + 1}] Using SOAX proxy (rotated session)`, userId);
-            broadcastLog(batchId, bulkId, `━━━ [slot ${i + 1}/${total}] ${acc.email} ━━━`, userId);
+            broadcastLog(batchId, bulkId, `━━━ [slot ${i + 1}/${total}] ━━━`, userId);
 
             try {
               const result = await registerLovableAccount(
-                acc.email,
-                acc.password,
                 (msg) => broadcastLog(batchId, bulkId, msg, userId),
                 rotatedProxy || undefined,
                 referralUrl || undefined
@@ -4034,7 +4019,6 @@ export async function registerRoutes(
                   await storage.createLovableAccount({
                     email: result.email!,
                     password: result.password || null,
-                    outlookEmail: acc.email,
                     status: "created",
                     credits: referralUrl ? 20 : 5,
                     createdBy: userId,
@@ -4050,7 +4034,6 @@ export async function registerRoutes(
                   await storage.createLovableAccount({
                     email: result.email!,
                     password: result.password || null,
-                    outlookEmail: acc.email,
                     status: "pending_verification",
                     credits: referralUrl ? 20 : 5,
                     error: result.error || null,
@@ -4098,20 +4081,9 @@ export async function registerRoutes(
 
   app.post("/api/lovable-create", requireAuth, requireServiceAccess("lovable"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword, referralUrl } = req.body;
-      if (!outlookEmail || !outlookPassword) {
-        return res.status(400).json({ error: "Outlook email and password are required" });
-      }
+      const { referralUrl } = req.body;
       if (referralUrl && !referralUrl.startsWith("https://lovable.dev/")) {
         return res.status(400).json({ error: "referralUrl must be a lovable.dev URL" });
-      }
-
-      const existingAccts = await storage.getAllLovableAccounts();
-      const alreadyUsed = existingAccts.some(
-        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
-      );
-      if (alreadyUsed) {
-        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Lovable account` });
       }
 
       const userId = req.session.userId;
@@ -4122,9 +4094,8 @@ export async function registerRoutes(
       res.json({ success: true, createId, batchId, message: "Lovable account creation started" });
 
       (async () => {
-        broadcastLog(batchId, createId, `Starting Lovable account creation for ${outlookEmail}...`, userId);
+        broadcastLog(batchId, createId, `Starting Lovable account creation via mail.gw...`, userId);
         try {
-          // Fetch and rotate SOAX proxy for this creation session
           const soaxTemplate = await storage.getSetting("soax_proxy_template");
           const residentialProxy = await storage.getSetting("residential_proxy_url");
           const baseProxy = soaxTemplate || residentialProxy || "";
@@ -4132,8 +4103,6 @@ export async function registerRoutes(
           if (rotatedProxy) broadcastLog(batchId, createId, `Using SOAX residential proxy (rotated session)`, userId);
 
           const result = await registerLovableAccount(
-            outlookEmail,
-            outlookPassword,
             (msg) => broadcastLog(batchId, createId, msg, userId),
             rotatedProxy || undefined,
             referralUrl || undefined
@@ -4144,7 +4113,6 @@ export async function registerRoutes(
               await storage.createLovableAccount({
                 email: result.email!,
                 password: result.password || null,
-                outlookEmail,
                 status: "created",
                 credits: referralUrl ? 20 : 5,
                 createdBy: userId,
@@ -4155,12 +4123,10 @@ export async function registerRoutes(
             }
             broadcast({ type: "lovable_create_result", createId, batchId, success: true, email: result.email, password: result.password }, userId);
           } else if (result.pendingVerification) {
-            // Firebase signup succeeded but email not yet verified — save as pending
             try {
               await storage.createLovableAccount({
                 email: result.email!,
                 password: result.password || null,
-                outlookEmail,
                 status: "pending_verification",
                 credits: referralUrl ? 20 : 5,
                 error: result.error || null,
@@ -4168,7 +4134,7 @@ export async function registerRoutes(
                 firebaseUid: result.firebaseUid || null,
                 createdBy: userId,
               });
-              broadcastLog(batchId, createId, `⏳ Account saved as pending_verification — check Hotmail inbox for verification email`, userId);
+              broadcastLog(batchId, createId, `⏳ Account saved as pending_verification`, userId);
             } catch (dbErr: any) {
               broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
             }
