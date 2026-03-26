@@ -13530,6 +13530,9 @@ export async function registerLovableAccount(
             midUrl.includes("/getting-started") || midText.toLowerCase().includes("what are you building");
           if (midLoggedIn) {
             log("✅ Signup completed during extra wait!");
+          } else if (capturedFirebaseIdToken) {
+            // Firebase signup completed during the extra wait — skip retry, go straight to mail scan
+            log("✅ Firebase signup completed during extra wait (idToken captured) — proceeding to email verification, skipping retry");
           } else if (midUrl.includes("lovable.dev/signup") || midUrl.includes("verify-email")) {
             log("Retrying form submit...");
             await page.evaluate(() => {
@@ -13546,9 +13549,14 @@ export async function registerLovableAccount(
               if (btn) btn.click();
             });
             await waitMs(12000);
-            const r2Url = page.url();
-            const r2Text = await page.evaluate(() => document.body?.innerText || "");
-            log(`After retry: ${r2Url} — ${r2Text.substring(0, 120).replace(/\s+/g, " ")}`);
+            // If Firebase came through during the retry wait, bail out before checking EMAIL_EXISTS
+            if (capturedFirebaseIdToken) {
+              log("✅ Firebase idToken captured during retry wait — aborting retry check, proceeding to email scan");
+            } else {
+              const r2Url = page.url();
+              const r2Text = await page.evaluate(() => document.body?.innerText || "");
+              log(`After retry: ${r2Url} — ${r2Text.substring(0, 120).replace(/\s+/g, " ")}`);
+            }
           }
         }
       }

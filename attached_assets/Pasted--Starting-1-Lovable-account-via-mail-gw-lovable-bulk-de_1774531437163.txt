@@ -1,0 +1,148 @@
+>
+🚀 Starting 1 Lovable account via mail.gw [lovable-bulk-de74ef46]
+18:39:13
++
+✅ Connected via ZenRows anti-bot browser — Cloudflare WAF bypassed
+18:39:13
+·
+Solving Turnstile via CapSolver in background (sitekey: 0x4AAAAAAChnKAZBY0iFpFHC, action: signup_email_password)...
+18:39:14
++
+✅ mail.gw account created: keensky5634@questtechsystems.com
+18:39:14
+>
+Navigating to https://lovable.dev/signup ...
+18:39:20
+·
+Page title: "Create account" | Has email input: true
+18:39:20
+·
+Filling email: keensky5634@questtechsystems.com
+18:39:21
+·
+[API 200] https://api.lovable.dev/consent/policy → {"$schema":"https://api.lovable.dev/ConsentPolicyResponse.json","bucket":"rest"}
+18:39:25
++
+✅ Background CapSolver solved! Token length: 1050
+18:39:28
+·
+Filled email via input[type="email"]
+18:39:28
+·
+Pre-Continue: fired 0 Turnstile callback(s) with token — button should be enabled
+18:39:30
+·
+No pre-set Turnstile token in DOM — CapSolver injection required
+18:39:30
+·
+Clicking Continue...
+18:39:31
+·
+Clicked Continue: "continue"
+18:39:31
+·
+Waiting for page response (7s)...
+18:39:31
+·
+[API 200] https://api.lovable.dev/auth/check-auth-provider → {"has_sso_provider":false,"has_email_password":false,"domain_lock":false}
+18:39:31
+·
+Fake Turnstile script served — render() callbacks queued until real CapSolver token
+18:39:38
+·
+URL after Continue: https://lovable.dev/signup
+18:39:38
+·
+Text snippet: Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password must contain: at least 8 characters a number (0-9) By continuing, you agree to the Te
+18:39:38
++
+✅ Password field detected — using email + password registration
+18:39:40
+·
+Filled password via input[type="password"]
+18:39:40
+·
+Generated password: rP6dmsCjpKB@Aa1!
+18:39:41
+·
+Awaiting real CapSolver token to fire queued Turnstile callbacks...
+18:39:41
++
+✅ Got real CapSolver token (1050 chars) — firing queued Turnstile callbacks
+18:39:41
+·
+Fired 1 queued Turnstile callback(s) with real token
+18:39:41
+·
+Waiting 5s for Lovable to write token to Firestore...
+18:39:47
+·
+Buttons: "Continue with Google" disabled=false | "Continue with GitHub" disabled=false | "Edit" disabled=false | "" disabled=false | "Create your account" disabled=false
+18:39:47
+·
+Submitting password form...
+18:39:47
+·
+[HTTP 601] https://www.facebook.com/tr/
+18:39:47
+·
+Clicked Submit: "create your account"
+18:39:47
+·
+Waiting 18s for signup response...
+18:40:05
+·
+URL after submit: https://lovable.dev/signup
+18:40:05
+·
+Text after submit: Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password meets all requirements By continuing, you agree to the Terms of Service and Privacy Pol
+18:40:05
+·
+Still on signup page — waiting 15s more then retrying form submit...
+18:40:07
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","dlc96g6lr6PVnVRJWx7kOQ","",8,14,30000]]]
+18:40:08
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+18:40:11
+·
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#SignupNewUserResponse", "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjM3MzAwNzY5YTA3ZTA1MTE2ZjdlNTEzOGZhOTA5MzY4NWVlYmMyNDAiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vZ3B0LWVuZ2luZWVyLTM5MDYwNyIsImF1ZCI6ImdwdC1lbmdpbmVlci0zOTA2MDciLCJhdXRoX3RpbWUiOjE3NzQ1MzA2MTEsInVzZXJfaWQiOiIydzJCNzA4a0c3VkxOeVVCM1VtMFVQQjRIU0kyIiwic3ViIjoiMncyQjcwOGtHN1ZMTn
+18:40:11
++
+✅ Firebase idToken captured (length: 969)
+18:40:11
++
+✅ Firebase refreshToken captured
+18:40:11
++
+✅ Firebase UID captured: 2w2B708kG7VLNyUB3Um0UPB4HSI2
+18:40:12
++
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetAccountInfoResponse", "users": [ { "localId": "2w2B708kG7VLNyUB3Um0UPB4HSI2", "email": "keensky5634@questtechsystems.com", "passwordHash": "UkVEQUNURUQ=", "emailVerified": false, "passwordUpdatedAt": 1774530609238, "providerUserInfo": [ { "providerId": "password", "federatedId": "keensky5634@quest
+18:40:14
+›
+[API 200] https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "kind": "identitytoolkit#GetOobConfirmationCodeResponse", "email": "keensky5634@questtechsystems.com" }
+18:40:15
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","3FzNrIbxSL0uBj-pPEYfmQ","",8,14,30000]]]
+18:40:21
+·
+After extra wait: https://lovable.dev/signup — Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password meets a
+18:40:21
+·
+Retrying form submit...
+18:40:21
+·
+[HTTP 601] https://www.facebook.com/tr/
+18:40:21
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","riXY8d77-SxLkvr4J2lPVA","",8,14,30000]]]
+18:40:23
+!
+[API 400] https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw → { "error": { "code": 400, "message": "EMAIL_EXISTS", "errors": [ { "message": "EMAIL_EXISTS", "domain": "global", "reason": "invalid" } ] } }
+18:40:23
+!
+[Firebase 400] https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyBQNjlw9Vp4tP → { "error": { "code": 400, "message": "EMAIL_EXISTS", "errors": [ { "message": "EMAIL_EXISTS", "domain": "global", "reason": "invalid" } ] } }
+addison@panel:~$
+executing lovable_create...
