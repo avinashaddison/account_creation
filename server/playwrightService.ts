@@ -12897,7 +12897,12 @@ export async function registerLovableAccount(
   let browser: any = null;
   let page: any = null;
 
-  const signupUrl = referralUrl || "https://lovable.dev/signup";
+  // Normalize invite URLs: /invite/CODE → /signup?referral_code=CODE
+  let signupUrl = referralUrl || "https://lovable.dev/signup";
+  if (signupUrl.includes("lovable.dev/invite/")) {
+    const code = signupUrl.split("/invite/")[1]?.split(/[?#]/)[0];
+    if (code) signupUrl = `https://lovable.dev/signup?referral_code=${code}`;
+  }
 
   // ── helpers ────────────────────────────────────────────────────────────────
   function randPass(): string {
