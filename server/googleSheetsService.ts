@@ -187,8 +187,8 @@ export async function syncReplitAccountsToSheet(
   });
 
   // ── Column widths ──
-  // E = wide breathing gap, F = Status label, G = Count
-  const colWidths = [300, 155, 80, 145, 90, 200, 120]; // A B C D E(gap) F G
+  // E = tiny separator (almost hidden), F = Status label, G = Count
+  const colWidths = [300, 155, 80, 145, 18, 200, 120]; // A B C D E(gap) F G
   colWidths.forEach((px, i) => {
     requests.push({
       updateDimensionProperties: {
@@ -233,8 +233,8 @@ export async function syncReplitAccountsToSheet(
       range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 5, endColumnIndex: 7 },
       cell: {
         userEnteredFormat: {
-          backgroundColor: rgb(30, 30, 50),
-          textFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: rgb(150, 120, 255) },
+          backgroundColor: rgb(20, 20, 48),
+          textFormat: { bold: true, fontSize: 14, fontFamily: "Arial Black", foregroundColor: rgb(185, 90, 255) },
           horizontalAlignment: "CENTER",
           verticalAlignment: "MIDDLE",
         },
@@ -243,23 +243,20 @@ export async function syncReplitAccountsToSheet(
     },
   });
 
-  // ── Summary column headers (F2:G2) ──
-  const summaryHeaderColors = [rgb(60, 40, 120), rgb(40, 60, 120)];
-  [5, 6].forEach((colIndex, i) => {
-    requests.push({
-      repeatCell: {
-        range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
-        cell: {
-          userEnteredFormat: {
-            backgroundColor: summaryHeaderColors[i],
-            textFormat: { bold: true, fontSize: 12, fontFamily: "Arial Black", foregroundColor: WHITE },
-            horizontalAlignment: "CENTER",
-            verticalAlignment: "MIDDLE",
-          },
+  // ── Summary column headers (F2:G2) — unified dark navy, white text ──
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 5, endColumnIndex: 7 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: rgb(25, 25, 60),
+          textFormat: { bold: true, fontSize: 12, fontFamily: "Arial Black", foregroundColor: WHITE },
+          horizontalAlignment: "CENTER",
+          verticalAlignment: "MIDDLE",
         },
-        fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
       },
-    });
+      fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+    },
   });
 
   // ── Summary data rows F3:G(n) — colored per status ──
@@ -281,14 +278,14 @@ export async function syncReplitAccountsToSheet(
         fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
       },
     });
-    // Count cell (col G)
+    // Count cell (col G) — dark navy background, bold orange number
     requests.push({
       repeatCell: {
         range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 6, endColumnIndex: 7 },
         cell: {
           userEnteredFormat: {
-            backgroundColor: rgb(240, 240, 255),
-            textFormat: { bold: true, fontSize: 13, fontFamily: "Arial Black", foregroundColor: bg },
+            backgroundColor: rgb(18, 18, 45),
+            textFormat: { bold: true, fontSize: 14, fontFamily: "Arial Black", foregroundColor: rgb(255, 160, 30) },
             horizontalAlignment: "CENTER",
             verticalAlignment: "MIDDLE",
           },
