@@ -4201,10 +4201,13 @@ export async function registerRoutes(
     }
   });
 
+  const LOVABLE_VALID_STATUSES = new Set(["created", "pending_verification", "verified", "failed", "sold_out"]);
+
   app.patch("/api/lovable-accounts/:id/status", requireAuth, async (req: Request, res: Response) => {
     try {
       const { status } = req.body;
       if (!status) return res.status(400).json({ error: "status is required" });
+      if (!LOVABLE_VALID_STATUSES.has(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${[...LOVABLE_VALID_STATUSES].join(", ")}` });
       const userId = req.session.userId;
       const role = req.session.role;
       const accounts = await storage.getAllLovableAccounts();
@@ -4224,6 +4227,7 @@ export async function registerRoutes(
     try {
       const { ids, status } = req.body;
       if (!status) return res.status(400).json({ error: "status is required" });
+      if (!LOVABLE_VALID_STATUSES.has(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${[...LOVABLE_VALID_STATUSES].join(", ")}` });
       if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids must be a non-empty array" });
       const userId = req.session.userId;
       const role = req.session.role;

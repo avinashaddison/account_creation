@@ -1331,6 +1331,8 @@ export default function PrivateAccount() {
                     navigator.clipboard.writeText(text).then(() => {
                       setBulkCopiedIds(slice.map((a) => a.id));
                       toast({ title: `Copied ${slice.length} accounts`, description: "email:password — one per line" });
+                    }).catch(() => {
+                      toast({ title: "Clipboard error", description: "Could not write to clipboard — check browser permissions", variant: "destructive" });
                     });
                   }}
                   data-testid="button-bulk-copy"
