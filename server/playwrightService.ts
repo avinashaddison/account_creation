@@ -15819,8 +15819,8 @@ export async function registerV0Account(
       ignoreHTTPSErrors: true,
       proxy: {
         server: "http://proxy.soax.com:5000",
-        username: "package-339450-sessionid-gAnRlzTJavAjPDD9-sessionlength-300-opt-wb",
-        password: "G7AI0bmAwNwoiniW",
+        username: "package-339940-country-us-sessionid-uG1LIsg05VYTWbsn-sessionlength-300-opt-wb",
+        password: "WVN2E38uJ16cZgOw",
       },
     });
     page = await context.newPage();
