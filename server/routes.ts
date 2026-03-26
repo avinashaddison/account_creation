@@ -3999,6 +3999,10 @@ export async function registerRoutes(
         const baseProxy = soaxTemplate || residentialProxy || "";
 
         for (let i = 0; i < toUse.length; i++) {
+          if (cancelledBatches.has(batchId)) {
+            broadcastLog(batchId, bulkId, `🛑 Batch cancelled — stopping after account ${i}/${toUse.length}`, userId);
+            break;
+          }
           const acc = toUse[i];
           // Rotate proxy session per account
           const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
@@ -4058,6 +4062,8 @@ export async function registerRoutes(
 
         broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
         broadcastBatchComplete(batchId, userId);
+        cancelledBatches.delete(batchId);
+        batchOwners.delete(batchId);
       })();
     } catch (err: any) {
       res.status(500).json({ error: err.message });

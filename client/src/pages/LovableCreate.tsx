@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
-import { Heart, Play, Hash, Layers, ChevronRight, Radio, AtSign, Zap, Tag, Link2 } from "lucide-react";
+import { Heart, Play, Hash, Layers, ChevronRight, Radio, AtSign, Zap, Tag, Link2, Square } from "lucide-react";
 
 type LovableAccount = {
   id: string;
@@ -126,6 +126,17 @@ export default function LovableCreate() {
 
     return () => ws.close();
   }, []);
+
+  const handleStop = async () => {
+    const batchId = activeBatchId.current;
+    if (!batchId) return;
+    try {
+      await apiRequest("POST", `/api/cancel-batch/${batchId}`, {});
+      addLog(`🛑 Stop signal sent — waiting for current account to finish...`);
+    } catch (err: any) {
+      toast({ title: "Stop failed", description: err.message, variant: "destructive" });
+    }
+  };
 
   const handleCreate = async () => {
     sounds.start();
@@ -309,29 +320,47 @@ export default function LovableCreate() {
                 )}
               </div>
 
-              {/* Create button */}
-              <button
-                onClick={handleCreate}
-                disabled={running}
-                className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
-                style={{
-                  background: running ? PA(0.04) : `linear-gradient(135deg, ${PA(0.25)}, ${PA(0.1)})`,
-                  border: `1px solid ${running ? PA(0.08) : PA(0.5)}`,
-                  color: running ? PA(0.25) : P,
-                  textShadow: running ? "none" : `0 0 14px ${P}`,
-                  boxShadow: running ? "none" : `0 0 25px ${PA(0.1)}, inset 0 1px 0 ${PA(0.12)}`,
-                  cursor: running ? "not-allowed" : "pointer",
-                }}
-                data-testid="button-create-lovable"
-              >
-                {!running && <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 2px, ${PA(0.025)} 2px, ${PA(0.025)} 4px)` }} />}
-                <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
-                <span className="relative z-10">
-                  {running
-                    ? totalCount > 1 ? `creating ${completedCount}/${totalCount}...` : "creating account..."
-                    : count > 1 ? `bulk_create ${count} accounts` : "create_lovable_account"}
-                </span>
-              </button>
+              {/* Create / STOP buttons */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreate}
+                  disabled={running}
+                  className="relative flex-1 flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+                  style={{
+                    background: running ? PA(0.04) : `linear-gradient(135deg, ${PA(0.25)}, ${PA(0.1)})`,
+                    border: `1px solid ${running ? PA(0.08) : PA(0.5)}`,
+                    color: running ? PA(0.25) : P,
+                    textShadow: running ? "none" : `0 0 14px ${P}`,
+                    boxShadow: running ? "none" : `0 0 25px ${PA(0.1)}, inset 0 1px 0 ${PA(0.12)}`,
+                    cursor: running ? "not-allowed" : "pointer",
+                  }}
+                  data-testid="button-create-lovable"
+                >
+                  {!running && <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 2px, ${PA(0.025)} 2px, ${PA(0.025)} 4px)` }} />}
+                  <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                  <span className="relative z-10">
+                    {running
+                      ? totalCount > 1 ? `creating ${completedCount}/${totalCount}...` : "creating account..."
+                      : count > 1 ? `bulk_create ${count} accounts` : "create_lovable_account"}
+                  </span>
+                </button>
+                {running && (
+                  <button
+                    onClick={handleStop}
+                    className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
+                    style={{
+                      background: "rgba(239,68,68,0.12)",
+                      border: "1px solid rgba(239,68,68,0.45)",
+                      color: "#f87171",
+                      textShadow: "0 0 10px rgba(239,68,68,0.6)",
+                    }}
+                    data-testid="button-stop-lovable"
+                  >
+                    <Square className="w-3.5 h-3.5" />
+                    STOP
+                  </button>
+                )}
+              </div>
 
               {/* Progress bar */}
               {running && totalCount > 1 && (

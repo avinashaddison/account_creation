@@ -13053,6 +13053,20 @@ export async function registerLovableAccount(
     page = await context.newPage();
     page.setDefaultTimeout(35000);
 
+    // ── Show exit IP (proxy verification) ────────────────────────────────────
+    try {
+      const ipPage = await context.newPage();
+      ipPage.setDefaultTimeout(8000);
+      const ipRes = await ipPage.goto("https://api.ipify.org?format=json", { timeout: 8000 });
+      if (ipRes && ipRes.ok()) {
+        const ipJson = await ipRes.json();
+        log(`🌐 Exit IP: ${ipJson.ip || "unknown"}${proxyUrl ? " (SOAX residential)" : " (datacenter/direct)"}`);
+      }
+      await ipPage.close().catch(() => {});
+    } catch {
+      log(`🌐 Exit IP: (unable to determine)`);
+    }
+
     // Capture browser console logs for debugging
     page.on("console", (msg: any) => {
       const text = msg.text() || "";
@@ -13666,12 +13680,12 @@ export async function registerLovableAccount(
     if (!verificationLink) {
 
     // Poll mail.gw API for the Lovable verification email
-    log("📬 Polling mail.gw inbox for verification email (up to 3 minutes)...");
+    log("📬 Polling mail.gw inbox for verification email (up to 45s — mail.gw is near-instant)...");
     try {
       const gwToken = await getAuthToken(mailGwEmail, mailGwPassword, mailGwProvider as any);
       const pollStart = Date.now();
-      const pollTimeout = 3 * 60 * 1000;
-      const pollInterval = 5000;
+      const pollTimeout = 45 * 1000;
+      const pollInterval = 3000;
       const seenMsgIds = new Set<string>();
 
       while (Date.now() - pollStart < pollTimeout && !verificationLink) {
@@ -13737,7 +13751,7 @@ export async function registerLovableAccount(
       }
 
       if (!verificationLink) {
-        log("⚠️ mail.gw: No verification email received after 3 minutes — trying Firebase resend + 90s extended poll...");
+        log("⚠️ mail.gw: No verification email in 45s — triggering Firebase resend + 30s extended poll...");
         if (capturedFirebaseIdToken) {
           try {
             const rr = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyBQNjlw9Vp4tP4VVeANzyPJnqbG2wLbYPw`, {
@@ -13751,7 +13765,7 @@ export async function registerLovableAccount(
           const extStart = Date.now();
           const extToken = await getAuthToken(mailGwEmail, mailGwPassword, mailGwProvider as any).catch(() => gwToken);
           const seenMsgIds2 = new Set<string>(seenMsgIds);
-          while (Date.now() - extStart < 90000 && !verificationLink) {
+          while (Date.now() - extStart < 30000 && !verificationLink) {
             try {
               const msgs2 = await fetchMessages(extToken, mailGwProvider as any);
               for (const msg2 of msgs2) {

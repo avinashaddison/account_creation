@@ -1,0 +1,129 @@
+18:18:25
+>
+🚀 Starting 9 Lovable accounts via mail.gw [lovable-bulk-752ecd76]
+18:18:25
+>
+ZenRows browser mode enabled
+18:18:25
+>
+Connecting to ZenRows browser: wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fa...
+18:18:28
++
+✅ Connected via ZenRows anti-bot browser — Cloudflare WAF bypassed
+18:18:28
+·
+Solving Turnstile via CapSolver in background (sitekey: 0x4AAAAAAChnKAZBY0iFpFHC, action: signup_email_password)...
+18:18:28
++
+✅ mail.gw account created: coolbee3928@questtechsystems.com
+18:18:28
+>
+Navigating to https://lovable.dev/signup ...
+18:18:38
+·
+[API 200] https://api.lovable.dev/consent/policy → {"$schema":"https://api.lovable.dev/ConsentPolicyResponse.json","bucket":"rest"}
+18:18:38
+·
+Page title: "Create account" | Has email input: true
+18:18:38
+·
+Filling email: coolbee3928@questtechsystems.com
+18:18:40
++
+✅ Background CapSolver solved! Token length: 1093
+18:18:43
+·
+Filled email via input[type="email"]
+18:18:44
+·
+Pre-Continue: fired 0 Turnstile callback(s) with token — button should be enabled
+18:18:45
+·
+No pre-set Turnstile token in DOM — CapSolver injection required
+18:18:45
+·
+Clicking Continue...
+18:18:46
+·
+Clicked Continue: "continue"
+18:18:46
+·
+Waiting for page response (7s)...
+18:18:47
+·
+[API 200] https://api.lovable.dev/auth/check-auth-provider → {"has_sso_provider":false,"has_email_password":false,"domain_lock":false}
+18:18:47
+·
+Fake Turnstile script served — render() callbacks queued until real CapSolver token
+18:18:53
+·
+URL after Continue: https://lovable.dev/signup
+18:18:53
+·
+Text snippet: Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password must contain: at least 8 characters a number (0-9) By continuing, you agree to the Te
+18:18:53
++
+✅ Password field detected — using email + password registration
+18:18:56
+·
+Filled password via input[type="password"]
+18:18:56
+·
+Generated password: WDTR3mggTy@mAa1!
+18:18:57
+·
+Awaiting real CapSolver token to fire queued Turnstile callbacks...
+18:18:57
++
+✅ Got real CapSolver token (1093 chars) — firing queued Turnstile callbacks
+18:18:57
+·
+Fired 1 queued Turnstile callback(s) with real token
+18:18:57
+·
+Waiting 5s for Lovable to write token to Firestore...
+18:19:02
+·
+Buttons: "Continue with Google" disabled=false | "Continue with GitHub" disabled=false | "Edit" disabled=false | "" disabled=false | "Create your account" disabled=false
+18:19:02
+·
+Submitting password form...
+18:19:03
+·
+Clicked Submit: "create your account"
+18:19:03
+·
+Waiting 18s for signup response...
+18:19:21
+·
+URL after submit: https://lovable.dev/signup
+18:19:21
+·
+Text after submit: Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password meets all requirements By continuing, you agree to the Terms of Service and Privacy Pol
+18:19:21
+·
+Still on signup page — waiting 15s more then retrying form submit...
+18:19:24
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 51 [[0,["c","Ul5osP9F8MnneVq3StUzjw","",8,14,30000]]]
+18:19:26
+·
+[API 200] https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgpt-engineer-3906 → 8 [1,1,7]
+18:19:36
+·
+After extra wait: https://lovable.dev/signup — Create your account Continue with Google Continue with GitHub OR Email Email Edit Password Password Password meets a
+18:19:36
+·
+Retrying form submit...
+18:19:36
+·
+[HTTP 601] https://www.facebook.com/tr/
+18:19:42
+·
+[API 200] https://api.lovable.dev/consent/policy → {"$schema":"https://api.lovable.dev/ConsentPolicyResponse.json","bucket":"rest"}
+18:19:48
+·
+After retry: https://lovable.dev/signup — Create your account Continue with Google Continue with GitHub OR Email Email By continuing, you agree to the Terms of
+18:19:48
+·
+📬 Polling mail.gw inbox for verification email (up to 3 minutes)...
