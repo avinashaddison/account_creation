@@ -497,81 +497,40 @@ export default function PrivateAccount() {
   ];
 
   return (
-    <div className="flex h-full" style={{ minHeight: 0 }}>
-
-      {/* ── ICON SIDEBAR ── */}
-      <div
-        className="flex flex-col gap-1 py-3 px-1.5 flex-shrink-0"
-        style={{
-          width: "68px",
-          background: "rgba(0,0,0,0.45)",
-          borderRight: "1px solid rgba(255,255,255,0.05)",
-        }}
-      >
-        {statCards.map((s) => {
-          const active = tab === s.id;
-          return (
-            <button
-              key={s.id}
-              onClick={() => { setTab(s.id); sounds.hover(); }}
-              data-testid={s.testId}
-              className="relative flex flex-col items-center gap-1 py-2.5 rounded-xl w-full transition-all duration-150 group"
-              style={{
-                background: active ? s.glow : "transparent",
-                border: `1px solid ${active ? s.border : "transparent"}`,
-                boxShadow: active ? `0 0 14px ${s.glow}` : "none",
-              }}
-            >
-              {/* active left indicator */}
-              {active && (
-                <span
-                  className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full"
-                  style={{ background: s.color, boxShadow: `0 0 6px ${s.color}` }}
-                />
-              )}
-              {/* icon */}
-              <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-150"
-                style={{
-                  background: active ? `${s.glow}` : "rgba(255,255,255,0.05)",
-                  border: `1px solid ${active ? s.border : "rgba(255,255,255,0.07)"}`,
-                  color: active ? s.color : "rgba(255,255,255,0.35)",
-                }}
-              >
-                {s.icon}
-              </div>
-              {/* count badge */}
-              <span
-                className="font-mono font-black text-[11px] leading-none"
-                style={{ color: active ? s.color : "rgba(255,255,255,0.5)" }}
-                data-testid={`text-${s.id}-count`}
-              >
-                {s.count}
-              </span>
-              {/* label */}
-              <span
-                className="font-mono text-[8px] uppercase tracking-wide leading-tight text-center px-1"
-                style={{ color: active ? s.color : "rgba(255,255,255,0.22)" }}
-              >
-                {s.label.replace(" Accounts", "").replace(" API Stock", "")}
-              </span>
-              {/* sub badge */}
-              {active && (
-                <span
-                  className="text-[7px] font-mono px-1 py-0.5 rounded"
-                  style={{ background: s.glow, color: s.color, border: `1px solid ${s.border}` }}
-                >
+    <div className="space-y-5">
+      {/* ── STAT CARDS ── */}
+      <div className="grid grid-cols-5 gap-3">
+        {statCards.map((s) => (
+          <div
+            key={s.id}
+            onClick={() => { setTab(s.id); sounds.hover(); }}
+            data-testid={s.testId}
+            className="relative rounded-xl cursor-pointer group overflow-hidden transition-all duration-200"
+            style={{
+              background: tab === s.id ? `linear-gradient(135deg, ${s.glow} 0%, rgba(0,0,0,0.6) 100%)` : "rgba(0,0,0,0.35)",
+              border: `1px solid ${tab === s.id ? s.border : "rgba(255,255,255,0.06)"}`,
+              boxShadow: tab === s.id ? `0 0 24px ${s.glow}` : "none",
+            }}
+          >
+            {/* top accent bar */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-xl transition-all duration-200" style={{ background: tab === s.id ? `linear-gradient(90deg, transparent, ${s.color}, transparent)` : "transparent" }} />
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200" style={{ background: `${s.glow}`, border: `1px solid ${s.border}`, color: s.color }}>
+                  {s.icon}
+                </div>
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full transition-all duration-200" style={{ color: s.color, background: `${s.glow}`, border: `1px solid ${s.border}` }}>
                   {s.sub}
                 </span>
-              )}
-            </button>
-          );
-        })}
+              </div>
+              <p className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>{s.label}</p>
+              <p className="text-2xl font-black font-mono leading-none transition-all duration-200" style={{ color: tab === s.id ? s.color : "#f1f5f9" }} data-testid={`text-${s.id}-count`}>
+                {s.count}
+              </p>
+            </div>
+          </div>
+        ))}
       </div>
-
-      {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 overflow-y-auto" style={{ minWidth: 0 }}>
-      <div className="space-y-5 p-4">
 
       {activeJobs.length > 0 && (
         <div className="space-y-3">
@@ -1795,8 +1754,6 @@ export default function PrivateAccount() {
           </CardContent>
         </Card>
       )}
-      </div>
-      </div>
     </div>
   );
 }
