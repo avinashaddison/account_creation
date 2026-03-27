@@ -1079,7 +1079,10 @@ export default function PrivateAccount() {
                 </div>
 
                 {/* Data rows */}
-                {replitAccounts.map((acct, idx) => {
+                {[...replitAccounts].sort((a, b) => {
+                  const rank: Record<string, number> = { working: 0, available: 1, created: 1, processing: 2, sold_out: 3 };
+                  return (rank[a.status] ?? 2) - (rank[b.status] ?? 2);
+                }).map((acct, idx) => {
                   const st = acct.status;
                   type StatusCfg = { label: string; icon: string; color: string; glow: string; bg: string; border: string };
                   const statusConfig: Record<string, StatusCfg> = {
