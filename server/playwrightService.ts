@@ -18698,28 +18698,64 @@ async function handleReplitEmailVerification(
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
+    // Helper: extract link/code from raw HTML
+    const extractFromHtml = (html: string): { link: string | null; code: string | null } => {
+      // Replit verification link patterns
+      const lm = html.match(/href="(https?:\/\/[^"]*replit[^"]*(?:verify|confirm|token)[^"]*)"/i)
+        || html.match(/(https?:\/\/replit\.com\/verify[^\s"<>]+)/i)
+        || html.match(/(https?:\/\/replit\.com\/[^\s"<>]*token=[^\s"<>]+)/i);
+      const link = lm ? lm[1].replace(/&amp;/g, "&").replace(/=\n/g, "=") : null;
+      // 6-digit OTP code
+      const cm = !link ? html.match(/>\s*(\d{6})\s*</) || html.match(/confirmation code[^\d]*(\d{6})/i) || html.match(/\b(\d{6})\b/) : null;
+      return { link, code: cm ? cm[1] : null };
+    };
+
     for (let attempt = 0; attempt < 12 && !verificationLink && !verificationCode; attempt++) {
       if (attempt > 0) {
         await outlookPage.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
         await sleep(5000);
-        log(`  ⏳ Waiting for verification email... (${attempt * 5}s elapsed)`);
+        log(`  ⏳ Waiting for Replit email... (${attempt * 5}s elapsed)`);
       }
-      const items = await outlookPage.$$('[role="option"]').catch(() => [] as any[]);
-      for (const item of items.slice(0, 10)) {
+
+      // Try multiple selectors for email list items in Outlook Web
+      const itemSelectors = ['[role="option"]', '[data-convid]', 'div[aria-label][tabindex]', '.jGG6V'];
+      let items: any[] = [];
+      for (const sel of itemSelectors) {
+        items = await outlookPage.$$(sel).catch(() => [] as any[]);
+        if (items.length > 0) break;
+      }
+
+      for (const item of items.slice(0, 15)) {
         const text = await item.textContent().catch(() => "");
-        if (/replit|verify|confirm/i.test(text)) {
+        if (/replit|verify|confirm|email/i.test(text)) {
           await item.click();
-          await sleep(2000);
-          const bodyHtml = await outlookPage.evaluate(() => document.body?.innerHTML || "").catch(() => "");
-          const lm = bodyHtml.match(/href="(https?:\/\/[^"]*replit[^"]*(?:verify|token|confirm)[^"]*)"/i);
-          if (lm) { verificationLink = lm[1].replace(/&amp;/g, "&"); break; }
-          const cm = bodyHtml.match(/\b(\d{6})\b/);
-          if (cm) { verificationCode = cm[1]; break; }
+          await sleep(3000); // wait for email body to load
+
+          // Read from all frames (email content may be in an iframe)
+          let combinedHtml = await outlookPage.evaluate(() => document.body?.innerHTML || "").catch(() => "");
+          for (const frame of outlookPage.frames()) {
+            try {
+              const fHtml = await frame.evaluate(() => document.body?.innerHTML || "").catch(() => "");
+              combinedHtml += fHtml;
+            } catch {}
+          }
+
+          const { link, code } = extractFromHtml(combinedHtml);
+          if (link) { verificationLink = link; break; }
+          if (code) { verificationCode = code; break; }
+
+          // Also try getting all <a> hrefs directly
+          const hrefs = await outlookPage.$$eval("a[href]", els => els.map((e: any) => e.href)).catch(() => [] as string[]);
+          const replitHref = hrefs.find(h => /replit\.com.*(verify|confirm|token)/i.test(h));
+          if (replitHref) { verificationLink = replitHref; break; }
         }
       }
     }
 
     if (!verificationLink && !verificationCode) {
+      // Last resort: dump page text for debug
+      const pageText = await outlookPage.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
+      log(`  ⚠️  Inbox page text: ${pageText.replace(/\n/g, " ").substring(0, 300)}`);
       throw new Error(`Replit verification email not found in ${replitEmail} inbox after 60s`);
     }
 
@@ -18917,25 +18953,21 @@ export async function generateSingleCheckoutLink(
     if (postBody.toLowerCase().includes("incorrect password") || postBody.toLowerCase().includes("invalid credentials") || postBody.toLowerCase().includes("wrong password")) {
       throw new Error(`Login failed — incorrect password for ${email}`);
     }
+    let verificationHandled = false;
     if (postBody.toLowerCase().includes("verify your email") || postBody.toLowerCase().includes("check your email") || postBody.toLowerCase().includes("confirmation code")) {
       log(`📧 Replit requires email verification — auto-handling via Outlook...`);
       await handleReplitEmailVerification(page, email, log);
-      // After verification, wait for the login redirect to complete
-      try {
-        await page.waitForURL(
-          (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
-          { timeout: 30000 }
-        );
-      } catch {
-        if (page.url().includes("replit.com/login")) throw new Error(`Login failed after email verification for ${email} — still on login page`);
-      }
+      verificationHandled = true;
+      // Give the verification redirect a moment to settle
+      await glSleep(2000);
     }
-    if (postBody.toLowerCase().includes("captcha") || postBody.toLowerCase().includes("i'm not a robot") || postBody.toLowerCase().includes("recaptcha")) {
+    if (!verificationHandled && (postBody.toLowerCase().includes("captcha") || postBody.toLowerCase().includes("i'm not a robot") || postBody.toLowerCase().includes("recaptcha"))) {
       throw new Error(`Login failed — CAPTCHA triggered for ${email}. Try again later or use a different account.`);
     }
 
-    // If already redirected, proceed
-    if (!postUrl.includes("replit.com/login") && !postUrl.includes("replit.com/signup")) {
+    // If already redirected away from login, proceed; otherwise wait for redirect
+    const currentLoginUrl = page.url();
+    if (!currentLoginUrl.includes("replit.com/login") && !currentLoginUrl.includes("replit.com/signup")) {
       log(`✅ Logged in (fast redirect)`);
     } else {
       // Wait for redirect away from /login
@@ -18945,10 +18977,10 @@ export async function generateSingleCheckoutLink(
           { timeout: 45000 }
         );
       } catch {
-        const currentUrl = page.url();
-        const pageTitle  = await page.title().catch(() => "");
-        const bodyFull   = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
-        log(`⚠️  Login stuck — URL: ${currentUrl.substring(0, 80)}`);
+        const stuckUrl  = page.url();
+        const pageTitle = await page.title().catch(() => "");
+        const bodyFull  = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
+        log(`⚠️  Login stuck — URL: ${stuckUrl.substring(0, 80)}`);
         if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
         if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 300)}`);
         throw new Error(`Login timed out — page stuck. Check logs above for reason.`);
@@ -18992,6 +19024,9 @@ export async function generateSingleCheckoutLink(
       if (retriedUrl.includes("stripe-checkout-error")) {
         let errMsg = "Stripe checkout error";
         try { errMsg = new URL(retriedUrl).searchParams.get("message") || errMsg; } catch {}
+        const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
+        log(`⚠️  Stripe error URL: ${retriedUrl.substring(0, 200)}`);
+        if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 200)}`);
         throw new Error(`Stripe error: ${errMsg}`);
       }
       await page.waitForTimeout(1500);
@@ -19002,6 +19037,9 @@ export async function generateSingleCheckoutLink(
     if (finalUrl.includes("stripe-checkout-error")) {
       let errMsg = "Stripe checkout error";
       try { errMsg = new URL(finalUrl).searchParams.get("message") || errMsg; } catch {}
+      const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
+      log(`⚠️  Stripe error URL: ${finalUrl.substring(0, 200)}`);
+      if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 200)}`);
       throw new Error(`Stripe error: ${errMsg}`);
     }
     await page.waitForTimeout(1500);
