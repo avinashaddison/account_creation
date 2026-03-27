@@ -498,44 +498,6 @@ export default function PrivateAccount() {
 
   return (
     <div className="space-y-5">
-      {/* ── HEADER BANNER ── */}
-      <div className="relative rounded-xl overflow-hidden" style={{ background: "linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(10,10,20,0.98) 100%)", border: "1px solid rgba(0,255,65,0.12)", boxShadow: "0 0 40px rgba(0,255,65,0.04) inset" }}>
-        {/* scan-line overlay */}
-        <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,255,65,0.015) 3px, rgba(0,255,65,0.015) 4px)" }} />
-        {/* left glow */}
-        <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: "linear-gradient(180deg, #00ff41 0%, #00bfff 50%, #ec4899 100%)" }} />
-        <div className="pl-6 pr-5 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: "rgba(0,255,65,0.06)", border: "1px solid rgba(0,255,65,0.2)", boxShadow: "0 0 20px rgba(0,255,65,0.15)" }}>
-                <Shield className="w-5 h-5 text-emerald-400" />
-              </div>
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: "0 0 6px #00ff41" }} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black font-mono tracking-tight" style={{ background: "linear-gradient(90deg, #00ff41 0%, #00bfff 60%, #ec4899 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }} data-testid="text-page-title">
-                  PRIVATE ACCOUNT
-                </h1>
-                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border" style={{ color: "#00ff41", borderColor: "rgba(0,255,65,0.3)", background: "rgba(0,255,65,0.06)" }}>SUPERADMIN</span>
-              </div>
-              <p className="text-[10px] font-mono mt-0.5" style={{ color: "rgba(0,255,65,0.45)" }}>&#9632; secure account stock management system &#9632; {outlookAccounts.length + replitAccounts.length + lovableAccounts.length} total assets</p>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="font-mono text-xs border gap-1.5"
-            style={{ color: "rgba(0,255,65,0.7)", borderColor: "rgba(0,255,65,0.15)", background: "rgba(0,255,65,0.04)" }}
-            onClick={() => { fetchOutlook(); fetchZenrows(); fetchReplit(); sounds.navigate(); }}
-            data-testid="button-refresh-private"
-          >
-            <RefreshCw className="w-3 h-3" />
-            Refresh
-          </Button>
-        </div>
-      </div>
-
       {/* ── STAT CARDS ── */}
       <div className="grid grid-cols-5 gap-3">
         {statCards.map((s) => (
@@ -624,28 +586,6 @@ export default function PrivateAccount() {
           ))}
         </div>
       )}
-
-      {/* ── TAB BAR ── */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.05)" }}>
-        {statCards.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => { setTab(s.id); sounds.hover(); }}
-            data-testid={`tab-${s.id}`}
-            className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-[11px] font-medium transition-all duration-200 flex-1 justify-center"
-            style={{
-              background: tab === s.id ? s.glow : "transparent",
-              color: tab === s.id ? s.color : "rgba(255,255,255,0.3)",
-              border: tab === s.id ? `1px solid ${s.border}` : "1px solid transparent",
-              boxShadow: tab === s.id ? `0 0 12px ${s.glow}` : "none",
-            }}
-          >
-            <span style={{ color: tab === s.id ? s.color : "rgba(255,255,255,0.3)" }}>{s.icon}</span>
-            {s.label}
-            {tab === s.id && <span className="w-1.5 h-1.5 rounded-full animate-pulse ml-0.5" style={{ background: s.color, boxShadow: `0 0 4px ${s.color}` }} />}
-          </button>
-        ))}
-      </div>
 
       {tab === "outlook" && (
         <Card className="border-emerald-500/10 bg-black/20">
