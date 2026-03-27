@@ -1527,156 +1527,285 @@ export default function PrivateAccount() {
                 <p className="text-zinc-700 text-xs font-mono mt-1">Use the Lovable Create module to create accounts</p>
               </div>
             ) : (
-              <div className="rounded-xl overflow-hidden border border-white/5 shadow-xl">
-                {/* Google-Sheets-style header */}
-                <div className="grid font-mono font-bold text-white text-xs uppercase tracking-wide" style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.6fr 0.5fr" }}>
-                  <div className="px-2 py-3 text-center" style={{ background: "#111" }}>#</div>
-                  <div className="px-4 py-3" style={{ background: "#c0392b" }}>E-Mail Address</div>
-                  <div className="px-4 py-3" style={{ background: "#e67e22" }}>Password</div>
-                  <div className="px-4 py-3" style={{ background: "#27ae60" }}>Status</div>
-                  <div className="px-4 py-3" style={{ background: "#7e22ce" }}>Credits</div>
-                  <div className="px-4 py-3 text-right" style={{ background: "#1a1a2e" }}>Actions</div>
-                </div>
+              <div className="overflow-x-auto" style={{ maxHeight: "62vh", overflowY: "auto" }}>
+                <div style={{ minWidth: "680px" }}>
 
-                {/* Rows */}
-                {lovableAccounts.map((acct, idx) => {
-                  const st = acct.status;
-                  const statusConfig: Record<string, { label: string; color: string; glow: string; bg: string; border: string }> = {
-                    created:              { label: "Account Created", color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
-                    pending_verification: { label: "⏳ Pending",    color: "#facc15", glow: "rgba(250,204,21,0.25)",  bg: "rgba(250,204,21,0.1)",   border: "#facc15" },
-                    verified:             { label: "✅ Verified",   color: "#22c55e", glow: "rgba(34,197,94,0.25)",   bg: "rgba(34,197,94,0.1)",    border: "#22c55e" },
-                    failed:               { label: "🚫 Failed",     color: "#71717a", glow: "rgba(113,113,122,0.2)",  bg: "rgba(113,113,122,0.08)", border: "#52525b" },
-                    sold_out:             { label: "Sold Out",       color: "#ef4444", glow: "rgba(239,68,68,0.3)",   bg: "rgba(239,68,68,0.12)",   border: "#ef4444" },
-                  };
-                  const cfg = statusConfig[st] ?? statusConfig.pending_verification;
-                  const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.01)";
-                  return (
+                  {/* Column-letter row */}
+                  <div
+                    className="grid sticky top-0 z-20 font-mono text-[9px] font-bold text-center select-none"
+                    style={{
+                      gridTemplateColumns: "30px 1fr 160px 190px 80px 72px",
+                      background: "#0f0f1e",
+                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div className="py-1" style={{ borderRight: "1px solid rgba(255,255,255,0.06)", color: "#2a2a3f" }} />
+                    {(["B", "C", "D", "E", "F"] as const).map((letter, i) => (
+                      <div
+                        key={letter}
+                        className="py-1"
+                        style={{
+                          borderRight: i < 4 ? "1px solid rgba(255,255,255,0.06)" : "none",
+                          color: "rgba(255,255,255,0.18)",
+                          letterSpacing: "0.15em",
+                        }}
+                      >
+                        {letter}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Colored column-header row */}
+                  <div
+                    className="grid sticky font-mono text-[10px] font-black uppercase tracking-widest z-10"
+                    style={{
+                      top: "22px",
+                      gridTemplateColumns: "30px 1fr 160px 190px 80px 72px",
+                      borderBottom: "2px solid rgba(0,0,0,0.4)",
+                    }}
+                  >
+                    <div style={{ background: "#0b0b18", borderRight: "1px solid rgba(255,255,255,0.06)" }} />
                     <div
-                      key={acct.id}
-                      className="grid items-center border-b border-white/5 last:border-0 hover:bg-white/[0.04] transition-colors"
-                      style={{ gridTemplateColumns: "36px 2fr 1.6fr 1fr 0.6fr 0.5fr", background: rowBg }}
-                      data-testid={`row-lovable-${acct.id}`}
+                      className="px-3 py-2 flex items-center"
+                      style={{
+                        background: "linear-gradient(90deg, #7f1d1d 0%, #b91c1c 100%)",
+                        color: "#fecaca",
+                        textShadow: "0 0 10px rgba(239,68,68,0.5)",
+                        borderRight: "1px solid rgba(0,0,0,0.35)",
+                      }}
                     >
-                      {/* Row number */}
-                      <div className="px-2 py-3.5 text-center">
-                        <span className="text-xs font-mono text-zinc-600">{idx + 1}</span>
-                      </div>
+                      E-Mail Address
+                    </div>
+                    <div
+                      className="px-3 py-2"
+                      style={{
+                        background: "linear-gradient(90deg, #78350f 0%, #b45309 100%)",
+                        color: "#fde68a",
+                        textShadow: "0 0 10px rgba(245,158,11,0.5)",
+                        borderRight: "1px solid rgba(0,0,0,0.35)",
+                      }}
+                    >
+                      Password
+                    </div>
+                    <div
+                      className="px-3 py-2"
+                      style={{
+                        background: "linear-gradient(90deg, #14532d 0%, #15803d 100%)",
+                        color: "#bbf7d0",
+                        textShadow: "0 0 10px rgba(34,197,94,0.5)",
+                        borderRight: "1px solid rgba(0,0,0,0.35)",
+                      }}
+                    >
+                      Status
+                    </div>
+                    <div
+                      className="px-3 py-2"
+                      style={{
+                        background: "linear-gradient(90deg, #581c87 0%, #7e22ce 100%)",
+                        color: "#e9d5ff",
+                        textShadow: "0 0 10px rgba(168,85,247,0.5)",
+                        borderRight: "1px solid rgba(0,0,0,0.35)",
+                      }}
+                    >
+                      Credits
+                    </div>
+                    <div
+                      className="px-3 py-2 text-right"
+                      style={{ background: "#0b0b18", color: "rgba(255,255,255,0.2)" }}
+                    >
+                      Actions
+                    </div>
+                  </div>
 
-                      {/* Email — click to copy */}
-                      <div className="px-4 py-3.5 flex flex-col gap-0.5 min-w-0">
-                        <button
-                          onClick={() => copyToClipboard(acct.email, `le-${acct.id}`)}
-                          className="flex items-center gap-2 group text-left"
-                          title="Click to copy email"
-                          data-testid={`button-copy-lovable-email-${acct.id}`}
+                  {/* Data rows */}
+                  {lovableAccounts.map((acct, idx) => {
+                    const st = acct.status;
+                    const statusConfig: Record<string, { label: string; color: string; glow: string; bg: string; border: string }> = {
+                      created:              { label: "Account Created", color: "#22c55e", glow: "rgba(34,197,94,0.2)",   bg: "rgba(34,197,94,0.09)",  border: "rgba(34,197,94,0.4)"  },
+                      pending_verification: { label: "Pending",         color: "#facc15", glow: "rgba(250,204,21,0.2)",  bg: "rgba(250,204,21,0.08)", border: "rgba(250,204,21,0.4)" },
+                      verified:             { label: "Verified",         color: "#22c55e", glow: "rgba(34,197,94,0.2)",   bg: "rgba(34,197,94,0.09)",  border: "rgba(34,197,94,0.4)"  },
+                      failed:               { label: "Failed",           color: "#71717a", glow: "rgba(113,113,122,0.15)",bg: "rgba(113,113,122,0.07)",border: "rgba(113,113,122,0.3)"},
+                      sold_out:             { label: "Sold Out",         color: "#ef4444", glow: "rgba(239,68,68,0.2)",   bg: "rgba(239,68,68,0.09)",  border: "rgba(239,68,68,0.4)"  },
+                    };
+                    const cfg = statusConfig[st] ?? statusConfig.pending_verification;
+                    const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.012)" : "rgba(0,0,0,0.18)";
+                    const cellBorder = "1px solid rgba(255,255,255,0.05)";
+                    return (
+                      <div
+                        key={acct.id}
+                        className="grid transition-colors duration-100"
+                        style={{ gridTemplateColumns: "30px 1fr 160px 190px 80px 72px", background: rowBg }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(236,72,153,0.04)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = rowBg)}
+                        data-testid={`row-lovable-${acct.id}`}
+                      >
+                        {/* Row number */}
+                        <div
+                          className="flex items-center justify-center font-mono text-[9px] select-none"
+                          style={{
+                            background: "#0b0b18",
+                            borderRight: cellBorder,
+                            borderBottom: cellBorder,
+                            color: "rgba(255,255,255,0.2)",
+                            minHeight: "38px",
+                          }}
                         >
-                          <span className="text-sm font-mono text-zinc-100 truncate max-w-[260px] group-hover:text-sky-300 transition-colors" data-testid={`text-lovable-email-${acct.id}`}>
-                            {copied === `le-${acct.id}` ? <span className="text-emerald-400">✓ Copied!</span> : acct.email}
-                          </span>
-                        </button>
-                      </div>
+                          {idx + 1}
+                        </div>
 
-                      {/* Password — click to copy, toggle visibility */}
-                      <div className="px-4 py-3.5">
-                        <div className="flex items-center gap-2">
+                        {/* Email */}
+                        <div
+                          className="px-3 py-2 min-w-0"
+                          style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                        >
+                          <button
+                            onClick={() => copyToClipboard(acct.email, `le-${acct.id}`)}
+                            className="text-left font-mono text-xs truncate w-full block"
+                            style={{ color: copied === `le-${acct.id}` ? "#4ade80" : "#e2e8f0" }}
+                            title="Click to copy email"
+                            data-testid={`button-copy-lovable-email-${acct.id}`}
+                          >
+                            {copied === `le-${acct.id}` ? "✓ Copied!" : acct.email}
+                          </button>
+                        </div>
+
+                        {/* Password */}
+                        <div
+                          className="px-3 py-2 flex items-center gap-1.5"
+                          style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                        >
                           <button
                             onClick={() => copyToClipboard(acct.password || "", `lp-${acct.id}`)}
-                            className="flex items-center gap-1.5 group text-left"
+                            className="text-left font-mono text-xs flex-1 truncate"
+                            style={{ color: copied === `lp-${acct.id}` ? "#4ade80" : "#a1a1aa" }}
                             title="Click to copy password"
                             data-testid={`button-copy-lovable-pw-${acct.id}`}
                           >
-                            <span className="text-sm font-mono text-zinc-300 group-hover:text-sky-300 transition-colors" data-testid={`text-lovable-pw-${acct.id}`}>
-                              {copied === `lp-${acct.id}`
-                                ? <span className="text-emerald-400">✓ Copied!</span>
-                                : lovableShowPasswords[acct.id]
-                                  ? (acct.password || "—")
-                                  : "••••••••"}
-                            </span>
+                            {copied === `lp-${acct.id}`
+                              ? "✓ Copied!"
+                              : lovableShowPasswords[acct.id]
+                                ? (acct.password || "—")
+                                : "••••••••"}
                           </button>
                           <button
                             onClick={() => setLovableShowPasswords((p) => ({ ...p, [acct.id]: !p[acct.id] }))}
-                            className="text-zinc-600 hover:text-pink-400 transition-colors flex-shrink-0"
+                            className="flex-shrink-0"
+                            style={{ color: "rgba(113,113,122,0.5)" }}
                             data-testid={`button-toggle-lovable-pw-${acct.id}`}
                           >
                             {lovableShowPasswords[acct.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                           </button>
                         </div>
-                      </div>
 
-                      {/* Status — dropdown */}
-                      <div className="px-4 py-3.5">
-                        <select
-                          value={st}
-                          onChange={async (e) => {
-                            await fetch(`/api/lovable-accounts/${acct.id}/status`, {
-                              method: "PATCH",
-                              headers: { "Content-Type": "application/json" },
-                              credentials: "include",
-                              body: JSON.stringify({ status: e.target.value }),
-                            });
-                            fetchLovable();
-                          }}
-                          className="w-full appearance-none rounded-lg px-3 py-2 text-sm font-mono font-semibold cursor-pointer focus:outline-none transition-all duration-150"
-                          style={{
-                            background: cfg.bg,
-                            border: `1.5px solid ${cfg.border}`,
-                            color: cfg.color,
-                            boxShadow: `0 0 10px ${cfg.glow}`,
-                          }}
-                          data-testid={`select-lovable-status-${acct.id}`}
+                        {/* Status */}
+                        <div
+                          className="px-2 py-2 flex items-center"
+                          style={{ borderRight: cellBorder, borderBottom: cellBorder }}
                         >
-                          <option value="created">Account Created</option>
-                          <option value="pending_verification">⏳ Pending</option>
-                          <option value="verified">✅ Verified</option>
-                          <option value="failed">🚫 Failed</option>
-                          <option value="sold_out">Sold Out</option>
-                        </select>
-                      </div>
-
-                      {/* Credits */}
-                      <div className="px-4 py-3.5">
-                        <span
-                          className="font-mono text-sm font-bold tabular-nums"
-                          style={{ color: acct.credits != null && acct.credits >= 20 ? "#a855f7" : "#00ff41" }}
-                          data-testid={`text-lovable-credits-${acct.id}`}
-                        >
-                          {acct.credits ?? 5}
-                        </span>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="px-4 py-3.5 flex items-center justify-end gap-1">
-                        {st === "created" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-zinc-500 hover:text-pink-400 hover:bg-pink-500/10"
-                            onClick={() => copyToClipboard(`Email 📧 : ${acct.email}\nPassword 🗝️ : ${acct.password || ""}`, `lall-${acct.id}`)}
-                            title="Copy credentials"
-                            data-testid={`button-copy-lovable-all-${acct.id}`}
-                          >
-                            {copied === `lall-${acct.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-red-400/40 hover:text-red-400 hover:bg-red-500/10"
-                          onClick={async () => {
-                            try {
-                              await fetch(`/api/lovable-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
+                          <select
+                            value={st}
+                            onChange={async (e) => {
+                              await fetch(`/api/lovable-accounts/${acct.id}/status`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({ status: e.target.value }),
+                              });
                               fetchLovable();
-                              toast({ title: "Deleted", description: "Lovable account removed" });
-                            } catch {}
-                          }}
-                          data-testid={`button-delete-lovable-${acct.id}`}
+                            }}
+                            className="w-full appearance-none rounded px-2 py-1 text-[10px] font-mono font-bold cursor-pointer focus:outline-none"
+                            style={{
+                              background: cfg.bg,
+                              border: `1px solid ${cfg.border}`,
+                              color: cfg.color,
+                              boxShadow: `0 0 8px ${cfg.glow}`,
+                            }}
+                            data-testid={`select-lovable-status-${acct.id}`}
+                          >
+                            <option value="created">Account Created</option>
+                            <option value="pending_verification">Pending</option>
+                            <option value="verified">Verified</option>
+                            <option value="failed">Failed</option>
+                            <option value="sold_out">Sold Out</option>
+                          </select>
+                        </div>
+
+                        {/* Credits */}
+                        <div
+                          className="px-3 py-2 flex items-center justify-center"
+                          style={{ borderRight: cellBorder, borderBottom: cellBorder }}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                          <span
+                            className="font-mono text-xs font-black tabular-nums"
+                            style={{
+                              color: acct.credits != null && acct.credits >= 20 ? "#a855f7" : "#22c55e",
+                              textShadow: acct.credits != null && acct.credits >= 20
+                                ? "0 0 12px rgba(168,85,247,0.5)"
+                                : "0 0 12px rgba(34,197,94,0.4)",
+                            }}
+                            data-testid={`text-lovable-credits-${acct.id}`}
+                          >
+                            {acct.credits ?? 5}
+                          </span>
+                        </div>
+
+                        {/* Actions */}
+                        <div
+                          className="px-2 py-2 flex items-center justify-end gap-0.5"
+                          style={{ borderBottom: cellBorder }}
+                        >
+                          {st === "created" && (
+                            <button
+                              onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password || ""}`, `lall-${acct.id}`)}
+                              className="w-7 h-7 rounded flex items-center justify-center"
+                              style={{ color: copied === `lall-${acct.id}` ? "#4ade80" : "rgba(113,113,122,0.6)" }}
+                              title="Copy credentials"
+                              data-testid={`button-copy-lovable-all-${acct.id}`}
+                            >
+                              {copied === `lall-${acct.id}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              try {
+                                await fetch(`/api/lovable-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
+                                fetchLovable();
+                                toast({ title: "Deleted", description: "Lovable account removed" });
+                              } catch {}
+                            }}
+                            className="w-7 h-7 rounded flex items-center justify-center"
+                            style={{ color: "rgba(239,68,68,0.3)" }}
+                            title="Delete"
+                            data-testid={`button-delete-lovable-${acct.id}`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
+                    );
+                  })}
+
+                  {/* Footer row */}
+                  <div
+                    className="grid font-mono text-[9px] select-none"
+                    style={{
+                      gridTemplateColumns: "30px 1fr 160px 190px 80px 72px",
+                      background: "#0b0b18",
+                      borderTop: "1px solid rgba(255,255,255,0.05)",
+                    }}
+                  >
+                    <div
+                      className="py-1.5 text-center"
+                      style={{ borderRight: "1px solid rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.12)" }}
+                    >
+                      {lovableAccounts.length + 1}
                     </div>
-                  );
-                })}
+                    <div className="px-3 py-1.5 col-span-5" style={{ color: "rgba(255,255,255,0.1)" }}>
+                      {lovableAccounts.length} row{lovableAccounts.length !== 1 ? "s" : ""}
+                    </div>
+                  </div>
+
+                </div>
               </div>
             )}
           </CardContent>
