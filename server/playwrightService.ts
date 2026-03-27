@@ -18518,6 +18518,7 @@ export async function warmReplitAccount(
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
       });
+      log("🖥️  Local stealth browser launched (no proxy)");
     }
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
     const context = await browser.newContext({ userAgent: ua, viewport: vp, locale: "en-US", timezoneId: tz, javaScriptEnabled: true });
@@ -18714,6 +18715,7 @@ export async function generateSingleCheckoutLink(
       };
       if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
       browser = await stealthChromium.launch(glLaunchOptions);
+      log("🖥️  Local stealth browser launched" + (linkAnonymizedProxy ? " with SOAX proxy" : " (no proxy)"));
     }
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
