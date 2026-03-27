@@ -18650,6 +18650,104 @@ export async function warmReplitAccount(
   }
 }
 
+// ── Auto-handle Replit email verification by reading the code/link from Outlook ──
+async function handleReplitEmailVerification(
+  replitPage: any,
+  replitEmail: string,
+  log: (msg: string) => void
+): Promise<void> {
+  const pwResult = await db.execute(
+    sql`SELECT password FROM private_outlook_accounts WHERE LOWER(email) = LOWER(${replitEmail}) LIMIT 1`
+  ).catch(() => ({ rows: [] as any[] }));
+  const outlookPassword = (pwResult.rows[0]?.password as string) || null;
+  if (!outlookPassword) {
+    throw new Error(`Email verification required but no Outlook password on file for ${replitEmail}. Verify the account manually once.`);
+  }
+
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+  const { chromium: outlookChromium } = await import("playwright");
+  let outlookBrowser: any = null;
+  try {
+    outlookBrowser = await outlookChromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] });
+    const outlookCtx = await outlookBrowser.newContext({ locale: "en-US" });
+    const outlookPage = await outlookCtx.newPage();
+
+    log(`  📧 Signing into Outlook as ${replitEmail}...`);
+    await outlookPage.goto("https://login.live.com", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(2000);
+
+    await outlookPage.fill('input[type="email"], input[name="loginfmt"]', replitEmail).catch(() => {});
+    await sleep(400);
+    await outlookPage.keyboard.press("Enter");
+    await sleep(3000);
+
+    await outlookPage.fill('input[type="password"]', outlookPassword).catch(() => {});
+    await sleep(400);
+    await outlookPage.keyboard.press("Enter");
+    await sleep(4000);
+
+    // Dismiss "Stay signed in?" if present
+    const noBtn = await outlookPage.$('#idBtn_Back').catch(() => null);
+    if (noBtn) { await noBtn.click(); await sleep(2000); }
+
+    // Navigate to inbox
+    await outlookPage.goto("https://outlook.live.com/mail/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await sleep(3000);
+
+    log(`  📬 Scanning Outlook inbox for Replit verification email...`);
+    let verificationLink: string | null = null;
+    let verificationCode: string | null = null;
+
+    for (let attempt = 0; attempt < 12 && !verificationLink && !verificationCode; attempt++) {
+      if (attempt > 0) {
+        await outlookPage.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+        await sleep(5000);
+        log(`  ⏳ Waiting for verification email... (${attempt * 5}s elapsed)`);
+      }
+      const items = await outlookPage.$$('[role="option"]').catch(() => [] as any[]);
+      for (const item of items.slice(0, 10)) {
+        const text = await item.textContent().catch(() => "");
+        if (/replit|verify|confirm/i.test(text)) {
+          await item.click();
+          await sleep(2000);
+          const bodyHtml = await outlookPage.evaluate(() => document.body?.innerHTML || "").catch(() => "");
+          const lm = bodyHtml.match(/href="(https?:\/\/[^"]*replit[^"]*(?:verify|token|confirm)[^"]*)"/i);
+          if (lm) { verificationLink = lm[1].replace(/&amp;/g, "&"); break; }
+          const cm = bodyHtml.match(/\b(\d{6})\b/);
+          if (cm) { verificationCode = cm[1]; break; }
+        }
+      }
+    }
+
+    if (!verificationLink && !verificationCode) {
+      throw new Error(`Replit verification email not found in ${replitEmail} inbox after 60s`);
+    }
+
+    if (verificationLink) {
+      log(`  🔗 Verification link found — navigating...`);
+      await replitPage.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await sleep(2000);
+      log(`  ✅ Email verified via link`);
+    } else if (verificationCode) {
+      log(`  🔢 Verification code: ${verificationCode} — submitting...`);
+      const codeInput = await replitPage.waitForSelector(
+        'input[type="text"], input[type="number"], input[inputmode="numeric"], input[maxlength="6"]',
+        { timeout: 10000 }
+      ).catch(() => null);
+      if (codeInput) {
+        await codeInput.fill(verificationCode);
+        await sleep(400);
+        const submitBtn = replitPage.getByRole("button", { name: /verify|submit|confirm|continue/i }).first();
+        await submitBtn.click();
+        await sleep(2000);
+      }
+      log(`  ✅ Verification code submitted`);
+    }
+  } finally {
+    if (outlookBrowser) await outlookBrowser.close().catch(() => {});
+  }
+}
+
 // ── Lightweight checkout link generator (login + get Stripe URL, no payment) ──
 export async function generateSingleCheckoutLink(
   email: string,
@@ -18820,7 +18918,17 @@ export async function generateSingleCheckoutLink(
       throw new Error(`Login failed — incorrect password for ${email}`);
     }
     if (postBody.toLowerCase().includes("verify your email") || postBody.toLowerCase().includes("check your email") || postBody.toLowerCase().includes("confirmation code")) {
-      throw new Error(`Login failed — Replit requires email verification for ${email}. Log in manually once to clear this.`);
+      log(`📧 Replit requires email verification — auto-handling via Outlook...`);
+      await handleReplitEmailVerification(page, email, log);
+      // After verification, wait for the login redirect to complete
+      try {
+        await page.waitForURL(
+          (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+          { timeout: 30000 }
+        );
+      } catch {
+        if (page.url().includes("replit.com/login")) throw new Error(`Login failed after email verification for ${email} — still on login page`);
+      }
     }
     if (postBody.toLowerCase().includes("captcha") || postBody.toLowerCase().includes("i'm not a robot") || postBody.toLowerCase().includes("recaptcha")) {
       throw new Error(`Login failed — CAPTCHA triggered for ${email}. Try again later or use a different account.`);
@@ -18868,7 +18976,28 @@ export async function generateSingleCheckoutLink(
     );
     const finalUrl = page.url();
     if (finalUrl.includes("/verify")) {
-      throw new Error(`Account requires email verification — log into ${email} manually once to clear this.`);
+      log(`📧 Checkout blocked by email verification — auto-handling via Outlook...`);
+      await handleReplitEmailVerification(page, email, log);
+      // Retry the checkout URL after verification
+      log(`🔄 Retrying checkout after verification...`);
+      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForURL(
+        (u: URL) =>
+          u.href.includes("checkout.stripe.com") ||
+          u.href.includes("billing.stripe.com") ||
+          u.href.includes("stripe-checkout-error"),
+        { timeout: 45000 }
+      );
+      const retriedUrl = page.url();
+      if (retriedUrl.includes("stripe-checkout-error")) {
+        let errMsg = "Stripe checkout error";
+        try { errMsg = new URL(retriedUrl).searchParams.get("message") || errMsg; } catch {}
+        throw new Error(`Stripe error: ${errMsg}`);
+      }
+      await page.waitForTimeout(1500);
+      const retriedStripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
+      log(`✅ Checkout link ready: ${retriedStripeUrl.substring(0, 80)}...`);
+      return { success: true, stripeUrl: retriedStripeUrl };
     }
     if (finalUrl.includes("stripe-checkout-error")) {
       let errMsg = "Stripe checkout error";

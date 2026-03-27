@@ -1,0 +1,174 @@
+14:25:27
+>
+🚀 Parallel batch started — 3 job(s) running simultaneously [replit-batch-mn8o1scf]
+14:25:28
+·
+[Job 1] Addison Proxy connected.
+14:25:28
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+14:25:28
+·
+[Job 2] Addison Proxy connected.
+14:25:28
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+14:25:28
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+14:25:29
+·
+[Job 2] 🔐 Logging into Replit as michellemacias8069@outlook.com...
+ACCOUNT CREATED
+14:25:30
+·
+[Job 3] Addison Proxy connected.
+14:25:30
++
+[Job 3] ✅ ZenRows anti-bot browser connected — ban protection active
+14:25:32
+·
+[Job 3] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+14:25:45
+·
+[Job 2] → Login submitted — waiting for redirect...
+14:25:49
+·
+[Job 3] → Login submitted — waiting for redirect...
+14:25:53
+!
+[Job 3] ❌ Error: Login failed — Replit requires email verification for gloriacharles1726@outlook.com. Log in manually once to clear this.
+ACCOUNT CREATED
+14:25:53
+·
+[Job 3] ↩️ Retrying...
+14:25:53
+·
+[Job 3] [retry] Connecting via Addison Proxy...
+14:25:54
++
+[Job 2] ✅ Logged in
+14:25:54
+>
+[Job 2] 💰 Navigating to checkout URL...
+14:25:55
+·
+[Job 3] [retry] Addison Proxy connected.
+14:25:55
++
+[Job 3] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:25:55
+·
+[Job 3] [retry] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+14:25:56
+$
+[Job 2] ⏳ Waiting for Stripe redirect...
+14:25:58
+!
+[Job 2] ❌ Error: Stripe error: Stripe checkout error
+14:25:58
+·
+[Job 2] ↩️ Retrying...
+14:25:58
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+14:25:59
+·
+[Job 2] [retry] Addison Proxy connected.
+14:25:59
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:25:59
+·
+[Job 2] [retry] 🔐 Logging into Replit as michellemacias8069@outlook.com...
+ACCOUNT CREATED
+14:26:05
+·
+[Job 1] → Login submitted — waiting for redirect...
+14:26:15
+·
+[Job 3] [retry] → Login submitted — waiting for redirect...
+14:26:20
+!
+[Job 3] [retry] ❌ Error: Login failed — Replit requires email verification for gloriacharles1726@outlook.com. Log in manually once to clear this.
+ACCOUNT CREATED
+14:26:20
+!
+[Job 3] ❌ Link generation failed: Login failed — Replit requires email verification for gloriacharles1726@outlook.com. Log in manually once to clear this.
+ACCOUNT CREATED
+14:26:22
++
+[Job 1] ✅ Logged in
+14:26:22
+>
+[Job 1] 💰 Navigating to checkout URL...
+14:26:23
+$
+[Job 1] ⏳ Waiting for Stripe redirect...
+14:26:26
+!
+[Job 1] ❌ Error: Account requires email verification — log into kathleenparker3225@outlook.com manually once to clear this.
+ACCOUNT CREATED
+14:26:26
+·
+[Job 1] ↩️ Retrying...
+14:26:27
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+14:26:27
+·
+[Job 1] [retry] Addison Proxy connected.
+14:26:27
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:26:27
+·
+[Job 1] [retry] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+14:26:33
+·
+[Job 2] [retry] → Login submitted — waiting for redirect...
+14:26:43
++
+[Job 2] [retry] ✅ Logged in
+14:26:43
+>
+[Job 2] [retry] 💰 Navigating to checkout URL...
+14:26:45
+$
+[Job 2] [retry] ⏳ Waiting for Stripe redirect...
+14:26:46
+·
+[Job 1] [retry] → Login submitted — waiting for redirect...
+14:26:49
+!
+[Job 2] [retry] ❌ Error: Stripe error: Stripe checkout error
+14:26:49
+!
+[Job 2] ❌ Link generation failed: Stripe error: Stripe checkout error
+14:27:08
++
+[Job 1] [retry] ✅ Logged in
+14:27:08
+>
+[Job 1] [retry] 💰 Navigating to checkout URL...
+14:27:11
+$
+[Job 1] [retry] ⏳ Waiting for Stripe redirect...
+14:27:12
+!
+[Job 1] [retry] ❌ Error: Account requires email verification — log into kathleenparker3225@outlook.com manually once to clear this.
+ACCOUNT CREATED
+14:27:12
+!
+[Job 1] ❌ Link generation failed: Account requires email verification — log into kathleenparker3225@outlook.com manually once to clear this.
+ACCOUNT CREATED
+14:27:12
+·
+──────────────────────────────────────────────────
+14:27:12
++
+✅ Batch complete — 0/3 links generated
