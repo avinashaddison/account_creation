@@ -1142,38 +1142,18 @@ export default function PrivateAccount() {
 
                       {/* Email */}
                       <div
-                        className="px-3 py-2 flex flex-col gap-0.5 min-w-0"
+                        className="px-3 py-2 flex items-center min-w-0"
                         style={{ borderRight: cellBorder, borderBottom: cellBorder }}
                       >
                         <button
                           onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)}
-                          className="text-left font-mono text-xs truncate"
+                          className="text-left font-mono text-xs truncate w-full"
                           style={{ color: copied === `re-${acct.id}` ? "#4ade80" : "#e2e8f0" }}
                           title="Click to copy"
                           data-testid={`button-copy-replit-email-${acct.id}`}
                         >
                           {copied === `re-${acct.id}` ? "✓ Copied!" : acct.email}
                         </button>
-                        <div className="flex items-center gap-1">
-                          <Code2 className="w-2 h-2 flex-shrink-0" style={{ color: "rgba(167,139,250,0.4)" }} />
-                          <span className="text-[9px] font-mono truncate" style={{ color: "rgba(167,139,250,0.45)" }}>
-                            @{acct.username}
-                          </span>
-                          <span className="text-[9px] font-mono ml-1" style={{ color: "rgba(255,255,255,0.15)" }}>·</span>
-                          <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.15)" }} title={formatDate(acct.createdAt)}>
-                            {timeAgo(acct.createdAt)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Zap className="w-2 h-2 flex-shrink-0" style={{ color: acct.warmedAt ? "#fb923c" : "rgba(255,255,255,0.12)" }} />
-                          <span
-                            className="text-[9px] font-mono"
-                            style={{ color: acct.warmedAt ? "rgba(251,146,60,0.6)" : "rgba(255,255,255,0.15)" }}
-                            data-testid={`text-warm-status-${acct.id}`}
-                          >
-                            {acct.warmedAt ? `warmed ${timeAgo(acct.warmedAt)}` : "not warmed"}
-                          </span>
-                        </div>
                       </div>
 
                       {/* Password */}
