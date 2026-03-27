@@ -215,7 +215,7 @@ function DataReadout({ label, value, accent = false }: { label: string; value: s
   );
 }
 
-const FULLSCREEN_ROUTES = ["/admin/outlook-workspace", "/admin/email-workspace"];
+const FULLSCREEN_ROUTES = ["/admin/outlook-workspace", "/admin/email-workspace", "/admin/private-account"];
 
 export default function Layout({ children, user, onLogout, onPanelNameChange }: LayoutProps) {
   const [location] = useLocation();

@@ -497,9 +497,9 @@ export default function PrivateAccount() {
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col h-full p-7 gap-5">
       {/* ── STAT CARDS ── */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-5 gap-3 shrink-0">
         {statCards.map((s) => (
           <div
             key={s.id}
@@ -533,7 +533,7 @@ export default function PrivateAccount() {
       </div>
 
       {activeJobs.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-3 shrink-0">
           {Object.values(zenrowsRegJobs).map((job) => (
             <Card key={job.batchId} className={`border-emerald-500/10 bg-black/20 ${job.status === "success" ? "border-emerald-500/20" : job.status === "failed" ? "border-red-500/20" : "border-purple-500/20"}`}>
               <CardContent className="p-4">
@@ -840,7 +840,7 @@ export default function PrivateAccount() {
 
       {tab === "replit" && (
         <div
-          className="rounded-xl border overflow-hidden"
+          className="rounded-xl border flex flex-col flex-1 min-h-0 overflow-hidden"
           style={{
             borderColor: "rgba(124,58,237,0.2)",
             background: "linear-gradient(135deg, rgba(10,0,30,0.98) 0%, rgba(20,5,45,0.98) 100%)",
@@ -964,7 +964,7 @@ export default function PrivateAccount() {
               <p className="text-xs font-mono mt-1" style={{ color: "rgba(255,255,255,0.2)" }}>Create accounts in the Replit Create module</p>
             </div>
           ) : (
-            <div className="overflow-x-auto" style={{ maxHeight: "62vh", overflowY: "auto" }}>
+            <div className="overflow-auto flex-1 min-h-0">
               {/* ── Spreadsheet grid ── */}
               <div style={{ minWidth: "680px" }}>
 
