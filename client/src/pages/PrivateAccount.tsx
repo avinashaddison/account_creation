@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar, Code2 } from "lucide-react";
+import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar, Code2, Activity, TrendingUp, Cpu, Globe } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
@@ -445,92 +445,247 @@ export default function PrivateAccount() {
   const activeZenrows = zenrowsKeys.filter((k) => k.status === "active").length;
   const activeJobs = Object.values(zenrowsRegJobs).filter((j) => j.status !== "running" || j.logs.length > 0);
 
-  const statCards = [
-    {
-      id: "outlook" as TabType,
-      label: "Outlook Accounts",
-      count: outlookAccounts.length,
-      sub: `${activeOutlook} active`,
-      color: "#3b82f6",
-      glow: "rgba(59,130,246,0.18)",
-      border: "rgba(59,130,246,0.25)",
-      textColor: "text-blue-400",
-      icon: <Mail className="w-4 h-4" />,
-      testId: "card-outlook-summary",
-    },
-    {
-      id: "zenrows" as TabType,
-      label: "Proxy API Stock",
-      count: zenrowsKeys.length,
-      sub: `${activeZenrows} active`,
-      color: "#a855f7",
-      glow: "rgba(168,85,247,0.18)",
-      border: "rgba(168,85,247,0.25)",
-      textColor: "text-purple-400",
-      icon: <Key className="w-4 h-4" />,
-      testId: "card-zenrows-summary",
-    },
-    {
-      id: "replit" as TabType,
-      label: "Replit Accounts",
-      count: replitAccounts.length,
-      sub: `${replitAccounts.filter((a) => a.status === "created").length} ready`,
-      color: "#7c3aed",
-      glow: "rgba(124,58,237,0.18)",
-      border: "rgba(124,58,237,0.25)",
-      textColor: "text-violet-400",
-      icon: <Code2 className="w-4 h-4" />,
-      testId: "card-replit-summary",
-    },
-    {
-      id: "lovable" as TabType,
-      label: "Lovable Accounts",
-      count: lovableAccounts.length,
-      sub: `${lovableAccounts.filter((a) => a.status === "created").length} ready`,
-      color: "#ec4899",
-      glow: "rgba(236,72,153,0.18)",
-      border: "rgba(236,72,153,0.25)",
-      textColor: "text-pink-400",
-      icon: <Shield className="w-4 h-4" />,
-      testId: "card-lovable-summary",
-    },
-  ];
-
   return (
     <div className="flex flex-col h-full p-7 gap-5">
-      {/* ── STAT CARDS ── */}
-      <div className="grid grid-cols-5 gap-3 shrink-0">
-        {statCards.map((s) => (
-          <div
-            key={s.id}
-            onClick={() => { setTab(s.id); sounds.hover(); }}
-            data-testid={s.testId}
-            className="relative rounded-xl cursor-pointer group overflow-hidden transition-all duration-200"
-            style={{
-              background: tab === s.id ? `linear-gradient(135deg, ${s.glow} 0%, rgba(0,0,0,0.6) 100%)` : "rgba(0,0,0,0.35)",
-              border: `1px solid ${tab === s.id ? s.border : "rgba(255,255,255,0.06)"}`,
-              boxShadow: tab === s.id ? `0 0 24px ${s.glow}` : "none",
-            }}
-          >
-            {/* top accent bar */}
-            <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-xl transition-all duration-200" style={{ background: tab === s.id ? `linear-gradient(90deg, transparent, ${s.color}, transparent)` : "transparent" }} />
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200" style={{ background: `${s.glow}`, border: `1px solid ${s.border}`, color: s.color }}>
-                  {s.icon}
+      {/* ══════════════════════════════════════════════════════════
+           SYSTEM_OVERVIEW  —  HACKER TRACKING DASHBOARD
+      ══════════════════════════════════════════════════════════ */}
+      {(() => {
+        /* ── derived metrics ── */
+        const rReady      = replitAccounts.filter(a => ["working","created","available"].includes(a.status)).length;
+        const lReady      = lovableAccounts.filter(a => ["created","verified"].includes(a.status)).length;
+        const rProc       = replitAccounts.filter(a => a.status === "processing").length;
+        const lProc       = lovableAccounts.filter(a => a.status === "pending_verification").length;
+        const rFailed     = replitAccounts.filter(a => a.status === "sold_out").length;
+        const lFailed     = lovableAccounts.filter(a => ["failed","sold_out"].includes(a.status)).length;
+        const totalReady  = rReady + lReady;
+        const totalProc   = rProc + lProc;
+        const totalFailed = rFailed + lFailed;
+        const totalActive = replitAccounts.length + lovableAccounts.length;
+        const totalAll    = totalActive + outlookAccounts.length + zenrowsKeys.length;
+        const successPct  = totalActive > 0 ? Math.round((totalReady / totalActive) * 100) : 0;
+        const failPct     = totalActive > 0 ? Math.round((totalFailed / totalActive) * 100) : 0;
+
+        /* ── donut chart ── */
+        const R = 52, SW = 11, CX = 68, CY = 68;
+        const circ = 2 * Math.PI * R;
+        const seg = (n: number) => totalActive > 0 ? (n / totalActive) * circ : 0;
+        const segReady = seg(totalReady);
+        const segProc  = seg(totalProc);
+        const segFail  = seg(totalFailed);
+        const off = -circ / 4; // start at 12-o'clock
+
+        /* ── mini sparkline (status distribution bars) ── */
+        const platforms = [
+          { label: "REPLIT",  color: "#7c3aed", ready: rReady,  proc: rProc,  fail: rFailed,  total: replitAccounts.length,  id: "replit" as TabType },
+          { label: "LOVABLE", color: "#ec4899", ready: lReady,  proc: lProc,  fail: lFailed,  total: lovableAccounts.length, id: "lovable" as TabType },
+          { label: "OUTLOOK", color: "#3b82f6", ready: outlookAccounts.filter(a=>a.status==="active").length, proc: 0, fail: outlookAccounts.filter(a=>a.status==="failed").length, total: outlookAccounts.length, id: "outlook" as TabType },
+          { label: "PROXIES", color: "#a855f7", ready: zenrowsKeys.filter(k=>k.status==="active").length, proc: 0, fail: 0, total: zenrowsKeys.length, id: "zenrows" as TabType },
+        ];
+
+        return (
+          <div className="shrink-0 flex flex-col gap-3 font-mono select-none">
+
+            {/* ── HEADER ── */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="relative flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: "rgba(0,255,65,0.08)", border: "1px solid rgba(0,255,65,0.25)" }}>
+                  <Activity className="w-4 h-4" style={{ color: "#00ff41" }} />
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: "0 0 6px #00ff41" }} />
                 </div>
-                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full transition-all duration-200" style={{ color: s.color, background: `${s.glow}`, border: `1px solid ${s.border}` }}>
-                  {s.sub}
-                </span>
+                <div>
+                  <h1 className="text-sm font-black tracking-widest uppercase" style={{ color: "#00ff41", textShadow: "0 0 20px rgba(0,255,65,0.4)" }}>System_Overview</h1>
+                  <p className="text-[9px] tracking-wider" style={{ color: "rgba(0,255,65,0.4)" }}>&gt; Realtime operational metrics</p>
+                </div>
               </div>
-              <p className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>{s.label}</p>
-              <p className="text-2xl font-black font-mono leading-none transition-all duration-200" style={{ color: tab === s.id ? s.color : "#f1f5f9" }} data-testid={`text-${s.id}-count`}>
-                {s.count}
-              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { fetchOutlook(); fetchZenrows(); fetchReplit(); fetchLovable(); sounds.navigate(); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition-all"
+                  style={{ color: "rgba(0,255,65,0.7)", border: "1px solid rgba(0,255,65,0.2)", background: "rgba(0,255,65,0.04)" }}
+                  data-testid="button-refresh-all"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Sync
+                </button>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded" style={{ color: "#00ff41", border: "1px solid rgba(0,255,65,0.25)", background: "rgba(0,255,65,0.06)", boxShadow: "0 0 12px rgba(0,255,65,0.12)" }}>
+                  <Cpu className="w-3 h-3" />
+                  <span className="text-[10px] font-black tracking-widest">ROOT_ACCESS</span>
+                </div>
+              </div>
             </div>
+
+            {/* ── TOP KPI STRIP ── */}
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: "TOTAL_ASSETS",  value: totalAll,    sub: `${totalActive} monitored`,       color: "#00ff41",  glow: "rgba(0,255,65,0.18)",    border: "rgba(0,255,65,0.22)",     icon: <Database className="w-3.5 h-3.5" />,  tab: null },
+                { label: "READY_STOCK",   value: totalReady,  sub: `${successPct}% rate`,             color: "#4ade80",  glow: "rgba(74,222,128,0.18)",  border: "rgba(74,222,128,0.25)",   icon: <TrendingUp className="w-3.5 h-3.5" />, tab: null },
+                { label: "IN_PROGRESS",   value: totalProc,   sub: totalProc === 0 ? "queue empty" : "processing",    color: "#facc15",  glow: "rgba(250,204,21,0.15)",  border: "rgba(250,204,21,0.22)",   icon: <Loader2 className="w-3.5 h-3.5" />,   tab: null },
+                { label: "FAILED_OUT",    value: totalFailed, sub: `${failPct}% rate`,                color: "#f87171",  glow: "rgba(248,113,113,0.18)", border: "rgba(248,113,113,0.25)",  icon: <X className="w-3.5 h-3.5" />,          tab: null },
+              ].map((kpi) => (
+                <div
+                  key={kpi.label}
+                  className="relative rounded-lg overflow-hidden"
+                  style={{ background: "rgba(0,0,0,0.6)", border: `1px solid ${kpi.border}`, boxShadow: `0 0 20px ${kpi.glow}` }}
+                >
+                  <div className="absolute top-0 left-0 right-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${kpi.color}, transparent)` }} />
+                  <div className="p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[8px] tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>{kpi.label}</span>
+                      <div className="w-5 h-5 rounded flex items-center justify-center" style={{ background: kpi.glow, color: kpi.color }}>
+                        {kpi.icon}
+                      </div>
+                    </div>
+                    <div className="text-3xl font-black leading-none" style={{ color: kpi.color, textShadow: `0 0 20px ${kpi.glow}` }}>
+                      {kpi.value}
+                    </div>
+                    <div className="text-[9px] mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>{kpi.sub}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* ── ANALYTICS ROW ── */}
+            <div className="grid gap-2" style={{ gridTemplateColumns: "200px 1fr" }}>
+
+              {/* LEFT: Donut chart */}
+              <div className="rounded-lg p-3 flex flex-col" style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <span className="text-[8px] tracking-widest uppercase mb-2 flex items-center gap-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  <Activity className="w-2.5 h-2.5" />
+                  SUCCESS_METRIC
+                </span>
+                <div className="flex items-center justify-center">
+                  <svg width="136" height="136" viewBox="0 0 136 136">
+                    {/* bg track */}
+                    <circle cx={CX} cy={CY} r={R} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={SW} />
+                    {/* ready segment - green */}
+                    {segReady > 0 && (
+                      <circle cx={CX} cy={CY} r={R} fill="none"
+                        stroke="#00ff41" strokeWidth={SW}
+                        strokeDasharray={`${segReady} ${circ - segReady}`}
+                        strokeDashoffset={off}
+                        strokeLinecap="round"
+                        style={{ filter: "drop-shadow(0 0 6px rgba(0,255,65,0.7))" }}
+                      />
+                    )}
+                    {/* processing segment - yellow */}
+                    {segProc > 0 && (
+                      <circle cx={CX} cy={CY} r={R} fill="none"
+                        stroke="#facc15" strokeWidth={SW}
+                        strokeDasharray={`${segProc} ${circ - segProc}`}
+                        strokeDashoffset={off - segReady}
+                        strokeLinecap="round"
+                        style={{ filter: "drop-shadow(0 0 5px rgba(250,204,21,0.6))" }}
+                      />
+                    )}
+                    {/* failed segment - red */}
+                    {segFail > 0 && (
+                      <circle cx={CX} cy={CY} r={R} fill="none"
+                        stroke="#f87171" strokeWidth={SW}
+                        strokeDasharray={`${segFail} ${circ - segFail}`}
+                        strokeDashoffset={off - segReady - segProc}
+                        strokeLinecap="round"
+                        style={{ filter: "drop-shadow(0 0 5px rgba(248,113,113,0.6))" }}
+                      />
+                    )}
+                    {/* centre text */}
+                    <text x={CX} y={CY - 6} textAnchor="middle" fill="#00ff41" fontSize="18" fontWeight="900" fontFamily="monospace" style={{ filter: "drop-shadow(0 0 8px rgba(0,255,65,0.8))" }}>
+                      {successPct}%
+                    </text>
+                    <text x={CX} y={CY + 10} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="7" fontFamily="monospace" letterSpacing="2">
+                      SUCCESS
+                    </text>
+                  </svg>
+                </div>
+                {/* legend pills */}
+                <div className="grid grid-cols-3 gap-1 mt-1">
+                  {[
+                    { label: "PASS", val: totalReady,  color: "#00ff41" },
+                    { label: "FAIL", val: totalFailed, color: "#f87171" },
+                    { label: "PROC", val: totalProc,   color: "#facc15" },
+                  ].map(p => (
+                    <div key={p.label} className="rounded flex flex-col items-center py-1" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${p.color}22` }}>
+                      <span className="text-xs font-black" style={{ color: p.color, textShadow: `0 0 8px ${p.color}` }}>{p.val}</span>
+                      <span className="text-[7px]" style={{ color: "rgba(255,255,255,0.25)" }}>{p.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* RIGHT: Platform breakdown */}
+              <div className="rounded-lg p-3 flex flex-col gap-2" style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <span className="text-[8px] tracking-widest uppercase flex items-center gap-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  <Globe className="w-2.5 h-2.5" />
+                  PLATFORM_STATUS
+                </span>
+                <div className="grid grid-cols-2 gap-2 flex-1">
+                  {platforms.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => { setTab(p.id); sounds.hover(); }}
+                      className="rounded p-2.5 text-left transition-all duration-150 flex flex-col gap-1.5"
+                      style={{
+                        background: tab === p.id ? `rgba(${p.color === "#7c3aed" ? "124,58,237" : p.color === "#ec4899" ? "236,72,153" : p.color === "#3b82f6" ? "59,130,246" : "168,85,247"},0.12)` : "rgba(0,0,0,0.4)",
+                        border: `1px solid ${tab === p.id ? p.color + "44" : "rgba(255,255,255,0.06)"}`,
+                        boxShadow: tab === p.id ? `0 0 16px ${p.color}22` : "none",
+                      }}
+                      data-testid={`tab-platform-${p.id}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black tracking-widest" style={{ color: p.color }}>{p.label}</span>
+                        <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: p.color, background: `${p.color}18`, border: `1px solid ${p.color}33` }}>
+                          {p.total}
+                        </span>
+                      </div>
+                      {/* mini bar */}
+                      <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                        <div className="flex h-full">
+                          {p.total > 0 && p.ready > 0 && <div style={{ width: `${(p.ready/p.total)*100}%`, background: "#00ff41", boxShadow: "0 0 4px rgba(0,255,65,0.8)" }} />}
+                          {p.total > 0 && p.proc > 0  && <div style={{ width: `${(p.proc/p.total)*100}%`,  background: "#facc15" }} />}
+                          {p.total > 0 && p.fail > 0  && <div style={{ width: `${(p.fail/p.total)*100}%`,  background: "#f87171" }} />}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px]" style={{ color: "#00ff4166" }}>✓ {p.ready}</span>
+                        <span className="text-[8px]" style={{ color: "#facc1566" }}>◌ {p.proc}</span>
+                        <span className="text-[8px]" style={{ color: "#f8717166" }}>✕ {p.fail}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── PIPELINE DISTRIBUTION BAR ── */}
+            <div className="rounded-lg p-3" style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[8px] tracking-widest uppercase flex items-center gap-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  <TrendingUp className="w-2.5 h-2.5" />
+                  PIPELINE_DISTRIBUTION
+                </span>
+                <div className="flex items-center gap-3">
+                  {[
+                    { label: "Ready",      val: totalReady,  color: "#00ff41" },
+                    { label: "Processing", val: totalProc,   color: "#facc15" },
+                    { label: "Failed",     val: totalFailed, color: "#f87171" },
+                  ].map(l => (
+                    <span key={l.label} className="flex items-center gap-1 text-[8px]" style={{ color: "rgba(255,255,255,0.35)" }}>
+                      <span className="w-2 h-2 rounded-full inline-block" style={{ background: l.color, boxShadow: `0 0 4px ${l.color}` }} />
+                      {l.label} ({l.val})
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden flex" style={{ background: "rgba(255,255,255,0.04)" }}>
+                {totalActive > 0 && totalReady > 0  && <div style={{ width: `${(totalReady/totalActive)*100}%`,  background: "linear-gradient(90deg, #00c032, #00ff41)", boxShadow: "0 0 8px rgba(0,255,65,0.6)",   transition: "width 0.8s ease" }} />}
+                {totalActive > 0 && totalProc > 0   && <div style={{ width: `${(totalProc/totalActive)*100}%`,   background: "linear-gradient(90deg, #d97706, #facc15)", boxShadow: "0 0 6px rgba(250,204,21,0.5)", transition: "width 0.8s ease" }} />}
+                {totalActive > 0 && totalFailed > 0 && <div style={{ width: `${(totalFailed/totalActive)*100}%`, background: "linear-gradient(90deg, #b91c1c, #f87171)", boxShadow: "0 0 6px rgba(248,113,113,0.5)", transition: "width 0.8s ease" }} />}
+              </div>
+            </div>
+
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {activeJobs.length > 0 && (
         <div className="space-y-3 shrink-0">
