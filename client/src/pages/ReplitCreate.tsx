@@ -37,9 +37,6 @@ const PA = (a: number) => `rgba(190,120,255,${a})`;
 const L = "rgba(255,185,50,1)";
 const LA = (a: number) => `rgba(255,185,50,${a})`;
 
-// Sort priority matches sheet: Verified Account → Working Now → Account Created → Stock Out → rest
-const STATUS_SORT_ORDER = ["available", "working", "processing", "sold_out", "subscribed", "completed", "warmed", "error"];
-
 const STATUSES: { value: string; label: string; color: string; bg: string; border: string }[] = [
   { value: "available",  label: "VERIFIED ACCOUNT", color: "#22c55e", bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.4)" },
   { value: "working",    label: "WORKING NOW",       color: "#f97316", bg: "rgba(249,115,22,0.12)",  border: "rgba(249,115,22,0.4)" },
@@ -105,11 +102,6 @@ export default function ReplitCreate() {
   const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
   useEffect(() => { if (checkoutDelayData?.minutes !== undefined) setCheckoutDelayMinutes(checkoutDelayData.minutes); }, [checkoutDelayData]);
 
-  const { data: syncStatus } = useQuery<{ lastAutoSyncAt: string | null; lastPollAt: string | null; lastPollChanges: number }>({
-    queryKey: ["/api/replit-accounts/sync-status"],
-    refetchInterval: 15_000,
-  });
-
   // ── ONBOARDING mode state ──
   const [onbEmail, setOnbEmail] = useState("");
   const [onbPassword, setOnbPassword] = useState("");
@@ -137,7 +129,6 @@ export default function ReplitCreate() {
 
   // ── Status changer ──
   const [statusPickerOpen, setStatusPickerOpen] = useState<string | null>(null); // accountId
-  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
@@ -147,30 +138,6 @@ export default function ReplitCreate() {
       setStatusPickerOpen(null);
     },
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) =>
-      apiRequest("DELETE", `/api/replit-accounts/${id}`).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] }),
-    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
-  });
-
-  const syncSheetMutation = useMutation({
-    mutationFn: (statusFilter: string) =>
-      apiRequest("POST", "/api/replit-accounts/sync-sheet", { statusFilter }).then(r => r.json()),
-    onSuccess: (data: any) => {
-      if (data.error) {
-        toast({ title: "Sync failed", description: data.error, variant: "destructive" });
-        return;
-      }
-      toast({
-        title: "Synced to Google Sheets",
-        description: `${data.updated} rows written (${data.total} accounts)`,
-      });
-      window.open(data.sheetUrl, "_blank");
-    },
-    onError: (err: any) => toast({ title: "Sync failed", description: err.message, variant: "destructive" }),
   });
 
   // ── Shared ──
@@ -497,19 +464,6 @@ export default function ReplitCreate() {
   );
   // Quick regex to extract emails from a log line
   const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
-
-  // Filtered + sorted accounts list (priority: Verified Account → Working Now → Account Created → Stock Out → rest)
-  const filteredAccounts = (statusFilter === "all"
-    ? [...replitAccounts]
-    : replitAccounts.filter(a => a.status === statusFilter)
-  ).sort((a, b) => {
-    const ai = STATUS_SORT_ORDER.indexOf(a.status);
-    const bi = STATUS_SORT_ORDER.indexOf(b.status);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-
-  // Status count summary
-  const statusCounts = STATUSES.map(s => ({ ...s, count: replitAccounts.filter(a => a.status === s.value).length }));
 
   // Extract coupon from promo URL for display
   let urlCoupon = "";
@@ -1458,194 +1412,6 @@ export default function ReplitCreate() {
         </div>
       </div>
 
-      {/* ══ BULK ACCOUNTS LIST ══ */}
-      {replitAccounts.length > 0 && (
-        <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.14)}` }}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 py-3 flex-wrap gap-2" style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.1)}` }}>
-            <div className="flex items-center gap-2.5">
-              <Layers className="w-3.5 h-3.5" style={{ color: G, filter: `drop-shadow(0 0 6px ${G})` }} />
-              <span className="text-[10px] font-mono uppercase tracking-widest font-bold" style={{ color: GA(0.7) }}>replit_accounts</span>
-              <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ background: GA(0.08), border: `1px solid ${GA(0.25)}`, color: G }}>{replitAccounts.length} total</span>
-              <div className="flex flex-col gap-0.5">
-                <button
-                  onClick={() => syncSheetMutation.mutate(statusFilter)}
-                  disabled={syncSheetMutation.isPending}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
-                  style={{ background: "rgba(15,157,88,0.12)", border: "1px solid rgba(15,157,88,0.35)", color: syncSheetMutation.isPending ? "rgba(15,157,88,0.35)" : "rgba(15,157,88,0.85)", cursor: syncSheetMutation.isPending ? "not-allowed" : "pointer" }}
-                  data-testid="button-sync-google-sheets"
-                  title={`Sync ${statusFilter === "all" ? "all" : `"${statusFilter}"`} accounts to Google Sheets`}
-                >
-                  <FileSpreadsheet className="w-3 h-3" />
-                  {syncSheetMutation.isPending ? "SYNCING..." : "SYNC TO SHEET"}
-                </button>
-                {/* Bidirectional sync status */}
-                <div className="flex flex-col gap-0.5 px-0.5">
-                  <span className="text-[7px] font-mono" style={{ color: "rgba(15,157,88,0.45)" }}>
-                    <span style={{ color: "rgba(15,157,88,0.6)" }}>↑ panel→sheet:</span>{" "}
-                    {syncStatus?.lastAutoSyncAt ? new Date(syncStatus.lastAutoSyncAt).toLocaleTimeString() : "waiting…"}
-                  </span>
-                  <span className="text-[7px] font-mono" style={{ color: "rgba(100,180,255,0.45)" }}>
-                    <span style={{ color: "rgba(100,180,255,0.6)" }}>↓ sheet→panel:</span>{" "}
-                    {syncStatus?.lastPollAt
-                      ? `${new Date(syncStatus.lastPollAt).toLocaleTimeString()}${syncStatus.lastPollChanges > 0 ? ` · ${syncStatus.lastPollChanges} update(s)` : ""}`
-                      : "polling…"}
-                  </span>
-                </div>
-              </div>
-            </div>
-            {/* Status filter tabs */}
-            <div className="flex items-center gap-1 flex-wrap">
-              <button
-                onClick={() => setStatusFilter("all")}
-                className="px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
-                style={{ background: statusFilter === "all" ? GA(0.12) : "transparent", border: `1px solid ${statusFilter === "all" ? GA(0.4) : GA(0.12)}`, color: statusFilter === "all" ? G : GA(0.35) }}
-                data-testid="button-filter-all"
-              >
-                ALL ({replitAccounts.length})
-              </button>
-              {statusCounts.filter(s => s.count > 0).map(s => (
-                <button
-                  key={s.value}
-                  onClick={() => setStatusFilter(s.value)}
-                  className="px-2.5 py-1 rounded text-[9px] font-mono font-bold transition-all"
-                  style={{ background: statusFilter === s.value ? s.bg : "transparent", border: `1px solid ${statusFilter === s.value ? s.border : "rgba(255,255,255,0.07)"}`, color: statusFilter === s.value ? s.color : "rgba(255,255,255,0.25)" }}
-                  data-testid={`button-filter-${s.value}`}
-                >
-                  {s.label} ({s.count})
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Spreadsheet-style table ── */}
-          <div className="overflow-hidden" style={{ borderTop: `1px solid ${GA(0.1)}` }}>
-
-            {/* Title banner — row 1 */}
-            <div className="flex items-center justify-center py-3" style={{ background: "#000", borderBottom: "2px solid #111" }}>
-              <span className="text-[15px] font-black tracking-widest uppercase" style={{ color: "#00ff41", fontFamily: "Arial Black, monospace", textShadow: "0 0 18px rgba(0,255,65,0.5)" }}>
-                REPLIT CORE $20 — ACCOUNTS
-              </span>
-            </div>
-
-            {/* Column headers — row 2 */}
-            <div className="grid text-[11px] font-black uppercase tracking-wider" style={{ gridTemplateColumns: "44px 1fr 180px 90px 200px 44px" }}>
-              <div className="flex items-center justify-center py-2.5" style={{ background: "#111", borderRight: "1px solid #222" }}>
-                <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 9 }}>#</span>
-              </div>
-              <div className="flex items-center px-3 py-2.5" style={{ background: "rgb(192,0,0)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
-                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>E-Mail Address</span>
-              </div>
-              <div className="flex items-center px-3 py-2.5" style={{ background: "rgb(0,135,0)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
-                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>PASSWORD</span>
-              </div>
-              <div className="flex items-center justify-center px-2 py-2.5" style={{ background: "rgb(210,100,0)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
-                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>CREDITS</span>
-              </div>
-              <div className="flex items-center px-3 py-2.5" style={{ background: "rgb(0,70,190)", borderRight: "1px solid rgba(0,0,0,0.3)" }}>
-                <span style={{ color: "#fff", fontFamily: "Arial Black, sans-serif" }}>Status</span>
-              </div>
-              <div className="flex items-center justify-center py-2.5" style={{ background: "#111" }}>
-                <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 9 }}></span>
-              </div>
-            </div>
-
-            {/* Data rows */}
-            <div className="overflow-y-auto" style={{ maxHeight: "420px" }}>
-              {filteredAccounts.length === 0 ? (
-                <div className="flex items-center justify-center py-10">
-                  <p className="text-[10px] font-mono" style={{ color: GA(0.25) }}>no accounts with status "{statusFilter}"</p>
-                </div>
-              ) : (
-                filteredAccounts.map((acct, idx) => {
-                  const sm = statusMeta(acct.status);
-                  const isPickerOpen = statusPickerOpen === acct.id;
-                  const isEven = idx % 2 === 0;
-                  const rowBg = isEven ? "rgb(14,14,22)" : "rgb(10,10,16)";
-                  const cellBorder = "1px solid rgba(255,255,255,0.04)";
-                  return (
-                    <div
-                      key={acct.id}
-                      className="grid items-stretch transition-all"
-                      style={{ gridTemplateColumns: "44px 1fr 180px 90px 200px 44px", background: isPickerOpen ? "rgba(0,255,65,0.03)" : rowBg, borderBottom: "1px solid rgba(255,255,255,0.05)" }}
-                      data-testid={`row-replit-account-${acct.id}`}
-                    >
-                      {/* Row number */}
-                      <div className="flex items-center justify-center" style={{ borderRight: cellBorder }}>
-                        <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.18)" }}>{idx + 3}</span>
-                      </div>
-
-                      {/* Email */}
-                      <div className="flex flex-col justify-center px-3 py-2 min-w-0" style={{ borderRight: cellBorder }}>
-                        <p className="text-[11px] font-bold truncate" style={{ color: "rgba(255,255,255,0.9)", fontFamily: "Arial, sans-serif" }}>{acct.email}</p>
-                        <p className="text-[8px] font-mono truncate" style={{ color: "rgba(255,255,255,0.3)" }}>@{acct.username}</p>
-                        {acct.error && (
-                          <p className="text-[8px] font-mono truncate" style={{ color: "#f87171" }} title={acct.error}>{acct.error.substring(0, 45)}</p>
-                        )}
-                      </div>
-
-                      {/* Password */}
-                      <div className="flex items-center px-3 py-2 min-w-0" style={{ borderRight: cellBorder }}>
-                        <p className="text-[10px] font-mono truncate" style={{ color: "rgba(220,220,220,0.75)" }}>{acct.password ?? "—"}</p>
-                      </div>
-
-                      {/* Credits */}
-                      <div className="flex items-center justify-center px-2 py-2" style={{ borderRight: cellBorder }}>
-                        <span className="text-[11px] font-black" style={{ color: "#22c55e", fontFamily: "Arial Black, sans-serif" }}>
-                          {acct.credits ? `${acct.credits}$` : "20$"}
-                        </span>
-                      </div>
-
-                      {/* Status cell — full solid fill like a spreadsheet cell */}
-                      <div className="relative flex items-stretch" style={{ borderRight: cellBorder }}>
-                        <button
-                          onClick={() => setStatusPickerOpen(isPickerOpen ? null : acct.id)}
-                          className="flex items-center justify-between w-full px-3"
-                          style={{ background: statusSolid(acct.status), cursor: "pointer", minHeight: 38 }}
-                          data-testid={`button-status-pill-${acct.id}`}
-                        >
-                          <span className="text-[10px] font-black uppercase tracking-wide truncate" style={{ color: "#fff", fontFamily: "Arial Black, sans-serif", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{sm.label}</span>
-                          <ChevronDown className="w-3 h-3 flex-shrink-0 ml-1" style={{ color: "rgba(255,255,255,0.7)" }} />
-                        </button>
-                        {isPickerOpen && (
-                          <div className="absolute left-0 top-full mt-0.5 z-50 overflow-hidden shadow-2xl" style={{ background: "#0d0d14", border: "1px solid rgba(255,255,255,0.12)", minWidth: 210, borderRadius: 4 }}>
-                            {STATUSES.map(s => (
-                              <button
-                                key={s.value}
-                                onClick={() => statusMutation.mutate({ id: acct.id, status: s.value })}
-                                disabled={statusMutation.isPending}
-                                className="w-full text-left px-3 py-2 text-[10px] font-black flex items-center gap-2.5 uppercase tracking-wide"
-                                style={{ fontFamily: "Arial Black, sans-serif", color: "#fff", background: acct.status === s.value ? statusSolid(s.value) : "transparent", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
-                                data-testid={`button-change-status-${s.value}-${acct.id}`}
-                              >
-                                <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: statusSolid(s.value) }} />
-                                {s.label}
-                                {acct.status === s.value && <span className="ml-auto opacity-80">✓</span>}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Delete */}
-                      <div className="flex items-center justify-center">
-                        <button
-                          onClick={() => { if (confirm(`Delete @${acct.username}?`)) deleteMutation.mutate(acct.id); }}
-                          className="p-1.5 rounded transition-all"
-                          style={{ color: "rgba(248,113,113,0.35)", cursor: "pointer" }}
-                          data-testid={`button-delete-account-${acct.id}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
