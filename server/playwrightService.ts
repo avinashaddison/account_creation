@@ -19024,9 +19024,11 @@ export async function generateSingleCheckoutLink(
       if (retriedUrl.includes("stripe-checkout-error")) {
         let errMsg = "Stripe checkout error";
         try { errMsg = new URL(retriedUrl).searchParams.get("message") || errMsg; } catch {}
-        const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
+        const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 400)).catch(() => "");
         log(`⚠️  Stripe error URL: ${retriedUrl.substring(0, 200)}`);
-        if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 200)}`);
+        if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 300)}`);
+        const alreadySub = /agent\s*4|core\s*plan|already\s*(subscribed|have\s*a\s*subscription)|subscription\s*already|referral\s*gift/i.test(errBody);
+        if (alreadySub) throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
         throw new Error(`Stripe error: ${errMsg}`);
       }
       await page.waitForTimeout(1500);
@@ -19037,9 +19039,11 @@ export async function generateSingleCheckoutLink(
     if (finalUrl.includes("stripe-checkout-error")) {
       let errMsg = "Stripe checkout error";
       try { errMsg = new URL(finalUrl).searchParams.get("message") || errMsg; } catch {}
-      const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
+      const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 400)).catch(() => "");
       log(`⚠️  Stripe error URL: ${finalUrl.substring(0, 200)}`);
-      if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 200)}`);
+      if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 300)}`);
+      const alreadySub = /agent\s*4|core\s*plan|already\s*(subscribed|have\s*a\s*subscription)|subscription\s*already|referral\s*gift/i.test(errBody);
+      if (alreadySub) throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
       throw new Error(`Stripe error: ${errMsg}`);
     }
     await page.waitForTimeout(1500);

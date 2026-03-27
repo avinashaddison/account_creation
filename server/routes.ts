@@ -3526,15 +3526,15 @@ export async function registerRoutes(
 
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
-            // Broadcast as special copyable format
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
-            // Store URL in DB so the Chrome extension can pick it up
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
-            // Mark as "working" — link has been generated, ready for checkout
             await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
-            // Leave as "processing" — still needs a valid link
+            if (result.error?.includes("already has an active Replit")) {
+              await storage.updateReplitAccountStatus(acct.id, "subscribed").catch(() => {});
+              broadcastLog(batchId, jobId, `  ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+            }
           }
         }
 
@@ -3699,8 +3699,8 @@ export async function registerRoutes(
             (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
           );
 
-          // Auto-retry once on failure (new proxy session, fresh browser)
-          if (!result.success) {
+          // Auto-retry once on failure — but skip retry if account is already subscribed
+          if (!result.success && !result.error?.includes("already has an active Replit")) {
             broadcastLog(batchId, jobId, `  ↩️  Retrying with fresh proxy session...`, userId);
             result = await generateSingleCheckoutLink(
               acct.email,
@@ -3716,6 +3716,10 @@ export async function registerRoutes(
             await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
+            if (result.error?.includes("already has an active Replit")) {
+              await storage.updateReplitAccountStatus(acct.id, "subscribed").catch(() => {});
+              broadcastLog(batchId, jobId, `  ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+            }
           }
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
@@ -3824,7 +3828,7 @@ export async function registerRoutes(
               target.email, target.password, coupon,
               (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
             );
-            if (!result.success) {
+            if (!result.success && !result.error?.includes("already has an active Replit")) {
               broadcastLog(batchId, jobId, `${tag} ↩️  Retrying...`, userId);
               result = await generateSingleCheckoutLink(
                 target.email, target.password, coupon,
@@ -3839,6 +3843,10 @@ export async function registerRoutes(
               return { success: true, source: source.email, target: target.email, url: result.stripeUrl };
             } else {
               broadcastLog(batchId, jobId, `${tag} ❌ Link generation failed: ${result.error}`, userId);
+              if (result.error?.includes("already has an active Replit")) {
+                await storage.updateReplitAccountStatus(target.id, "subscribed").catch(() => {});
+                broadcastLog(batchId, jobId, `${tag} ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+              }
               return { success: false, source: source.email, target: target.email };
             }
           })();

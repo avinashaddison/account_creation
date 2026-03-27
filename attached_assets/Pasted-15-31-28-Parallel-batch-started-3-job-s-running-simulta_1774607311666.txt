@@ -1,0 +1,110 @@
+15:31:28
+>
+🚀 Parallel batch started — 3 job(s) running simultaneously [replit-batch-mn8qeobi]
+15:31:28
+·
+[Job 1] Addison Proxy connected.
+15:31:28
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+15:31:29
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+15:31:29
+·
+[Job 3] Addison Proxy connected.
+15:31:29
++
+[Job 3] ✅ ZenRows anti-bot browser connected — ban protection active
+15:31:29
+·
+[Job 3] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+15:31:30
+·
+[Job 2] Addison Proxy connected.
+15:31:30
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+15:31:31
+·
+[Job 2] 🔐 Logging into Replit as michellemacias8069@outlook.com...
+ACCOUNT CREATED
+15:31:46
+·
+[Job 3] → Login submitted — waiting for redirect...
+15:31:51
+·
+[Job 3] 📧 Replit requires email verification — auto-handling via Outlook...
+15:31:51
+·
+[Job 1] → Login submitted — waiting for redirect...
+15:31:51
+·
+[Job 2] → Login submitted — waiting for redirect...
+15:31:54
+·
+[Job 3] 📧 Signing into Outlook as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+15:32:05
++
+[Job 1] ✅ Logged in
+15:32:05
+>
+[Job 1] 💰 Navigating to checkout URL...
+15:32:08
+·
+[Job 3] 📬 Scanning Outlook inbox for Replit verification email...
+15:32:09
++
+[Job 2] ✅ Logged in
+15:32:09
+>
+[Job 2] 💰 Navigating to checkout URL...
+15:32:11
+·
+[Job 3] 🔢 Verification code: 224937 — submitting...
+15:32:11
+$
+[Job 2] ⏳ Waiting for Stripe redirect...
+15:32:15
+!
+[Job 2] ⚠️ Stripe error URL: https://replit.com/stripe-checkout-error
+15:32:15
+!
+[Job 2] ⚠️ Stripe error page: Skip to content MI michellemacias8's Workspace Create something new Import code or design Home Projects Published Projects Settings Agent 4 Referral Gift a friend a month of Replit Agent 4. They get 1
+15:32:15
+!
+[Job 2] ❌ Error: Stripe error: Stripe checkout error
+15:32:15
+·
+[Job 2] ↩️ Retrying...
+15:32:15
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+15:32:15
++
+[Job 3] ✅ Verification code submitted
+15:32:16
+·
+[Job 2] [retry] Addison Proxy connected.
+15:32:16
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+15:32:16
+·
+[Job 2] [retry] 🔐 Logging into Replit as michellemacias8069@outlook.com...
+ACCOUNT CREATED
+15:32:17
++
+[Job 3] ✅ Logged in (fast redirect)
+15:32:17
++
+[Job 3] ✅ Logged in
+15:32:18
+>
+[Job 3] 💰 Navigating to checkout URL...
+15:32:18
+$
+[Job 3] ⏳ Waiting for Stripe redirect...
