@@ -1,0 +1,189 @@
+14:12:01
+·
+[Job 2] Connecting via Addison Proxy...
+14:12:01
+·
+[Job 3] Connecting via Addison Proxy...
+14:12:02
+·
+[Job 3] Addison Proxy connected.
+14:12:02
++
+[Job 3] ✅ ZenRows anti-bot browser connected — ban protection active
+14:12:02
+·
+[Job 3] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+14:12:03
+·
+[Job 1] Addison Proxy connected.
+14:12:03
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+14:12:03
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+14:12:04
+·
+[Job 2] Addison Proxy connected.
+14:12:04
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+14:12:04
+·
+[Job 2] 🔐 Logging into Replit as michellemacias8069@outlook.com...
+ACCOUNT CREATED
+14:12:24
+·
+[Job 1] → Login submitted — waiting for redirect...
+14:12:29
+·
+[Job 2] → Login submitted — waiting for redirect...
+14:12:35
++
+[Job 1] ✅ Logged in
+14:12:35
+>
+[Job 1] 💰 Navigating to checkout URL...
+14:12:37
+$
+[Job 1] ⏳ Waiting for Stripe redirect...
+14:12:51
++
+[Job 2] ✅ Logged in
+14:12:51
+>
+[Job 2] 💰 Navigating to checkout URL...
+14:12:54
+$
+[Job 2] ⏳ Waiting for Stripe redirect...
+14:12:57
+!
+[Job 2] ❌ Error: Stripe error: Stripe checkout error
+14:12:57
+·
+[Job 2] ↩️ Retrying...
+14:12:57
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+14:12:58
+·
+[Job 2] [retry] Addison Proxy connected.
+14:12:58
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:12:58
+·
+[Job 2] [retry] 🔐 Logging into Replit as michellemacias8069@outlook.com...
+ACCOUNT CREATED
+14:13:01
+·
+[Job 3] → Login submitted — waiting for redirect...
+14:13:22
+!
+[Job 1] ❌ Error: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/verify?goto=%2Fstripe-checkout-by-price%2Fcore_1mo_20usd_monthly_feb_26%3Fcoupon%3DAGENT4614954509C1A" ============================================================
+14:13:22
+·
+[Job 1] ↩️ Retrying...
+14:13:22
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+14:13:24
+·
+[Job 1] [retry] Addison Proxy connected.
+14:13:24
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:13:25
+·
+[Job 1] [retry] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+14:13:35
+·
+[Job 2] [retry] → Login submitted — waiting for redirect...
+14:13:47
+·
+[Job 1] [retry] → Login submitted — waiting for redirect...
+14:13:50
+~
+[Job 3] ⚠️ Login stuck — URL: https://replit.com/login
+14:13:50
+~
+[Job 3] ⚠️ Page title: Log In - Replit
+14:13:50
+~
+[Job 3] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+14:13:50
+!
+[Job 3] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+14:13:51
+·
+[Job 3] ↩️ Retrying...
+14:13:51
+·
+[Job 3] [retry] Connecting via Addison Proxy...
+14:13:52
+·
+[Job 3] [retry] Addison Proxy connected.
+14:13:52
++
+[Job 3] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:13:52
+·
+[Job 3] [retry] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+14:13:53
++
+[Job 2] [retry] ✅ Logged in
+14:13:53
+>
+[Job 2] [retry] 💰 Navigating to checkout URL...
+14:13:55
+$
+[Job 2] [retry] ⏳ Waiting for Stripe redirect...
+14:13:58
+!
+[Job 2] [retry] ❌ Error: Stripe error: Stripe checkout error
+14:13:58
+!
+[Job 2] ❌ Link generation failed: Stripe error: Stripe checkout error
+14:14:03
++
+[Job 1] [retry] ✅ Logged in
+14:14:03
+>
+[Job 1] [retry] 💰 Navigating to checkout URL...
+14:14:04
+$
+[Job 1] [retry] ⏳ Waiting for Stripe redirect...
+14:14:25
+·
+[Job 3] [retry] → Login submitted — waiting for redirect...
+14:14:49
+!
+[Job 1] [retry] ❌ Error: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/verify?goto=%2Fstripe-checkout-by-price%2Fcore_1mo_20usd_monthly_feb_26%3Fcoupon%3DAGENT4614954509C1A" ============================================================
+14:14:49
+!
+[Job 1] ❌ Link generation failed: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/verify?goto=%2Fstripe-checkout-by-price%2Fcore_1mo_20usd_monthly_feb_26%3Fcoupon%3DAGENT4614954509C1A" ============================================================
+14:15:15
+~
+[Job 3] [retry] ⚠️ Login stuck — URL: https://replit.com/login
+14:15:15
+~
+[Job 3] [retry] ⚠️ Page title: Log In - Replit
+14:15:15
+~
+[Job 3] [retry] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log InForgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+14:15:15
+!
+[Job 3] [retry] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+14:15:15
+!
+[Job 3] ❌ Link generation failed: Login timed out — page stuck. Check logs above for reason.
+14:15:15
+·
+──────────────────────────────────────────────────
+14:15:15
++
+✅ Batch complete — 0/3 links generated

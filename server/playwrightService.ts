@@ -18856,16 +18856,20 @@ export async function generateSingleCheckoutLink(
     log(`💰 Navigating to checkout URL...`);
     await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
 
-    // ── Wait for Stripe redirect (or error page) ──
+    // ── Wait for Stripe redirect (or error/verify page) ──
     log(`⏳ Waiting for Stripe redirect...`);
     await page.waitForURL(
       (u: URL) =>
         u.href.includes("checkout.stripe.com") ||
         u.href.includes("billing.stripe.com") ||
-        u.href.includes("stripe-checkout-error"),
+        u.href.includes("stripe-checkout-error") ||
+        u.href.includes("/verify"),
       { timeout: 45000 }
     );
     const finalUrl = page.url();
+    if (finalUrl.includes("/verify")) {
+      throw new Error(`Account requires email verification — log into ${email} manually once to clear this.`);
+    }
     if (finalUrl.includes("stripe-checkout-error")) {
       let errMsg = "Stripe checkout error";
       try { errMsg = new URL(finalUrl).searchParams.get("message") || errMsg; } catch {}
