@@ -447,239 +447,221 @@ export default function PrivateAccount() {
 
   return (
     <div className="flex flex-col h-full p-7 gap-5">
-      {/* ══════════════════════════════════════════════════════════
-           SYSTEM_OVERVIEW  —  HACKER TRACKING DASHBOARD
-      ══════════════════════════════════════════════════════════ */}
+      {/* ══ COMMAND CENTER OVERVIEW ══ */}
       {(() => {
-        /* ── derived metrics ── */
-        const rReady      = replitAccounts.filter(a => ["working","created","available"].includes(a.status)).length;
-        const lReady      = lovableAccounts.filter(a => ["created","verified"].includes(a.status)).length;
-        const rProc       = replitAccounts.filter(a => a.status === "processing").length;
-        const lProc       = lovableAccounts.filter(a => a.status === "pending_verification").length;
-        const rFailed     = replitAccounts.filter(a => a.status === "sold_out").length;
-        const lFailed     = lovableAccounts.filter(a => ["failed","sold_out"].includes(a.status)).length;
+        const C = {
+          cyan:   "#06b6d4",
+          cyanDim:"rgba(6,182,212,0.15)",
+          cyanBdr:"rgba(6,182,212,0.25)",
+          amber:  "#f59e0b",
+          amberDim:"rgba(245,158,11,0.12)",
+          rose:   "#f43f5e",
+          roseDim:"rgba(244,63,94,0.12)",
+          card:   "rgba(255,255,255,0.025)",
+          bdr:    "rgba(255,255,255,0.07)",
+          mute:   "rgba(255,255,255,0.22)",
+          dim:    "rgba(255,255,255,0.12)",
+        };
+
+        const rReady   = replitAccounts.filter(a => ["working","created","available"].includes(a.status)).length;
+        const lReady   = lovableAccounts.filter(a => ["created","verified"].includes(a.status)).length;
+        const rProc    = replitAccounts.filter(a => a.status === "processing").length;
+        const lProc    = lovableAccounts.filter(a => a.status === "pending_verification").length;
+        const rFailed  = replitAccounts.filter(a => a.status === "sold_out").length;
+        const lFailed  = lovableAccounts.filter(a => ["failed","sold_out"].includes(a.status)).length;
+
         const totalReady  = rReady + lReady;
-        const totalProc   = rProc + lProc;
+        const totalProc   = rProc  + lProc;
         const totalFailed = rFailed + lFailed;
         const totalActive = replitAccounts.length + lovableAccounts.length;
         const totalAll    = totalActive + outlookAccounts.length + zenrowsKeys.length;
-        const successPct  = totalActive > 0 ? Math.round((totalReady / totalActive) * 100) : 0;
+        const successPct  = totalActive > 0 ? Math.round((totalReady  / totalActive) * 100) : 0;
         const failPct     = totalActive > 0 ? Math.round((totalFailed / totalActive) * 100) : 0;
 
-        /* ── donut chart ── */
-        const R = 52, SW = 11, CX = 68, CY = 68;
+        const R = 46, SW = 9, CX = 60, CY = 60;
         const circ = 2 * Math.PI * R;
-        const seg = (n: number) => totalActive > 0 ? (n / totalActive) * circ : 0;
+        const seg  = (n: number) => totalActive > 0 ? (n / totalActive) * circ : 0;
         const segReady = seg(totalReady);
         const segProc  = seg(totalProc);
         const segFail  = seg(totalFailed);
-        const off = -circ / 4; // start at 12-o'clock
+        const off = -circ / 4;
 
-        /* ── mini sparkline (status distribution bars) ── */
         const platforms = [
-          { label: "REPLIT",  color: "#7c3aed", ready: rReady,  proc: rProc,  fail: rFailed,  total: replitAccounts.length,  id: "replit" as TabType },
-          { label: "LOVABLE", color: "#ec4899", ready: lReady,  proc: lProc,  fail: lFailed,  total: lovableAccounts.length, id: "lovable" as TabType },
-          { label: "OUTLOOK", color: "#3b82f6", ready: outlookAccounts.filter(a=>a.status==="active").length, proc: 0, fail: outlookAccounts.filter(a=>a.status==="failed").length, total: outlookAccounts.length, id: "outlook" as TabType },
-          { label: "PROXIES", color: "#a855f7", ready: zenrowsKeys.filter(k=>k.status==="active").length, proc: 0, fail: 0, total: zenrowsKeys.length, id: "zenrows" as TabType },
+          { label:"REPLIT",  sub:"Automation accounts", color:"#818cf8", ready:rReady,  proc:rProc,  fail:rFailed,  total:replitAccounts.length,  id:"replit"  as TabType },
+          { label:"LOVABLE", sub:"AI builder accounts", color:"#f472b6", ready:lReady,  proc:lProc,  fail:lFailed,  total:lovableAccounts.length, id:"lovable" as TabType },
+          { label:"OUTLOOK", sub:"Mail infrastructure", color:"#38bdf8", ready:outlookAccounts.filter(a=>a.status==="active").length, proc:0, fail:outlookAccounts.filter(a=>a.status==="failed").length, total:outlookAccounts.length, id:"outlook" as TabType },
+          { label:"PROXIES", sub:"Residential API keys", color:"#a78bfa", ready:zenrowsKeys.filter(k=>k.status==="active").length, proc:0, fail:0, total:zenrowsKeys.length, id:"zenrows" as TabType },
         ];
 
         return (
           <div className="shrink-0 flex flex-col gap-3 font-mono select-none">
 
-            {/* ── HEADER ── */}
+            {/* ── HEADER BAR ── */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="relative flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: "rgba(0,255,65,0.08)", border: "1px solid rgba(0,255,65,0.25)" }}>
-                  <Activity className="w-4 h-4" style={{ color: "#00ff41" }} />
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: "0 0 6px #00ff41" }} />
-                </div>
-                <div>
-                  <h1 className="text-sm font-black tracking-widest uppercase" style={{ color: "#00ff41", textShadow: "0 0 20px rgba(0,255,65,0.4)" }}>System_Overview</h1>
-                  <p className="text-[9px] tracking-wider" style={{ color: "rgba(0,255,65,0.4)" }}>&gt; Realtime operational metrics</p>
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: C.cyan }} />
+                    <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: C.cyan }} />
+                  </span>
+                  <span className="text-[9px] tracking-[0.2em] uppercase font-semibold" style={{ color: C.cyan }}>SYSTEM ONLINE</span>
+                  <span className="text-[9px]" style={{ color: C.dim }}>·</span>
+                  <span className="text-[9px] tracking-wider" style={{ color: C.dim }}>Command Center</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => { fetchOutlook(); fetchZenrows(); fetchReplit(); fetchLovable(); sounds.navigate(); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition-all"
-                  style={{ color: "rgba(0,255,65,0.7)", border: "1px solid rgba(0,255,65,0.2)", background: "rgba(0,255,65,0.04)" }}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-medium uppercase tracking-wider transition-all"
+                  style={{ color: C.mute, border: `1px solid ${C.bdr}`, background: C.card }}
                   data-testid="button-refresh-all"
                 >
                   <RefreshCw className="w-3 h-3" />
                   Sync
                 </button>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded" style={{ color: "#00ff41", border: "1px solid rgba(0,255,65,0.25)", background: "rgba(0,255,65,0.06)", boxShadow: "0 0 12px rgba(0,255,65,0.12)" }}>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded" style={{ color: C.cyan, border: `1px solid ${C.cyanBdr}`, background: C.cyanDim }}>
                   <Cpu className="w-3 h-3" />
-                  <span className="text-[10px] font-black tracking-widest">ROOT_ACCESS</span>
+                  <span className="text-[9px] font-bold tracking-[0.15em]">ROOT_ACCESS</span>
                 </div>
               </div>
             </div>
 
-            {/* ── TOP KPI STRIP ── */}
+            {/* ── KPI ROW ── */}
             <div className="grid grid-cols-4 gap-2">
-              {[
-                { label: "TOTAL_ASSETS",  value: totalAll,    sub: `${totalActive} monitored`,       color: "#00ff41",  glow: "rgba(0,255,65,0.18)",    border: "rgba(0,255,65,0.22)",     icon: <Database className="w-3.5 h-3.5" />,  tab: null },
-                { label: "READY_STOCK",   value: totalReady,  sub: `${successPct}% rate`,             color: "#4ade80",  glow: "rgba(74,222,128,0.18)",  border: "rgba(74,222,128,0.25)",   icon: <TrendingUp className="w-3.5 h-3.5" />, tab: null },
-                { label: "IN_PROGRESS",   value: totalProc,   sub: totalProc === 0 ? "queue empty" : "processing",    color: "#facc15",  glow: "rgba(250,204,21,0.15)",  border: "rgba(250,204,21,0.22)",   icon: <Loader2 className="w-3.5 h-3.5" />,   tab: null },
-                { label: "FAILED_OUT",    value: totalFailed, sub: `${failPct}% rate`,                color: "#f87171",  glow: "rgba(248,113,113,0.18)", border: "rgba(248,113,113,0.25)",  icon: <X className="w-3.5 h-3.5" />,          tab: null },
-              ].map((kpi) => (
-                <div
-                  key={kpi.label}
-                  className="relative rounded-lg overflow-hidden"
-                  style={{ background: "rgba(0,0,0,0.6)", border: `1px solid ${kpi.border}`, boxShadow: `0 0 20px ${kpi.glow}` }}
-                >
-                  <div className="absolute top-0 left-0 right-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${kpi.color}, transparent)` }} />
-                  <div className="p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[8px] tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.3)" }}>{kpi.label}</span>
-                      <div className="w-5 h-5 rounded flex items-center justify-center" style={{ background: kpi.glow, color: kpi.color }}>
-                        {kpi.icon}
+              {([
+                { label:"TOTAL ACCOUNTS", value:totalAll,    note:`${totalActive} active`,                  color:C.cyan,  dimColor:C.cyanDim,  bdr:C.cyanBdr,  icon:<Database  className="w-3.5 h-3.5" /> },
+                { label:"READY STOCK",    value:totalReady,  note:`${successPct}% success rate`,             color:"#4ade80", dimColor:"rgba(74,222,128,0.12)", bdr:"rgba(74,222,128,0.22)", icon:<TrendingUp className="w-3.5 h-3.5" /> },
+                { label:"IN PROGRESS",    value:totalProc,   note:totalProc===0?"queue clear":"processing",  color:C.amber, dimColor:C.amberDim, bdr:"rgba(245,158,11,0.22)", icon:<Loader2   className="w-3.5 h-3.5" /> },
+                { label:"FAILED",         value:totalFailed, note:`${failPct}% fail rate`,                   color:C.rose,  dimColor:C.roseDim,  bdr:"rgba(244,63,94,0.22)",  icon:<X         className="w-3.5 h-3.5" /> },
+              ] as const).map((k) => (
+                <div key={k.label} className="relative rounded-lg overflow-hidden" style={{ background: C.card, border: `1px solid ${k.bdr}` }}>
+                  <div className="absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${k.color}88, transparent)` }} />
+                  <div className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[9px] tracking-widest uppercase font-medium" style={{ color: C.mute }}>{k.label}</span>
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: k.dimColor, color: k.color }}>
+                        {k.icon}
                       </div>
                     </div>
-                    <div className="text-3xl font-black leading-none" style={{ color: kpi.color, textShadow: `0 0 20px ${kpi.glow}` }}>
-                      {kpi.value}
+                    <div className="text-4xl font-black leading-none tabular-nums" style={{ color: k.color, textShadow: `0 0 30px ${k.dimColor}` }}>
+                      {k.value}
                     </div>
-                    <div className="text-[9px] mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>{kpi.sub}</div>
+                    <div className="text-[9px] mt-2 font-medium" style={{ color: C.dim }}>{k.note}</div>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* ── ANALYTICS ROW ── */}
-            <div className="grid gap-2" style={{ gridTemplateColumns: "200px 1fr" }}>
+            {/* ── MAIN ANALYTICS SECTION ── */}
+            <div className="grid gap-2" style={{ gridTemplateColumns: "176px 1fr" }}>
 
-              {/* LEFT: Donut chart */}
-              <div className="rounded-lg p-3 flex flex-col" style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                <span className="text-[8px] tracking-widest uppercase mb-2 flex items-center gap-1" style={{ color: "rgba(255,255,255,0.25)" }}>
-                  <Activity className="w-2.5 h-2.5" />
-                  SUCCESS_METRIC
-                </span>
-                <div className="flex items-center justify-center">
-                  <svg width="136" height="136" viewBox="0 0 136 136">
-                    {/* bg track */}
-                    <circle cx={CX} cy={CY} r={R} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={SW} />
-                    {/* ready segment - green */}
-                    {segReady > 0 && (
-                      <circle cx={CX} cy={CY} r={R} fill="none"
-                        stroke="#00ff41" strokeWidth={SW}
-                        strokeDasharray={`${segReady} ${circ - segReady}`}
-                        strokeDashoffset={off}
-                        strokeLinecap="round"
-                        style={{ filter: "drop-shadow(0 0 6px rgba(0,255,65,0.7))" }}
-                      />
-                    )}
-                    {/* processing segment - yellow */}
-                    {segProc > 0 && (
-                      <circle cx={CX} cy={CY} r={R} fill="none"
-                        stroke="#facc15" strokeWidth={SW}
-                        strokeDasharray={`${segProc} ${circ - segProc}`}
-                        strokeDashoffset={off - segReady}
-                        strokeLinecap="round"
-                        style={{ filter: "drop-shadow(0 0 5px rgba(250,204,21,0.6))" }}
-                      />
-                    )}
-                    {/* failed segment - red */}
-                    {segFail > 0 && (
-                      <circle cx={CX} cy={CY} r={R} fill="none"
-                        stroke="#f87171" strokeWidth={SW}
-                        strokeDasharray={`${segFail} ${circ - segFail}`}
-                        strokeDashoffset={off - segReady - segProc}
-                        strokeLinecap="round"
-                        style={{ filter: "drop-shadow(0 0 5px rgba(248,113,113,0.6))" }}
-                      />
-                    )}
-                    {/* centre text */}
-                    <text x={CX} y={CY - 6} textAnchor="middle" fill="#00ff41" fontSize="18" fontWeight="900" fontFamily="monospace" style={{ filter: "drop-shadow(0 0 8px rgba(0,255,65,0.8))" }}>
-                      {successPct}%
-                    </text>
-                    <text x={CX} y={CY + 10} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="7" fontFamily="monospace" letterSpacing="2">
-                      SUCCESS
-                    </text>
-                  </svg>
+              {/* LEFT — Donut + legend */}
+              <div className="rounded-lg flex flex-col items-center justify-between p-3 gap-2" style={{ background: C.card, border: `1px solid ${C.bdr}` }}>
+                <div className="w-full flex items-center gap-1.5">
+                  <Activity className="w-2.5 h-2.5" style={{ color: C.dim }} />
+                  <span className="text-[8px] tracking-[0.18em] uppercase" style={{ color: C.dim }}>Success Rate</span>
                 </div>
-                {/* legend pills */}
-                <div className="grid grid-cols-3 gap-1 mt-1">
-                  {[
-                    { label: "PASS", val: totalReady,  color: "#00ff41" },
-                    { label: "FAIL", val: totalFailed, color: "#f87171" },
-                    { label: "PROC", val: totalProc,   color: "#facc15" },
-                  ].map(p => (
-                    <div key={p.label} className="rounded flex flex-col items-center py-1" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${p.color}22` }}>
-                      <span className="text-xs font-black" style={{ color: p.color, textShadow: `0 0 8px ${p.color}` }}>{p.val}</span>
-                      <span className="text-[7px]" style={{ color: "rgba(255,255,255,0.25)" }}>{p.label}</span>
+                <svg width="120" height="120" viewBox="0 0 120 120">
+                  <circle cx={CX} cy={CY} r={R} fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth={SW} />
+                  {segReady > 0 && <circle cx={CX} cy={CY} r={R} fill="none" stroke={C.cyan} strokeWidth={SW} strokeDasharray={`${segReady} ${circ-segReady}`} strokeDashoffset={off} strokeLinecap="butt" style={{ filter:`drop-shadow(0 0 5px ${C.cyan})` }} />}
+                  {segProc  > 0 && <circle cx={CX} cy={CY} r={R} fill="none" stroke={C.amber} strokeWidth={SW} strokeDasharray={`${segProc} ${circ-segProc}`} strokeDashoffset={off - segReady} strokeLinecap="butt" style={{ filter:`drop-shadow(0 0 4px ${C.amber})` }} />}
+                  {segFail  > 0 && <circle cx={CX} cy={CY} r={R} fill="none" stroke={C.rose}  strokeWidth={SW} strokeDasharray={`${segFail} ${circ-segFail}`}  strokeDashoffset={off - segReady - segProc} strokeLinecap="butt" style={{ filter:`drop-shadow(0 0 4px ${C.rose})` }} />}
+                  <text x={CX} y={CY-5} textAnchor="middle" fill={C.cyan} fontSize="17" fontWeight="900" fontFamily="monospace" style={{ filter:`drop-shadow(0 0 10px ${C.cyan})` }}>{successPct}%</text>
+                  <text x={CX} y={CY+9} textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="6.5" fontFamily="monospace" letterSpacing="2">SUCCESS</text>
+                </svg>
+                <div className="w-full grid grid-cols-3 gap-1">
+                  {([
+                    { l:"PASS", v:totalReady,  c:C.cyan  },
+                    { l:"FAIL", v:totalFailed, c:C.rose  },
+                    { l:"PROC", v:totalProc,   c:C.amber },
+                  ] as const).map(p => (
+                    <div key={p.l} className="rounded flex flex-col items-center py-1.5 gap-0.5" style={{ background:"rgba(0,0,0,0.25)", border:`1px solid ${p.c}18` }}>
+                      <span className="text-sm font-black tabular-nums" style={{ color:p.c }}>{p.v}</span>
+                      <span className="text-[7px] tracking-widest" style={{ color:C.dim }}>{p.l}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* RIGHT: Platform breakdown */}
-              <div className="rounded-lg p-3 flex flex-col gap-2" style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                <span className="text-[8px] tracking-widest uppercase flex items-center gap-1" style={{ color: "rgba(255,255,255,0.25)" }}>
-                  <Globe className="w-2.5 h-2.5" />
-                  PLATFORM_STATUS
-                </span>
+              {/* RIGHT — Platform tiles */}
+              <div className="rounded-lg p-3 flex flex-col gap-2" style={{ background: C.card, border: `1px solid ${C.bdr}` }}>
+                <div className="flex items-center gap-1.5">
+                  <Globe className="w-2.5 h-2.5" style={{ color: C.dim }} />
+                  <span className="text-[8px] tracking-[0.18em] uppercase" style={{ color: C.dim }}>Platform Status</span>
+                </div>
                 <div className="grid grid-cols-2 gap-2 flex-1">
-                  {platforms.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => { setTab(p.id); sounds.hover(); }}
-                      className="rounded p-2.5 text-left transition-all duration-150 flex flex-col gap-1.5"
-                      style={{
-                        background: tab === p.id ? `rgba(${p.color === "#7c3aed" ? "124,58,237" : p.color === "#ec4899" ? "236,72,153" : p.color === "#3b82f6" ? "59,130,246" : "168,85,247"},0.12)` : "rgba(0,0,0,0.4)",
-                        border: `1px solid ${tab === p.id ? p.color + "44" : "rgba(255,255,255,0.06)"}`,
-                        boxShadow: tab === p.id ? `0 0 16px ${p.color}22` : "none",
-                      }}
-                      data-testid={`tab-platform-${p.id}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-black tracking-widest" style={{ color: p.color }}>{p.label}</span>
-                        <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ color: p.color, background: `${p.color}18`, border: `1px solid ${p.color}33` }}>
-                          {p.total}
-                        </span>
-                      </div>
-                      {/* mini bar */}
-                      <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-                        <div className="flex h-full">
-                          {p.total > 0 && p.ready > 0 && <div style={{ width: `${(p.ready/p.total)*100}%`, background: "#00ff41", boxShadow: "0 0 4px rgba(0,255,65,0.8)" }} />}
-                          {p.total > 0 && p.proc > 0  && <div style={{ width: `${(p.proc/p.total)*100}%`,  background: "#facc15" }} />}
-                          {p.total > 0 && p.fail > 0  && <div style={{ width: `${(p.fail/p.total)*100}%`,  background: "#f87171" }} />}
+                  {platforms.map((p) => {
+                    const isActive = tab === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => { setTab(p.id); sounds.hover(); }}
+                        className="rounded-lg p-3 text-left flex flex-col gap-2 transition-all duration-200"
+                        style={{
+                          background: isActive ? `${p.color}10` : "rgba(0,0,0,0.2)",
+                          border: `1px solid ${isActive ? p.color+"40" : "rgba(255,255,255,0.05)"}`,
+                        }}
+                        data-testid={`tab-platform-${p.id}`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="text-[10px] font-bold tracking-wider" style={{ color: p.color }}>{p.label}</div>
+                            <div className="text-[8px] mt-0.5" style={{ color: C.dim }}>{p.sub}</div>
+                          </div>
+                          <div className="text-lg font-black tabular-nums leading-none" style={{ color: isActive ? p.color : "rgba(255,255,255,0.7)" }}>
+                            {p.total}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[8px]" style={{ color: "#00ff4166" }}>✓ {p.ready}</span>
-                        <span className="text-[8px]" style={{ color: "#facc1566" }}>◌ {p.proc}</span>
-                        <span className="text-[8px]" style={{ color: "#f8717166" }}>✕ {p.fail}</span>
-                      </div>
-                    </button>
-                  ))}
+                        <div className="h-[3px] rounded-full overflow-hidden flex" style={{ background:"rgba(255,255,255,0.05)" }}>
+                          {p.total > 0 && p.ready > 0 && <div style={{ width:`${(p.ready/p.total)*100}%`, background:C.cyan, boxShadow:`0 0 4px ${C.cyan}` }} />}
+                          {p.total > 0 && p.proc  > 0 && <div style={{ width:`${(p.proc/p.total)*100}%`,  background:C.amber }} />}
+                          {p.total > 0 && p.fail  > 0 && <div style={{ width:`${(p.fail/p.total)*100}%`,  background:C.rose }} />}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[8px] flex items-center gap-1" style={{ color:"rgba(6,182,212,0.6)" }}>
+                            <span className="w-1 h-1 rounded-full inline-block" style={{ background:C.cyan }} />
+                            {p.ready}
+                          </span>
+                          <span className="text-[8px] flex items-center gap-1" style={{ color:"rgba(245,158,11,0.6)" }}>
+                            <span className="w-1 h-1 rounded-full inline-block" style={{ background:C.amber }} />
+                            {p.proc}
+                          </span>
+                          <span className="text-[8px] flex items-center gap-1" style={{ color:"rgba(244,63,94,0.6)" }}>
+                            <span className="w-1 h-1 rounded-full inline-block" style={{ background:C.rose }} />
+                            {p.fail}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            {/* ── PIPELINE DISTRIBUTION BAR ── */}
-            <div className="rounded-lg p-3" style={{ background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[8px] tracking-widest uppercase flex items-center gap-1" style={{ color: "rgba(255,255,255,0.25)" }}>
-                  <TrendingUp className="w-2.5 h-2.5" />
-                  PIPELINE_DISTRIBUTION
-                </span>
-                <div className="flex items-center gap-3">
-                  {[
-                    { label: "Ready",      val: totalReady,  color: "#00ff41" },
-                    { label: "Processing", val: totalProc,   color: "#facc15" },
-                    { label: "Failed",     val: totalFailed, color: "#f87171" },
-                  ].map(l => (
-                    <span key={l.label} className="flex items-center gap-1 text-[8px]" style={{ color: "rgba(255,255,255,0.35)" }}>
-                      <span className="w-2 h-2 rounded-full inline-block" style={{ background: l.color, boxShadow: `0 0 4px ${l.color}` }} />
-                      {l.label} ({l.val})
+            {/* ── PIPELINE DISTRIBUTION ── */}
+            <div className="rounded-lg px-4 py-3" style={{ background: C.card, border: `1px solid ${C.bdr}` }}>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-1.5">
+                  <TrendingUp className="w-2.5 h-2.5" style={{ color: C.dim }} />
+                  <span className="text-[8px] tracking-[0.18em] uppercase" style={{ color: C.dim }}>Pipeline Distribution</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  {([
+                    { l:"Ready",      v:totalReady,  c:C.cyan  },
+                    { l:"Processing", v:totalProc,   c:C.amber },
+                    { l:"Failed",     v:totalFailed, c:C.rose  },
+                  ] as const).map(l => (
+                    <span key={l.l} className="flex items-center gap-1.5 text-[8px]" style={{ color: C.mute }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background:l.c, boxShadow:`0 0 4px ${l.c}` }} />
+                      {l.l} <span className="font-bold" style={{ color:"rgba(255,255,255,0.5)" }}>({l.v})</span>
                     </span>
                   ))}
                 </div>
               </div>
-              <div className="h-2 rounded-full overflow-hidden flex" style={{ background: "rgba(255,255,255,0.04)" }}>
-                {totalActive > 0 && totalReady > 0  && <div style={{ width: `${(totalReady/totalActive)*100}%`,  background: "linear-gradient(90deg, #00c032, #00ff41)", boxShadow: "0 0 8px rgba(0,255,65,0.6)",   transition: "width 0.8s ease" }} />}
-                {totalActive > 0 && totalProc > 0   && <div style={{ width: `${(totalProc/totalActive)*100}%`,   background: "linear-gradient(90deg, #d97706, #facc15)", boxShadow: "0 0 6px rgba(250,204,21,0.5)", transition: "width 0.8s ease" }} />}
-                {totalActive > 0 && totalFailed > 0 && <div style={{ width: `${(totalFailed/totalActive)*100}%`, background: "linear-gradient(90deg, #b91c1c, #f87171)", boxShadow: "0 0 6px rgba(248,113,113,0.5)", transition: "width 0.8s ease" }} />}
+              <div className="h-2.5 rounded overflow-hidden flex" style={{ background:"rgba(255,255,255,0.04)" }}>
+                {totalActive > 0 && totalReady  > 0 && <div style={{ width:`${(totalReady/totalActive)*100}%`,  background:`linear-gradient(90deg,#0891b2,${C.cyan})`, boxShadow:`0 0 8px ${C.cyanDim}`, transition:"width 0.8s ease" }} />}
+                {totalActive > 0 && totalProc   > 0 && <div style={{ width:`${(totalProc/totalActive)*100}%`,   background:`linear-gradient(90deg,#b45309,${C.amber})`, transition:"width 0.8s ease" }} />}
+                {totalActive > 0 && totalFailed > 0 && <div style={{ width:`${(totalFailed/totalActive)*100}%`, background:`linear-gradient(90deg,#be123c,${C.rose})`, transition:"width 0.8s ease" }} />}
               </div>
             </div>
 
