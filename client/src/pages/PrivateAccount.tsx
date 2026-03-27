@@ -1016,7 +1016,7 @@ export default function PrivateAccount() {
             </div>
           )}
 
-          {/* ── Table ── */}
+          {/* ── Spreadsheet Table ── */}
           {replitAccounts.length === 0 ? (
             <div className="text-center py-16">
               <Code2 className="w-8 h-8 mx-auto mb-3" style={{ color: "rgba(124,58,237,0.3)" }} />
@@ -1024,195 +1024,250 @@ export default function PrivateAccount() {
               <p className="text-xs font-mono mt-1" style={{ color: "rgba(255,255,255,0.2)" }}>Create accounts in the Replit Create module</p>
             </div>
           ) : (
-            <div>
-              {/* Column headers */}
-              <div
-                className="grid font-mono text-[10px] font-black uppercase tracking-widest"
-                style={{ gridTemplateColumns: "40px 2fr 1.5fr 0.6fr 1.1fr 80px" }}
-              >
-                <div
-                  className="px-3 py-2.5 flex items-center justify-center"
-                  style={{ background: "#0d0d1a", color: "#3f3f5c" }}
-                >
-                  <input
-                    type="checkbox"
-                    className="w-3 h-3 cursor-pointer"
-                    style={{ accentColor: "#a78bfa" }}
-                    checked={replitAccounts.length > 0 && selectedReplitIds.size === replitAccounts.length}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedReplitIds(new Set(replitAccounts.map(a => a.id)));
-                      } else {
-                        setSelectedReplitIds(new Set());
-                      }
-                    }}
-                    title="Select all"
-                    data-testid="checkbox-replit-select-all"
-                  />
-                </div>
-                <div
-                  className="px-4 py-2.5 flex items-center gap-2"
-                  style={{
-                    background: "linear-gradient(90deg, #9b1c1c 0%, #c0392b 100%)",
-                    color: "#fecaca",
-                    textShadow: "0 0 12px rgba(239,68,68,0.6)",
-                    boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.3)",
-                  }}
-                >
-                  E-Mail Address
-                </div>
-                <div
-                  className="px-4 py-2.5"
-                  style={{
-                    background: "linear-gradient(90deg, #92400e 0%, #d97706 100%)",
-                    color: "#fde68a",
-                    textShadow: "0 0 12px rgba(245,158,11,0.6)",
-                    boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.3)",
-                  }}
-                >
-                  Password
-                </div>
-                <div
-                  className="px-4 py-2.5"
-                  style={{
-                    background: "linear-gradient(90deg, #1e3a5f 0%, #2563eb 100%)",
-                    color: "#bfdbfe",
-                    textShadow: "0 0 12px rgba(59,130,246,0.6)",
-                    boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.3)",
-                  }}
-                >
-                  Credits
-                </div>
-                <div
-                  className="px-4 py-2.5"
-                  style={{
-                    background: "linear-gradient(90deg, #14532d 0%, #16a34a 100%)",
-                    color: "#bbf7d0",
-                    textShadow: "0 0 12px rgba(34,197,94,0.6)",
-                    boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.3)",
-                  }}
-                >
-                  Status
-                </div>
-                <div
-                  className="px-3 py-2.5 text-right"
-                  style={{ background: "#0d0d20", color: "#3f3f5c" }}
-                >
-                  Actions
-                </div>
-              </div>
+            <div className="overflow-x-auto" style={{ maxHeight: "62vh", overflowY: "auto" }}>
+              {/* ── Spreadsheet grid ── */}
+              <div style={{ minWidth: "680px" }}>
 
-              {/* Data rows */}
-              {replitAccounts.map((acct, idx) => {
-                const st = acct.status;
-                type StatusCfg = { label: string; icon: string; color: string; glow: string; bg: string; border: string; pulse?: boolean };
-                const statusConfig: Record<string, StatusCfg> = {
-                  processing: { label: "Processing", icon: "◌", color: "#facc15", glow: "rgba(250,204,21,0.3)",  bg: "rgba(250,204,21,0.08)", border: "rgba(250,204,21,0.4)", pulse: true },
-                  created:    { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.35)", bg: "rgba(74,222,128,0.08)", border: "rgba(74,222,128,0.4)" },
-                  available:  { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.35)", bg: "rgba(74,222,128,0.08)", border: "rgba(74,222,128,0.4)" },
-                  working:    { label: "Working",    icon: "▶", color: "#f87171", glow: "rgba(248,113,113,0.4)", bg: "rgba(248,113,113,0.1)", border: "rgba(248,113,113,0.4)" },
-                  sold_out:   { label: "Sold Out",   icon: "⊘", color: "#f87171", glow: "rgba(248,113,113,0.3)", bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.4)" },
-                };
-                const cfg = statusConfig[st] ?? statusConfig.processing;
-                const isEven = idx % 2 === 0;
-                return (
+                {/* Column-letter row (Google Sheets style) */}
+                <div
+                  className="grid sticky top-0 z-20 font-mono text-[9px] font-bold text-center select-none"
+                  style={{
+                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px",
+                    background: "#0f0f1e",
+                    borderBottom: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  {/* row-number gutter label */}
+                  <div className="py-1" style={{ borderRight: "1px solid rgba(255,255,255,0.06)", color: "#2a2a3f" }} />
+                  {/* checkbox gutter */}
                   <div
-                    key={acct.id}
-                    className="grid items-center border-b transition-all duration-150 group"
-                    style={{
-                      gridTemplateColumns: "40px 2fr 1.5fr 0.6fr 1.1fr 80px",
-                      borderColor: "rgba(255,255,255,0.03)",
-                      background: isEven ? "rgba(255,255,255,0.018)" : "rgba(0,0,0,0.2)",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(124,58,237,0.06)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = isEven ? "rgba(255,255,255,0.018)" : "rgba(0,0,0,0.2)")}
-                    data-testid={`row-replit-private-${acct.id}`}
+                    className="py-1 flex items-center justify-center"
+                    style={{ borderRight: "1px solid rgba(255,255,255,0.06)", color: "#3a3a55" }}
                   >
-                    {/* Checkbox */}
-                    <div className="px-3 py-4 flex items-center justify-center">
-                      <input
-                        type="checkbox"
-                        className="w-3 h-3 cursor-pointer"
-                        style={{ accentColor: "#a78bfa" }}
-                        checked={selectedReplitIds.has(acct.id)}
-                        onChange={(e) => {
-                          setSelectedReplitIds(prev => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(acct.id);
-                            else next.delete(acct.id);
-                            return next;
-                          });
-                        }}
-                        data-testid={`checkbox-replit-${acct.id}`}
-                      />
+                    <input
+                      type="checkbox"
+                      className="w-3 h-3 cursor-pointer"
+                      style={{ accentColor: "#a78bfa" }}
+                      checked={replitAccounts.length > 0 && selectedReplitIds.size === replitAccounts.length}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedReplitIds(new Set(replitAccounts.map(a => a.id)));
+                        else setSelectedReplitIds(new Set());
+                      }}
+                      title="Select all"
+                      data-testid="checkbox-replit-select-all"
+                    />
+                  </div>
+                  {(["B", "C", "D", "E", "F"] as const).map((letter, i) => (
+                    <div
+                      key={letter}
+                      className="py-1"
+                      style={{
+                        borderRight: i < 4 ? "1px solid rgba(255,255,255,0.06)" : "none",
+                        color: "rgba(255,255,255,0.18)",
+                        letterSpacing: "0.15em",
+                      }}
+                    >
+                      {letter}
                     </div>
+                  ))}
+                </div>
 
-                    {/* Email */}
-                    <div className="px-4 py-4 flex flex-col gap-0.5 min-w-0">
-                      <button
-                        onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)}
-                        className="text-left font-mono text-sm truncate transition-all duration-150"
-                        style={{ color: copied === `re-${acct.id}` ? "#4ade80" : "#f1f5f9" }}
-                        title="Click to copy"
-                        data-testid={`button-copy-replit-email-${acct.id}`}
-                      >
-                        {copied === `re-${acct.id}` ? "✓ Copied!" : acct.email}
-                      </button>
-                      <div className="flex items-center gap-1">
-                        <Code2 className="w-2.5 h-2.5 flex-shrink-0" style={{ color: "rgba(167,139,250,0.4)" }} />
-                        <span className="text-[10px] font-mono truncate" style={{ color: "rgba(167,139,250,0.5)" }}>
-                          @{acct.username}
-                        </span>
-                      </div>
-                      <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.18)" }} title={formatDate(acct.createdAt)}>
-                        {timeAgo(acct.createdAt)}
-                      </span>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <Zap
-                          className="w-2.5 h-2.5 flex-shrink-0"
-                          style={{ color: acct.warmedAt ? "#fb923c" : "rgba(255,255,255,0.15)" }}
-                        />
-                        <span
-                          className="text-[9px] font-mono"
-                          style={{ color: acct.warmedAt ? "rgba(251,146,60,0.7)" : "rgba(255,255,255,0.18)" }}
-                          title={acct.warmedAt ? `Warmed ${formatDate(acct.warmedAt)}` : "Not warmed"}
-                          data-testid={`text-warm-status-${acct.id}`}
-                        >
-                          {acct.warmedAt ? `warmed ${timeAgo(acct.warmedAt)}` : "not warmed"}
-                        </span>
-                      </div>
-                    </div>
+                {/* Colored column-header row */}
+                <div
+                  className="grid sticky font-mono text-[10px] font-black uppercase tracking-widest z-10"
+                  style={{
+                    top: "22px",
+                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px",
+                    borderBottom: "2px solid rgba(0,0,0,0.4)",
+                  }}
+                >
+                  {/* row-number gutter header */}
+                  <div style={{ background: "#0b0b18", borderRight: "1px solid rgba(255,255,255,0.06)" }} />
+                  {/* checkbox gutter header */}
+                  <div style={{ background: "#0b0b18", borderRight: "1px solid rgba(255,255,255,0.06)" }} />
 
-                    {/* Password */}
-                    <div className="px-4 py-4">
-                      <button
-                        onClick={() => copyToClipboard(acct.password, `rp-${acct.id}`)}
-                        className="text-left font-mono text-sm transition-all duration-150"
-                        style={{ color: copied === `rp-${acct.id}` ? "#4ade80" : "#d4d4d8" }}
-                        title="Click to copy"
-                        data-testid={`button-copy-replit-pw-${acct.id}`}
-                      >
-                        {copied === `rp-${acct.id}` ? "✓ Copied!" : acct.password}
-                      </button>
-                    </div>
+                  <div
+                    className="px-3 py-2 flex items-center"
+                    style={{
+                      background: "linear-gradient(90deg, #7f1d1d 0%, #b91c1c 100%)",
+                      color: "#fecaca",
+                      textShadow: "0 0 10px rgba(239,68,68,0.5)",
+                      borderRight: "1px solid rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    E-Mail Address
+                  </div>
+                  <div
+                    className="px-3 py-2"
+                    style={{
+                      background: "linear-gradient(90deg, #78350f 0%, #b45309 100%)",
+                      color: "#fde68a",
+                      textShadow: "0 0 10px rgba(245,158,11,0.5)",
+                      borderRight: "1px solid rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    Password
+                  </div>
+                  <div
+                    className="px-3 py-2"
+                    style={{
+                      background: "linear-gradient(90deg, #1e3a8a 0%, #1d4ed8 100%)",
+                      color: "#bfdbfe",
+                      textShadow: "0 0 10px rgba(59,130,246,0.5)",
+                      borderRight: "1px solid rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    Credits
+                  </div>
+                  <div
+                    className="px-3 py-2"
+                    style={{
+                      background: "linear-gradient(90deg, #14532d 0%, #15803d 100%)",
+                      color: "#bbf7d0",
+                      textShadow: "0 0 10px rgba(34,197,94,0.5)",
+                      borderRight: "1px solid rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    Status
+                  </div>
+                  <div
+                    className="px-3 py-2 text-right"
+                    style={{ background: "#0b0b18", color: "rgba(255,255,255,0.2)" }}
+                  >
+                    Actions
+                  </div>
+                </div>
 
-                    {/* Credits */}
-                    <div className="px-4 py-4">
-                      <span
-                        className="text-sm font-black font-mono"
+                {/* Data rows */}
+                {replitAccounts.map((acct, idx) => {
+                  const st = acct.status;
+                  type StatusCfg = { label: string; icon: string; color: string; glow: string; bg: string; border: string };
+                  const statusConfig: Record<string, StatusCfg> = {
+                    processing: { label: "Processing", icon: "◌", color: "#facc15", glow: "rgba(250,204,21,0.25)", bg: "rgba(250,204,21,0.07)", border: "rgba(250,204,21,0.35)" },
+                    created:    { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
+                    available:  { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
+                    working:    { label: "Working",    icon: "▶", color: "#f87171", glow: "rgba(248,113,113,0.3)",  bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.35)" },
+                    sold_out:   { label: "Sold Out",   icon: "⊘", color: "#f87171", glow: "rgba(248,113,113,0.25)", bg: "rgba(248,113,113,0.07)", border: "rgba(248,113,113,0.35)" },
+                  };
+                  const cfg = statusConfig[st] ?? statusConfig.processing;
+                  const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.012)" : "rgba(0,0,0,0.18)";
+                  const cellBorder = "1px solid rgba(255,255,255,0.05)";
+                  return (
+                    <div
+                      key={acct.id}
+                      className="grid transition-colors duration-100 group"
+                      style={{ gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px", background: rowBg }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(124,58,237,0.055)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = rowBg)}
+                      data-testid={`row-replit-private-${acct.id}`}
+                    >
+                      {/* Row number */}
+                      <div
+                        className="flex items-center justify-center font-mono text-[9px] select-none"
                         style={{
-                          color: "#fb923c",
-                          textShadow: "0 0 16px rgba(251,146,60,0.7), 0 0 30px rgba(251,146,60,0.3)",
+                          background: "#0b0b18",
+                          borderRight: cellBorder,
+                          borderBottom: cellBorder,
+                          color: "rgba(255,255,255,0.2)",
+                          minHeight: "38px",
                         }}
-                        data-testid={`text-replit-credits-${acct.id}`}
                       >
-                        20$
-                      </span>
-                    </div>
+                        {idx + 1}
+                      </div>
 
-                    {/* Status */}
-                    <div className="px-4 py-4">
-                      <div className="relative">
+                      {/* Checkbox */}
+                      <div
+                        className="flex items-center justify-center"
+                        style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                      >
+                        <input
+                          type="checkbox"
+                          className="w-3 h-3 cursor-pointer"
+                          style={{ accentColor: "#a78bfa" }}
+                          checked={selectedReplitIds.has(acct.id)}
+                          onChange={(e) => {
+                            setSelectedReplitIds(prev => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(acct.id);
+                              else next.delete(acct.id);
+                              return next;
+                            });
+                          }}
+                          data-testid={`checkbox-replit-${acct.id}`}
+                        />
+                      </div>
+
+                      {/* Email */}
+                      <div
+                        className="px-3 py-2 flex flex-col gap-0.5 min-w-0"
+                        style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                      >
+                        <button
+                          onClick={() => copyToClipboard(acct.email, `re-${acct.id}`)}
+                          className="text-left font-mono text-xs truncate"
+                          style={{ color: copied === `re-${acct.id}` ? "#4ade80" : "#e2e8f0" }}
+                          title="Click to copy"
+                          data-testid={`button-copy-replit-email-${acct.id}`}
+                        >
+                          {copied === `re-${acct.id}` ? "✓ Copied!" : acct.email}
+                        </button>
+                        <div className="flex items-center gap-1">
+                          <Code2 className="w-2 h-2 flex-shrink-0" style={{ color: "rgba(167,139,250,0.4)" }} />
+                          <span className="text-[9px] font-mono truncate" style={{ color: "rgba(167,139,250,0.45)" }}>
+                            @{acct.username}
+                          </span>
+                          <span className="text-[9px] font-mono ml-1" style={{ color: "rgba(255,255,255,0.15)" }}>·</span>
+                          <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.15)" }} title={formatDate(acct.createdAt)}>
+                            {timeAgo(acct.createdAt)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Zap className="w-2 h-2 flex-shrink-0" style={{ color: acct.warmedAt ? "#fb923c" : "rgba(255,255,255,0.12)" }} />
+                          <span
+                            className="text-[9px] font-mono"
+                            style={{ color: acct.warmedAt ? "rgba(251,146,60,0.6)" : "rgba(255,255,255,0.15)" }}
+                            data-testid={`text-warm-status-${acct.id}`}
+                          >
+                            {acct.warmedAt ? `warmed ${timeAgo(acct.warmedAt)}` : "not warmed"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Password */}
+                      <div
+                        className="px-3 py-2 flex items-center"
+                        style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                      >
+                        <button
+                          onClick={() => copyToClipboard(acct.password, `rp-${acct.id}`)}
+                          className="text-left font-mono text-xs truncate w-full"
+                          style={{ color: copied === `rp-${acct.id}` ? "#4ade80" : "#a1a1aa" }}
+                          title="Click to copy"
+                          data-testid={`button-copy-replit-pw-${acct.id}`}
+                        >
+                          {copied === `rp-${acct.id}` ? "✓ Copied!" : acct.password}
+                        </button>
+                      </div>
+
+                      {/* Credits */}
+                      <div
+                        className="px-3 py-2 flex items-center justify-center"
+                        style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                      >
+                        <span
+                          className="text-xs font-black font-mono"
+                          style={{ color: "#fb923c", textShadow: "0 0 12px rgba(251,146,60,0.5)" }}
+                          data-testid={`text-replit-credits-${acct.id}`}
+                        >
+                          20$
+                        </span>
+                      </div>
+
+                      {/* Status */}
+                      <div
+                        className="px-2 py-2 flex items-center"
+                        style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                      >
                         <select
                           value={st}
                           onChange={async (e) => {
@@ -1224,12 +1279,12 @@ export default function PrivateAccount() {
                             });
                             fetchReplit();
                           }}
-                          className="w-full appearance-none rounded-md px-3 py-1.5 text-xs font-mono font-bold cursor-pointer focus:outline-none transition-all duration-150"
+                          className="w-full appearance-none rounded px-2 py-1 text-[10px] font-mono font-bold cursor-pointer focus:outline-none"
                           style={{
                             background: cfg.bg,
                             border: `1px solid ${cfg.border}`,
                             color: cfg.color,
-                            boxShadow: `0 0 12px ${cfg.glow}, inset 0 1px 0 rgba(255,255,255,0.05)`,
+                            boxShadow: `0 0 8px ${cfg.glow}`,
                           }}
                           data-testid={`select-replit-status-${acct.id}`}
                         >
@@ -1239,38 +1294,62 @@ export default function PrivateAccount() {
                           <option value="sold_out">⊘ Sold Out</option>
                         </select>
                       </div>
-                    </div>
 
-                    {/* Actions */}
-                    <div className="px-3 py-4 flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password}\nUsername: @${acct.username}`, `rall-${acct.id}`)}
-                        className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
-                        style={{ color: copied === `rall-${acct.id}` ? "#4ade80" : "rgba(113,113,122,0.7)", background: "transparent" }}
-                        title="Copy all"
-                        data-testid={`button-copy-replit-all-${acct.id}`}
+                      {/* Actions */}
+                      <div
+                        className="px-2 py-2 flex items-center justify-end gap-0.5"
+                        style={{ borderBottom: cellBorder }}
                       >
-                        {copied === `rall-${acct.id}` ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                      <button
-                        onClick={async () => {
-                          try {
-                            await fetch(`/api/replit-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
-                            fetchReplit();
-                            toast({ title: "Deleted", description: "Replit account removed" });
-                          } catch {}
-                        }}
-                        className="w-7 h-7 rounded flex items-center justify-center transition-all duration-150"
-                        style={{ color: "rgba(239,68,68,0.35)", background: "transparent" }}
-                        title="Delete"
-                        data-testid={`button-delete-replit-${acct.id}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        <button
+                          onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password}\nUsername: @${acct.username}`, `rall-${acct.id}`)}
+                          className="w-7 h-7 rounded flex items-center justify-center"
+                          style={{ color: copied === `rall-${acct.id}` ? "#4ade80" : "rgba(113,113,122,0.6)" }}
+                          title="Copy all"
+                          data-testid={`button-copy-replit-all-${acct.id}`}
+                        >
+                          {copied === `rall-${acct.id}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await fetch(`/api/replit-accounts/${acct.id}`, { method: "DELETE", credentials: "include" });
+                              fetchReplit();
+                              toast({ title: "Deleted", description: "Replit account removed" });
+                            } catch {}
+                          }}
+                          className="w-7 h-7 rounded flex items-center justify-center"
+                          style={{ color: "rgba(239,68,68,0.3)" }}
+                          title="Delete"
+                          data-testid={`button-delete-replit-${acct.id}`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
+                  );
+                })}
+
+                {/* Bottom spreadsheet "add row" footer */}
+                <div
+                  className="grid font-mono text-[9px] select-none"
+                  style={{
+                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px",
+                    background: "#0b0b18",
+                    borderTop: "1px solid rgba(255,255,255,0.05)",
+                  }}
+                >
+                  <div
+                    className="py-1.5 text-center"
+                    style={{ borderRight: "1px solid rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.12)" }}
+                  >
+                    {replitAccounts.length + 1}
                   </div>
-                );
-              })}
+                  <div style={{ borderRight: "1px solid rgba(255,255,255,0.05)" }} />
+                  <div className="px-3 py-1.5 col-span-5" style={{ color: "rgba(255,255,255,0.1)" }}>
+                    {replitAccounts.length} row{replitAccounts.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
