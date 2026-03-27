@@ -1299,8 +1299,8 @@ export default function PrivateAccount() {
       )}
 
       {tab === "lovable" && (
-        <Card className="border-pink-500/10 bg-black/20">
-          <CardHeader className="pb-3">
+        <Card className="border-pink-500/10 bg-black/20 flex flex-col flex-1 min-h-0 overflow-hidden">
+          <CardHeader className="pb-3 shrink-0">
             <div className="flex items-center justify-between flex-wrap gap-1">
               <CardTitle className="text-sm font-mono text-zinc-300 flex items-center gap-2">
                 <Mail className="w-4 h-4 text-pink-400" />
@@ -1462,7 +1462,7 @@ export default function PrivateAccount() {
               </div>
             )}
           </CardHeader>
-          <CardContent className="pt-0">
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
             {lovableAccounts.length === 0 ? (
               <div className="text-center py-12">
                 <Mail className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
@@ -1470,7 +1470,7 @@ export default function PrivateAccount() {
                 <p className="text-zinc-700 text-xs font-mono mt-1">Use the Lovable Create module to create accounts</p>
               </div>
             ) : (
-              <div className="overflow-x-auto" style={{ maxHeight: "62vh", overflowY: "auto" }}>
+              <div className="overflow-auto flex-1 min-h-0">
                 <div style={{ minWidth: "680px" }}>
 
                   {/* Column-letter row */}
