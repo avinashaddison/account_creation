@@ -18492,10 +18492,8 @@ export async function warmReplitAccount(
   password: string,
   log: (msg: string) => void
 ): Promise<{ success: boolean; error?: string }> {
-  const { chromium: wChromium } = await import("playwright-extra");
-  const WStealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-  wChromium.use(WStealthPlugin());
   let browser: any = null;
+  let usingZenRows = false;
   try {
     const VIEWPORTS = [{ width: 1280, height: 800 }, { width: 1366, height: 768 }, { width: 1440, height: 900 }];
     const TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles"];
@@ -18504,10 +18502,23 @@ export async function warmReplitAccount(
     const tz = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
     const cv = CVS[Math.floor(Math.random() * CVS.length)];
 
-    browser = await wChromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-    });
+    // ── Try ZenRows first (anti-ban: residential IP + advanced fingerprinting) ──
+    try {
+      browser = await connectViaZenRows(log);
+      usingZenRows = true;
+      log("✅ ZenRows anti-bot browser connected — ban protection active");
+    } catch (zrErr: any) {
+      log(`⚠️ ZenRows not available (${(zrErr.message || "").substring(0, 60)}) — falling back to local stealth browser`);
+    }
+    if (!usingZenRows) {
+      const { chromium: wChromium } = await import("playwright-extra");
+      const WStealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+      wChromium.use(WStealthPlugin());
+      browser = await wChromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+      });
+    }
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
     const context = await browser.newContext({ userAgent: ua, viewport: vp, locale: "en-US", timezoneId: tz, javaScriptEnabled: true });
     await context.addInitScript(() => {
@@ -18645,33 +18656,20 @@ export async function generateSingleCheckoutLink(
   couponCode: string,
   log: (msg: string) => void
 ): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
-  const { chromium: stealthChromium } = await import("playwright-extra");
-  const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
-  stealthChromium.use(StealthPluginCls());
   let browser: any = null;
   let linkAnonymizedProxy: string | null = null;
+  let usingZenRows = false;
   try {
-    // ── SOAX residential proxy — unique IP per link generation ──
+    // ── Try ZenRows first (anti-ban: residential IP + advanced fingerprinting) ──
     try {
-      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const rawProxy = soaxTemplate || residentialUrl;
-      if (rawProxy) {
-        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
-        let rotatedProxy = rawProxy;
-        if (rawProxy.includes("sessionid-")) rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
-        else if (rawProxy.includes("sessid=")) rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
-        else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
-        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
-        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
-        linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
-        await resolveProxyIp(linkAnonymizedProxy, log, "SOAX LINK-GEN");
-      }
-    } catch { /* continue without proxy */ }
+      browser = await connectViaZenRows(log);
+      usingZenRows = true;
+      log("✅ ZenRows anti-bot browser connected — ban protection active");
+    } catch (zrErr: any) {
+      log(`⚠️ ZenRows not available (${(zrErr.message || "").substring(0, 60)}) — falling back to SOAX + stealth browser`);
+    }
 
-    // ── Randomised fingerprint ──
+    // ── Randomised fingerprint (used for browser context regardless of browser type) ──
     const GL_VIEWPORTS = [{ width: 1280, height: 800 }, { width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1536, height: 864 }, { width: 1920, height: 1080 }];
     const GL_TIMEZONES = ["America/New_York", "America/Chicago", "America/Los_Angeles", "America/Denver", "America/Phoenix", "America/Detroit"];
     const GL_CVS = ["120", "121", "122", "123", "124"];
@@ -18679,19 +18677,44 @@ export async function generateSingleCheckoutLink(
     const glTz = GL_TIMEZONES[Math.floor(Math.random() * GL_TIMEZONES.length)];
     const glCv = GL_CVS[Math.floor(Math.random() * GL_CVS.length)];
 
-    const glLaunchOptions: any = {
-      headless: true,
-      args: [
-        "--no-sandbox", "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-dev-shm-usage", "--disable-web-security",
-        "--allow-running-insecure-content",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
-      ],
-    };
-    if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
-    browser = await stealthChromium.launch(glLaunchOptions);
+    if (!usingZenRows) {
+      // ── SOAX residential proxy — unique IP per link generation ──
+      try {
+        const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        const rawProxy = soaxTemplate || residentialUrl;
+        if (rawProxy) {
+          const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+          let rotatedProxy = rawProxy;
+          if (rawProxy.includes("sessionid-")) rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+          else if (rawProxy.includes("sessid=")) rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+          else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+          const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+          const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+          const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
+          linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          await resolveProxyIp(linkAnonymizedProxy, log, "SOAX LINK-GEN");
+        }
+      } catch { /* continue without proxy */ }
+
+      const { chromium: stealthChromium } = await import("playwright-extra");
+      const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
+      stealthChromium.use(StealthPluginCls());
+      const glLaunchOptions: any = {
+        headless: true,
+        args: [
+          "--no-sandbox", "--disable-setuid-sandbox",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-dev-shm-usage", "--disable-web-security",
+          "--allow-running-insecure-content",
+          "--disable-features=IsolateOrigins,site-per-process",
+          "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
+        ],
+      };
+      if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
+      browser = await stealthChromium.launch(glLaunchOptions);
+    }
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
     const context = await browser.newContext({
