@@ -19160,6 +19160,11 @@ export async function generateSingleCheckoutLink(
       }
       await page.waitForTimeout(1500);
       const retriedStripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
+      // billing.stripe.com = customer portal (already subscribed), checkout.stripe.com = valid new checkout
+      if (retriedStripeUrl.includes("billing.stripe.com")) {
+        log(`⚠️  Redirected to Stripe billing portal — account already has an active subscription`);
+        throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
+      }
       log(`✅ Checkout link ready: ${retriedStripeUrl.substring(0, 80)}...`);
       return { success: true, stripeUrl: retriedStripeUrl };
     }
@@ -19173,8 +19178,18 @@ export async function generateSingleCheckoutLink(
       if (alreadySub) throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
       throw new Error(`Stripe error: ${errMsg}`);
     }
+    // billing.stripe.com = customer portal (already subscribed), checkout.stripe.com = valid new checkout
+    if (finalUrl.includes("billing.stripe.com")) {
+      log(`⚠️  Redirected to Stripe billing portal — account already has an active subscription`);
+      throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
+    }
     await page.waitForTimeout(1500);
     const stripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
+    // Final safety check — re-confirm we're on checkout not the billing portal
+    if (stripeUrl.includes("billing.stripe.com")) {
+      log(`⚠️  Final URL is Stripe billing portal — account already subscribed`);
+      throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
+    }
     log(`✅ Checkout link ready: ${stripeUrl.substring(0, 80)}...`);
     return { success: true, stripeUrl };
   } catch (err: any) {
