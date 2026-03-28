@@ -19406,19 +19406,21 @@ export async function checkReplitBanStatus(
     const loginBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
     await loginBtn.click();
     log(`  → Submitted — waiting for response...`);
-    await sleep(4000);
+    await sleep(5000); // slightly longer grace — Replit can be slow
 
-    // Read result
-    const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000)).catch(() => "");
-    const bodyLower = bodyText.toLowerCase();
-    const currentUrl = page.url();
+    // ── Helper: read and classify current page state ──
+    const readState = async () => {
+      const body = await page.evaluate(() => document.body?.innerText?.substring(0, 1500)).catch(() => "");
+      const url  = page.url();
+      return { body, bodyLower: body.toLowerCase(), url };
+    };
 
-    // ── Ban check ──
+    let { body: bodyText, bodyLower, url: currentUrl } = await readState();
+
+    // ── Immediate failure checks ──
     if (/you have been banned|banned from replit/i.test(bodyText)) {
       return { banned: true, unrecoverable: true, reason: "banned_account" };
     }
-
-    // ── Other unrecoverable failures ──
     if (/signed up without adding a password|without adding a password/i.test(bodyText)) {
       return { banned: false, unrecoverable: true, reason: "no_password_account" };
     }
@@ -19426,40 +19428,91 @@ export async function checkReplitBanStatus(
       return { banned: false, unrecoverable: true, reason: "bad_credentials" };
     }
 
-    // ── Needs email verification — not banned, just needs 2FA ──
-    const needsVerify =
-      bodyLower.includes("verify your email") || bodyLower.includes("confirmation code") ||
-      bodyLower.includes("we sent a code") || bodyLower.includes("enter the code") ||
-      currentUrl.includes("/verify") || currentUrl.includes("/confirm");
-    if (needsVerify) {
-      return { banned: false, unrecoverable: false, reason: "needs_verification" };
+    // ── Already logged in (fast redirect) ──
+    if (!currentUrl.includes("replit.com/login") && !currentUrl.includes("replit.com/signup")) {
+      return { banned: false, unrecoverable: false, reason: "ok" };
     }
 
-    // ── Wait for redirect if still on login ──
-    if (currentUrl.includes("replit.com/login") || currentUrl.includes("replit.com/signup")) {
+    // ── Detect email verification requirement ──
+    const needsVerify =
+      bodyLower.includes("verify your email") || bodyLower.includes("check your email") ||
+      bodyLower.includes("confirmation code") || bodyLower.includes("confirm your email") ||
+      bodyLower.includes("we sent a code") || bodyLower.includes("enter the code") ||
+      bodyLower.includes("verify account") || bodyLower.includes("email verification") ||
+      currentUrl.includes("/verify") || currentUrl.includes("/confirm");
+
+    if (needsVerify) {
+      log(`  📧 Email verification required — auto-handling via Outlook...`);
       try {
-        await page.waitForURL(
-          (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
-          { timeout: 20000 }
-        );
-      } catch {
-        // Re-read body after timeout
-        const finalBody = await page.evaluate(() => document.body?.innerText?.substring(0, 1000)).catch(() => "");
-        if (/you have been banned|banned from replit/i.test(finalBody)) {
-          return { banned: true, unrecoverable: true, reason: "banned_account" };
+        await handleReplitEmailVerification(page, email, log);
+        await sleep(2000);
+        // After verification, wait for the logged-in redirect
+        const postVerUrl = page.url();
+        if (!postVerUrl.includes("replit.com/login") && !postVerUrl.includes("replit.com/signup")) {
+          log(`  ✅ Verified and logged in`);
+          return { banned: false, unrecoverable: false, reason: "ok" };
         }
-        if (/signed up without adding a password/i.test(finalBody)) {
-          return { banned: false, unrecoverable: true, reason: "no_password_account" };
+        try {
+          await page.waitForURL(
+            (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+            { timeout: 15000 }
+          );
+          log(`  ✅ Verified and logged in`);
+          return { banned: false, unrecoverable: false, reason: "ok" };
+        } catch {
+          const vBody = await page.evaluate(() => document.body?.innerText?.substring(0, 800)).catch(() => "");
+          if (/you have been banned|banned from replit/i.test(vBody)) {
+            return { banned: true, unrecoverable: true, reason: "banned_account" };
+          }
+          return { banned: false, unrecoverable: false, reason: "ok_verification_done" };
         }
-        if (/invalid username or password|incorrect password/i.test(finalBody)) {
-          return { banned: false, unrecoverable: true, reason: "bad_credentials" };
-        }
-        return { banned: false, unrecoverable: false, reason: "login_timeout" };
+      } catch (verErr: any) {
+        // Verification failed (e.g. no Outlook password on file) — not a ban, just inconclusive
+        log(`  ⚠️ Verification auto-handle failed: ${(verErr.message || "").substring(0, 80)}`);
+        return { banned: false, unrecoverable: false, reason: "verification_failed" };
       }
     }
 
-    // Redirected successfully — account is good
-    return { banned: false, unrecoverable: false, reason: "ok" };
+    // ── Still on login page — wait up to 25s for redirect or ban message ──
+    try {
+      await page.waitForURL(
+        (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+        { timeout: 25000 }
+      );
+      return { banned: false, unrecoverable: false, reason: "ok" };
+    } catch {
+      // Re-read after timeout
+      const { body: finalBody } = await readState();
+      if (/you have been banned|banned from replit/i.test(finalBody)) {
+        return { banned: true, unrecoverable: true, reason: "banned_account" };
+      }
+      if (/signed up without adding a password/i.test(finalBody)) {
+        return { banned: false, unrecoverable: true, reason: "no_password_account" };
+      }
+      if (/invalid username or password|incorrect password/i.test(finalBody)) {
+        return { banned: false, unrecoverable: true, reason: "bad_credentials" };
+      }
+      // Check for late-appearing verification prompt
+      const finalLower = finalBody.toLowerCase();
+      if (
+        finalLower.includes("verify your email") || finalLower.includes("confirmation code") ||
+        finalLower.includes("we sent a code") || finalLower.includes("enter the code")
+      ) {
+        log(`  📧 Late verification prompt detected — auto-handling...`);
+        try {
+          await handleReplitEmailVerification(page, email, log);
+          await sleep(2000);
+          const lateUrl = page.url();
+          if (!lateUrl.includes("replit.com/login")) {
+            return { banned: false, unrecoverable: false, reason: "ok" };
+          }
+          return { banned: false, unrecoverable: false, reason: "ok_verification_done" };
+        } catch {
+          return { banned: false, unrecoverable: false, reason: "verification_failed" };
+        }
+      }
+      return { banned: false, unrecoverable: false, reason: "login_timeout" };
+    }
   } catch (err: any) {
     log(`❌ Check error: ${err.message?.substring(0, 100)}`);
     return { banned: false, unrecoverable: false, reason: `check_error: ${err.message?.substring(0, 80)}` };
