@@ -19335,6 +19335,139 @@ export async function generateLovableCheckoutLink(
   }
 }
 
+// ── Lightweight ban checker — login only, no full checkout ──
+export async function checkReplitBanStatus(
+  email: string,
+  password: string,
+  log: (msg: string) => void
+): Promise<{ banned: boolean; unrecoverable: boolean; reason: string }> {
+  let browser: any = null;
+  try {
+    try {
+      browser = await connectViaZenRows(log);
+      log("✅ ZenRows connected");
+    } catch (zrErr: any) {
+      log(`⚠️ ZenRows unavailable — using local stealth browser`);
+      const { chromium: stealthChromium } = await import("playwright-extra");
+      const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
+      stealthChromium.use(StealthPluginCls());
+      browser = await stealthChromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    }
+
+    const context = await browser.newContext({
+      userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36`,
+      viewport: { width: 1280, height: 800 }, locale: "en-US",
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+    const page = await context.newPage();
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+    log(`🔐 Checking login for ${email}...`);
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(3000);
+
+    // Cloudflare check
+    const cfContent = await page.content().catch(() => "");
+    if (cfContent.includes("Please enable cookies") || cfContent.includes("Checking your browser") || cfContent.includes("challenge-platform")) {
+      log(`  ⚠️ Cloudflare challenge — waiting 15s...`);
+      try { await page.waitForFunction(() => !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 }); } catch {}
+      await sleep(2000);
+    }
+
+    await page.waitForSelector("input", { timeout: 20000, state: "visible" });
+
+    // Fill email
+    const emailInput = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i], input[placeholder*="username" i]').first();
+    await emailInput.waitFor({ state: "visible", timeout: 15000 });
+    await emailInput.focus();
+    await emailInput.fill("");
+    await emailInput.pressSequentially(email, { delay: 55 });
+    await sleep(600);
+
+    // Two-step form?
+    const passVisible = await page.locator('input[type="password"]').first().isVisible().catch(() => false);
+    if (!passVisible) {
+      const continueBtn = page.getByRole("button", { name: /continue|next/i }).first();
+      await continueBtn.click();
+      await sleep(1500);
+    }
+
+    // Fill password
+    const passInput = page.locator('input[type="password"]').first();
+    await passInput.waitFor({ state: "visible", timeout: 15000 });
+    await passInput.focus();
+    await passInput.fill("");
+    await passInput.pressSequentially(password, { delay: 55 });
+    await sleep(600);
+
+    // Submit
+    const loginBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
+    await loginBtn.click();
+    log(`  → Submitted — waiting for response...`);
+    await sleep(4000);
+
+    // Read result
+    const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000)).catch(() => "");
+    const bodyLower = bodyText.toLowerCase();
+    const currentUrl = page.url();
+
+    // ── Ban check ──
+    if (/you have been banned|banned from replit/i.test(bodyText)) {
+      return { banned: true, unrecoverable: true, reason: "banned_account" };
+    }
+
+    // ── Other unrecoverable failures ──
+    if (/signed up without adding a password|without adding a password/i.test(bodyText)) {
+      return { banned: false, unrecoverable: true, reason: "no_password_account" };
+    }
+    if (/invalid username or password|incorrect password|wrong password|password is incorrect/i.test(bodyText)) {
+      return { banned: false, unrecoverable: true, reason: "bad_credentials" };
+    }
+
+    // ── Needs email verification — not banned, just needs 2FA ──
+    const needsVerify =
+      bodyLower.includes("verify your email") || bodyLower.includes("confirmation code") ||
+      bodyLower.includes("we sent a code") || bodyLower.includes("enter the code") ||
+      currentUrl.includes("/verify") || currentUrl.includes("/confirm");
+    if (needsVerify) {
+      return { banned: false, unrecoverable: false, reason: "needs_verification" };
+    }
+
+    // ── Wait for redirect if still on login ──
+    if (currentUrl.includes("replit.com/login") || currentUrl.includes("replit.com/signup")) {
+      try {
+        await page.waitForURL(
+          (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+          { timeout: 20000 }
+        );
+      } catch {
+        // Re-read body after timeout
+        const finalBody = await page.evaluate(() => document.body?.innerText?.substring(0, 1000)).catch(() => "");
+        if (/you have been banned|banned from replit/i.test(finalBody)) {
+          return { banned: true, unrecoverable: true, reason: "banned_account" };
+        }
+        if (/signed up without adding a password/i.test(finalBody)) {
+          return { banned: false, unrecoverable: true, reason: "no_password_account" };
+        }
+        if (/invalid username or password|incorrect password/i.test(finalBody)) {
+          return { banned: false, unrecoverable: true, reason: "bad_credentials" };
+        }
+        return { banned: false, unrecoverable: false, reason: "login_timeout" };
+      }
+    }
+
+    // Redirected successfully — account is good
+    return { banned: false, unrecoverable: false, reason: "ok" };
+  } catch (err: any) {
+    log(`❌ Check error: ${err.message?.substring(0, 100)}`);
+    return { banned: false, unrecoverable: false, reason: `check_error: ${err.message?.substring(0, 80)}` };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink, checkReplitBanStatus } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3549,6 +3549,76 @@ export async function registerRoutes(
 
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
         broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Purge Banned: scan all processing accounts one by one, delete permanently banned ones ──
+  app.post("/api/replit-purge-banned", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const role = req.session.role!;
+
+      const allAccounts = role === "superadmin"
+        ? await storage.getAllReplitAccounts()
+        : await storage.getReplitAccountsByOwner(userId);
+
+      const toCheck = allAccounts.filter(a => a.status === "processing" && a.email && a.password);
+
+      if (toCheck.length === 0) {
+        return res.status(400).json({ error: 'No "processing" accounts found to scan' });
+      }
+
+      const batchId = `replit-purge-${Date.now().toString(36)}`;
+      res.json({ batchId, total: toCheck.length });
+
+      (async () => {
+        broadcastLog(batchId, "purge", `🔍 Starting ban scan — ${toCheck.length} processing account(s) to check`, userId);
+        broadcastLog(batchId, "purge", `─`.repeat(50), userId);
+
+        let bannedCount = 0;
+        let unrecoverableCount = 0;
+        let okCount = 0;
+
+        for (let i = 0; i < toCheck.length; i++) {
+          const acct = toCheck[i];
+          broadcastLog(batchId, "purge", `[${i + 1}/${toCheck.length}] 🔎 Checking ${acct.email}...`, userId);
+
+          const result = await checkReplitBanStatus(
+            acct.email,
+            acct.password!,
+            (msg) => broadcastLog(batchId, "purge", `  ${msg}`, userId)
+          );
+
+          if (result.banned) {
+            bannedCount++;
+            broadcastLog(batchId, "purge", `  🚫 BANNED — deleting from database`, userId);
+            await storage.deleteReplitAccount(acct.id).catch(() => {});
+            broadcast({ type: "replit_account_deleted", id: acct.id }, userId);
+          } else if (result.unrecoverable) {
+            unrecoverableCount++;
+            const label = result.reason === "no_password_account"
+              ? "No password (social auth only)"
+              : result.reason === "bad_credentials"
+                ? "Bad credentials stored"
+                : result.reason;
+            broadcastLog(batchId, "purge", `  ⚠️ UNRECOVERABLE (${label}) — deleting from database`, userId);
+            await storage.deleteReplitAccount(acct.id).catch(() => {});
+            broadcast({ type: "replit_account_deleted", id: acct.id }, userId);
+          } else if (result.reason === "ok" || result.reason === "needs_verification") {
+            okCount++;
+            broadcastLog(batchId, "purge", `  ✅ Account OK (${result.reason})`, userId);
+          } else {
+            broadcastLog(batchId, "purge", `  ⚠️ Check inconclusive (${result.reason}) — keeping account`, userId);
+          }
+
+          broadcastLog(batchId, "purge", `─`.repeat(50), userId);
+        }
+
+        broadcastLog(batchId, "purge", `✅ Scan complete — ${toCheck.length} checked | ${bannedCount} banned deleted | ${unrecoverableCount} unrecoverable deleted | ${okCount} OK`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {

@@ -91,8 +91,11 @@ export default function PrivateAccount() {
   const [warmLogs, setWarmLogs] = useState<string[]>([]);
   const [warmRunning, setWarmRunning] = useState(false);
   const [warmBatchId, setWarmBatchId] = useState<string | null>(null);
+  const [purgeLogs, setPurgeLogs] = useState<string[]>([]);
+  const [purgeRunning, setPurgeRunning] = useState(false);
   const [selectedReplitIds, setSelectedReplitIds] = useState<Set<string>>(new Set());
   const warmLogsEndRef = useRef<HTMLDivElement | null>(null);
+  const purgeLogsEndRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
@@ -163,6 +166,17 @@ export default function PrivateAccount() {
       if (data.type === "batch_complete" && data.batchId?.startsWith("replit-warm-")) {
         setWarmRunning(false);
         fetchReplit();
+      }
+
+      if (data.type === "log" && data.batchId?.startsWith("replit-purge-")) {
+        setPurgeLogs((prev) => [...prev, data.message].slice(-300));
+      }
+      if (data.type === "batch_complete" && data.batchId?.startsWith("replit-purge-")) {
+        setPurgeRunning(false);
+        fetchReplit();
+      }
+      if (data.type === "replit_account_deleted") {
+        setReplitAccounts((prev) => prev.filter((a) => a.id !== data.id));
       }
 
       if (data.type === "account_update" && data.account) {
@@ -257,6 +271,10 @@ export default function PrivateAccount() {
   }, [warmLogs]);
 
   useEffect(() => {
+    purgeLogsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [purgeLogs]);
+
+  useEffect(() => {
     const fetchers: Record<TabType, () => void> = {
       outlook: fetchOutlook,
       zenrows: fetchZenrows,
@@ -310,6 +328,32 @@ export default function PrivateAccount() {
     } catch (err: any) {
       setWarmRunning(false);
       toast({ title: "Warmup error", description: err.message, variant: "destructive" });
+    }
+  }
+
+  async function handlePurgeBanned() {
+    const processing = replitAccounts.filter(a => a.status === "processing");
+    if (processing.length === 0) {
+      toast({ title: "Nothing to scan", description: 'No "processing" accounts in the list' });
+      return;
+    }
+    setPurgeLogs([`Starting ban scan for ${processing.length} processing account(s)...`]);
+    setPurgeRunning(true);
+    try {
+      const res = await fetch("/api/replit-purge-banned", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPurgeRunning(false);
+        toast({ title: "Scan failed", description: data.error, variant: "destructive" });
+      }
+    } catch (err: any) {
+      setPurgeRunning(false);
+      toast({ title: "Scan error", description: err.message, variant: "destructive" });
     }
   }
 
@@ -902,6 +946,25 @@ export default function PrivateAccount() {
                       : `Warm All Unwarmed (${replitAccounts.filter(a => !a.warmedAt).length})`}
                 </button>
               )}
+              {replitAccounts.filter(a => a.status === "processing").length > 0 && (
+                <button
+                  onClick={handlePurgeBanned}
+                  disabled={purgeRunning}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-xs font-semibold transition-all duration-150"
+                  style={{
+                    background: purgeRunning ? "rgba(239,68,68,0.06)" : "rgba(239,68,68,0.12)",
+                    border: "1px solid rgba(239,68,68,0.35)",
+                    color: purgeRunning ? "rgba(239,68,68,0.4)" : "#f87171",
+                    cursor: purgeRunning ? "not-allowed" : "pointer",
+                  }}
+                  data-testid="button-purge-banned"
+                >
+                  <Trash2 className={`w-3 h-3 ${purgeRunning ? "animate-pulse" : ""}`} />
+                  {purgeRunning
+                    ? "scanning..."
+                    : `Purge Banned (${replitAccounts.filter(a => a.status === "processing").length})`}
+                </button>
+              )}
               {replitAccounts.length > 0 && (
                 <button
                   onClick={() => window.open("/api/replit-accounts/export-csv", "_blank")}
@@ -952,6 +1015,42 @@ export default function PrivateAccount() {
                   </div>
                 ))}
                 <div ref={warmLogsEndRef} />
+              </div>
+            </div>
+          )}
+
+          {/* ── Purge Banned log drawer ── */}
+          {purgeLogs.length > 0 && (
+            <div style={{ borderTop: "1px solid rgba(239,68,68,0.15)", background: "rgba(0,0,0,0.6)" }}>
+              <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: "1px solid rgba(239,68,68,0.08)" }}>
+                <div className="flex items-center gap-2">
+                  <Trash2 className="w-3 h-3" style={{ color: purgeRunning ? "#f87171" : "rgba(239,68,68,0.4)" }} />
+                  <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: purgeRunning ? "#f87171" : "rgba(239,68,68,0.4)" }}>
+                    {purgeRunning ? "scanning_accounts" : "scan_complete"}
+                  </span>
+                  {purgeRunning && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />}
+                </div>
+                <button
+                  onClick={() => setPurgeLogs([])}
+                  className="text-[10px] font-mono"
+                  style={{ color: "rgba(255,255,255,0.2)" }}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="px-4 py-2 max-h-48 overflow-y-auto font-mono text-[10px] space-y-0.5">
+                {purgeLogs.map((line, i) => (
+                  <div key={i} style={{
+                    color: line.includes("✅") ? "#4ade80"
+                      : line.includes("🚫") || line.includes("BANNED") ? "#f87171"
+                      : line.includes("⚠️") ? "#facc15"
+                      : line.includes("🔎") || line.includes("🔍") ? "#a78bfa"
+                      : "rgba(239,68,68,0.6)",
+                  }}>
+                    {line}
+                  </div>
+                ))}
+                <div ref={purgeLogsEndRef} />
               </div>
             </div>
           )}
