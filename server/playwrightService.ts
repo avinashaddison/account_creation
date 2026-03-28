@@ -18830,31 +18830,28 @@ export async function generateSingleCheckoutLink(
     const glTz = GL_TIMEZONES[Math.floor(Math.random() * GL_TIMEZONES.length)];
     const glCv = GL_CVS[Math.floor(Math.random() * GL_CVS.length)];
 
-    // ── SOAX residential proxy — always loaded (used by both ZenRows context and stealth browser) ──
-    try {
-      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const browserProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      // soax_proxy_template > residential_proxy_url > browser_proxy_url
-      const rawProxy = soaxTemplate || residentialUrl || browserProxyUrl;
-      if (rawProxy) {
-        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
-        let rotatedProxy = rawProxy;
-        if (rawProxy.includes("sessionid-")) rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
-        else if (rawProxy.includes("sessid=")) rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
-        else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
-        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
-        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
-        linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`🌐 SOAX proxy ready — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}${usingZenRows ? " (routing ZenRows browser through SOAX)" : ""}`);
-        await resolveProxyIp(linkAnonymizedProxy, log, "SOAX LINK-GEN");
-      }
-    } catch (pErr: any) {
-      log(`⚠️ SOAX proxy setup failed: ${(pErr.message || "").substring(0, 80)} — continuing without proxy`);
-    }
-
     if (!usingZenRows) {
+      // ── SOAX residential proxy — only for local stealth browser fallback (ZenRows manages its own proxy internally) ──
+      try {
+        const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        const browserProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        // soax_proxy_template > residential_proxy_url > browser_proxy_url
+        const rawProxy = soaxTemplate || residentialUrl || browserProxyUrl;
+        if (rawProxy) {
+          const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+          let rotatedProxy = rawProxy;
+          if (rawProxy.includes("sessionid-")) rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+          else if (rawProxy.includes("sessid=")) rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+          else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+          const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+          const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+          const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
+          linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          await resolveProxyIp(linkAnonymizedProxy, log, "SOAX LINK-GEN");
+        }
+      } catch { /* continue without proxy */ }
 
       const { chromium: stealthChromium } = await import("playwright-extra");
       const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
@@ -18876,8 +18873,7 @@ export async function generateSingleCheckoutLink(
     }
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
-    // When using ZenRows browser, pass SOAX proxy at the context level so traffic routes through SOAX IPs
-    const contextOptions: any = {
+    const context = await browser.newContext({
       userAgent: ua, viewport: glVp, locale: "en-US",
       timezoneId: glTz, javaScriptEnabled: true,
       extraHTTPHeaders: {
@@ -18887,12 +18883,7 @@ export async function generateSingleCheckoutLink(
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
       },
-    };
-    if (usingZenRows && linkAnonymizedProxy) {
-      contextOptions.proxy = { server: linkAnonymizedProxy };
-      log(`🔀 ZenRows browser + SOAX proxy active — dual-layer protection`);
-    }
-    const context = await browser.newContext(contextOptions);
+    });
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
       Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });

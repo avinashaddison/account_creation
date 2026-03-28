@@ -1,0 +1,118 @@
+14:36:23
+>
+🚀 Parallel batch started — 2 job(s) running simultaneously [replit-batch-mna3vp2x]
+14:36:23
+·
+[Job 2] Connecting via Addison Proxy...
+14:36:25
+·
+[Job 1] Addison Proxy connected.
+14:36:25
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+14:36:25
+>
+[Job 1] 🌐 SOAX proxy ready — session: qku8c2bljrdv | endpoint: proxy.soax.com:5000 (routing ZenRows browser through SOAX)
+14:36:26
+·
+[Job 1] │ [IP check: malformed response]
+14:36:26
+>
+[Job 1] 🔀 ZenRows browser + SOAX proxy active — dual-layer protection
+14:36:26
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+14:36:26
+!
+[Job 1] ❌ Error: page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+14:36:26
+·
+[Job 1] ↩️ Retrying...
+14:36:26
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+14:36:26
+·
+[Job 2] Addison Proxy connected.
+14:36:26
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+14:36:26
+>
+[Job 2] 🌐 SOAX proxy ready — session: fq594s0759a4 | endpoint: proxy.soax.com:5000 (routing ZenRows browser through SOAX)
+14:36:27
+·
+[Job 2] │ [IP check: malformed response]
+14:36:27
+>
+[Job 2] 🔀 ZenRows browser + SOAX proxy active — dual-layer protection
+14:36:27
+·
+[Job 1] [retry] Addison Proxy connected.
+14:36:27
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:36:27
+>
+[Job 1] [retry] 🌐 SOAX proxy ready — session: xq555xslz1rm | endpoint: proxy.soax.com:5000 (routing ZenRows browser through SOAX)
+14:36:27
+·
+[Job 2] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+14:36:27
+!
+[Job 2] ❌ Error: page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+14:36:27
+·
+[Job 2] ↩️ Retrying...
+14:36:27
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+14:36:27
+·
+[Job 1] [retry] │ [IP check: malformed response]
+14:36:27
+>
+[Job 1] [retry] 🔀 ZenRows browser + SOAX proxy active — dual-layer protection
+14:36:27
+·
+[Job 1] [retry] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+14:36:27
+!
+[Job 1] [retry] ❌ Error: page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+14:36:27
+!
+[Job 1] ❌ Link generation failed: page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+14:36:29
+·
+[Job 2] [retry] Addison Proxy connected.
+14:36:29
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+14:36:30
+>
+[Job 2] [retry] 🌐 SOAX proxy ready — session: 1iunmte63i6n | endpoint: proxy.soax.com:5000 (routing ZenRows browser through SOAX)
+14:36:30
+·
+[Job 2] [retry] │ [IP check: malformed response]
+14:36:30
+>
+[Job 2] [retry] 🔀 ZenRows browser + SOAX proxy active — dual-layer protection
+14:36:30
+·
+[Job 2] [retry] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+14:36:30
+!
+[Job 2] [retry] ❌ Error: page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+14:36:30
+!
+[Job 2] ❌ Link generation failed: page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+14:36:31
+·
+──────────────────────────────────────────────────
+14:36:31
++
+✅ Batch complete — 0/2 links generated
