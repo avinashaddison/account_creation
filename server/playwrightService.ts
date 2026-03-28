@@ -18690,9 +18690,18 @@ async function handleReplitEmailVerification(
     const noBtn = await outlookPage.$('#idBtn_Back').catch(() => null);
     if (noBtn) { await noBtn.click(); await sleep(2000); }
 
-    // Navigate to inbox
+    // Navigate to inbox — then verify we actually landed there
     await outlookPage.goto("https://outlook.live.com/mail/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
     await sleep(3000);
+
+    // If still on a login/error page, Outlook auth failed
+    const inboxUrl = outlookPage.url();
+    if (inboxUrl.includes("login") || inboxUrl.includes("microsoft.com/error") || inboxUrl.includes("account.live.com")) {
+      const loginBody = await outlookPage.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
+      log(`  ⚠️  Outlook login may have failed — URL: ${inboxUrl.substring(0, 100)}`);
+      log(`  ⚠️  Outlook page text: ${loginBody.replace(/\n/g, " ").substring(0, 200)}`);
+      throw new Error(`Outlook login failed for ${replitEmail} — cannot auto-verify`);
+    }
 
     log(`  📬 Scanning Outlook inbox for Replit verification email...`);
     let verificationLink: string | null = null;
@@ -18700,63 +18709,72 @@ async function handleReplitEmailVerification(
 
     // Helper: extract link/code from raw HTML
     const extractFromHtml = (html: string): { link: string | null; code: string | null } => {
-      // Replit verification link patterns
       const lm = html.match(/href="(https?:\/\/[^"]*replit[^"]*(?:verify|confirm|token)[^"]*)"/i)
         || html.match(/(https?:\/\/replit\.com\/verify[^\s"<>]+)/i)
         || html.match(/(https?:\/\/replit\.com\/[^\s"<>]*token=[^\s"<>]+)/i);
       const link = lm ? lm[1].replace(/&amp;/g, "&").replace(/=\n/g, "=") : null;
-      // 6-digit OTP code
-      const cm = !link ? html.match(/>\s*(\d{6})\s*</) || html.match(/confirmation code[^\d]*(\d{6})/i) || html.match(/\b(\d{6})\b/) : null;
+      const cm = !link ? html.match(/>\s*(\d{6})\s*</) || html.match(/confirmation code[^\d]*(\d{6})/i) || html.match(/code[^\d]*(\d{6})/i) || html.match(/\b(\d{6})\b/) : null;
       return { link, code: cm ? cm[1] : null };
     };
 
-    for (let attempt = 0; attempt < 12 && !verificationLink && !verificationCode; attempt++) {
-      if (attempt > 0) {
-        await outlookPage.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-        await sleep(5000);
-        log(`  ⏳ Waiting for Replit email... (${attempt * 5}s elapsed)`);
-      }
+    // Helper: scan a folder for the Replit email
+    const scanFolder = async (folderUrl: string, folderName: string): Promise<boolean> => {
+      await outlookPage.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await sleep(3000);
 
-      // Try multiple selectors for email list items in Outlook Web
-      const itemSelectors = ['[role="option"]', '[data-convid]', 'div[aria-label][tabindex]', '.jGG6V'];
+      const itemSelectors = ['[role="option"]', '[data-convid]', 'div[aria-label][tabindex]', '.jGG6V', '[data-is-focused]'];
       let items: any[] = [];
       for (const sel of itemSelectors) {
         items = await outlookPage.$$(sel).catch(() => [] as any[]);
         if (items.length > 0) break;
       }
+      log(`  📁 ${folderName}: ${items.length} items found`);
 
-      for (const item of items.slice(0, 15)) {
+      for (const item of items.slice(0, 25)) {
         const text = await item.textContent().catch(() => "");
-        if (/replit|verify|confirm|email/i.test(text)) {
-          await item.click();
-          await sleep(3000); // wait for email body to load
+        if (!/replit|verify|confirm|your account|code/i.test(text)) continue;
 
-          // Read from all frames (email content may be in an iframe)
-          let combinedHtml = await outlookPage.evaluate(() => document.body?.innerHTML || "").catch(() => "");
-          for (const frame of outlookPage.frames()) {
-            try {
-              const fHtml = await frame.evaluate(() => document.body?.innerHTML || "").catch(() => "");
-              combinedHtml += fHtml;
-            } catch {}
-          }
+        await item.click().catch(() => {});
+        await sleep(3000);
 
-          const { link, code } = extractFromHtml(combinedHtml);
-          if (link) { verificationLink = link; break; }
-          if (code) { verificationCode = code; break; }
-
-          // Also try getting all <a> hrefs directly
-          const hrefs = await outlookPage.$$eval("a[href]", els => els.map((e: any) => e.href)).catch(() => [] as string[]);
-          const replitHref = hrefs.find(h => /replit\.com.*(verify|confirm|token)/i.test(h));
-          if (replitHref) { verificationLink = replitHref; break; }
+        let combinedHtml = await outlookPage.evaluate(() => document.body?.innerHTML || "").catch(() => "");
+        for (const frame of outlookPage.frames()) {
+          try { combinedHtml += await frame.evaluate(() => document.body?.innerHTML || "").catch(() => ""); } catch {}
         }
+
+        const { link, code } = extractFromHtml(combinedHtml);
+        if (link) { verificationLink = link; return true; }
+        if (code) { verificationCode = code; return true; }
+
+        // All <a> hrefs fallback
+        const hrefs = await outlookPage.$$eval("a[href]", els => els.map((e: any) => e.href)).catch(() => [] as string[]);
+        const replitHref = hrefs.find((h: string) => /replit\.com.*(verify|confirm|token)/i.test(h));
+        if (replitHref) { verificationLink = replitHref; return true; }
+      }
+      return false;
+    };
+
+    for (let attempt = 0; attempt < 10 && !verificationLink && !verificationCode; attempt++) {
+      if (attempt > 0) {
+        await sleep(6000);
+        log(`  ⏳ Waiting for Replit email... (${attempt * 6}s elapsed)`);
+      }
+
+      // 1. Scan inbox
+      const foundInInbox = await scanFolder("https://outlook.live.com/mail/inbox", "Inbox");
+      if (foundInInbox) break;
+
+      // 2. On first miss, also check junk/spam
+      if (attempt === 0) {
+        const foundInJunk = await scanFolder("https://outlook.live.com/mail/junkemail", "Junk/Spam");
+        if (foundInJunk) break;
       }
     }
 
     if (!verificationLink && !verificationCode) {
-      // Last resort: dump page text for debug
-      const pageText = await outlookPage.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
-      log(`  ⚠️  Inbox page text: ${pageText.replace(/\n/g, " ").substring(0, 300)}`);
-      throw new Error(`Replit verification email not found in ${replitEmail} inbox after 60s`);
+      const pageText = await outlookPage.evaluate(() => document.body?.innerText?.substring(0, 600)).catch(() => "");
+      log(`  ⚠️  Final inbox page text: ${pageText.replace(/\n/g, " ").substring(0, 400)}`);
+      throw new Error(`Replit verification email not found in ${replitEmail} inbox/junk after polling`);
     }
 
     if (verificationLink) {
@@ -18948,20 +18966,31 @@ export async function generateSingleCheckoutLink(
     // ── Detect common post-submit states before long timeout ──
     await glSleep(3000);
     const postUrl = page.url();
-    const postBody = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
+    const postBody = await page.evaluate(() => document.body?.innerText?.substring(0, 2000)).catch(() => "");
+    const postBodyLower = postBody.toLowerCase();
 
-    if (postBody.toLowerCase().includes("incorrect password") || postBody.toLowerCase().includes("invalid credentials") || postBody.toLowerCase().includes("wrong password")) {
+    if (postBodyLower.includes("incorrect password") || postBodyLower.includes("invalid credentials") || postBodyLower.includes("wrong password")) {
       throw new Error(`Login failed — incorrect password for ${email}`);
     }
     let verificationHandled = false;
-    if (postBody.toLowerCase().includes("verify your email") || postBody.toLowerCase().includes("check your email") || postBody.toLowerCase().includes("confirmation code")) {
-      log(`📧 Replit requires email verification — auto-handling via Outlook...`);
+    const needsVerify =
+      postBodyLower.includes("verify your email") ||
+      postBodyLower.includes("check your email") ||
+      postBodyLower.includes("confirmation code") ||
+      postBodyLower.includes("confirm your email") ||
+      postBodyLower.includes("we sent a code") ||
+      postBodyLower.includes("enter the code") ||
+      postBodyLower.includes("verify account") ||
+      postBodyLower.includes("email verification") ||
+      postUrl.includes("/verify") ||
+      postUrl.includes("/confirm");
+    if (needsVerify) {
+      log(`📧 Replit requires email verification (URL: ${postUrl.substring(0, 80)}) — auto-handling via Outlook...`);
       await handleReplitEmailVerification(page, email, log);
       verificationHandled = true;
-      // Give the verification redirect a moment to settle
       await glSleep(2000);
     }
-    if (!verificationHandled && (postBody.toLowerCase().includes("captcha") || postBody.toLowerCase().includes("i'm not a robot") || postBody.toLowerCase().includes("recaptcha"))) {
+    if (!verificationHandled && (postBodyLower.includes("captcha") || postBodyLower.includes("i'm not a robot") || postBodyLower.includes("recaptcha"))) {
       throw new Error(`Login failed — CAPTCHA triggered for ${email}. Try again later or use a different account.`);
     }
 
