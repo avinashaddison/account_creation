@@ -1,0 +1,205 @@
+13:45:16
+>
+🚀 Parallel batch started — 2 job(s) running simultaneously [replit-batch-mna21yed]
+13:45:16
+·
+[Job 2] Connecting via Addison Proxy...
+13:45:17
+·
+[Job 1] Addison Proxy connected.
+13:45:17
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+13:45:17
+·
+[Job 2] Addison Proxy connected.
+13:45:17
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+13:45:17
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+13:45:17
+·
+[Job 2] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+13:45:34
+·
+[Job 1] → Login submitted — waiting for redirect...
+13:45:39
+·
+[Job 1] 📧 Replit requires email verification (URL: https://replit.com/login) — auto-handling via Outlook...
+13:45:43
+·
+[Job 1] 📧 Signing into Outlook as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+13:45:56
+·
+[Job 2] → Login submitted — waiting for redirect...
+13:45:58
+·
+[Job 1] 📬 Scanning Outlook inbox for Replit verification email...
+13:46:01
+·
+[Job 1] 📁 Inbox: 3 items found
+13:46:04
+·
+[Job 1] 🔢 Verification code: 224937 — submitting...
+13:46:08
++
+[Job 1] ✅ Verification code submitted
+13:46:10
++
+[Job 1] ✅ Logged in (fast redirect)
+13:46:10
++
+[Job 1] ✅ Logged in
+13:46:10
+·
+[Job 1] 🏠 Warming up session — visiting Replit home...
+13:46:18
+>
+[Job 1] 💰 Navigating to checkout URL...
+13:46:20
+$
+[Job 1] ⏳ Waiting for Stripe redirect...
+13:46:46
+~
+[Job 2] ⚠️ Login stuck — URL: https://replit.com/login
+13:46:46
+~
+[Job 2] ⚠️ Page title: Log In - Replit
+13:46:46
+~
+[Job 2] ⚠️ Page text : Log in to your account Something went wrong trying to submit. Please try again. EMAIL OR USERNAME PASSWORD Log InForgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+13:46:46
+!
+[Job 2] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+13:46:46
+·
+[Job 2] ↩️ Retrying...
+13:46:46
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+13:46:47
+·
+[Job 2] [retry] Addison Proxy connected.
+13:46:47
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+13:46:47
+·
+[Job 2] [retry] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+13:47:04
+!
+[Job 1] ❌ Error: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" navigated to "https://replit.com/signup?source=stripe-checkout-by-price&goto=%2Fstripe-checkout-by-price%2Fcore_1mo_20usd_monthly_feb_26%3Fcoupon%3DAGENT4614954509C1A" ============================================================
+13:47:04
+·
+[Job 1] ↩️ Retrying...
+13:47:04
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+13:47:07
+·
+[Job 1] [retry] Addison Proxy connected.
+13:47:07
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+13:47:07
+·
+[Job 1] [retry] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+13:47:20
+·
+[Job 2] [retry] → Login submitted — waiting for redirect...
+13:47:25
+·
+[Job 2] [retry] 📧 Replit requires email verification (URL: https://replit.com/login) — auto-handling via Outlook...
+13:47:25
+·
+[Job 1] [retry] → Login submitted — waiting for redirect...
+13:47:25
+·
+[Job 2] [retry] 📧 Signing into Outlook as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+13:47:30
+·
+[Job 1] [retry] 📧 Replit requires email verification (URL: https://replit.com/login) — auto-handling via Outlook...
+13:47:30
+·
+[Job 1] [retry] 📧 Signing into Outlook as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+13:47:39
+·
+[Job 2] [retry] 📬 Scanning Outlook inbox for Replit verification email...
+13:47:42
+·
+[Job 2] [retry] 📁 Inbox: 4 items found
+13:47:44
+·
+[Job 1] [retry] 📬 Scanning Outlook inbox for Replit verification email...
+13:47:45
+·
+[Job 2] [retry] 🔢 Verification code: 224937 — submitting...
+13:47:47
+·
+[Job 1] [retry] 📁 Inbox: 3 items found
+13:47:49
++
+[Job 2] [retry] ✅ Verification code submitted
+13:47:50
+·
+[Job 1] [retry] 🔢 Verification code: 224937 — submitting...
+13:47:51
++
+[Job 2] [retry] ✅ Logged in (fast redirect)
+13:47:51
++
+[Job 2] [retry] ✅ Logged in
+13:47:51
+·
+[Job 2] [retry] 🏠 Warming up session — visiting Replit home...
+13:47:53
++
+[Job 1] [retry] ✅ Verification code submitted
+13:47:56
++
+[Job 1] [retry] ✅ Logged in (fast redirect)
+13:47:56
++
+[Job 1] [retry] ✅ Logged in
+13:47:56
+·
+[Job 1] [retry] 🏠 Warming up session — visiting Replit home...
+13:47:59
+>
+[Job 2] [retry] 💰 Navigating to checkout URL...
+13:48:00
+$
+[Job 2] [retry] ⏳ Waiting for Stripe redirect...
+13:48:04
+>
+[Job 1] [retry] 💰 Navigating to checkout URL...
+13:48:06
+$
+[Job 1] [retry] ⏳ Waiting for Stripe redirect...
+13:48:46
+!
+[Job 2] [retry] ❌ Error: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+13:48:46
+!
+[Job 2] ❌ Link generation failed: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+13:48:51
+!
+[Job 1] [retry] ❌ Error: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+13:48:51
+!
+[Job 1] ❌ Link generation failed: page.waitForURL: Timeout 45000ms exceeded. =========================== logs =========================== waiting for navigation until "load" ============================================================
+13:48:51
+·
+──────────────────────────────────────────────────
+13:48:51
++
+✅ Batch complete — 0/2 links generated

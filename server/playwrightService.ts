@@ -19058,17 +19058,79 @@ export async function generateSingleCheckoutLink(
     await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await waitForCf("checkout");
 
-    // ── Wait for Stripe redirect (or error/verify page) ──
+    // ── Wait for Stripe redirect (or error/verify/session-lost page) ──
     log(`⏳ Waiting for Stripe redirect...`);
     await page.waitForURL(
       (u: URL) =>
         u.href.includes("checkout.stripe.com") ||
         u.href.includes("billing.stripe.com") ||
         u.href.includes("stripe-checkout-error") ||
-        u.href.includes("/verify"),
+        u.href.includes("/verify") ||
+        u.href.includes("replit.com/login") ||
+        u.href.includes("replit.com/signup"),
       { timeout: 45000 }
     );
-    const finalUrl = page.url();
+    let finalUrl = page.url();
+
+    // ── Session lost — Replit redirected to login/signup instead of Stripe ──
+    if (finalUrl.includes("replit.com/login") || finalUrl.includes("replit.com/signup")) {
+      log(`⚠️ Session dropped — Replit redirected to ${finalUrl.includes("login") ? "login" : "signup"} — re-authenticating...`);
+      await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await glSleep(2000);
+      await waitForCf("re-login");
+
+      const rlEmailInput = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i], input[placeholder*="username" i]').first();
+      await rlEmailInput.waitFor({ state: "visible", timeout: 15000 });
+      await glHumanType(rlEmailInput, email);
+      await glSleep(600);
+
+      const rlPassVisible = await page.locator('input[type="password"]').first().isVisible().catch(() => false);
+      if (!rlPassVisible) {
+        const rlContinue = page.getByRole("button", { name: /continue|next/i }).first();
+        await rlContinue.click();
+        await glSleep(1200);
+      }
+      const rlPassInput = page.locator('input[type="password"]').first();
+      await rlPassInput.waitFor({ state: "visible", timeout: 10000 });
+      await glHumanType(rlPassInput, password);
+      await glSleep(500);
+      const rlLoginBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
+      await rlLoginBtn.click();
+      log(`  → Re-login submitted...`);
+      await glSleep(4000);
+
+      // After re-login, skip verification check (account already verified) and wait for redirect
+      try {
+        await page.waitForURL(
+          (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+          { timeout: 30000 }
+        );
+      } catch {
+        const stuckBody = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
+        log(`⚠️  Re-login stuck: ${stuckBody.replace(/\n/g, " ").substring(0, 200)}`);
+        throw new Error(`Re-login after session drop failed — stuck on login page`);
+      }
+      log(`✅ Re-authenticated — retrying checkout...`);
+
+      // Home warm-up again
+      await page.goto("https://replit.com", { waitUntil: "domcontentloaded", timeout: 30000 }).catch((err: Error) => log(`  ⚠️ Home warm-up (re-auth): ${(err.message || "").substring(0, 60)}`));
+      await glSleep(3000);
+      await waitForCf("home-reauth");
+
+      // Re-navigate to checkout
+      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await waitForCf("checkout-reauth");
+      await page.waitForURL(
+        (u: URL) =>
+          u.href.includes("checkout.stripe.com") ||
+          u.href.includes("billing.stripe.com") ||
+          u.href.includes("stripe-checkout-error") ||
+          u.href.includes("/verify"),
+        { timeout: 45000 }
+      );
+      finalUrl = page.url();
+      log(`📍 URL after re-auth checkout: ${finalUrl.substring(0, 100)}`);
+    }
     if (finalUrl.includes("/verify")) {
       log(`📧 Checkout blocked by email verification — auto-handling via Outlook...`);
       await handleReplitEmailVerification(page, email, log);
