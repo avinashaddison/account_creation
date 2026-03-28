@@ -18835,7 +18835,9 @@ export async function generateSingleCheckoutLink(
       try {
         const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
         const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-        const rawProxy = soaxTemplate || residentialUrl;
+        const browserProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        // Pick whichever SOAX URL is configured — soax_proxy_template > residential_proxy_url > browser_proxy_url
+        const rawProxy = soaxTemplate || residentialUrl || browserProxyUrl;
         if (rawProxy) {
           const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
           let rotatedProxy = rawProxy;
