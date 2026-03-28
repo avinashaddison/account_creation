@@ -518,7 +518,7 @@ export default function PrivateAccount() {
       id: "replit" as TabType,
       label: "Replit Accounts",
       count: replitAccounts.length,
-      sub: `${replitAccounts.filter((a) => a.status === "created").length} ready`,
+      sub: `${replitAccounts.filter((a) => a.status === "working").length} ready`,
       color: "#7c3aed",
       glow: "rgba(124,58,237,0.18)",
       border: "rgba(124,58,237,0.25)",
@@ -914,13 +914,13 @@ export default function PrivateAccount() {
               >
                 {replitAccounts.length} total
               </div>
-              {replitAccounts.filter((a) => a.status === "created" || a.status === "available").length > 0 && (
+              {replitAccounts.filter((a) => a.status === "working").length > 0 && (
                 <div
                   className="px-2 py-0.5 rounded font-mono text-[10px] font-bold flex items-center gap-1"
                   style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", color: "#4ade80" }}
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
-                  {replitAccounts.filter((a) => a.status === "created" || a.status === "available").length} ready
+                  {replitAccounts.filter((a) => a.status === "working").length} ready
                 </div>
               )}
             </div>

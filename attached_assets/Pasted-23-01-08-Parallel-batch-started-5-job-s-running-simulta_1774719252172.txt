@@ -1,0 +1,263 @@
+23:01:08
+>
+🚀 Parallel batch started — 5 job(s) running simultaneously [replit-batch-mnalwt34]
+23:01:08
+·
+[Job 1] Connecting via Addison Proxy...
+23:01:08
+·
+[Job 4] Connecting via Addison Proxy...
+23:01:08
+·
+[Job 2] Connecting via Addison Proxy...
+23:01:08
+·
+[Job 3] Connecting via Addison Proxy...
+23:01:08
+·
+[Job 5] Connecting via Addison Proxy...
+23:01:09
+·
+[Job 5] Addison Proxy connected.
+23:01:09
++
+[Job 5] ✅ ZenRows anti-bot browser connected — ban protection active
+23:01:09
+·
+[Job 2] Addison Proxy connected.
+23:01:09
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+23:01:09
+·
+[Job 5] 🔐 Logging into Replit as aclanhkhieuztb@hotmail.com...
+SUBSCRIBED
+23:01:09
+·
+[Job 2] 🔐 Logging into Replit as ammiegardryddmd@hotmail.com...
+SUBSCRIBED
+23:01:09
+·
+[Job 1] Addison Proxy connected.
+23:01:09
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+23:01:09
+·
+[Job 4] Addison Proxy connected.
+23:01:09
++
+[Job 4] ✅ ZenRows anti-bot browser connected — ban protection active
+23:01:09
+·
+[Job 1] 🔐 Logging into Replit as daakekmasalpbz@hotmail.com...
+ERROR
+23:01:09
+·
+[Job 3] Addison Proxy connected.
+23:01:09
++
+[Job 3] ✅ ZenRows anti-bot browser connected — ban protection active
+23:01:09
+·
+[Job 4] 🔐 Logging into Replit as gauzeibeithpbh@hotmail.com...
+STOCK OUT
+23:01:10
+·
+[Job 3] 🔐 Logging into Replit as fematuraatzcz@hotmail.com...
+SUBSCRIBED
+23:01:26
+·
+[Job 4] → Login submitted — waiting for redirect...
+23:01:28
+·
+[Job 1] → Login submitted — waiting for redirect...
+23:01:28
+·
+[Job 3] → Login submitted — waiting for redirect...
+23:01:37
+·
+[Job 2] → Login submitted — waiting for redirect...
+23:01:42
+!
+[Job 5] ❌ Error: page.goto: net::ERR_CONNECTION_CLOSED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+23:01:42
+·
+[Job 5] ↩️ Retrying...
+23:01:42
+·
+[Job 5] [retry] Connecting via Addison Proxy...
+23:01:43
+·
+[Job 5] [retry] Addison Proxy connected.
+23:01:43
++
+[Job 5] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+23:01:43
+·
+[Job 5] [retry] 🔐 Logging into Replit as aclanhkhieuztb@hotmail.com...
+SUBSCRIBED
+23:01:48
++
+[Job 3] ✅ Logged in
+23:01:48
+·
+[Job 3] 🏠 Warming up session — visiting Replit home...
+23:01:56
+>
+[Job 3] 💰 Navigating to checkout URL...
+23:01:57
+$
+[Job 3] ⏳ Waiting for Stripe redirect...
+23:01:57
+~
+[Job 3] ⚠️ Redirected to Stripe billing portal — account already has an active subscription
+23:01:57
+!
+[Job 3] ❌ Error: Account already has an active Replit Core/Agent subscription — skip this account
+23:01:57
+!
+[Job 3] ❌ Link generation failed: Account already has an active Replit Core/Agent subscription — skip this account
+23:01:57
+~
+[Job 3] ⚠️ Marked as already-subscribed — will be skipped in future batches
+23:01:58
++
+[Job 2] ✅ Logged in
+23:01:58
+·
+[Job 2] 🏠 Warming up session — visiting Replit home...
+23:02:06
+>
+[Job 2] 💰 Navigating to checkout URL...
+23:02:15
+·
+[Job 5] [retry] → Login submitted — waiting for redirect...
+23:02:17
+~
+[Job 4] ⚠️ Login stuck — URL: https://replit.com/login
+23:02:17
+~
+[Job 4] ⚠️ Page title: Log In - Replit
+23:02:17
+~
+[Job 4] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+23:02:17
+!
+[Job 4] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+23:02:17
+·
+[Job 4] ↩️ Retrying...
+23:02:17
+·
+[Job 4] [retry] Connecting via Addison Proxy...
+23:02:18
+·
+[Job 4] [retry] Addison Proxy connected.
+23:02:18
++
+[Job 4] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+23:02:18
+·
+[Job 4] [retry] 🔐 Logging into Replit as gauzeibeithpbh@hotmail.com...
+STOCK OUT
+23:02:18
+~
+[Job 1] ⚠️ Login stuck — URL: https://replit.com/login
+23:02:18
+~
+[Job 1] ⚠️ Page title: Log In - Replit
+23:02:18
+~
+[Job 1] ⚠️ Page text : Log in to your account Invalid username or password. EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+23:02:18
+!
+[Job 1] ❌ Error: Login failed — incorrect password stored for this account — bad_credentials
+23:02:18
+!
+[Job 1] ❌ Link generation failed: Login failed — incorrect password stored for this account — bad_credentials
+23:02:18
+!
+[Job 1] ⚠️ Bad credentials stored for this account — marked as error, will be skipped
+23:02:18
+!
+[Job 4] [retry] ❌ Error: page.goto: net::ERR_CONNECTION_CLOSED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+23:02:18
+!
+[Job 4] ❌ Link generation failed: page.goto: net::ERR_CONNECTION_CLOSED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+23:02:26
++
+[Job 5] [retry] ✅ Logged in
+23:02:26
+·
+[Job 5] [retry] 🏠 Warming up session — visiting Replit home...
+23:02:33
+>
+[Job 5] [retry] 💰 Navigating to checkout URL...
+23:02:35
+$
+[Job 5] [retry] ⏳ Waiting for Stripe redirect...
+23:02:35
+~
+[Job 5] [retry] ⚠️ Redirected to Stripe billing portal — account already has an active subscription
+23:02:35
+!
+[Job 5] [retry] ❌ Error: Account already has an active Replit Core/Agent subscription — skip this account
+23:02:35
+!
+[Job 5] ❌ Link generation failed: Account already has an active Replit Core/Agent subscription — skip this account
+23:02:35
+~
+[Job 5] ⚠️ Marked as already-subscribed — will be skipped in future batches
+23:03:06
+!
+[Job 2] ❌ Error: page.goto: Timeout 60000ms exceeded. Call log: [2m - navigating to "https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=AGENT46DEB1E1817EE", waiting until "domcontentloaded"[22m
+23:03:06
+·
+[Job 2] ↩️ Retrying...
+23:03:06
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+23:03:06
+·
+[Job 2] [retry] Addison Proxy connected.
+23:03:07
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+23:03:07
+·
+[Job 2] [retry] 🔐 Logging into Replit as ammiegardryddmd@hotmail.com...
+SUBSCRIBED
+23:03:27
+·
+[Job 2] [retry] → Login submitted — waiting for redirect...
+23:03:41
++
+[Job 2] [retry] ✅ Logged in
+23:03:41
+·
+[Job 2] [retry] 🏠 Warming up session — visiting Replit home...
+23:03:48
+>
+[Job 2] [retry] 💰 Navigating to checkout URL...
+23:03:49
+$
+[Job 2] [retry] ⏳ Waiting for Stripe redirect...
+23:03:49
+~
+[Job 2] [retry] ⚠️ Redirected to Stripe billing portal — account already has an active subscription
+23:03:49
+!
+[Job 2] [retry] ❌ Error: Account already has an active Replit Core/Agent subscription — skip this account
+23:03:49
+!
+[Job 2] ❌ Link generation failed: Account already has an active Replit Core/Agent subscription — skip this account
+23:03:50
+~
+[Job 2] ⚠️ Marked as already-subscribed — will be skipped in future batches
+23:03:50
+·
+──────────────────────────────────────────────────
+23:03:50
++
+✅ Batch complete — 0/5 links generated
