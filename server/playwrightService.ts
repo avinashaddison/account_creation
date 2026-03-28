@@ -19018,12 +19018,61 @@ export async function generateSingleCheckoutLink(
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page after redirect wait");
     log(`✅ Logged in`);
 
+    // ── Warm-up: visit Replit home to establish session trust before hitting checkout ──
+    log(`🏠 Warming up session — visiting Replit home...`);
+    await page.goto("https://replit.com", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await glSleep(2000);
+    const homeContent = await page.content().catch(() => "");
+    if (
+      homeContent.includes("Please enable cookies") ||
+      homeContent.includes("Checking your browser") ||
+      homeContent.includes("challenge-platform") ||
+      homeContent.includes("Just a moment")
+    ) {
+      log(`  ⚠️ Cloudflare challenge on home — waiting up to 15s...`);
+      try {
+        await page.waitForFunction(
+          () => !document.title.toLowerCase().includes("please wait") &&
+                !document.body?.innerText?.includes("Please enable cookies") &&
+                !document.body?.innerText?.includes("Checking your browser"),
+          { timeout: 15000, polling: 1000 }
+        );
+        log(`  ✅ Cloudflare resolved on home`);
+      } catch {
+        log(`  ⚠️ Cloudflare did not resolve on home — proceeding anyway`);
+      }
+    }
+    await glSleep(3000); // let session cookies propagate
+
     // ── Navigate to direct checkout URL ──
     const checkoutUrl = couponCode
       ? `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=${encodeURIComponent(couponCode)}`
       : `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26`;
     log(`💰 Navigating to checkout URL...`);
-    await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+    // ── Check for Cloudflare challenge on the checkout page ──
+    const checkoutContent = await page.content().catch(() => "");
+    if (
+      checkoutContent.includes("Please enable cookies") ||
+      checkoutContent.includes("Checking your browser") ||
+      checkoutContent.includes("challenge-platform") ||
+      checkoutContent.includes("Just a moment")
+    ) {
+      log(`  ⚠️ Cloudflare challenge on checkout — waiting up to 15s...`);
+      try {
+        await page.waitForFunction(
+          () => !document.title.toLowerCase().includes("please wait") &&
+                !document.body?.innerText?.includes("Please enable cookies") &&
+                !document.body?.innerText?.includes("Checking your browser"),
+          { timeout: 15000, polling: 1000 }
+        );
+        log(`  ✅ Cloudflare resolved on checkout`);
+      } catch {
+        log(`  ⚠️ Cloudflare did not resolve on checkout — proceeding`);
+      }
+      await glSleep(2000);
+    }
 
     // ── Wait for Stripe redirect (or error/verify page) ──
     log(`⏳ Waiting for Stripe redirect...`);
@@ -19041,7 +19090,17 @@ export async function generateSingleCheckoutLink(
       await handleReplitEmailVerification(page, email, log);
       // Retry the checkout URL after verification
       log(`🔄 Retrying checkout after verification...`);
-      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      // Cloudflare check on the retry too
+      const retryContent = await page.content().catch(() => "");
+      if (retryContent.includes("challenge-platform") || retryContent.includes("Checking your browser") || retryContent.includes("Just a moment")) {
+        log(`  ⚠️ Cloudflare on checkout retry — waiting up to 15s...`);
+        await page.waitForFunction(
+          () => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"),
+          { timeout: 15000, polling: 1000 }
+        ).catch(() => {});
+        await glSleep(2000);
+      }
       await page.waitForURL(
         (u: URL) =>
           u.href.includes("checkout.stripe.com") ||
