@@ -3838,6 +3838,7 @@ export async function registerRoutes(
       const userId = req.session.userId!;
       const role = req.session.role!;
       const count = Math.min(Math.max(parseInt(req.body.count || "5", 10), 1), 20);
+      const linksPerSource = Math.min(Math.max(parseInt(req.body.linksPerSource || "1", 10), 1), 5);
 
       const allAccounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
@@ -3865,38 +3866,51 @@ export async function registerRoutes(
 
       const sourceIds = new Set(sources.map(a => a.id));
       // Targets: only "processing" accounts without a checkout URL
-      // sold_out = already subscribed (used as coupon sources), never valid targets
+      // Each source can serve linksPerSource targets (same coupon used N times)
       const targets = allAccounts
         .filter(a =>
           !sourceIds.has(a.id) && a.email && a.password && !a.checkoutUrl &&
           a.status === "processing"
         )
-        .slice(0, sources.length);
+        .slice(0, sources.length * linksPerSource);
 
       if (targets.length === 0) {
         return res.status(400).json({ error: "No processing accounts need checkout links — create new accounts first" });
       }
 
-      const actualCount = Math.min(sources.length, targets.length);
-      const preExtractedCount = sources.slice(0, actualCount).filter(s => s.couponExtracted && s.couponCode).length;
-      const freshCount = actualCount - preExtractedCount;
+      // Build (source, target) pairs — each source repeated linksPerSource times
+      const pairs: Array<{ source: typeof sources[0]; target: typeof targets[0] }> = [];
+      for (let si = 0; si < sources.length; si++) {
+        for (let li = 0; li < linksPerSource; li++) {
+          const ti = si * linksPerSource + li;
+          if (ti >= targets.length) break;
+          pairs.push({ source: sources[si], target: targets[ti] });
+        }
+      }
+
+      const actualCount = pairs.length;
+      const preExtractedCount = [...new Set(pairs.filter(p => p.source.couponExtracted && p.source.couponCode).map(p => p.source.id))].length;
+      const freshCount = sources.length - preExtractedCount;
       const batchId = `replit-batch-${Date.now().toString(36)}`;
       batchOwners.set(batchId, userId);
       res.json({ success: true, batchId, count: actualCount });
 
       (async () => {
-        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} job(s) [${preExtractedCount} stored coupon(s) + ${freshCount} live extraction(s)]`, userId);
+        broadcastLog(batchId, "batch-init", `🚀 Parallel batch: ${actualCount} link(s) — ${sources.length} source(s) × ${linksPerSource}/source [${preExtractedCount} stored + ${freshCount} live]`, userId);
         broadcastLog(batchId, "batch-init", `─`.repeat(50), userId);
 
-        const jobs = sources.slice(0, actualCount).map((source, i) => {
-          const target = targets[i];
+        // Cache coupon promises per source so each source only logs in once
+        // even when linksPerSource > 1 (multiple targets share one source's coupon)
+        const couponPromiseCache = new Map<string, Promise<string | null>>();
+
+        const jobs = pairs.map(({ source, target }, i) => {
           const jobId = `batch-job-${i}`;
           const tag = `[Job ${i + 1}]`;
           const isPreExtracted = !!(source.couponExtracted && source.couponCode);
           return (async () => {
             // Stagger only live-extraction jobs — stored-coupon jobs start immediately
             if (!isPreExtracted && freshCount > 1) {
-              const freshIndex = sources.slice(0, i + 1).filter(s => !(s.couponExtracted && s.couponCode)).length - 1;
+              const freshIndex = sources.filter(s => !(s.couponExtracted && s.couponCode)).indexOf(source);
               if (freshIndex > 0) await new Promise(r => setTimeout(r, freshIndex * 5000));
             }
             broadcastLog(batchId, jobId, `${tag} 🤖 Source: ${source.email} → Target: ${target.email}`, userId);
@@ -3907,21 +3921,28 @@ export async function registerRoutes(
               coupon = source.couponCode!;
               broadcastLog(batchId, jobId, `${tag} 🎟️ Using stored coupon: ${coupon}`, userId);
             } else {
-              // Slow path: launch browser and log in to extract coupon
-              const couponResult = await extractCouponFromReplitAccount(
-                source.email, source.password,
-                (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
-              );
-              if (!couponResult.success || !couponResult.coupon) {
-                broadcastLog(batchId, jobId, `${tag} ❌ Coupon extraction failed: ${couponResult.error}`, userId);
-                if (/wrong password|invalid username|invalid credentials/i.test(couponResult.error || "")) {
-                  await storage.updateReplitAccountStatus(source.id, "error").catch(() => {});
-                  broadcastLog(batchId, jobId, `${tag} 🚫 Source ${source.email} marked as ERROR (bad credentials)`, userId);
-                }
+              // Deduplicated slow path — each source only launches one browser session
+              // even if linksPerSource > 1. Subsequent jobs await the cached promise.
+              if (!couponPromiseCache.has(source.id)) {
+                const p = extractCouponFromReplitAccount(
+                  source.email, source.password,
+                  (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
+                ).then(async (r) => {
+                  if (r.success && r.coupon) {
+                    await storage.markReplitCouponExtracted(source.id, r.coupon).catch(() => {});
+                    return r.coupon;
+                  }
+                  return null;
+                });
+                couponPromiseCache.set(source.id, p);
+              }
+              const resolved = await couponPromiseCache.get(source.id)!;
+              if (!resolved) {
+                broadcastLog(batchId, jobId, `${tag} ❌ Coupon extraction failed for source ${source.email}`, userId);
                 return { success: false, source: source.email, target: target.email };
               }
-              coupon = couponResult.coupon;
-              await storage.markReplitCouponExtracted(source.id, coupon).catch(() => {});
+              coupon = resolved;
+              broadcastLog(batchId, jobId, `${tag} 🎟️ Coupon from ${source.email}: ${coupon}`, userId);
             }
             broadcastLog(batchId, jobId, `${tag} 🎟️ Coupon: ${coupon}`, userId);
 

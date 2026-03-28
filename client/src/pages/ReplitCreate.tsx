@@ -97,6 +97,7 @@ export default function ReplitCreate() {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
   const [batchCount, setBatchCount] = useState(5);
+  const [linksPerSource, setLinksPerSource] = useState(2);
   const [checkoutDelayMinutes, setCheckoutDelayMinutes] = useState(0);
   const [checkoutDelaySaving, setCheckoutDelaySaving] = useState(false);
   const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
@@ -419,7 +420,7 @@ export default function ReplitCreate() {
     setCompletedCount(0);
     setTotalCount(batchCount);
     try {
-      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount });
+      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount, linksPerSource });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start batch");
       activeBatchId.current = data.batchId;
@@ -948,20 +949,40 @@ export default function ReplitCreate() {
                         <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Parallel Batch</span>
                         <span className="text-[9px] font-mono" style={{ color: LA(0.25) }}>run N jobs simultaneously</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={batchCount}
-                          onChange={e => setBatchCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
-                          className="w-16 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
-                          style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
-                          data-testid="input-batch-count"
-                        />
-                        <span className="text-[10px] font-mono flex-1" style={{ color: LA(0.4) }}>
-                          accounts in parallel · {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length)} available sources · {replitAccounts.filter(a => a.status === "processing").length} Account Created targets
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={batchCount}
+                            onChange={e => setBatchCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                            className="w-14 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
+                            style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
+                            data-testid="input-batch-count"
+                          />
+                          <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>sources</span>
+                        </div>
+                        <span className="text-[9px] font-mono" style={{ color: LA(0.2) }}>×</span>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={1}
+                            max={5}
+                            value={linksPerSource}
+                            onChange={e => setLinksPerSource(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
+                            className="w-14 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
+                            style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
+                            data-testid="input-links-per-source"
+                          />
+                          <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>links/source</span>
+                        </div>
+                        <span className="text-[10px] font-mono" style={{ color: "rgba(34,197,94,0.7)" }}>
+                          = {batchCount * linksPerSource} max links
                         </span>
+                      </div>
+                      <div className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
+                        {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length + replitAccounts.filter(a => a.couponExtracted && a.couponCode).length)} available sources · {replitAccounts.filter(a => a.status === "processing").length} processing targets
                       </div>
                       <button
                         onClick={handleBatchCouponLinks}
@@ -979,7 +1000,7 @@ export default function ReplitCreate() {
                       >
                         <Zap className={`w-3.5 h-3.5 relative z-10 ${running ? "animate-pulse" : ""}`} />
                         <span className="relative z-10">
-                          {running ? `running ${batchCount} jobs in parallel...` : exhausted ? "no_accounts_remaining" : `run_batch_${batchCount}_parallel`}
+                          {running ? `running batch...` : exhausted ? "no_accounts_remaining" : `run_batch_${batchCount}x${linksPerSource}_parallel`}
                         </span>
                       </button>
                     </div>
