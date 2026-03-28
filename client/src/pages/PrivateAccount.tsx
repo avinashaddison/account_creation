@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar, Code2 } from "lucide-react";
+import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar, Code2, Link, ExternalLink } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
@@ -1065,13 +1065,13 @@ export default function PrivateAccount() {
           ) : (
             <div className="overflow-auto flex-1 min-h-0">
               {/* ── Spreadsheet grid ── */}
-              <div style={{ minWidth: "680px" }}>
+              <div style={{ minWidth: "820px" }}>
 
                 {/* Column-letter row (Google Sheets style) */}
                 <div
                   className="grid sticky top-0 z-20 font-mono text-[9px] font-bold text-center select-none"
                   style={{
-                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px",
+                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 100px 72px",
                     background: "#0f0f1e",
                     borderBottom: "1px solid rgba(255,255,255,0.08)",
                   }}
@@ -1096,12 +1096,12 @@ export default function PrivateAccount() {
                       data-testid="checkbox-replit-select-all"
                     />
                   </div>
-                  {(["B", "C", "D", "E", "F"] as const).map((letter, i) => (
+                  {(["B", "C", "D", "E", "F", "G"] as const).map((letter, i) => (
                     <div
                       key={letter}
                       className="py-1"
                       style={{
-                        borderRight: i < 4 ? "1px solid rgba(255,255,255,0.06)" : "none",
+                        borderRight: i < 5 ? "1px solid rgba(255,255,255,0.06)" : "none",
                         color: "rgba(255,255,255,0.18)",
                         letterSpacing: "0.15em",
                       }}
@@ -1116,7 +1116,7 @@ export default function PrivateAccount() {
                   className="grid sticky font-mono text-[10px] font-black uppercase tracking-widest z-10"
                   style={{
                     top: "22px",
-                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px",
+                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 100px 72px",
                     borderBottom: "2px solid rgba(0,0,0,0.4)",
                   }}
                 >
@@ -1170,6 +1170,17 @@ export default function PrivateAccount() {
                     Status
                   </div>
                   <div
+                    className="px-3 py-2"
+                    style={{
+                      background: "linear-gradient(90deg, #1e3a5f 0%, #1d4ed8 100%)",
+                      color: "#bae6fd",
+                      textShadow: "0 0 10px rgba(59,130,246,0.5)",
+                      borderRight: "1px solid rgba(0,0,0,0.35)",
+                    }}
+                  >
+                    Checkout Link
+                  </div>
+                  <div
                     className="px-3 py-2 text-right"
                     style={{ background: "#0b0b18", color: "rgba(255,255,255,0.2)" }}
                   >
@@ -1198,7 +1209,7 @@ export default function PrivateAccount() {
                     <div
                       key={acct.id}
                       className="grid transition-colors duration-100 group"
-                      style={{ gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px", background: rowBg }}
+                      style={{ gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 100px 72px", background: rowBg }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(124,58,237,0.055)")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = rowBg)}
                       data-testid={`row-replit-private-${acct.id}`}
@@ -1317,13 +1328,47 @@ export default function PrivateAccount() {
                         </select>
                       </div>
 
+                      {/* Checkout Link */}
+                      <div
+                        className="px-2 py-2 flex items-center justify-center"
+                        style={{ borderRight: cellBorder, borderBottom: cellBorder }}
+                      >
+                        {acct.checkoutUrl ? (
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => copyToClipboard(acct.checkoutUrl!, `rurl-${acct.id}`)}
+                              className="w-6 h-6 rounded flex items-center justify-center"
+                              style={{ color: copied === `rurl-${acct.id}` ? "#4ade80" : "#38bdf8" }}
+                              title="Copy checkout link"
+                              data-testid={`button-copy-replit-url-${acct.id}`}
+                            >
+                              {copied === `rurl-${acct.id}` ? <Check className="w-3 h-3" /> : <Link className="w-3 h-3" />}
+                            </button>
+                            <button
+                              onClick={() => window.open(acct.checkoutUrl!, "_blank")}
+                              className="w-6 h-6 rounded flex items-center justify-center"
+                              style={{ color: "rgba(148,163,184,0.4)" }}
+                              title="Open checkout link"
+                              data-testid={`button-open-replit-url-${acct.id}`}
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-[9px]" style={{ color: "rgba(255,255,255,0.12)" }}>—</span>
+                        )}
+                      </div>
+
                       {/* Actions */}
                       <div
                         className="px-2 py-2 flex items-center justify-end gap-0.5"
                         style={{ borderBottom: cellBorder }}
                       >
                         <button
-                          onClick={() => copyToClipboard(`Email: ${acct.email}\nPassword: ${acct.password}\nUsername: @${acct.username}`, `rall-${acct.id}`)}
+                          onClick={() => copyToClipboard(
+                            `Email: ${acct.email}\nPassword: ${acct.password}\nUsername: @${acct.username}${acct.checkoutUrl ? `\nCheckout: ${acct.checkoutUrl}` : ""}`,
+                            `rall-${acct.id}`
+                          )}
                           className="w-7 h-7 rounded flex items-center justify-center"
                           style={{ color: copied === `rall-${acct.id}` ? "#4ade80" : "rgba(113,113,122,0.6)" }}
                           title="Copy all"
@@ -1355,7 +1400,7 @@ export default function PrivateAccount() {
                 <div
                   className="grid font-mono text-[9px] select-none"
                   style={{
-                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 72px",
+                    gridTemplateColumns: "30px 36px 1fr 160px 70px 180px 100px 72px",
                     background: "#0b0b18",
                     borderTop: "1px solid rgba(255,255,255,0.05)",
                   }}
@@ -1367,7 +1412,7 @@ export default function PrivateAccount() {
                     {replitAccounts.length + 1}
                   </div>
                   <div style={{ borderRight: "1px solid rgba(255,255,255,0.05)" }} />
-                  <div className="px-3 py-1.5 col-span-5" style={{ color: "rgba(255,255,255,0.1)" }}>
+                  <div className="px-3 py-1.5 col-span-6" style={{ color: "rgba(255,255,255,0.1)" }}>
                     {replitAccounts.length} row{replitAccounts.length !== 1 ? "s" : ""}
                   </div>
                 </div>
