@@ -1,0 +1,218 @@
+21:48:22
+>
+🚀 Parallel batch started — 2 job(s) running simultaneously [replit-batch-mnajb8i7]
+21:48:22
+·
+[Job 1] 🤖 Source: abdinzsealyjdym@hotmail.com → Target: kathleenparker3225@outlook.com
+ACCOUNT CREATED
+21:48:22
+·
+[Job 1] 🎟️ Using stored coupon: AGENT4614954509C1A
+21:48:22
+·
+[Job 1] 🎟️ Coupon: AGENT4614954509C1A
+21:48:22
+·
+[Job 2] 🤖 Source: weiheqirsikqgc@hotmail.com → Target: gloriacharles1726@outlook.com
+WORKING NOW
+21:48:22
+·
+[Job 2] 🎟️ Using stored coupon: AGENT46DEB1E1817EE
+21:48:22
+·
+[Job 2] 🎟️ Coupon: AGENT46DEB1E1817EE
+21:48:22
+·
+[Job 1] Connecting via Addison Proxy...
+21:48:22
+·
+[Job 2] Connecting via Addison Proxy...
+21:48:23
+·
+[Job 1] Addison Proxy connected.
+21:48:23
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+21:48:23
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ERROR
+21:48:24
+·
+[Job 2] Addison Proxy connected.
+21:48:24
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+21:48:24
+·
+[Job 2] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+21:48:46
+·
+[Job 2] → Login submitted — waiting for redirect...
+21:48:50
+·
+[Job 2] 📧 Replit requires email verification (URL: https://replit.com/login) — auto-handling via Outlook...
+21:48:55
+·
+[Job 2] 📧 Signing into Outlook as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+21:48:55
+·
+[Job 1] → Login submitted — waiting for redirect...
+21:49:09
+·
+[Job 2] 📬 Scanning Outlook inbox for Replit verification email...
+21:49:12
+·
+[Job 2] 📁 Inbox: 4 items found
+21:49:15
+·
+[Job 2] 🔢 Verification code: 224937 — submitting...
+21:49:18
++
+[Job 2] ✅ Verification code submitted
+21:49:21
++
+[Job 2] ✅ Logged in (fast redirect)
+21:49:21
++
+[Job 2] ✅ Logged in
+21:49:21
+·
+[Job 2] 🏠 Warming up session — visiting Replit home...
+21:49:30
+>
+[Job 2] 💰 Navigating to checkout URL...
+21:49:33
+$
+[Job 2] ⏳ Waiting for Stripe redirect...
+21:49:35
+~
+[Job 2] ⚠️ Session dropped — Replit redirected to signup — re-authenticating...
+21:49:46
+~
+[Job 1] ⚠️ Login stuck — URL: https://replit.com/login
+21:49:46
+~
+[Job 1] ⚠️ Page title: Log In - Replit
+21:49:46
+~
+[Job 1] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+21:49:46
+!
+[Job 1] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+21:49:46
+·
+[Job 1] ↩️ Retrying...
+21:49:46
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+21:49:48
+·
+[Job 1] [retry] Addison Proxy connected.
+21:49:48
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+21:49:49
+·
+[Job 1] [retry] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ERROR
+21:50:05
+!
+[Job 2] ❌ Error: page.goto: Timeout 30000ms exceeded. Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+21:50:05
+·
+[Job 2] ↩️ Retrying...
+21:50:05
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+21:50:07
+·
+[Job 1] [retry] → Login submitted — waiting for redirect...
+21:50:12
+·
+[Job 2] [retry] Addison Proxy connected.
+21:50:12
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+21:50:12
+·
+[Job 2] [retry] 🔐 Logging into Replit as gloriacharles1726@outlook.com...
+ACCOUNT CREATED
+21:50:12
+·
+[Job 1] [retry] 📧 Replit requires email verification (URL: https://replit.com/login) — auto-handling via Outlook...
+21:50:12
+·
+[Job 1] [retry] 📧 Signing into Outlook as kathleenparker3225@outlook.com...
+ERROR
+21:50:26
+·
+[Job 1] [retry] 📬 Scanning Outlook inbox for Replit verification email...
+21:50:30
+·
+[Job 1] [retry] 📁 Inbox: 3 items found
+21:50:33
+·
+[Job 1] [retry] 🔢 Verification code: 224937 — submitting...
+21:50:36
++
+[Job 1] [retry] ✅ Verification code submitted
+21:50:38
++
+[Job 1] [retry] ✅ Logged in (fast redirect)
+21:50:38
++
+[Job 1] [retry] ✅ Logged in
+21:50:38
+·
+[Job 1] [retry] 🏠 Warming up session — visiting Replit home...
+21:50:46
+>
+[Job 1] [retry] 💰 Navigating to checkout URL...
+21:50:47
+$
+[Job 1] [retry] ⏳ Waiting for Stripe redirect...
+21:50:48
+~
+[Job 1] [retry] ⚠️ Session dropped — Replit redirected to signup — re-authenticating...
+21:50:51
+·
+[Job 2] [retry] → Login submitted — waiting for redirect...
+21:51:01
+·
+[Job 1] [retry] → Re-login submitted...
+21:51:35
+~
+[Job 1] [retry] ⚠️ Re-login stuck: Log in to your account You have been banned from Replit. Please check your email for details. EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub
+21:51:35
+!
+[Job 1] [retry] ❌ Error: Account is permanently banned by Replit — banned_account
+21:51:35
+!
+[Job 1] ❌ Link generation failed: Account is permanently banned by Replit — banned_account
+21:51:35
+!
+[Job 1] 🚫 Account is banned by Replit — marked as error, will be skipped permanently
+21:51:41
+~
+[Job 2] [retry] ⚠️ Login stuck — URL: https://replit.com/login
+21:51:41
+~
+[Job 2] [retry] ⚠️ Page title: Log In - Replit
+21:51:41
+~
+[Job 2] [retry] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+21:51:41
+!
+[Job 2] [retry] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+21:51:41
+!
+[Job 2] ❌ Link generation failed: Login timed out — page stuck. Check logs above for reason.
+21:51:41
+·
+──────────────────────────────────────────────────
+21:51:41
++
+✅ Batch complete — 0/2 links generated
