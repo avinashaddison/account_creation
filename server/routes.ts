@@ -3688,8 +3688,9 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      // Auto-pick: first account with couponExtracted=false that has credentials
-      const sourceAccount = allAccounts.find(a => !a.couponExtracted && a.email && a.password);
+      // Auto-pick: first non-processing account with couponExtracted=false that has credentials
+      // (never pick processing accounts as sources — they are targets waiting for checkout links)
+      const sourceAccount = allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status !== "processing" && a.status !== "error");
       if (!sourceAccount) {
         return res.status(400).json({ error: "No unused accounts available for coupon extraction — all accounts have already been used" });
       }
@@ -3843,14 +3844,17 @@ export async function registerRoutes(
         : await storage.getReplitAccountsByOwner(userId);
 
       // ── Source selection: prefer stored coupons (no login needed), fall back to live extraction ──
-      // Pre-extracted: accounts with a stored coupon code (sold_out or processing that were used as sources before)
+      // IMPORTANT: never use "processing" accounts as sources — those are always targets waiting for checkout links
+      // Pre-extracted: accounts with a stored coupon code (sold_out / working / subscribed that were used as sources)
       const preExtractedSources = allAccounts.filter(a =>
-        a.couponExtracted && a.couponCode && a.email && a.password && a.status !== "error"
+        a.couponExtracted && a.couponCode && a.email && a.password &&
+        a.status !== "error" && a.status !== "processing"
       ).slice(0, count);
-      // Fresh sources: accounts not yet extracted (need Playwright login)
+      // Fresh sources: accounts not yet extracted (need Playwright login) — also never processing
       const preExtractedIds = new Set(preExtractedSources.map(a => a.id));
       const freshSources = allAccounts.filter(a =>
-        !a.couponExtracted && a.email && a.password && a.status !== "error" && !preExtractedIds.has(a.id)
+        !a.couponExtracted && a.email && a.password &&
+        a.status !== "error" && a.status !== "processing" && !preExtractedIds.has(a.id)
       ).slice(0, count - preExtractedSources.length);
 
       // Pre-extracted first (fast, no login), then fresh (slow, requires browser)
