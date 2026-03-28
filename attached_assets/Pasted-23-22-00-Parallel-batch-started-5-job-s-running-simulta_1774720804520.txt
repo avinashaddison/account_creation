@@ -1,0 +1,260 @@
+23:22:00
+>
+🚀 Parallel batch started — 5 job(s) running simultaneously [replit-batch-mnamnnbm]
+23:22:00
+·
+[Job 4] 🎟️ Using stored coupon: AGENT45866AC81C6A1
+23:22:00
+·
+[Job 4] 🎟️ Coupon: AGENT45866AC81C6A1
+23:22:00
+·
+[Job 5] 🤖 Source: galkorsumract@hotmail.com → Target: laurajacobs2591@outlook.com
+STOCK OUT
+23:22:00
+·
+[Job 5] 🎟️ Using stored coupon: AGENT411E25C43912C
+23:22:00
+·
+[Job 5] 🎟️ Coupon: AGENT411E25C43912C
+23:22:00
+·
+[Job 1] Connecting via Addison Proxy...
+23:22:00
+·
+[Job 2] Connecting via Addison Proxy...
+23:22:00
+·
+[Job 5] Connecting via Addison Proxy...
+23:22:00
+·
+[Job 4] Connecting via Addison Proxy...
+23:22:00
+·
+[Job 3] Connecting via Addison Proxy...
+23:22:01
+·
+[Job 3] Addison Proxy connected.
+23:22:01
++
+[Job 3] ✅ ZenRows anti-bot browser connected — ban protection active
+23:22:01
+·
+[Job 5] Addison Proxy connected.
+23:22:01
++
+[Job 5] ✅ ZenRows anti-bot browser connected — ban protection active
+23:22:01
+·
+[Job 2] Addison Proxy connected.
+23:22:01
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+23:22:01
+·
+[Job 3] 🔐 Logging into Replit as cynthiavaughn1527@outlook.com...
+SUBSCRIBED
+23:22:01
+·
+[Job 5] 🔐 Logging into Replit as laurajacobs2591@outlook.com...
+WORKING NOW
+23:22:01
+·
+[Job 2] 🔐 Logging into Replit as michellegreen8536@outlook.com...
+SUBSCRIBED
+23:22:01
+·
+[Job 4] Addison Proxy connected.
+23:22:02
++
+[Job 4] ✅ ZenRows anti-bot browser connected — ban protection active
+23:22:02
+!
+[Job 2] ❌ Error: page.goto: net::ERR_CONNECTION_CLOSED at https://replit.com/login Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+23:22:02
+·
+[Job 2] ↩️ Retrying...
+23:22:02
+·
+[Job 2] [retry] Connecting via Addison Proxy...
+23:22:02
+·
+[Job 4] 🔐 Logging into Replit as rubenleach5757@outlook.com...
+WORKING NOW
+23:22:03
+·
+[Job 2] [retry] Addison Proxy connected.
+23:22:03
++
+[Job 2] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+23:22:03
+·
+[Job 2] [retry] 🔐 Logging into Replit as michellegreen8536@outlook.com...
+SUBSCRIBED
+23:22:09
+·
+[Job 1] Addison Proxy connected.
+23:22:09
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+23:22:09
+·
+[Job 1] 🔐 Logging into Replit as coryharris6513@outlook.com...
+ACCOUNT CREATED
+23:22:18
+·
+[Job 5] → Login submitted — waiting for redirect...
+23:22:19
+·
+[Job 3] → Login submitted — waiting for redirect...
+23:22:20
+·
+[Job 4] → Login submitted — waiting for redirect...
+23:22:27
++
+[Job 5] ✅ Logged in
+23:22:27
+·
+[Job 5] 🏠 Warming up session — visiting Replit home...
+23:22:28
+·
+[Job 2] [retry] → Login submitted — waiting for redirect...
+23:22:34
+>
+[Job 5] 💰 Navigating to checkout URL...
+23:22:35
+$
+[Job 5] ⏳ Waiting for Stripe redirect...
+23:22:36
++
+[Job 5] ✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a11mjds4ZkGmei0G48wMTQYjaPOuWOg4DsDt8Q...
+🔗 laurajacobs2591@outlook.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a11mjds4ZkGmei0G48wMTQYjaPOuWOg4DsDt8Q...
+23:22:36
++
+[Job 5] ✅ Done — link generated for laurajacobs2591@outlook.com
+WORKING NOW
+23:22:38
++
+[Job 4] ✅ Logged in
+23:22:38
+·
+[Job 4] 🏠 Warming up session — visiting Replit home...
+23:22:41
++
+[Job 3] ✅ Logged in
+23:22:41
+·
+[Job 3] 🏠 Warming up session — visiting Replit home...
+23:22:43
++
+[Job 2] [retry] ✅ Logged in
+23:22:43
+·
+[Job 2] [retry] 🏠 Warming up session — visiting Replit home...
+23:22:46
+>
+[Job 4] 💰 Navigating to checkout URL...
+23:22:48
+$
+[Job 4] ⏳ Waiting for Stripe redirect...
+23:22:48
+>
+[Job 3] 💰 Navigating to checkout URL...
+23:22:49
++
+[Job 4] ✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1qn6FVCg4dnta2FugAYOE3nxZONoA72SzFuFI...
+🔗 rubenleach5757@outlook.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1qn6FVCg4dnta2FugAYOE3nxZONoA72SzFuFI...
+23:22:49
++
+[Job 4] ✅ Done — link generated for rubenleach5757@outlook.com
+WORKING NOW
+23:22:50
+>
+[Job 2] [retry] 💰 Navigating to checkout URL...
+23:22:51
+$
+[Job 3] ⏳ Waiting for Stripe redirect...
+23:22:53
+$
+[Job 2] [retry] ⏳ Waiting for Stripe redirect...
+23:22:53
+!
+[Job 3] ⚠️ Stripe error URL: https://replit.com/stripe-checkout-error
+23:22:53
+!
+[Job 3] ⚠️ Stripe error page: Skip to content CY cynthiavaughn15's Workspace Create something new Import code or design Home Projects Published Projects Settings Agent 4 Referral Gift a friend a month of Replit Agent 4. They get 1 month of Core free. You get 1 month free. Learn Documentation Your Starter Plan Agent credits 0% us
+23:22:53
+!
+[Job 3] ❌ Error: Account already has an active Replit Core/Agent subscription — skip this account
+23:22:53
+!
+[Job 3] ❌ Link generation failed: Account already has an active Replit Core/Agent subscription — skip this account
+23:22:53
+~
+[Job 3] ⚠️ Marked as already-subscribed — will be skipped in future batches
+23:22:55
+!
+[Job 2] [retry] ⚠️ Stripe error URL: https://replit.com/stripe-checkout-error
+23:22:55
+!
+[Job 2] [retry] ⚠️ Stripe error page: Skip to content MI michellegreen85's Workspace Create something new Import code or design Home Projects Published Projects Settings Agent 4 Referral Gift a friend a month of Replit Agent 4. They get 1 month of Core free. You get 1 month free. Learn Documentation Your Starter Plan Agent credits 0% us
+23:22:55
+!
+[Job 2] [retry] ❌ Error: Account already has an active Replit Core/Agent subscription — skip this account
+23:22:55
+!
+[Job 2] ❌ Link generation failed: Account already has an active Replit Core/Agent subscription — skip this account
+23:22:55
+~
+[Job 2] ⚠️ Marked as already-subscribed — will be skipped in future batches
+23:23:16
+·
+[Job 1] → Login submitted — waiting for redirect...
+23:24:07
+~
+[Job 1] ⚠️ Login stuck — URL: https://replit.com/login
+23:24:07
+~
+[Job 1] ⚠️ Page title: Log In - Replit
+23:24:07
+~
+[Job 1] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+23:24:07
+!
+[Job 1] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+23:24:07
+·
+[Job 1] ↩️ Retrying...
+23:24:07
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+23:24:08
+·
+[Job 1] [retry] Addison Proxy connected.
+23:24:08
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+23:24:08
+·
+[Job 1] [retry] 🔐 Logging into Replit as coryharris6513@outlook.com...
+ACCOUNT CREATED
+23:24:56
+!
+[Job 1] [retry] ❌ Error: locator.click: Timeout 30000ms exceeded. Call log: [2m - waiting for getByRole('button', { name: /log in|sign in/i }).first()[22m [2m - locator resolved to <button data-rac="" tabindex="0" type="submit" data-cy="log-in-btn" id="react-aria2806800309-:rd:" data-react-aria-pressable="true" class="Button-module__nDccya__button Interactive2-module__BR3hWq__shades Interactive2-module__BR3hWq__root Interactive2-module__BR3hWq__transition Interactive2-module__BR3hWq__disabled _sdz_text _sdz_brand _sdz_surface-2 _sdz_surface-bg _sdz_hoverable-1 _sdz_pressable-2 Interactive2-module__BR3hWq__borderRadius Interactive2-module__BR3hWq__focus">…</button>[22m [2m - attempting click action[22m [2m 2 × waiting for element to be visible, enabled and stable[22m [2m - element is visible, enabled and stable[22m [2m - scrolling into view if needed[22m [2m - done scrolling[22m [2m - element is outside of the viewport[22m [2m - retrying click action[22m [2m - waiting 20ms[22m [2m 2 × waiting for element to be visible, enabled and stable[22m [2m - element is visible, enabled and stable[22m [2m - scrolling into view if needed[22m [2m - done scrolling[22m [2m - element is outside of the viewport[22m [2m - retrying click action[22m [2m - waiting 100ms[22m [2m 45 × waiting for element to be visible, enabled and stable[22m [2m - element is visible, enabled and stable[22m [2m - scrolling into view if needed[22m [2m - done scrolling[22m [2m - element is outside of the viewport[22m [2m - retrying click action[22m [2m - waiting 500ms[22m
+23:24:56
+!
+[Job 1] ❌ Link generation failed: locator.click: Timeout 30000ms exceeded. Call log: [2m - waiting for getByRole('button', { name: /log in|sign in/i }).first()[22m [2m - locator resolved to <button data-rac="" tabindex="0" type="submit" data-cy="log-in-btn" id="react-aria2806800309-:rd:" data-react-aria-pressable="true" class="Button-module__nDccya__button Interactive2-module__BR3hWq__shades Interactive2-module__BR3hWq__root Interactive2-module__BR3hWq__transition Interactive2-module__BR3hWq__disabled _sdz_text _sdz_brand _sdz_surface-2 _sdz_surface-bg _sdz_hoverable-1 _sdz_pressable-2 Interactive2-module__BR3hWq__borderRadius Interactive2-module__BR3hWq__focus">…</button>[22m [2m - attempting click action[22m [2m 2 × waiting for element to be visible, enabled and stable[22m [2m - element is visible, enabled and stable[22m [2m - scrolling into view if needed[22m [2m - done scrolling[22m [2m - element is outside of the viewport[22m [2m - retrying click action[22m [2m - waiting 20ms[22m [2m 2 × waiting for element to be visible, enabled and stable[22m [2m - element is visible, enabled and stable[22m [2m - scrolling into view if needed[22m [2m - done scrolling[22m [2m - element is outside of the viewport[22m [2m - retrying click action[22m [2m - waiting 100ms[22m [2m 45 × waiting for element to be visible, enabled and stable[22m [2m - element is visible, enabled and stable[22m [2m - scrolling into view if needed[22m [2m - done scrolling[22m [2m - element is outside of the viewport[22m [2m - retrying click action[22m [2m - waiting 500ms[22m
+23:24:56
+·
+──────────────────────────────────────────────────
+23:24:56
++
+✅ Batch complete — 2/5 links generated
