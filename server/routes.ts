@@ -3839,6 +3839,7 @@ export async function registerRoutes(
       const role = req.session.role!;
       const count = Math.min(Math.max(parseInt(req.body.count || "5", 10), 1), 20);
       const linksPerSource = Math.min(Math.max(parseInt(req.body.linksPerSource || "1", 10), 1), 5);
+      const includeSubscribed = req.body.includeSubscribed === true || req.body.includeSubscribed === "true";
 
       const allAccounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
@@ -3867,15 +3868,23 @@ export async function registerRoutes(
       const sourceIds = new Set(sources.map(a => a.id));
       // Targets: only "processing" accounts without a checkout URL
       // Each source can serve linksPerSource targets (same coupon used N times)
+      // includeSubscribed: also retry accounts marked subscribed (they may be false-positives)
+      const targetStatuses = includeSubscribed
+        ? ["processing", "subscribed"]
+        : ["processing"];
       const targets = allAccounts
         .filter(a =>
           !sourceIds.has(a.id) && a.email && a.password && !a.checkoutUrl &&
-          a.status === "processing"
+          targetStatuses.includes(a.status)
         )
         .slice(0, sources.length * linksPerSource);
 
       if (targets.length === 0) {
-        return res.status(400).json({ error: "No processing accounts need checkout links — create new accounts first" });
+        return res.status(400).json({
+          error: includeSubscribed
+            ? "No processing or subscribed accounts available as targets — create new accounts first"
+            : "No processing accounts need checkout links — enable 'retry subscribed' or create new accounts first"
+        });
       }
 
       // Build (source, target) pairs — each source repeated linksPerSource times

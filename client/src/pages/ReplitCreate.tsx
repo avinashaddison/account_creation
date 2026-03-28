@@ -98,6 +98,7 @@ export default function ReplitCreate() {
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
   const [batchCount, setBatchCount] = useState(5);
   const [linksPerSource, setLinksPerSource] = useState(2);
+  const [includeSubscribed, setIncludeSubscribed] = useState(true);
   const [checkoutDelayMinutes, setCheckoutDelayMinutes] = useState(0);
   const [checkoutDelaySaving, setCheckoutDelaySaving] = useState(false);
   const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
@@ -420,7 +421,7 @@ export default function ReplitCreate() {
     setCompletedCount(0);
     setTotalCount(batchCount);
     try {
-      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount, linksPerSource });
+      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount, linksPerSource, includeSubscribed });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start batch");
       activeBatchId.current = data.batchId;
@@ -981,8 +982,25 @@ export default function ReplitCreate() {
                           = {batchCount * linksPerSource} max links
                         </span>
                       </div>
-                      <div className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
-                        {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length + replitAccounts.filter(a => a.couponExtracted && a.couponCode).length)} available sources · {replitAccounts.filter(a => a.status === "processing").length} processing targets
+                      <div className="flex items-center justify-between">
+                        <div className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
+                          {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length + replitAccounts.filter(a => a.couponExtracted && a.couponCode).length)} available sources · {
+                            replitAccounts.filter(a => a.status === "processing" || (includeSubscribed && a.status === "subscribed")).length
+                          } targets
+                        </div>
+                        <button
+                          onClick={() => setIncludeSubscribed(v => !v)}
+                          className="flex items-center gap-1.5 rounded px-2 py-0.5 text-[9px] font-mono transition-colors"
+                          style={{
+                            background: includeSubscribed ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.04)",
+                            border: `1px solid ${includeSubscribed ? "rgba(34,197,94,0.4)" : LA(0.15)}`,
+                            color: includeSubscribed ? "#22c55e" : LA(0.35),
+                          }}
+                          data-testid="toggle-include-subscribed"
+                        >
+                          <span>{includeSubscribed ? "✓" : "○"}</span>
+                          <span>retry subscribed</span>
+                        </button>
                       </div>
                       <button
                         onClick={handleBatchCouponLinks}
