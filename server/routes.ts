@@ -3864,12 +3864,20 @@ export async function registerRoutes(
       }
 
       const sourceIds = new Set(sources.map(a => a.id));
+      // Targets: accounts that need a checkout link — prioritise "processing", then "sold_out" without a URL
       const targets = allAccounts
-        .filter(a => !sourceIds.has(a.id) && a.email && a.password && a.status === "processing" && !a.checkoutUrl)
+        .filter(a =>
+          !sourceIds.has(a.id) && a.email && a.password && !a.checkoutUrl &&
+          (a.status === "processing" || a.status === "sold_out" || a.status === "created")
+        )
+        .sort((a, b) => {
+          const priority: Record<string, number> = { processing: 0, created: 1, sold_out: 2 };
+          return (priority[a.status] ?? 99) - (priority[b.status] ?? 99);
+        })
         .slice(0, sources.length);
 
       if (targets.length === 0) {
-        return res.status(400).json({ error: "No processing accounts available to generate links for" });
+        return res.status(400).json({ error: "No accounts need checkout links (all have URLs or are subscribed)" });
       }
 
       const actualCount = Math.min(sources.length, targets.length);
