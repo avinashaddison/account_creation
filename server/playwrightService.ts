@@ -19015,6 +19015,9 @@ export async function generateSingleCheckoutLink(
         if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
         if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 300)}`);
         // Specific detectable failure reasons — throw named errors so batch can act on them
+        if (/you have been banned|banned from replit/i.test(bodyFull)) {
+          throw new Error(`Account is permanently banned by Replit — banned_account`);
+        }
         if (/signed up without adding a password|without adding a password/i.test(bodyFull)) {
           throw new Error(`Account has no password set — registered via social auth only. Cannot log in with credentials — no_password_account`);
         }
@@ -19117,6 +19120,9 @@ export async function generateSingleCheckoutLink(
       } catch {
         const stuckBody = await page.evaluate(() => document.body?.innerText?.substring(0, 300)).catch(() => "");
         log(`⚠️  Re-login stuck: ${stuckBody.replace(/\n/g, " ").substring(0, 200)}`);
+        if (/you have been banned|banned from replit/i.test(stuckBody)) {
+          throw new Error(`Account is permanently banned by Replit — banned_account`);
+        }
         throw new Error(`Re-login after session drop failed — stuck on login page`);
       }
       log(`✅ Re-authenticated — retrying checkout...`);

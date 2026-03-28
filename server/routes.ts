@@ -3534,6 +3534,9 @@ export async function registerRoutes(
             if (result.error?.includes("already has an active Replit")) {
               await storage.updateReplitAccountStatus(acct.id, "subscribed").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+            } else if (result.error?.includes("banned_account")) {
+              await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
+              broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
             } else if (result.error?.includes("no_password_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Account has no password (social auth only) — marked as error, will be skipped`, userId);
@@ -3705,9 +3708,9 @@ export async function registerRoutes(
             (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
           );
 
-          // Skip retry for unrecoverable errors (already subscribed, no password, bad creds)
+          // Skip retry for unrecoverable errors (banned, already subscribed, no password, bad creds)
           const isUnrecoverable = (e?: string) =>
-            !!e && (e.includes("already has an active Replit") || e.includes("no_password_account") || e.includes("bad_credentials"));
+            !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials"));
 
           // Auto-retry once on failure — but skip retry if error is unrecoverable
           if (!result.success && !isUnrecoverable(result.error)) {
@@ -3729,6 +3732,9 @@ export async function registerRoutes(
             if (result.error?.includes("already has an active Replit")) {
               await storage.updateReplitAccountStatus(acct.id, "subscribed").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+            } else if (result.error?.includes("banned_account")) {
+              await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
+              broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
             } else if (result.error?.includes("no_password_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Account has no password (social auth only) — marked as error, will be skipped`, userId);
@@ -3845,7 +3851,7 @@ export async function registerRoutes(
               (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
             );
             const isUnrecoverableErr = (e?: string) =>
-              !!e && (e.includes("already has an active Replit") || e.includes("no_password_account") || e.includes("bad_credentials"));
+              !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials"));
 
             if (!result.success && !isUnrecoverableErr(result.error)) {
               broadcastLog(batchId, jobId, `${tag} ↩️  Retrying...`, userId);
@@ -3865,6 +3871,9 @@ export async function registerRoutes(
               if (result.error?.includes("already has an active Replit")) {
                 await storage.updateReplitAccountStatus(target.id, "subscribed").catch(() => {});
                 broadcastLog(batchId, jobId, `${tag} ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+              } else if (result.error?.includes("banned_account")) {
+                await storage.updateReplitAccountStatus(target.id, "error").catch(() => {});
+                broadcastLog(batchId, jobId, `${tag} 🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
               } else if (result.error?.includes("no_password_account")) {
                 await storage.updateReplitAccountStatus(target.id, "error").catch(() => {});
                 broadcastLog(batchId, jobId, `${tag} ⚠️  Account has no password (social auth only) — marked as error, will be skipped`, userId);
