@@ -1190,17 +1190,19 @@ export default function PrivateAccount() {
 
                 {/* Data rows */}
                 {[...replitAccounts].sort((a, b) => {
-                  const rank: Record<string, number> = { working: 0, available: 1, created: 1, processing: 2, sold_out: 3 };
+                  const rank: Record<string, number> = { working: 0, available: 1, created: 1, processing: 2, sold_out: 3, subscribed: 4, error: 5 };
                   return (rank[a.status] ?? 2) - (rank[b.status] ?? 2);
                 }).map((acct, idx) => {
                   const st = acct.status;
                   type StatusCfg = { label: string; icon: string; color: string; glow: string; bg: string; border: string };
                   const statusConfig: Record<string, StatusCfg> = {
-                    processing: { label: "Processing", icon: "◌", color: "#facc15", glow: "rgba(250,204,21,0.25)", bg: "rgba(250,204,21,0.07)", border: "rgba(250,204,21,0.35)" },
-                    created:    { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
-                    available:  { label: "Available",  icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
-                    working:    { label: "Working",    icon: "▶", color: "#f87171", glow: "rgba(248,113,113,0.3)",  bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.35)" },
-                    sold_out:   { label: "Sold Out",   icon: "⊘", color: "#f87171", glow: "rgba(248,113,113,0.25)", bg: "rgba(248,113,113,0.07)", border: "rgba(248,113,113,0.35)" },
+                    processing:  { label: "Processing",  icon: "◌", color: "#facc15", glow: "rgba(250,204,21,0.25)",  bg: "rgba(250,204,21,0.07)",  border: "rgba(250,204,21,0.35)"  },
+                    created:     { label: "Available",   icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
+                    available:   { label: "Available",   icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
+                    working:     { label: "Working",     icon: "▶", color: "#f87171", glow: "rgba(248,113,113,0.3)",  bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.35)" },
+                    sold_out:    { label: "Sold Out",    icon: "⊘", color: "#94a3b8", glow: "rgba(148,163,184,0.2)", bg: "rgba(148,163,184,0.06)", border: "rgba(148,163,184,0.25)" },
+                    subscribed:  { label: "Subscribed",  icon: "✓", color: "#34d399", glow: "rgba(52,211,153,0.25)",  bg: "rgba(52,211,153,0.07)",  border: "rgba(52,211,153,0.3)"   },
+                    error:       { label: "Error",       icon: "✕", color: "#ef4444", glow: "rgba(239,68,68,0.25)",   bg: "rgba(239,68,68,0.07)",   border: "rgba(239,68,68,0.3)"    },
                   };
                   const cfg = statusConfig[st] ?? statusConfig.processing;
                   const rowBg = idx % 2 === 0 ? "rgba(255,255,255,0.012)" : "rgba(0,0,0,0.18)";
@@ -1325,6 +1327,8 @@ export default function PrivateAccount() {
                           <option value="created">● Available</option>
                           <option value="working">▶ Working</option>
                           <option value="sold_out">⊘ Sold Out</option>
+                          <option value="subscribed">✓ Subscribed</option>
+                          <option value="error">✕ Error</option>
                         </select>
                       </div>
 
