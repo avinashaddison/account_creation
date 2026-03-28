@@ -19014,6 +19014,13 @@ export async function generateSingleCheckoutLink(
         log(`⚠️  Login stuck — URL: ${stuckUrl.substring(0, 80)}`);
         if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
         if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 300)}`);
+        // Specific detectable failure reasons — throw named errors so batch can act on them
+        if (/signed up without adding a password|without adding a password/i.test(bodyFull)) {
+          throw new Error(`Account has no password set — registered via social auth only. Cannot log in with credentials — no_password_account`);
+        }
+        if (/invalid username or password|incorrect password|wrong password|password is incorrect/i.test(bodyFull)) {
+          throw new Error(`Login failed — incorrect password stored for this account — bad_credentials`);
+        }
         throw new Error(`Login timed out — page stuck. Check logs above for reason.`);
       }
     }

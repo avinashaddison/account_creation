@@ -1,0 +1,68 @@
+21:16:09
+>
+🚀 Parallel batch started — 1 job(s) running simultaneously [replit-batch-mnai5sz4]
+21:16:13
+·
+[Job 1] Addison Proxy connected.
+21:16:13
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+21:16:13
+·
+[Job 1] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+21:16:36
+·
+[Job 1] → Login submitted — waiting for redirect...
+21:17:26
+~
+[Job 1] ⚠️ Login stuck — URL: https://replit.com/login
+21:17:26
+~
+[Job 1] ⚠️ Page title: Log In - Replit
+21:17:26
+~
+[Job 1] ⚠️ Page text : Log in to your account Looks like you may have signed up without adding a password. Please follow the "forgot password?" instructions to add a password. EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Cont
+21:17:26
+!
+[Job 1] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+21:17:26
+·
+[Job 1] ↩️ Retrying...
+21:17:26
+·
+[Job 1] [retry] Connecting via Addison Proxy...
+21:17:27
+·
+[Job 1] [retry] Addison Proxy connected.
+21:17:27
++
+[Job 1] [retry] ✅ ZenRows anti-bot browser connected — ban protection active
+21:17:27
+·
+[Job 1] [retry] 🔐 Logging into Replit as kathleenparker3225@outlook.com...
+ACCOUNT CREATED
+21:17:52
+·
+[Job 1] [retry] → Login submitted — waiting for redirect...
+21:18:42
+~
+[Job 1] [retry] ⚠️ Login stuck — URL: https://replit.com/login
+21:18:42
+~
+[Job 1] [retry] ⚠️ Page title: Log In - Replit
+21:18:42
+~
+[Job 1] [retry] ⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+21:18:42
+!
+[Job 1] [retry] ❌ Error: Login timed out — page stuck. Check logs above for reason.
+21:18:42
+!
+[Job 1] ❌ Link generation failed: Login timed out — page stuck. Check logs above for reason.
+21:18:42
+·
+──────────────────────────────────────────────────
+21:18:42
++
+✅ Batch complete — 0/1 links generated
