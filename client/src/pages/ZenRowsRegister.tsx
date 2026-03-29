@@ -1,67 +1,125 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useServiceGuard } from "@/lib/useServiceGuard";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Loader2, CheckCircle2, XCircle, Terminal, ArrowLeft,
-  Mail, Lock, Key, Zap, Globe, ChevronDown, ChevronUp, Copy, Rocket
-} from "lucide-react";
-import { subscribe } from "@/lib/ws";
-import { Link } from "wouter";
 import { sounds } from "@/lib/sounds";
+import { ArrowLeft, Terminal, Key, CheckCircle2, XCircle, Copy, ChevronDown, Zap, Radio } from "lucide-react";
+import { Link } from "wouter";
 
-type LogEntry = {
-  message: string;
-  timestamp: string;
-};
+type OutlookAccount = { id: string; email: string; password: string; status: string };
+type LogLine = { text: string; time: string };
 
-type Result = {
-  success: boolean;
-  error?: string;
-  apiKey?: string;
-  outlookEmail?: string;
-  outlookPassword?: string;
-};
+const G = "#00ff41";
+const GA = (a: number) => `rgba(0,255,65,${a})`;
+
+function getLogStyle(text: string): { color: string; prefix: string } {
+  if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.2), prefix: "" };
+  if (text.toLowerCase().includes("api key") || text.toLowerCase().includes("success") || text.toLowerCase().includes("complete") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("extracted"))
+    return { color: G, prefix: "+" };
+  if (text.toLowerCase().includes("error") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("fail"))
+    return { color: "#ff4141", prefix: "!" };
+  if (text.toLowerCase().includes("warn") || text.toLowerCase().includes("retry") || text.toLowerCase().includes("timeout"))
+    return { color: "#ffaa00", prefix: "~" };
+  if (text.toLowerCase().includes("soax") || text.toLowerCase().includes("proxy") || text.toLowerCase().includes("launch") || text.toLowerCase().includes("browser"))
+    return { color: GA(0.75), prefix: ">" };
+  if (text.toLowerCase().includes("captcha") || text.toLowerCase().includes("turnstile") || text.toLowerCase().includes("recaptcha"))
+    return { color: "rgba(255,200,50,0.85)", prefix: "~" };
+  if (text.toLowerCase().includes("email") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("verif"))
+    return { color: "rgba(0,200,255,0.75)", prefix: "·" };
+  if (text.toLowerCase().includes("step "))
+    return { color: "rgba(180,120,255,0.9)", prefix: "»" };
+  if (text.toLowerCase().includes("navigat") || text.toLowerCase().includes("register") || text.toLowerCase().includes("login"))
+    return { color: GA(0.65), prefix: ">" };
+  return { color: GA(0.45), prefix: "·" };
+}
+
+function nowTime() {
+  return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
 
 export default function ZenRowsRegister() {
   const { checking } = useServiceGuard("zenrows");
-  const [showManual, setShowManual] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [result, setResult] = useState<Result | null>(null);
-  const [error, setError] = useState<string | null>(null);
+
+  const [logs, setLogs] = useState<LogLine[]>([]);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; apiKey?: string; error?: string; outlookEmail?: string } | null>(null);
+  const [selectedOutlookId, setSelectedOutlookId] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [tick, setTick] = useState(true);
+
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const activeBatchId = useRef<string | null>(null);
 
-  const batchIdRef = useRef<string | null>(null);
-  batchIdRef.current = batchId;
+  const { data: outlookAccounts = [] } = useQuery<OutlookAccount[]>({
+    queryKey: ["/api/private/outlook"],
+  });
+
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+  useEffect(() => { const t = setInterval(() => setTick(p => !p), 600); return () => clearInterval(t); }, []);
+
+  function addLog(text: string) {
+    setLogs(prev => [...prev, { text, time: nowTime() }]);
+  }
 
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    wsRef.current = ws;
 
-  useEffect(() => {
-    const unsub = subscribe((msg) => {
-      if (msg.type === "log" && msg.batchId === batchIdRef.current) {
-        setLogs((prev) => [...prev, { message: msg.message, timestamp: msg.timestamp }]);
-      }
-      if (msg.type === "zenrows_register_result" && msg.batchId === batchIdRef.current) {
-        setResult({ success: msg.success, error: msg.error, apiKey: msg.apiKey, outlookEmail: msg.outlookEmail, outlookPassword: msg.outlookPassword });
-        if (msg.success) sounds.complete();
-        else sounds.warning();
-      }
-      if (msg.type === "batch_complete" && msg.batchId === batchIdRef.current) {
-        setIsRunning(false);
-      }
-    });
-    return unsub;
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.batchId && data.batchId !== activeBatchId.current) return;
+        if (data.type === "log" && data.batchId === activeBatchId.current) {
+          addLog(data.message);
+        } else if (data.type === "zenrows_register_result" && data.batchId === activeBatchId.current) {
+          setResult({ success: data.success, apiKey: data.apiKey, error: data.error, outlookEmail: data.outlookEmail });
+          if (data.success) { sounds.complete(); addLog("✅ API key extracted and saved!"); }
+          else { sounds.warning(); addLog("❌ Registration failed: " + (data.error || "Unknown error")); }
+        } else if (data.type === "batch_complete" && data.batchId === activeBatchId.current) {
+          setRunning(false);
+        }
+      } catch {}
+    };
+    return () => { ws.close(); };
   }, []);
+
+  const selectedOutlook = outlookAccounts.find(a => a.id === selectedOutlookId);
+
+  const handleRegister = useCallback(async () => {
+    if (!selectedOutlookId || !selectedOutlook) {
+      addLog("❌ Select an Outlook account first");
+      return;
+    }
+    setLogs([]);
+    setResult(null);
+    setRunning(true);
+    sounds.navigate();
+    addLog(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    addLog(`🚀 Starting ZenRows registration via SOAX proxy...`);
+    addLog(`📧 Using Outlook: ${selectedOutlook.email}`);
+
+    try {
+      const res = await fetch("/api/zenrows-register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ outlookEmail: selectedOutlook.email, outlookPassword: selectedOutlook.password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addLog("❌ " + (data.error || "Failed to start registration"));
+        setRunning(false);
+        return;
+      }
+      activeBatchId.current = data.batchId;
+      addLog(`[batch: ${data.batchId}]`);
+    } catch (err: any) {
+      addLog("❌ Network error: " + err.message);
+      setRunning(false);
+    }
+  }, [selectedOutlookId, selectedOutlook]);
 
   const handleCopy = useCallback((text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -69,318 +127,286 @@ export default function ZenRowsRegister() {
     setTimeout(() => setCopied(null), 2000);
   }, []);
 
-  const startRegistration = useCallback(async (outlookEmail?: string, outlookPassword?: string) => {
-    setError(null);
-    setResult(null);
-    setLogs([]);
-    setIsRunning(true);
-    sounds.navigate();
+  if (checking) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin w-6 h-6 border-2 border-t-transparent rounded-full" style={{ borderColor: `${G} transparent transparent transparent` }} />
+      </div>
+    );
+  }
 
-    try {
-      const body: Record<string, string> = {};
-      if (outlookEmail && outlookPassword) {
-        body.outlookEmail = outlookEmail;
-        body.outlookPassword = outlookPassword;
-      }
-      const res = await fetch("/api/zenrows-register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Failed to start registration");
-        setIsRunning(false);
-        return;
-      }
-      setBatchId(data.batchId);
-    } catch (err: any) {
-      setError(err.message || "Network error");
-      setIsRunning(false);
-    }
-  }, []);
-
-  const handleAutoRegister = useCallback(() => {
-    startRegistration();
-  }, [startRegistration]);
-
-  const handleManualRegister = useCallback(() => {
-    if (!email.trim() || !password.trim()) {
-      setError("Both Outlook email and password are required");
-      return;
-    }
-    startRegistration(email.trim(), password.trim());
-  }, [email, password, startRegistration]);
-
-  if (checking) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full" /></div>;
+  const border = `1px solid ${GA(0.12)}`;
+  const panelBg = "rgba(8,12,8,0.97)";
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+    <div className="min-h-screen font-mono" style={{ background: "#060a06", color: G }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: border, background: "rgba(0,255,65,0.02)" }}>
+        <div className="flex items-center gap-4">
           <Link href="/admin/create-server">
-            <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-zinc-300 hover:bg-emerald-500/5 font-mono text-xs" data-testid="button-back-create-server">
-              <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+            <button className="flex items-center gap-1.5 text-xs transition-colors" style={{ color: GA(0.45) }}
+              onMouseEnter={e => (e.currentTarget.style.color = GA(0.8))}
+              onMouseLeave={e => (e.currentTarget.style.color = GA(0.45))}
+              data-testid="button-back">
+              <ArrowLeft className="w-3.5 h-3.5" />
               Back
-            </Button>
+            </button>
           </Link>
+          <div style={{ width: "1px", height: "16px", background: GA(0.15) }} />
           <div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(16,185,129,0.1) 100%)', border: '1px solid rgba(34,197,94,0.2)' }}>
-                <Globe className="w-4 h-4 text-emerald-400" />
-              </div>
-              <h1 className="text-lg font-bold text-white font-mono tracking-tight" data-testid="text-page-title">Proxy Register</h1>
+              <Terminal className="w-4 h-4" style={{ color: G }} />
+              <span className="text-sm font-bold tracking-widest uppercase" style={{ color: G }}>
+                ZenRows Register
+              </span>
             </div>
-            <p className="text-[10px] text-emerald-400/30 font-mono mt-0.5 tracking-wide">AUTO-CREATE ZENROWS ACCOUNT & EXTRACT API KEY</p>
+            <div className="text-[9px] tracking-[0.25em] uppercase mt-0.5" style={{ color: GA(0.3) }}>
+              Auto-register via SOAX residential proxy · extract API key
+            </div>
           </div>
         </div>
-        {isRunning && (
-          <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 font-mono text-[10px] animate-pulse" data-testid="badge-running">
-            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-            REGISTERING
-          </Badge>
-        )}
+
+        <div className="flex items-center gap-3">
+          {running && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded text-[10px] tracking-widest uppercase"
+              style={{ background: GA(0.06), border: `1px solid ${GA(0.2)}`, color: G }}>
+              <Radio className="w-3 h-3 animate-pulse" />
+              RUNNING
+            </div>
+          )}
+          {result?.success && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded text-[10px] tracking-widest uppercase"
+              style={{ background: "rgba(0,255,65,0.08)", border: `1px solid ${GA(0.3)}`, color: G }}>
+              <CheckCircle2 className="w-3 h-3" />
+              SUCCESS
+            </div>
+          )}
+          {result && !result.success && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded text-[10px] tracking-widest uppercase"
+              style={{ background: "rgba(255,65,65,0.08)", border: "1px solid rgba(255,65,65,0.3)", color: "#ff4141" }}>
+              <XCircle className="w-3 h-3" />
+              FAILED
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="space-y-4">
-          <div className="rounded-xl p-5 space-y-4" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.8) 0%, rgba(13,17,23,0.9) 100%)', border: '1px solid rgba(34,197,94,0.15)' }}>
-            <div className="flex items-center gap-2 mb-1">
-              <Rocket className="w-3.5 h-3.5 text-emerald-400/70" />
-              <span className="text-[10px] font-mono text-emerald-400/60 uppercase tracking-wider">One-Click Auto Registration</span>
+      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] h-[calc(100vh-65px)]">
+
+        {/* Left panel - Controls */}
+        <div className="flex flex-col gap-0" style={{ borderRight: border }}>
+
+          {/* Outlook account selector */}
+          <div className="p-5" style={{ borderBottom: border }}>
+            <div className="text-[9px] tracking-[0.25em] uppercase mb-3" style={{ color: GA(0.35) }}>
+              01 / Select Outlook Account
             </div>
 
-            <p className="text-xs text-zinc-400 font-mono leading-relaxed">
-              Automatically creates a fresh Outlook account, registers it on our proxy service, verifies via email, and extracts the API key. No manual input needed.
-            </p>
+            {/* Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => !running && setDropdownOpen(o => !o)}
+                disabled={running}
+                className="w-full flex items-center justify-between px-3 py-2.5 text-left text-xs rounded"
+                style={{ background: "rgba(0,255,65,0.04)", border: `1px solid ${GA(selectedOutlook ? 0.25 : 0.1)}`, color: selectedOutlook ? G : GA(0.35), cursor: running ? "not-allowed" : "pointer" }}
+                data-testid="button-select-outlook"
+              >
+                <span className="truncate">
+                  {selectedOutlook ? selectedOutlook.email : "— select outlook account —"}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 shrink-0 ml-2" style={{ color: GA(0.4) }} />
+              </button>
 
-            {error && !showManual && (
-              <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="text-error">
-                <p className="text-xs text-red-400 font-mono">{error}</p>
+              {dropdownOpen && !running && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded overflow-hidden"
+                  style={{ background: "#0a120a", border: `1px solid ${GA(0.2)}`, maxHeight: "240px", overflowY: "auto" }}>
+                  {outlookAccounts.length === 0 ? (
+                    <div className="px-3 py-4 text-center text-[11px]" style={{ color: GA(0.3) }}>
+                      No Outlook accounts found
+                    </div>
+                  ) : (
+                    outlookAccounts.map(acc => (
+                      <button
+                        key={acc.id}
+                        onClick={() => { setSelectedOutlookId(acc.id); setDropdownOpen(false); }}
+                        className="w-full text-left px-3 py-2.5 text-xs transition-colors block"
+                        style={{ color: selectedOutlookId === acc.id ? G : GA(0.55), background: selectedOutlookId === acc.id ? GA(0.06) : "transparent", borderBottom: `1px solid ${GA(0.06)}` }}
+                        onMouseEnter={e => { if (selectedOutlookId !== acc.id) (e.currentTarget as HTMLElement).style.background = GA(0.04); }}
+                        onMouseLeave={e => { if (selectedOutlookId !== acc.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                        data-testid={`option-outlook-${acc.id}`}
+                      >
+                        <div className="truncate">{acc.email}</div>
+                        <div className="text-[9px] mt-0.5" style={{ color: GA(0.25) }}>{acc.status}</div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {selectedOutlook && (
+              <div className="mt-2 px-2 py-1.5 rounded text-[10px]" style={{ background: GA(0.04), border: `1px solid ${GA(0.08)}` }}>
+                <span style={{ color: GA(0.35) }}>password: </span>
+                <span style={{ color: GA(0.6) }}>{selectedOutlook.password.substring(0, 6)}••••••</span>
               </div>
             )}
+          </div>
 
-            <Button
-              onClick={handleAutoRegister}
-              disabled={isRunning}
-              className="w-full h-12 font-mono text-sm rounded-lg text-white"
-              style={{ background: isRunning ? 'rgba(34,197,94,0.2)' : 'linear-gradient(135deg, rgba(34,197,94,0.4) 0%, rgba(16,185,129,0.3) 100%)', border: '1px solid rgba(34,197,94,0.4)' }}
-              data-testid="button-auto-register"
+          {/* Info section */}
+          <div className="p-5" style={{ borderBottom: border }}>
+            <div className="text-[9px] tracking-[0.25em] uppercase mb-3" style={{ color: GA(0.35) }}>
+              02 / What Happens
+            </div>
+            <div className="space-y-2">
+              {[
+                ["SOAX proxy", "US residential IP assigned"],
+                ["Browser", "Navigates to app.zenrows.com/register"],
+                ["Signup", "Registers with selected Outlook email"],
+                ["Verification", "Checks Outlook inbox for confirm link"],
+                ["API Key", "Extracts key, auto-saves to settings"],
+              ].map(([label, desc]) => (
+                <div key={label} className="flex items-start gap-2 text-[10px]">
+                  <span style={{ color: GA(0.3) }}>›</span>
+                  <span style={{ color: GA(0.5) }}>{label}:</span>
+                  <span style={{ color: GA(0.35) }}>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Register button */}
+          <div className="p-5" style={{ borderBottom: border }}>
+            <div className="text-[9px] tracking-[0.25em] uppercase mb-3" style={{ color: GA(0.35) }}>
+              03 / Execute
+            </div>
+            <button
+              onClick={handleRegister}
+              disabled={running || !selectedOutlookId}
+              className="w-full py-3 rounded flex items-center justify-center gap-2 text-xs tracking-widest uppercase transition-all font-bold"
+              style={{
+                background: running ? GA(0.06) : selectedOutlookId ? GA(0.12) : "rgba(0,255,65,0.03)",
+                border: `1px solid ${running ? GA(0.2) : selectedOutlookId ? GA(0.45) : GA(0.08)}`,
+                color: running ? GA(0.4) : selectedOutlookId ? G : GA(0.2),
+                cursor: running || !selectedOutlookId ? "not-allowed" : "pointer",
+                boxShadow: (!running && selectedOutlookId) ? `0 0 20px ${GA(0.08)}` : "none",
+              }}
+              data-testid="button-register"
             >
-              {isRunning ? (
+              {running ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating Account & Extracting API Key...
+                  <span className="inline-block w-3 h-3 border border-t-transparent rounded-full animate-spin" style={{ borderColor: `${GA(0.6)} transparent transparent transparent` }} />
+                  Registering...
                 </>
               ) : (
                 <>
-                  <Zap className="w-4 h-4 mr-2" />
-                  Create Account & Get API Key
+                  <Zap className="w-3.5 h-3.5" />
+                  Register &amp; Extract API Key
                 </>
               )}
-            </Button>
-
-            <div className="pt-2 space-y-1.5">
-              <span className="text-[10px] font-mono text-emerald-400/30 uppercase tracking-wider">What happens</span>
-              <ul className="space-y-1 text-[11px] text-zinc-500 font-mono">
-                <li className="flex items-start gap-2">
-                  <span className="text-emerald-400/40 mt-0.5">1</span>
-                  Creates a fresh Outlook email account automatically
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-emerald-400/40 mt-0.5">2</span>
-                  Registers a new proxy account with that email
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-emerald-400/40 mt-0.5">3</span>
-                  Logs into Outlook to find & click the verification link
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-emerald-400/40 mt-0.5">4</span>
-                  Extracts the proxy API key and saves it
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="rounded-xl overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(15,21,32,0.6) 0%, rgba(13,17,23,0.7) 100%)', border: '1px solid rgba(0,255,65,0.06)' }}>
-            <button
-              onClick={() => setShowManual(!showManual)}
-              disabled={isRunning}
-              className="w-full px-5 py-3 flex items-center justify-between text-left"
-              data-testid="button-toggle-manual"
-            >
-              <div className="flex items-center gap-2">
-                <Key className="w-3.5 h-3.5 text-zinc-500/40" />
-                <span className="text-[10px] font-mono text-zinc-500/50 uppercase tracking-wider">Use Existing Outlook Account</span>
-              </div>
-              {showManual ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />}
             </button>
-
-            {showManual && (
-              <div className="px-5 pb-5 space-y-3">
-                <p className="text-[11px] text-zinc-500 font-mono leading-relaxed">
-                  Already have an Outlook account? Enter it here to register on our proxy directly.
-                </p>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
-                    <Mail className="w-3 h-3" />
-                    Outlook Email
-                  </Label>
-                  <Input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="user@outlook.com"
-                    disabled={isRunning}
-                    className="h-9 bg-black/30 border-emerald-500/10 text-emerald-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
-                    data-testid="input-outlook-email"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
-                    <Lock className="w-3 h-3" />
-                    Outlook Password
-                  </Label>
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Outlook account password"
-                    disabled={isRunning}
-                    className="h-9 bg-black/30 border-emerald-500/10 text-emerald-50 font-mono text-sm rounded-lg placeholder:text-zinc-600"
-                    onKeyDown={(e) => { if (e.key === "Enter" && !isRunning && email.trim() && password.trim()) handleManualRegister(); }}
-                    data-testid="input-outlook-password"
-                  />
-                </div>
-
-                {error && showManual && (
-                  <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20" data-testid="text-error-manual">
-                    <p className="text-xs text-red-400 font-mono">{error}</p>
-                  </div>
-                )}
-
-                <Button
-                  onClick={handleManualRegister}
-                  disabled={isRunning || !email.trim() || !password.trim()}
-                  className="w-full h-9 font-mono text-xs rounded-lg"
-                  style={{ background: 'rgba(0,255,65,0.1)', border: '1px solid rgba(0,255,65,0.15)' }}
-                  data-testid="button-manual-register"
-                >
-                  {isRunning ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      Running...
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-3.5 h-3.5 mr-1.5" />
-                      Register with Existing Outlook
-                    </>
-                  )}
-                </Button>
-              </div>
-            )}
           </div>
 
+          {/* Result */}
           {result && (
-            <div
-              className={`rounded-xl p-4 ${result.success ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'}`}
-              data-testid="zenrows-register-result"
-            >
-              <div className="flex items-center gap-2">
-                {result.success ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                ) : (
-                  <XCircle className="w-5 h-5 text-red-400" />
-                )}
-                <span className={`text-sm font-mono font-bold ${result.success ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {result.success ? "Registration Successful" : "Registration Failed"}
-                </span>
+            <div className="p-5 flex-1 overflow-y-auto">
+              <div className="text-[9px] tracking-[0.25em] uppercase mb-3" style={{ color: result.success ? GA(0.4) : "rgba(255,65,65,0.4)" }}>
+                04 / Result
               </div>
-
-              {result.success && result.outlookEmail && (
-                <div className="mt-3 space-y-2 p-3 rounded-lg bg-black/20">
-                  <span className="text-[10px] font-mono text-blue-400/50 uppercase tracking-wider">Outlook Account Created</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-zinc-500 w-12">Email</span>
-                    <code className="flex-1 text-xs font-mono text-blue-300 truncate" data-testid="text-outlook-email">{result.outlookEmail}</code>
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[9px] text-blue-400/40 hover:text-blue-300 font-mono shrink-0" onClick={() => handleCopy(result.outlookEmail!, "email")} data-testid="button-copy-email">
-                      {copied === "email" ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-zinc-500 w-12">Pass</span>
-                    <code className="flex-1 text-xs font-mono text-blue-300 truncate" data-testid="text-outlook-password">{result.outlookPassword}</code>
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-[9px] text-blue-400/40 hover:text-blue-300 font-mono shrink-0" onClick={() => handleCopy(result.outlookPassword!, "pass")} data-testid="button-copy-password">
-                      {copied === "pass" ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    </Button>
-                  </div>
-                </div>
-              )}
 
               {result.success && result.apiKey && (
-                <div className="mt-3 space-y-1.5">
-                  <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Proxy API Key</span>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 text-xs font-mono text-emerald-300 bg-black/30 px-3 py-2 rounded-lg truncate" data-testid="text-api-key">
-                      {result.apiKey}
-                    </code>
-                    <Button variant="ghost" size="sm" className="h-8 px-3 text-[10px] text-emerald-400/50 hover:text-emerald-300 font-mono shrink-0" onClick={() => handleCopy(result.apiKey!, "apikey")} data-testid="button-copy-api-key">
-                      {copied === "apikey" ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    </Button>
+                <div className="space-y-3">
+                  <div className="p-3 rounded" style={{ background: GA(0.05), border: `1px solid ${GA(0.2)}` }}>
+                    <div className="text-[9px] tracking-widest uppercase mb-2" style={{ color: GA(0.35) }}>
+                      <Key className="w-3 h-3 inline mr-1" />API Key
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-[11px] break-all" style={{ color: G }} data-testid="text-api-key">
+                        {result.apiKey}
+                      </code>
+                      <button
+                        onClick={() => handleCopy(result.apiKey!, "apikey")}
+                        className="shrink-0 p-1.5 rounded transition-colors"
+                        style={{ color: copied === "apikey" ? G : GA(0.35), background: GA(0.06) }}
+                        data-testid="button-copy-api-key"
+                      >
+                        {copied === "apikey" ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-[10px] px-1" style={{ color: GA(0.3) }}>
+                    Auto-saved to settings as active ZenRows key.
                   </div>
                 </div>
               )}
 
-              {result.error && (
-                <p className="text-xs text-red-400/80 font-mono mt-1.5">{result.error}</p>
+              {result.success && result.outlookEmail && (
+                <div className="mt-3 p-3 rounded" style={{ background: "rgba(0,200,255,0.04)", border: "1px solid rgba(0,200,255,0.15)" }}>
+                  <div className="text-[9px] tracking-widest uppercase mb-2" style={{ color: "rgba(0,200,255,0.4)" }}>Outlook Used</div>
+                  <div className="text-[11px]" style={{ color: "rgba(0,200,255,0.7)" }} data-testid="text-outlook-email">{result.outlookEmail}</div>
+                </div>
+              )}
+
+              {!result.success && result.error && (
+                <div className="p-3 rounded" style={{ background: "rgba(255,65,65,0.06)", border: "1px solid rgba(255,65,65,0.2)" }}>
+                  <div className="text-[9px] tracking-widest uppercase mb-1.5" style={{ color: "rgba(255,65,65,0.5)" }}>Error</div>
+                  <div className="text-[11px]" style={{ color: "#ff7070" }} data-testid="text-error">{result.error}</div>
+                </div>
               )}
             </div>
           )}
         </div>
 
-        <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(0,255,65,0.08)' }}>
-          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: 'rgba(0,255,65,0.03)', borderBottom: '1px solid rgba(0,255,65,0.06)' }}>
-            <Terminal className="w-3.5 h-3.5 text-emerald-400/50" />
-            <span className="text-[10px] font-mono text-emerald-400/40 uppercase tracking-wider">Live Logs</span>
+        {/* Right panel - Terminal logs */}
+        <div className="flex flex-col min-h-0">
+          <div className="flex items-center gap-3 px-4 py-3 shrink-0" style={{ borderBottom: border, background: "rgba(0,255,65,0.02)" }}>
+            <Terminal className="w-3.5 h-3.5" style={{ color: GA(0.45) }} />
+            <span className="text-[10px] tracking-[0.2em] uppercase" style={{ color: GA(0.35) }}>Live Terminal</span>
+            {running && (
+              <span className="text-[9px] tracking-widest ml-1" style={{ color: GA(0.4) }}>
+                {tick ? "█" : " "} recording
+              </span>
+            )}
             {logs.length > 0 && (
-              <Badge variant="outline" className="ml-auto border-emerald-500/15 text-emerald-400/40 text-[9px] font-mono" data-testid="badge-log-count">
-                {logs.length}
-              </Badge>
+              <span className="ml-auto text-[9px] px-2 py-0.5 rounded" style={{ background: GA(0.05), border: `1px solid ${GA(0.1)}`, color: GA(0.35) }}>
+                {logs.length} lines
+              </span>
             )}
           </div>
-          <ScrollArea className="h-[500px]">
-            <div className="p-3 space-y-0.5 font-mono text-[11px]">
-              {logs.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-zinc-600 text-xs" data-testid="text-no-logs">
-                  Logs will appear here when registration starts...
+
+          <div className="flex-1 overflow-y-auto p-4" style={{ background: panelBg }}>
+            {logs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3">
+                <Terminal className="w-8 h-8" style={{ color: GA(0.12) }} />
+                <div className="text-xs text-center" style={{ color: GA(0.2) }}>
+                  Select an Outlook account and click Register<br />
+                  <span style={{ color: GA(0.15) }}>logs will stream here in real-time</span>
                 </div>
-              ) : (
-                logs.map((log, i) => {
-                  const isError = log.message.toLowerCase().includes("error") || log.message.toLowerCase().includes("failed");
-                  const isSuccess = log.message.includes("API Key") || log.message.includes("successful") || log.message.includes("solved") || log.message.includes("Complete!");
-                  const isStep = log.message.startsWith("Step ");
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {logs.map((log, i) => {
+                  const { color, prefix } = getLogStyle(log.text);
+                  const isSep = log.text.startsWith("━━━") || log.text.startsWith("---");
                   return (
-                    <div
-                      key={i}
-                      className={`py-1 px-2 rounded ${isError ? 'text-red-400/80 bg-red-500/5' : isSuccess ? 'text-emerald-400/80 bg-emerald-500/5' : isStep ? 'text-blue-400/80 bg-blue-500/5' : 'text-zinc-400'}`}
-                      data-testid={`log-entry-${i}`}
-                    >
-                      <span className="text-emerald-400/20 mr-2">
-                        {new Date(log.timestamp).toLocaleTimeString("en-US", { hour12: false })}
-                      </span>
-                      {log.message}
+                    <div key={i} className={`flex items-start gap-2 text-[11px] leading-relaxed ${isSep ? "my-1" : ""}`} data-testid={`log-${i}`}>
+                      <span className="shrink-0 text-[9px] mt-0.5 tabular-nums" style={{ color: GA(0.2), minWidth: "60px" }}>{log.time}</span>
+                      {prefix && <span className="shrink-0 w-3" style={{ color }}>{prefix}</span>}
+                      <span style={{ color }}>{log.text}</span>
                     </div>
                   );
-                })
-              )}
-              <div ref={logsEndRef} />
-            </div>
-          </ScrollArea>
+                })}
+                <div ref={logsEndRef} />
+              </div>
+            )}
+          </div>
+
+          {/* Terminal footer */}
+          <div className="px-4 py-2 shrink-0 flex items-center gap-4" style={{ borderTop: border, background: "rgba(0,255,65,0.015)" }}>
+            <span className="text-[9px] tracking-widest" style={{ color: GA(0.25) }}>SOAX · US RESIDENTIAL · ZENROWS REG</span>
+            <span className="ml-auto text-[9px]" style={{ color: GA(0.2) }}>
+              {running ? "● active" : result?.success ? "● done" : "○ idle"}
+            </span>
+          </div>
         </div>
       </div>
     </div>
