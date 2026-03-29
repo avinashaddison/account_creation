@@ -3528,12 +3528,12 @@ export async function registerRoutes(
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
-            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
+            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {
-              await storage.updateReplitAccountStatus(acct.id, "subscribed").catch(() => {});
-              broadcastLog(batchId, jobId, `  ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+              await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
+              broadcastLog(batchId, jobId, `  ⚠️  Already has Core subscription — moved to sold_out, will be skipped as target`, userId);
             } else if (result.error?.includes("banned_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
@@ -3797,12 +3797,12 @@ export async function registerRoutes(
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
-            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
+            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {
-              await storage.updateReplitAccountStatus(acct.id, "subscribed").catch(() => {});
-              broadcastLog(batchId, jobId, `  ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+              await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
+              broadcastLog(batchId, jobId, `  ⚠️  Already has Core subscription — moved to sold_out, will be skipped as target`, userId);
             } else if (result.error?.includes("banned_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
@@ -3868,22 +3868,17 @@ export async function registerRoutes(
       const sourceIds = new Set(sources.map(a => a.id));
       // Targets: only "processing" accounts without a checkout URL
       // Each source can serve linksPerSource targets (same coupon used N times)
-      // includeSubscribed: also retry accounts marked subscribed (they may be false-positives)
-      const targetStatuses = includeSubscribed
-        ? ["processing", "subscribed"]
-        : ["processing"];
+      // Only "processing" accounts are valid targets — fresh accounts that haven't got a checkout URL yet
       const targets = allAccounts
         .filter(a =>
           !sourceIds.has(a.id) && a.email && a.password && !a.checkoutUrl &&
-          targetStatuses.includes(a.status)
+          a.status === "processing"
         )
         .slice(0, sources.length * linksPerSource);
 
       if (targets.length === 0) {
         return res.status(400).json({
-          error: includeSubscribed
-            ? "No processing or subscribed accounts available as targets — create new accounts first"
-            : "No processing accounts need checkout links — enable 'retry subscribed' or create new accounts first"
+          error: "No processing accounts need checkout links — create new accounts first"
         });
       }
 
@@ -3972,14 +3967,14 @@ export async function registerRoutes(
             if (result.success && result.stripeUrl) {
               broadcastLog(batchId, jobId, `CHECKOUT_URL|${target.email}|${result.stripeUrl}`, userId);
               await storage.setReplitCheckoutUrl(target.id, result.stripeUrl).catch(() => {});
-              await storage.updateReplitAccountStatus(target.id, "working").catch(() => {});
+              await storage.updateReplitAccountStatus(target.id, "available").catch(() => {});
               broadcastLog(batchId, jobId, `${tag} ✅ Done — link generated for ${target.email}`, userId);
               return { success: true, source: source.email, target: target.email, url: result.stripeUrl };
             } else {
               broadcastLog(batchId, jobId, `${tag} ❌ Link generation failed: ${result.error}`, userId);
               if (result.error?.includes("already has an active Replit")) {
-                await storage.updateReplitAccountStatus(target.id, "subscribed").catch(() => {});
-                broadcastLog(batchId, jobId, `${tag} ⚠️  Marked as already-subscribed — will be skipped in future batches`, userId);
+                await storage.updateReplitAccountStatus(target.id, "sold_out").catch(() => {});
+                broadcastLog(batchId, jobId, `${tag} ⚠️  Already has Core subscription — moved to sold_out, will be skipped as target`, userId);
               } else if (result.error?.includes("banned_account")) {
                 await storage.updateReplitAccountStatus(target.id, "error").catch(() => {});
                 broadcastLog(batchId, jobId, `${tag} 🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);

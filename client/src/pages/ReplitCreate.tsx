@@ -38,10 +38,11 @@ const L = "rgba(255,185,50,1)";
 const LA = (a: number) => `rgba(255,185,50,${a})`;
 
 const STATUSES: { value: string; label: string; color: string; bg: string; border: string }[] = [
-  { value: "available",  label: "VERIFIED ACCOUNT", color: "#22c55e", bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.4)" },
-  { value: "working",    label: "WORKING NOW",       color: "#f97316", bg: "rgba(249,115,22,0.12)",  border: "rgba(249,115,22,0.4)" },
+  { value: "available",  label: "AVAILABLE",         color: "#22c55e", bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.4)" },
   { value: "processing", label: "ACCOUNT CREATED",   color: "#3b82f6", bg: "rgba(59,130,246,0.12)",  border: "rgba(59,130,246,0.4)" },
   { value: "sold_out",   label: "STOCK OUT",         color: "#ef4444", bg: "rgba(239,68,68,0.12)",   border: "rgba(239,68,68,0.4)" },
+  { value: "subscribed", label: "SOLD",              color: "#a855f7", bg: "rgba(168,85,247,0.12)",  border: "rgba(168,85,247,0.4)" },
+  { value: "working",    label: "PROCESSING",        color: "#f97316", bg: "rgba(249,115,22,0.12)",  border: "rgba(249,115,22,0.4)" },
   { value: "completed",  label: "COMPLETED",         color: "#34d399", bg: "rgba(52,211,153,0.12)",  border: "rgba(52,211,153,0.35)" },
   { value: "warmed",     label: "WARMED",            color: "#c084fc", bg: "rgba(192,132,252,0.12)", border: "rgba(192,132,252,0.35)" },
   { value: "error",      label: "ERROR",             color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.35)" },
@@ -59,7 +60,7 @@ function statusSolid(s: string): string {
     case "completed":  return "rgb(13,148,136)";   // teal
     case "warmed":     return "rgb(124,58,237)";   // purple
     case "error":      return "rgb(139,0,0)";      // dark red
-    case "subscribed": return "rgb(109,40,217)";   // deep purple
+    case "subscribed": return "rgb(168,85,247)";   // purple - SOLD
     default:           return "rgb(55,65,81)";     // gray
   }
 }
@@ -98,7 +99,7 @@ export default function ReplitCreate() {
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
   const [batchCount, setBatchCount] = useState(5);
   const [linksPerSource, setLinksPerSource] = useState(2);
-  const [includeSubscribed, setIncludeSubscribed] = useState(true);
+
   const [checkoutDelayMinutes, setCheckoutDelayMinutes] = useState(0);
   const [checkoutDelaySaving, setCheckoutDelaySaving] = useState(false);
   const { data: checkoutDelayData } = useQuery<{ minutes: number }>({ queryKey: ["/api/settings/replit-checkout-delay"] });
@@ -421,7 +422,7 @@ export default function ReplitCreate() {
     setCompletedCount(0);
     setTotalCount(batchCount);
     try {
-      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount, linksPerSource, includeSubscribed });
+      const res = await apiRequest("POST", "/api/replit-batch-coupon-links", { count: batchCount, linksPerSource });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start batch");
       activeBatchId.current = data.batchId;
@@ -985,22 +986,12 @@ export default function ReplitCreate() {
                       <div className="flex items-center justify-between">
                         <div className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
                           {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length + replitAccounts.filter(a => a.couponExtracted && a.couponCode).length)} available sources · {
-                            replitAccounts.filter(a => a.status === "processing" || (includeSubscribed && a.status === "subscribed")).length
+                            replitAccounts.filter(a => a.status === "processing").length
                           } targets
                         </div>
-                        <button
-                          onClick={() => setIncludeSubscribed(v => !v)}
-                          className="flex items-center gap-1.5 rounded px-2 py-0.5 text-[9px] font-mono transition-colors"
-                          style={{
-                            background: includeSubscribed ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.04)",
-                            border: `1px solid ${includeSubscribed ? "rgba(34,197,94,0.4)" : LA(0.15)}`,
-                            color: includeSubscribed ? "#22c55e" : LA(0.35),
-                          }}
-                          data-testid="toggle-include-subscribed"
-                        >
-                          <span>{includeSubscribed ? "✓" : "○"}</span>
-                          <span>retry subscribed</span>
-                        </button>
+                        <div className="text-[9px] font-mono" style={{ color: "rgba(34,197,94,0.5)" }}>
+                          only processing accounts used as targets
+                        </div>
                       </div>
                       <button
                         onClick={handleBatchCouponLinks}
