@@ -7221,7 +7221,7 @@ export async function registerZenrowsAccount(
 
     if (!restSignupDone) {
 
-    log("Launching browser for proxy registration (direct browser mode)...");
+    log("Launching browser for proxy registration (SOAX residential proxy mode)...");
 
     await ensureBrowserInstalled();
     const launchArgs = [
@@ -7231,18 +7231,40 @@ export async function registerZenrowsAccount(
       "--disable-blink-features=AutomationControlled",
       "--ignore-certificate-errors",
     ];
-    log("Launching direct browser for proxy registration (direct mode)");
-    const dedicatedBrowser = await chromium.launch({ headless: true, args: launchArgs });
-    localBrowser = dedicatedBrowser;
-    context = await dedicatedBrowser.newContext({
+
+    // Load SOAX residential proxy
+    const rawProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+    const soaxUrl = rawProxyUrl ? rawProxyUrl.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
+    const soaxCtxOptions: any = {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       viewport: { width: 1920, height: 1080 },
       locale: "en-US",
-      timezoneId: "America/Los_Angeles",
+      timezoneId: "America/New_York",
       ignoreHTTPSErrors: true,
-    });
+    };
+    if (soaxUrl) {
+      try {
+        const parsedSoax = new URL(soaxUrl);
+        const cleanUser = (decodeURIComponent(parsedSoax.username) || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        soaxCtxOptions.proxy = {
+          server: `${parsedSoax.protocol}//${parsedSoax.hostname}:${parsedSoax.port}`,
+          username: cleanUser,
+          password: decodeURIComponent(parsedSoax.password),
+        };
+        log(`SOAX proxy configured: ${parsedSoax.hostname}:${parsedSoax.port} (session=${cleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+      } catch (proxyErr: any) {
+        log("Warning: could not parse SOAX proxy URL — falling back to no proxy: " + proxyErr.message);
+      }
+    } else {
+      log("Warning: no residential_proxy_url set — launching without proxy");
+    }
+
+    log("Launching browser for ZenRows registration");
+    const dedicatedBrowser = await chromium.launch({ headless: true, args: launchArgs });
+    localBrowser = dedicatedBrowser;
+    context = await dedicatedBrowser.newContext(soaxCtxOptions);
     page = await context.newPage();
-    log("Local browser launched (direct, no proxy)");
+    log(`Browser launched ${soaxUrl ? "with SOAX residential proxy" : "(no proxy — direct)"}`);
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
@@ -7281,13 +7303,19 @@ export async function registerZenrowsAccount(
         args: launchArgs,
       });
       localBrowser = directBrowser;
-      context = await directBrowser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        viewport: { width: 1920, height: 1080 },
-        locale: "en-US",
-        timezoneId: "America/Los_Angeles",
-        ignoreHTTPSErrors: true,
-      });
+      // Reuse soaxCtxOptions (includes proxy if configured) with a fresh session ID
+      const retrySessionId = Math.random().toString(36).substring(2, 14);
+      const retryCtxOptions = { ...soaxCtxOptions };
+      if (retryCtxOptions.proxy && rawProxyUrl) {
+        const retryParsed = new URL(rawProxyUrl.replace(/sessionid-[^-@]+/, `sessionid-${retrySessionId}`));
+        const retryCleanUser = (decodeURIComponent(retryParsed.username) || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        retryCtxOptions.proxy = {
+          server: `${retryParsed.protocol}//${retryParsed.hostname}:${retryParsed.port}`,
+          username: retryCleanUser,
+          password: decodeURIComponent(retryParsed.password),
+        };
+      }
+      context = await directBrowser.newContext(retryCtxOptions);
       page = await context.newPage();
       await page.setDefaultNavigationTimeout(120000);
       await page.setDefaultTimeout(30000);
@@ -7297,7 +7325,7 @@ export async function registerZenrowsAccount(
         Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         (window as any).chrome = { runtime: {} };
       });
-      log("Direct browser launched. Navigating to proxy site...");
+      log(`Retry browser launched ${soaxUrl ? "with fresh SOAX session" : "(no proxy)"}. Navigating to proxy site...`);
       try {
         await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 120000 });
         navSuccess = true;
