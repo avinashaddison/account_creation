@@ -1,0 +1,197 @@
+13:20:26
+>
+🚀 Parallel batch started — 10 job(s) running simultaneously [replit-batch-mnbglvrw]
+13:20:27
+·
+[Job 6] 🎟️ Using stored coupon: AGENT410FDC072CFDA
+13:20:27
+·
+[Job 6] 🎟️ Coupon: AGENT410FDC072CFDA
+13:20:27
+·
+[Job 7] 🤖 Source: tveitfbanfibrr@hotmail.com → Target: ammiegardryddmd@hotmail.com
+STOCK OUT
+13:20:27
+·
+[Job 7] 🎟️ Using stored coupon: AGENT45866AC81C6A1
+13:20:27
+·
+[Job 7] 🎟️ Coupon: AGENT45866AC81C6A1
+13:20:27
+·
+[Job 8] 🤖 Source: tveitfbanfibrr@hotmail.com → Target: fematuraatzcz@hotmail.com
+STOCK OUT
+13:20:27
+·
+[Job 8] 🎟️ Using stored coupon: AGENT45866AC81C6A1
+13:20:27
+·
+[Job 8] 🎟️ Coupon: AGENT45866AC81C6A1
+13:20:27
+·
+[Job 9] 🤖 Source: galkorsumract@hotmail.com → Target: aclanhkhieuztb@hotmail.com
+STOCK OUT
+13:20:27
+·
+[Job 9] 🎟️ Using stored coupon: AGENT411E25C43912C
+13:20:27
+·
+[Job 9] 🎟️ Coupon: AGENT411E25C43912C
+13:20:27
+·
+[Job 10] 🤖 Source: galkorsumract@hotmail.com → Target: pescejbietzpyon@hotmail.com
+STOCK OUT
+13:20:27
+·
+[Job 10] 🎟️ Using stored coupon: AGENT411E25C43912C
+13:20:27
+·
+[Job 10] 🎟️ Coupon: AGENT411E25C43912C
+13:20:27
+·
+[Job 1] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 5] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 6] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 3] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 7] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 8] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 10] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 2] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 9] Connecting via Addison Proxy...
+13:20:27
+·
+[Job 4] Connecting via Addison Proxy...
+13:20:28
+·
+[Job 10] Addison Proxy connected.
+13:20:28
++
+[Job 10] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 2] Addison Proxy connected.
+13:20:28
++
+[Job 2] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 9] Addison Proxy connected.
+13:20:28
++
+[Job 9] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 1] Addison Proxy connected.
+13:20:28
++
+[Job 1] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 10] 🔐 Logging into Replit as pescejbietzpyon@hotmail.com...
+SUBSCRIBED
+13:20:28
+·
+[Job 2] 🔐 Logging into Replit as russellobrien1991@outlook.com...
+WORKING NOW
+13:20:28
+·
+[Job 9] 🔐 Logging into Replit as aclanhkhieuztb@hotmail.com...
+SUBSCRIBED
+13:20:28
+·
+[Job 1] 🔐 Logging into Replit as jenniferdavis4725@outlook.com...
+ACCOUNT CREATED
+13:20:28
+·
+[Job 8] Addison Proxy connected.
+13:20:28
++
+[Job 8] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 6] Addison Proxy connected.
+13:20:28
++
+[Job 6] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 8] 🔐 Logging into Replit as fematuraatzcz@hotmail.com...
+SUBSCRIBED
+13:20:28
+·
+[Job 5] Addison Proxy connected.
+13:20:28
++
+[Job 5] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:28
+·
+[Job 6] 🔐 Logging into Replit as zecuaemerasyz@hotmail.com...
+SUBSCRIBED
+13:20:28
+·
+[Job 5] 🔐 Logging into Replit as baumlvferusdo@hotmail.com...
+SUBSCRIBED
+13:20:29
+·
+[Job 7] Addison Proxy connected.
+13:20:29
++
+[Job 7] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:30
+·
+[Job 7] 🔐 Logging into Replit as ammiegardryddmd@hotmail.com...
+SUBSCRIBED
+13:20:30
+·
+[Job 4] Addison Proxy connected.
+13:20:30
++
+[Job 4] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:30
+·
+[Job 4] 🔐 Logging into Replit as danielsullivan3613@outlook.com...
+SUBSCRIBED
+13:20:31
+·
+[Job 3] Addison Proxy connected.
+13:20:31
++
+[Job 3] ✅ ZenRows anti-bot browser connected — ban protection active
+13:20:31
+·
+[Job 3] 🔐 Logging into Replit as mrsmelinda4596@outlook.com...
+SUBSCRIBED
+13:20:45
+·
+[Job 2] → Login submitted — waiting for redirect...
+13:20:47
+·
+[Job 5] → Login submitted — waiting for redirect...
+13:20:48
+·
+[Job 10] → Login submitted — waiting for redirect...
+13:20:49
+·
+[Job 4] → Login submitted — waiting for redirect...
+13:20:49
+·
+[Job 7] → Login submitted — waiting for redirect...
+13:20:53
+·
+[Job 3] → Login submitted — waiting for redirect...

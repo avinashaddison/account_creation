@@ -10,7 +10,6 @@ import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import { getAvailableDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent } from "./mailService";
-import * as ProxyChain from "proxy-chain";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
 
@@ -9686,7 +9685,7 @@ export async function createGmailAccount(
 ): Promise<GmailCreateResult> {
   let browser: any = null;
   let smsOrderId: string | undefined;
-  let anonymizedProxyUrl: string | null = null;
+  let gmailNativeProxy: { server: string; username: string; password: string } | null = null;
 
   try {
     await ensureBrowserInstalled();
@@ -9722,15 +9721,28 @@ export async function createGmailAccount(
       const rawProxy = residentialProxy.startsWith("http") ? residentialProxy : `http://${residentialProxy}`;
       try {
         const u = new URL(rawProxy);
-        // Strip SOAX web-bypass suffix (-opt-wb) — not needed for standard tunneling
         const cleanUsername = (u.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-        // Rebuild clean proxy URL with credentials for proxy-chain
-        const cleanProxyUrl = `http://${encodeURIComponent(cleanUsername)}:${encodeURIComponent(u.password || "")}@${u.hostname}:${u.port}`;
-        // anonymizeProxy wraps SOAX (auth required) behind a local no-auth proxy
-        // Chromium can't do SOCKS5 auth and has issues with HTTP proxy auth — local wrap solves both
-        anonymizedProxyUrl = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`Local proxy: ${anonymizedProxyUrl} → SOAX ${u.hostname}:${u.port}`);
-        launchOptions.proxy = { server: anonymizedProxyUrl };
+        const cleanPassword = decodeURIComponent(u.password || "");
+        const proxyHealthy = await new Promise<boolean>((resolve) => {
+          const http = require("http") as typeof import("http");
+          const req = http.request({
+            host: u.hostname, port: Number(u.port),
+            method: "CONNECT", path: "google.com:443",
+            headers: { "Proxy-Authorization": "Basic " + Buffer.from(`${cleanUsername}:${cleanPassword}`).toString("base64") },
+            timeout: 8000,
+          });
+          req.on("connect", (_res: any, socket: any) => { socket.destroy(); resolve(_res.statusCode === 200); });
+          req.on("error", () => resolve(false));
+          req.on("timeout", () => { req.destroy(); resolve(false); });
+          req.end();
+        });
+        if (!proxyHealthy) {
+          log(`Proxy rejected CONNECT — falling back to direct`);
+        } else {
+          gmailNativeProxy = { server: `http://${u.hostname}:${u.port}`, username: cleanUsername, password: cleanPassword };
+          log(`SOAX proxy → ${u.hostname}:${u.port}`);
+          launchOptions.proxy = gmailNativeProxy;
+        }
       } catch (e) {
         log(`Proxy setup error: ${e} — continuing without proxy`);
       }
@@ -10107,9 +10119,6 @@ export async function createGmailAccount(
       try { await (await import("./smspoolService")).cancelSMSOrder(smsOrderId); } catch {}
     }
     if (browser) { try { await browser.close(); } catch {} }
-    if (anonymizedProxyUrl) {
-      try { await ProxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true); } catch {}
-    }
   }
 }
 
@@ -17388,7 +17397,7 @@ export async function onboardingCheckoutReplitAccount(
   }
 
   let browser: any = null;
-  let checkoutAnonymizedProxy: string | null = null;
+  let checkoutNativeProxy: { server: string; username: string; password: string } | null = null;
 
   try {
     log("═".repeat(55));
@@ -17397,7 +17406,7 @@ export async function onboardingCheckoutReplitAccount(
     log(`   Coupon : ${couponCode}`);
     log("═".repeat(55));
 
-    // ── SOAX residential proxy — unique IP per checkout to prevent Promo Abuse detection ──
+    // ── SOAX residential proxy — native Playwright proxy (no ProxyChain) ──
     try {
       const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
       const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
@@ -17410,10 +17419,29 @@ export async function onboardingCheckoutReplitAccount(
         else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
         const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
         const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
-        checkoutAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-        log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
-        await resolveProxyIp(checkoutAnonymizedProxy, log, "SOAX CHECKOUT");
+        const cleanPassword = decodeURIComponent(pUrl.password || "");
+        // Health-check before committing
+        const proxyHealthy = await new Promise<boolean>((resolve) => {
+          const http = require("http") as typeof import("http");
+          const req = http.request({
+            host: pUrl.hostname, port: Number(pUrl.port),
+            method: "CONNECT", path: "replit.com:443",
+            headers: { "Proxy-Authorization": "Basic " + Buffer.from(`${cleanUser}:${cleanPassword}`).toString("base64") },
+            timeout: 8000,
+          });
+          req.on("connect", (_res: any, socket: any) => { socket.destroy(); resolve(_res.statusCode === 200); });
+          req.on("error", () => resolve(false));
+          req.on("timeout", () => { req.destroy(); resolve(false); });
+          req.end();
+        });
+        if (!proxyHealthy) {
+          log(`❌ SOAX proxy rejected CONNECT — package suspended. Falling back to DIRECT.`);
+        } else {
+          checkoutNativeProxy = { server: `http://${pUrl.hostname}:${pUrl.port}`, username: cleanUser, password: cleanPassword };
+          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
+          await resolveProxyIp(rawForIp, log, "SOAX CHECKOUT");
+        }
       } else {
         log("⚠️ No SOAX proxy configured — checkout using direct connection (higher ban risk)");
       }
@@ -17445,7 +17473,7 @@ export async function onboardingCheckoutReplitAccount(
         "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
       ],
     };
-    if (checkoutAnonymizedProxy) coLaunchOptions.proxy = { server: checkoutAnonymizedProxy };
+    if (checkoutNativeProxy) coLaunchOptions.proxy = checkoutNativeProxy;
     browser = await chromium.launch(coLaunchOptions);
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${coCv}.0.0.0 Safari/537.36`;
@@ -18317,9 +18345,6 @@ export async function onboardingCheckoutReplitAccount(
     return { success: false, couponConfirmed: false, error: msg };
   } finally {
     try { if (browser) await browser.close(); } catch {}
-    if (checkoutAnonymizedProxy) {
-      try { await ProxyChain.closeAnonymizedProxy(checkoutAnonymizedProxy, true); } catch {}
-    }
     log("🔒 Browser closed.");
   }
 }
@@ -18834,7 +18859,7 @@ export async function generateSingleCheckoutLink(
   log: (msg: string) => void
 ): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
   let browser: any = null;
-  let linkAnonymizedProxy: string | null = null;
+  let linkNativeProxy: { server: string; username: string; password: string } | null = null;
   let usingZenRows = false;
   try {
     // ── Try ZenRows first (anti-ban: residential IP + advanced fingerprinting) ──
@@ -18855,12 +18880,11 @@ export async function generateSingleCheckoutLink(
     const glCv = GL_CVS[Math.floor(Math.random() * GL_CVS.length)];
 
     if (!usingZenRows) {
-      // ── SOAX residential proxy — only for local stealth browser fallback (ZenRows manages its own proxy internally) ──
+      // ── SOAX residential proxy — native Playwright proxy (no ProxyChain) ──
       try {
         const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
         const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
         const browserProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-        // soax_proxy_template > residential_proxy_url > browser_proxy_url
         const rawProxy = soaxTemplate || residentialUrl || browserProxyUrl;
         if (rawProxy) {
           const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
@@ -18870,10 +18894,31 @@ export async function generateSingleCheckoutLink(
           else if (rawProxy.includes("session-")) rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
           const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
           const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-          const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
-          linkAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
-          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
-          await resolveProxyIp(linkAnonymizedProxy, log, "SOAX LINK-GEN");
+          const cleanPassword = decodeURIComponent(pUrl.password || "");
+
+          // Health-check: CONNECT test before committing to this proxy
+          const proxyHealthy = await new Promise<boolean>((resolve) => {
+            const http = require("http") as typeof import("http");
+            const req = http.request({
+              host: pUrl.hostname, port: Number(pUrl.port),
+              method: "CONNECT", path: "replit.com:443",
+              headers: { "Proxy-Authorization": "Basic " + Buffer.from(`${cleanUser}:${cleanPassword}`).toString("base64") },
+              timeout: 8000,
+            });
+            req.on("connect", (_res: any, socket: any) => { socket.destroy(); resolve(_res.statusCode === 200); });
+            req.on("error", () => resolve(false));
+            req.on("timeout", () => { req.destroy(); resolve(false); });
+            req.end();
+          });
+
+          if (!proxyHealthy) {
+            log(`❌ SOAX proxy rejected CONNECT — package may be suspended. Falling back to DIRECT.`);
+          } else {
+            linkNativeProxy = { server: `http://${pUrl.hostname}:${pUrl.port}`, username: cleanUser, password: cleanPassword };
+            log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+            const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
+            await resolveProxyIp(rawForIp, log, "SOAX LINK-GEN");
+          }
         }
       } catch { /* continue without proxy */ }
 
@@ -18891,9 +18936,9 @@ export async function generateSingleCheckoutLink(
           "--flag-switches-begin", "--disable-site-isolation-trials", "--flag-switches-end",
         ],
       };
-      if (linkAnonymizedProxy) glLaunchOptions.proxy = { server: linkAnonymizedProxy };
+      if (linkNativeProxy) glLaunchOptions.proxy = linkNativeProxy;
       browser = await stealthChromium.launch(glLaunchOptions);
-      log("🖥️  Local stealth browser launched" + (linkAnonymizedProxy ? " with SOAX proxy" : " (no proxy)"));
+      log("🖥️  Local stealth browser launched" + (linkNativeProxy ? " with SOAX proxy" : " (no proxy)"));
     }
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
@@ -19234,7 +19279,6 @@ export async function generateSingleCheckoutLink(
     return { success: false, error: err.message };
   } finally {
     if (browser) await browser.close().catch(() => {});
-    if (linkAnonymizedProxy) { try { await ProxyChain.closeAnonymizedProxy(linkAnonymizedProxy, true); } catch {} }
   }
 }
 
