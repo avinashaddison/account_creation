@@ -1422,7 +1422,7 @@ export default function PrivateAccount() {
           )}
 
           {/* Replit Bulk copy toolbar */}
-          {replitAccounts.filter((a) => a.status === "processing").length > 0 && (
+          {replitAccounts.length > 0 && (
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-violet-500/10 flex-wrap">
               <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Bulk Copy</span>
               <input
@@ -1440,10 +1440,9 @@ export default function PrivateAccount() {
                 className="h-7 px-3 font-mono text-xs border border-violet-500/20"
                 style={{ color: "#a78bfa" }}
                 onClick={() => {
-                  const eligible = replitAccounts.filter((a) => a.status === "processing");
-                  const slice = eligible.slice(0, replitBulkCopyCount);
+                  const slice = replitAccounts.slice(0, replitBulkCopyCount);
                   if (slice.length === 0) {
-                    toast({ title: "No accounts", description: "No processing Replit accounts available to copy" });
+                    toast({ title: "No accounts", description: "No Replit accounts available to copy" });
                     return;
                   }
                   const text = slice.map((a) => `Email 📧: ${a.email}\n\nPassword 🔑: ${a.password || ""}\n\nCredits ✈︎: $${a.credits || "20"} 💰`).join("\n\n---\n\n");
@@ -1457,10 +1456,10 @@ export default function PrivateAccount() {
                 data-testid="button-replit-bulk-copy"
               >
                 <Copy className="w-3 h-3 mr-1" />
-                Copy {Math.min(replitBulkCopyCount, replitAccounts.filter((a) => a.status === "processing").length)}
+                Copy {Math.min(replitBulkCopyCount, replitAccounts.length)}
               </Button>
               <span className="text-[10px] font-mono text-zinc-600">
-                {replitAccounts.filter((a) => a.status === "processing").length} ready
+                {replitAccounts.length} total
               </span>
             </div>
           )}
