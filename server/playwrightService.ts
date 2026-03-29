@@ -10574,12 +10574,33 @@ export async function registerReplitAccount(
         const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
         const cleanPassword = decodeURIComponent(pUrl.password || "");
         // Pass credentials natively — Playwright handles HTTPS CONNECT auth internally
-        replitNativeProxy = {
-          server: `http://${pUrl.hostname}:${pUrl.port}`,
-          username: cleanUser,
-          password: cleanPassword,
-        };
-        log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+        // ── Proxy health check: CONNECT test before committing to this proxy ──
+        const proxyHealthy = await new Promise<boolean>((resolve) => {
+          const http = require("http") as typeof import("http");
+          const req = http.request({
+            host: pUrl.hostname, port: Number(pUrl.port),
+            method: "CONNECT", path: "replit.com:443",
+            headers: { "Proxy-Authorization": "Basic " + Buffer.from(`${cleanUser}:${cleanPassword}`).toString("base64") },
+            timeout: 8000,
+          });
+          req.on("connect", (_res: any, socket: any) => { socket.destroy(); resolve(_res.statusCode === 200); });
+          req.on("error", () => resolve(false));
+          req.on("timeout", () => { req.destroy(); resolve(false); });
+          req.end();
+        });
+
+        if (!proxyHealthy) {
+          log(`❌ SOAX proxy rejected CONNECT (package may be suspended/expired) — falling back to DIRECT connection`);
+          log(`   ⚠  Check dashboard.soax.com for package-${pUrl.hostname.includes("soax") ? cleanUser.match(/package-(\d+)/)?.[1] || "?" : "?"} status`);
+          // replitNativeProxy stays null → browser launches without proxy
+        } else {
+          replitNativeProxy = {
+            server: `http://${pUrl.hostname}:${pUrl.port}`,
+            username: cleanUser,
+            password: cleanPassword,
+          };
+          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+        }
         const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
         await resolveProxyIp(rawForIp, log, "SOAX RESIDENTIAL");
       } else {
