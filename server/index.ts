@@ -8,6 +8,26 @@ import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import path from "path";
+import { execSync } from "child_process";
+import fs from "fs";
+
+(function ensurePlaywrightBrowsers() {
+  const cacheDir = path.join(process.cwd(), ".cache/ms-playwright");
+  let found = false;
+  if (fs.existsSync(cacheDir)) {
+    const entries = fs.readdirSync(cacheDir);
+    found = entries.some(e => e.startsWith("chromium_headless_shell"));
+  }
+  if (!found) {
+    console.log("[startup] Playwright browsers missing — installing (this may take a moment)...");
+    try {
+      execSync("node_modules/.bin/playwright install chromium chromium-headless-shell --quiet", { stdio: "inherit", timeout: 120000 });
+      console.log("[startup] Playwright browsers installed.");
+    } catch (e) {
+      console.warn("[startup] Playwright install failed:", e);
+    }
+  }
+})();
 
 const app = express();
 const httpServer = createServer(app);
