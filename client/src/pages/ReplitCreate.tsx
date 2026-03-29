@@ -38,11 +38,9 @@ const L = "rgba(255,185,50,1)";
 const LA = (a: number) => `rgba(255,185,50,${a})`;
 
 const STATUSES: { value: string; label: string; color: string; bg: string; border: string }[] = [
-  { value: "available",  label: "AVAILABLE",         color: "#22c55e", bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.4)" },
-  { value: "processing", label: "ACCOUNT CREATED",   color: "#3b82f6", bg: "rgba(59,130,246,0.12)",  border: "rgba(59,130,246,0.4)" },
+  { value: "processing", label: "PROCESSING",        color: "#f97316", bg: "rgba(249,115,22,0.12)",  border: "rgba(249,115,22,0.4)" },
+  { value: "working",    label: "WORKING",           color: "#22c55e", bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.4)" },
   { value: "sold_out",   label: "STOCK OUT",         color: "#ef4444", bg: "rgba(239,68,68,0.12)",   border: "rgba(239,68,68,0.4)" },
-  { value: "subscribed", label: "SOLD",              color: "#a855f7", bg: "rgba(168,85,247,0.12)",  border: "rgba(168,85,247,0.4)" },
-  { value: "working",    label: "PROCESSING",        color: "#f97316", bg: "rgba(249,115,22,0.12)",  border: "rgba(249,115,22,0.4)" },
   { value: "completed",  label: "COMPLETED",         color: "#34d399", bg: "rgba(52,211,153,0.12)",  border: "rgba(52,211,153,0.35)" },
   { value: "warmed",     label: "WARMED",            color: "#c084fc", bg: "rgba(192,132,252,0.12)", border: "rgba(192,132,252,0.35)" },
   { value: "error",      label: "ERROR",             color: "#f87171", bg: "rgba(248,113,113,0.12)", border: "rgba(248,113,113,0.35)" },
@@ -53,14 +51,12 @@ function statusMeta(s: string) {
 // Solid fill color for spreadsheet-style status cell (no transparency)
 function statusSolid(s: string): string {
   switch (s) {
-    case "available":  return "rgb(34,197,94)";   // green
-    case "working":    return "rgb(249,115,22)";   // orange
-    case "processing": return "rgb(59,130,246)";   // blue
+    case "processing": return "rgb(249,115,22)";   // orange
+    case "working":    return "rgb(34,197,94)";    // green
     case "sold_out":   return "rgb(220,38,38)";    // red
     case "completed":  return "rgb(13,148,136)";   // teal
     case "warmed":     return "rgb(124,58,237)";   // purple
     case "error":      return "rgb(139,0,0)";      // dark red
-    case "subscribed": return "rgb(168,85,247)";   // purple - SOLD
     default:           return "rgb(55,65,81)";     // gray
   }
 }

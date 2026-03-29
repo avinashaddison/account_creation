@@ -489,7 +489,7 @@ export class DatabaseStorage implements IStorage {
 
   async clearReplitCheckoutUrl(id: string): Promise<ReplitAccount> {
     const [row] = await db.update(replitAccounts)
-      .set({ checkoutUrl: null, status: "subscribed" })
+      .set({ checkoutUrl: null, status: "sold_out" })
       .where(eq(replitAccounts.id, id))
       .returning();
     return row;

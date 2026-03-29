@@ -3528,7 +3528,7 @@ export async function registerRoutes(
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
-            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
+            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {
@@ -3797,7 +3797,7 @@ export async function registerRoutes(
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
-            await storage.updateReplitAccountStatus(acct.id, "available").catch(() => {});
+            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {
@@ -3967,7 +3967,7 @@ export async function registerRoutes(
             if (result.success && result.stripeUrl) {
               broadcastLog(batchId, jobId, `CHECKOUT_URL|${target.email}|${result.stripeUrl}`, userId);
               await storage.setReplitCheckoutUrl(target.id, result.stripeUrl).catch(() => {});
-              await storage.updateReplitAccountStatus(target.id, "available").catch(() => {});
+              await storage.updateReplitAccountStatus(target.id, "working").catch(() => {});
               broadcastLog(batchId, jobId, `${tag} ✅ Done — link generated for ${target.email}`, userId);
               return { success: true, source: source.email, target: target.email, url: result.stripeUrl };
             } else {
@@ -4021,7 +4021,7 @@ export async function registerRoutes(
       const allAccounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
-      const accounts = allAccounts.filter(a => a.status === "available");
+      const accounts = allAccounts.filter(a => a.status === "working");
       const header = "User ID / Email Address,Mobile Number,Password,Activation Date (eg. 01 Jan 2020),First Secret Question,First Secret Answer,Second Secret Question,Second Secret Answer,Third Secret Question,Third Secret Answer,First Name,Last Name,Account Country,Date of Birth (eg. 01 Jan 2020),Remark";
       const lines = [header];
       const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
@@ -5022,7 +5022,7 @@ export async function registerRoutes(
     try {
       const all = await storage.getAllReplitAccounts();
       const queue = all
-        .filter(a => a.checkoutUrl && a.status !== "subscribed")
+        .filter(a => a.checkoutUrl && a.status === "working")
         .map(a => ({
           id: a.id,
           email: a.email,

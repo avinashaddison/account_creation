@@ -518,7 +518,7 @@ export default function PrivateAccount() {
       id: "replit" as TabType,
       label: "Replit Accounts",
       count: replitAccounts.length,
-      sub: `${replitAccounts.filter((a) => a.status === "available").length} ready`,
+      sub: `${replitAccounts.filter((a) => a.status === "working").length} ready`,
       color: "#7c3aed",
       glow: "rgba(124,58,237,0.18)",
       border: "rgba(124,58,237,0.25)",
@@ -1190,18 +1190,15 @@ export default function PrivateAccount() {
 
                 {/* Data rows */}
                 {[...replitAccounts].sort((a, b) => {
-                  const rank: Record<string, number> = { available: 0, processing: 1, working: 2, sold_out: 3, subscribed: 4, error: 5 };
-                  return (rank[a.status] ?? 2) - (rank[b.status] ?? 2);
+                  const rank: Record<string, number> = { processing: 0, working: 1, sold_out: 2, error: 3 };
+                  return (rank[a.status] ?? 1) - (rank[b.status] ?? 1);
                 }).map((acct, idx) => {
                   const st = acct.status;
                   type StatusCfg = { label: string; icon: string; color: string; glow: string; bg: string; border: string };
                   const statusConfig: Record<string, StatusCfg> = {
-                    processing:  { label: "Created",     icon: "◌", color: "#facc15", glow: "rgba(250,204,21,0.25)",  bg: "rgba(250,204,21,0.07)",  border: "rgba(250,204,21,0.35)"  },
-                    created:     { label: "Available",   icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
-                    available:   { label: "Available",   icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
-                    working:     { label: "Processing",  icon: "▶", color: "#f97316", glow: "rgba(249,115,22,0.3)",   bg: "rgba(249,115,22,0.08)",  border: "rgba(249,115,22,0.35)"  },
+                    processing:  { label: "Processing",  icon: "◌", color: "#f97316", glow: "rgba(249,115,22,0.25)",  bg: "rgba(249,115,22,0.07)",  border: "rgba(249,115,22,0.35)"  },
+                    working:     { label: "Working",     icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
                     sold_out:    { label: "Stock Out",   icon: "⊘", color: "#94a3b8", glow: "rgba(148,163,184,0.2)", bg: "rgba(148,163,184,0.06)", border: "rgba(148,163,184,0.25)" },
-                    subscribed:  { label: "Sold",        icon: "✓", color: "#a855f7", glow: "rgba(168,85,247,0.25)",  bg: "rgba(168,85,247,0.07)",  border: "rgba(168,85,247,0.3)"   },
                     error:       { label: "Error",       icon: "✕", color: "#ef4444", glow: "rgba(239,68,68,0.25)",   bg: "rgba(239,68,68,0.07)",   border: "rgba(239,68,68,0.3)"    },
                   };
                   const cfg = statusConfig[st] ?? statusConfig.processing;
@@ -1323,11 +1320,9 @@ export default function PrivateAccount() {
                           }}
                           data-testid={`select-replit-status-${acct.id}`}
                         >
-                          <option value="processing">◌ Created</option>
-                          <option value="available">● Available</option>
-                          <option value="working">▶ Processing</option>
+                          <option value="processing">◌ Processing</option>
+                          <option value="working">● Working</option>
                           <option value="sold_out">⊘ Stock Out</option>
-                          <option value="subscribed">✓ Sold</option>
                           <option value="error">✕ Error</option>
                         </select>
                       </div>
