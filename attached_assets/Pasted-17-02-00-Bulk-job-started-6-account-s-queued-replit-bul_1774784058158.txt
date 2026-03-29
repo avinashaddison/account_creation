@@ -1,0 +1,143 @@
+17:02:00
+>
+🚀 Bulk job started — 6 account(s) queued [replit-bulk-dce69b63]
+17:02:00
+>
+Using stealth headless browser
+17:02:00
+·
+Visiting Replit homepage before signup...
+17:02:08
+>
+Homepage visited — navigating to signup...
+17:02:08
+>
+Navigating to https://replit.com/signup ...
+17:02:12
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+17:02:12
+·
+Page title: Sign Up - Replit
+17:02:12
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+17:02:12
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+17:02:20
+·
+Network idle timeout — waiting 4s instead
+17:02:24
+·
+Page HTML snippet: <div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_default _sdz_surface-bg _sdz_surface _sdz_switch-theme css-b2skly" id="main-content"><div class="css-1dp71ui"><div class=" useView-module__vOh_Ha__view css-13zqyyc"><main class="css-1u21y0c"><div class=" useView-module__vOh_Ha__view css-r9arcl" as="header"><a href="/" aria-label="Home" class="css-19tfcnj"><svg width="86.58823529411765
+17:02:24
+·
+Waiting for signup form fields to appear...
+17:02:24
+·
+Form fields detected
+17:02:24
+·
+Filling signup form...
+17:02:24
+~
+⚠️ Could not find username field
+17:02:26
+·
+Typed email into input[name="email"]
+17:02:27
+»
+Typed password into input[name="password"]
+17:02:28
+·
+Submitting signup form...
+17:02:28
+·
+Clicked submit button "Create Account" (button[type="submit"])
+17:02:28
+·
+Waiting for signup response...
+17:02:33
++
+✅ Signup submitted — verification email expected
+17:02:33
+·
+Now waiting 20s before checking Outlook inbox for verification email...
+17:02:53
+·
+Reading Replit verification email via Outlook Web Access...
+17:02:54
+>
+Navigating to Outlook Web login...
+17:02:56
+·
+Entered Outlook email on login page
+17:02:58
+»
+Entered Outlook password on login page
+17:03:02
+·
+After login URL: https://account.live.com/proofs/Add?mkt=EN-US&uiflavor=web&id=292841&mpcxt=CATB&sn=604800&posturl=ht
+17:03:02
+·
+Microsoft security proofs / confirmation page — extracting posturl to skip...
+17:03:02
+·
+Extracted posturl: https://login.live.com/ppsecure/post.srf?lc=1033&mkt=EN-US&id=292841&opid=9BCC4E35B744D21F&opidt=177
+17:03:02
+>
+Navigating directly to: https://login.live.com/ppsecure/post.srf?lc=1033&mkt=EN-US&id=292841&opid=9BCC4E35B744D21F&opidt=177
+17:03:06
+>
+URL after skip navigation: https://login.live.com/ppsecure/post.srf?lc=1033&mkt=EN-US&id=292841&opid=9BCC4E35B744D21F&opidt=177
+17:03:06
+>
+Not on Outlook yet (host: https://login.live.com/ppsecure/post.srf?lc=1033&m) — navigating directly to inbox
+17:03:11
+·
+URL after direct nav: https://outlook.live.com/mail/0/
+17:03:11
++
+✅ Logged into Outlook Web — searching inbox for Replit email...
+17:03:18
+·
+[Attempt 1/4] Found 2 email items in inbox
+17:03:18
+·
+Found Replit-related email: R Replit Replit: Verify Your Email 19:32 Welcome to Replit! Please verify your email address to comp
+17:03:21
+·
+Extracted verification link from OWA: https://replit.com/action-code?mode=verifyEmail&oobCode=fEyv4rInxr9Wi7w--kKwI4hhvq8Bxw13Qt-OYrrsAysA...
+17:03:22
+>
+Navigating to verification link...
+17:03:26
++
+✅ Account verified! URL: https://replit.com/action-code?mode=verifyEmail&oobCode=fEyv4rInxr9Wi7w--kKwI4hhvq8Bxw13Qt-OYrrsAysAAAGdOV3uxA&apiKey=AIzaSyDdqupzUUvLXidm5MYw3Bqz50A_1t2Lxlc&lang=en
+17:03:29
+·
+No onboarding wizard detected — skipping
+17:03:29
+>
+🔐 Login(email): navigating to Replit login...
+17:03:35
+·
+Login(email): entered identifier "brendabrewer7285@outlook.com"
+PROCESSING
+17:03:36
+·
+Login(email): clicked step-1 button
+17:03:44
++
+✅ Login(email): step-1 landed on logged-in URL (https://replit.com/~) — no password step needed
+17:03:44
++
+✅ Replit account creation complete: username=kai_base1 email=brendabrewer7285@outlook.com password=HW3g2wrj@61
+PROCESSING
+17:03:44
++
+✅ [1/6] Saved — @kai_base1
+17:03:44
+·
+⏳ Waiting 7 min before next account to avoid detection...
