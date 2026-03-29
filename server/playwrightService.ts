@@ -19623,6 +19623,251 @@ export async function checkReplitBanStatus(
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// ElevenLabs account creation — mail.gw temp email + SOAX residential proxy
+// ══════════════════════════════════════════════════════════════════════════
+export async function createElevenLabsAccount(
+  options: { log?: (msg: string) => void } = {}
+): Promise<{ success: boolean; email?: string; password?: string; apiKey?: string; error?: string }> {
+  const log = options.log || ((msg: string) => console.log("[ElevenLabs]", msg));
+  let browser: any = null;
+
+  try {
+    // ── STEP 1: Create mail.gw temp email ────────────────────────────────
+    log("📬 Generating mail.gw temp email...");
+    const gwDomain = await getAvailableDomain(true);
+    const adjectives = ["swift","bright","cool","smart","keen","bold","calm","glad","fine","pure","neat","wise","warm","fair","free"];
+    const nouns = ["fox","owl","jay","bee","ark","elm","oak","ivy","fen","dew","ray","sky","sea","bay","glen"];
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 9000 + 1000);
+    const mailGwEmail = `${adj}${noun}${num}@${gwDomain}`;
+    const mailGwPassword = "MailGw@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
+    const providerStr = (gwDomain.includes("oakon") || gwDomain.includes("teihu") || gwDomain.includes("raleigh") || gwDomain.includes("pastry") || gwDomain.includes("questtech")) ? "mail.gw" : "mail.tm";
+    await createTempEmail(mailGwEmail, mailGwPassword);
+    log(`✅ mail.gw email created: ${mailGwEmail}`);
+
+    // Generate a strong ElevenLabs account password
+    const elPassword = "EL@" + Math.random().toString(36).substring(2, 8).toUpperCase() + Math.floor(Math.random() * 900 + 100) + "!";
+
+    // ── STEP 2: Launch browser with SOAX proxy ────────────────────────────
+    log("🚀 Launching browser with SOAX residential proxy...");
+    await ensureBrowserInstalled();
+    const launchArgs = [
+      "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
+    ];
+
+    const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+    const soaxUrl = rawProxy ? rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
+
+    const ctxOptions: any = {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1920, height: 1080 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      ignoreHTTPSErrors: true,
+    };
+    if (soaxUrl) {
+      try {
+        const parsed = new URL(soaxUrl);
+        const cleanUser = (decodeURIComponent(parsed.username) || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        ctxOptions.proxy = {
+          server: `${parsed.protocol}//${parsed.hostname}:${parsed.port}`,
+          username: cleanUser,
+          password: decodeURIComponent(parsed.password),
+        };
+        log(`SOAX proxy: ${parsed.hostname}:${parsed.port} (session=${cleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+      } catch (proxyErr: any) {
+        log("Warning: could not parse SOAX proxy — running direct: " + proxyErr.message);
+      }
+    } else {
+      log("No SOAX proxy configured — running direct");
+    }
+
+    browser = await chromium.launch({ headless: true, args: launchArgs });
+    const context = await browser.newContext(ctxOptions);
+    const page = await context.newPage();
+    await page.setDefaultNavigationTimeout(90000);
+    await page.setDefaultTimeout(30000);
+
+    // ── STEP 3: Navigate to ElevenLabs sign-up ────────────────────────────
+    log("🔗 Navigating to https://elevenlabs.io/app/sign-up ...");
+    await page.goto("https://elevenlabs.io/app/sign-up", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(3000);
+
+    // Handle Cloudflare if needed
+    const postNavTitle = await page.title().catch(() => "");
+    if (postNavTitle.toLowerCase().includes("just a moment") || postNavTitle.toLowerCase().includes("cloudflare")) {
+      log("⚠️ Cloudflare challenge detected — waiting up to 30s for auto-resolve...");
+      await waitForCloudflare(page, 30000);
+    }
+    log(`Page: "${await page.title().catch(() => "?")}"`);
+
+    // ── STEP 4: Fill email ────────────────────────────────────────────────
+    log(`📧 Filling email: ${mailGwEmail}`);
+    const emailSelectors = ['input[type="email"]', 'input[name="email"]', 'input[placeholder*="email" i]', 'input[id*="email" i]'];
+    let emailFilled = false;
+    for (const sel of emailSelectors) {
+      const input = await page.$(sel).catch(() => null);
+      if (input) {
+        await input.click().catch(() => {});
+        await waitMs(200);
+        await input.fill(mailGwEmail);
+        emailFilled = true;
+        log(`Email filled via: ${sel}`);
+        break;
+      }
+    }
+    if (!emailFilled) {
+      const html = await page.evaluate(() => document.body?.innerHTML?.substring(0, 600) || "").catch(() => "");
+      log(`Page HTML snippet: ${html}`);
+      return { success: false, error: "Could not find email input on ElevenLabs sign-up page" };
+    }
+    await waitMs(500);
+
+    // ── STEP 5: Fill password ─────────────────────────────────────────────
+    log("🔑 Filling password...");
+    const pwdSelectors = ['input[type="password"]', 'input[name="password"]', 'input[id*="password" i]'];
+    let pwdFilled = false;
+    for (const sel of pwdSelectors) {
+      const input = await page.$(sel).catch(() => null);
+      if (input) {
+        await input.click().catch(() => {});
+        await waitMs(200);
+        await input.fill(elPassword);
+        pwdFilled = true;
+        log("Password filled");
+        break;
+      }
+    }
+    if (!pwdFilled) {
+      log("Warning: password field not found — may be email-only step");
+    }
+    await waitMs(500);
+
+    // ── STEP 6: Click "Create account" / "Continue" / "Sign up" ──────────
+    log("🖱️ Clicking sign-up submit button...");
+    const btnSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Create account")',
+      'button:has-text("Create Account")',
+      'button:has-text("Sign up")',
+      'button:has-text("Continue")',
+      'button:has-text("Get started")',
+    ];
+    let btnClicked = false;
+    for (const sel of btnSelectors) {
+      const btn = await page.$(sel).catch(() => null);
+      if (btn) {
+        await btn.click().catch(() => {});
+        btnClicked = true;
+        log(`Clicked: ${sel}`);
+        break;
+      }
+    }
+    if (!btnClicked) {
+      await page.keyboard.press("Enter");
+      log("No button found — pressed Enter");
+    }
+    await waitMs(5000);
+
+    const afterSubmitUrl = page.url();
+    log(`After submit: ${afterSubmitUrl.substring(0, 100)}`);
+
+    // ── STEP 7: Poll mail.gw for verification email ───────────────────────
+    log("📬 Polling mail.gw for ElevenLabs verification email (up to 90s)...");
+    let verificationLink: string | null = null;
+    let mailToken: string | null = null;
+
+    try {
+      mailToken = await getAuthToken(mailGwEmail, mailGwPassword, providerStr as any);
+    } catch (authErr: any) {
+      log(`⚠️ mail.gw auth failed: ${authErr.message?.substring(0, 80)}`);
+    }
+
+    if (mailToken) {
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 90000 && !verificationLink) {
+        await waitMs(4000);
+        try {
+          const messages = await fetchMessages(mailToken, providerStr as any);
+          log(`📭 mail.gw: ${messages.length} message(s) found`);
+          for (const msg of messages) {
+            const from = (msg.from?.address || msg.from || "").toLowerCase();
+            const subject = (msg.subject || "").toLowerCase();
+            if (from.includes("elevenlabs") || subject.includes("elevenlabs") || subject.includes("verify") || subject.includes("confirm") || subject.includes("email")) {
+              const content = await fetchMessageContent(mailToken, msg.id, providerStr as any).catch(() => "");
+              // Extract verification link
+              const linkMatch = content.match(/https?:\/\/[^\s"<>]+elevenlabs[^\s"<>]*/i) ||
+                content.match(/https?:\/\/[^\s"<>]*verify[^\s"<>]*/i) ||
+                content.match(/https?:\/\/[^\s"<>]*confirm[^\s"<>]*/i) ||
+                content.match(/href="(https?:\/\/[^"]+)"/i);
+              if (linkMatch) {
+                verificationLink = linkMatch[1] || linkMatch[0];
+                log(`✅ Verification link found: ${verificationLink.substring(0, 80)}...`);
+                break;
+              }
+            }
+          }
+        } catch (pollErr: any) {
+          log(`⚠️ Poll error: ${pollErr.message?.substring(0, 60)}`);
+        }
+        if (!verificationLink) {
+          log(`Waiting for verification email... (${Math.round((Date.now() - pollStart) / 1000)}s)`);
+        }
+      }
+    }
+
+    if (!verificationLink) {
+      log("❌ No verification email received within 90s");
+      return { success: false, email: mailGwEmail, password: elPassword, error: "Verification email not received within 90s" };
+    }
+
+    // ── STEP 8: Click verification link ──────────────────────────────────
+    log(`🔗 Navigating to verification link...`);
+    await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(5000);
+    const verifyUrl = page.url();
+    log(`After verification: ${verifyUrl.substring(0, 100)}`);
+
+    // ── STEP 9: Try to extract API key from dashboard ─────────────────────
+    log("🔑 Attempting to extract API key...");
+    let apiKey: string | undefined;
+    try {
+      await page.goto("https://elevenlabs.io/app/settings/api-keys", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await waitMs(3000);
+      const apiKeyUrl = page.url();
+      log(`API keys page: ${apiKeyUrl.substring(0, 80)}`);
+
+      // Try to read visible API key from the page
+      const keyMatch = await page.evaluate(() => {
+        const allText = document.body?.innerText || "";
+        const m = allText.match(/[a-f0-9]{32,}/i);
+        return m ? m[0] : null;
+      }).catch(() => null);
+
+      if (keyMatch && keyMatch.length >= 32) {
+        apiKey = keyMatch;
+        log(`✅ API key extracted: ${apiKey.substring(0, 8)}...`);
+      } else {
+        log("ℹ️ API key not visible on page — can be retrieved manually from settings");
+      }
+    } catch (apiErr: any) {
+      log(`ℹ️ Could not load API key page: ${apiErr.message?.substring(0, 60)}`);
+    }
+
+    log("✅ ElevenLabs account created successfully!");
+    return { success: true, email: mailGwEmail, password: elPassword, apiKey };
+
+  } catch (err: any) {
+    log(`❌ ElevenLabs creation failed: ${err.message?.substring(0, 200)}`);
+    return { success: false, error: err.message?.substring(0, 200) };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

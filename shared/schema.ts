@@ -293,3 +293,18 @@ export const savedCards = pgTable("saved_cards", {
 export const insertSavedCardSchema = createInsertSchema(savedCards).omit({ id: true, createdAt: true });
 export type SavedCard = typeof savedCards.$inferSelect;
 export type InsertSavedCard = z.infer<typeof insertSavedCardSchema>;
+
+export const elevenLabsAccounts = pgTable("eleven_labs_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  password: text("password").notNull(),
+  apiKey: text("api_key"),
+  status: text("status").notNull().default("created"),
+  error: text("error"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertElevenLabsAccountSchema = createInsertSchema(elevenLabsAccounts).omit({ id: true, createdAt: true });
+export type ElevenLabsAccount = typeof elevenLabsAccounts.$inferSelect;
+export type InsertElevenLabsAccount = z.infer<typeof insertElevenLabsAccountSchema>;

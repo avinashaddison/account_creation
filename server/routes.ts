@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink, checkReplitBanStatus } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -4806,6 +4806,54 @@ export async function registerRoutes(
   app.delete("/api/adobe-accounts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       await storage.deleteAdobeAccount(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── ElevenLabs account creation ──────────────────────────────────────────
+  app.post("/api/elevenlabs-create", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `elevenlabs-create-${createId}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "ElevenLabs account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, "Starting ElevenLabs account creation via mail.gw...", userId);
+        try {
+          const result = await createElevenLabsAccount({ log: (msg) => broadcastLog(batchId, createId, msg, userId) });
+          if (result.success) {
+            try {
+              const saved = await storage.createElevenLabsAccount({ email: result.email!, password: result.password!, apiKey: result.apiKey, status: "active", createdBy: userId });
+              broadcastLog(batchId, createId, `✅ Account saved to database (id: ${saved.id})`, userId);
+            } catch (dbErr: any) { broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId); }
+            broadcast({ type: "elevenlabs_create_result", createId, batchId, success: true, email: result.email, password: result.password, apiKey: result.apiKey }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ ElevenLabs creation failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "elevenlabs_create_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "elevenlabs_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/elevenlabs-accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId;
+      const role = req.session.role;
+      const accounts = role === "superadmin" ? await storage.getAllElevenLabsAccounts() : await storage.getElevenLabsAccountsByOwner(userId);
+      res.json(accounts);
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete("/api/elevenlabs-accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteElevenLabsAccount(req.params.id);
       res.json({ success: true });
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });

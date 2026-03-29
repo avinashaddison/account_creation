@@ -159,6 +159,19 @@ const platforms: Platform[] = [
     stats: [{ label: "Auto Create", icon: Shield }, { label: "OWA Verify", icon: Mail }, { label: "6-Digit Code", icon: Zap }],
   },
   {
+    id: "elevenlabs",
+    name: "Create ElevenLabs Account",
+    description: "Auto-create ElevenLabs accounts via mail.gw temp email + SOAX residential proxy",
+    href: "/admin/elevenlabs-create",
+    accentColor: "#f97316",
+    accentGlow: "rgba(249,115,22,0.22)",
+    gradientFrom: "rgba(249,115,22,0.12)",
+    gradientTo: "rgba(124,45,18,0.04)",
+    badge: "ACTIVE",
+    badgeActive: true,
+    stats: [{ label: "Auto Create", icon: Shield }, { label: "mail.gw Email", icon: Mail }, { label: "API Key", icon: Zap }],
+  },
+  {
     id: "card-generator",
     name: "Card Generator",
     description: "Generate test card numbers with BIN lookup, network selection & bulk export",
@@ -225,6 +238,11 @@ function PlatformIcon({ id, accentColor, hovered }: { id: string; accentColor: s
   if (id === "adobe") return (
     <div className={`${base} bg-gradient-to-br from-red-600 to-orange-700`} style={{ boxShadow: glow }}>
       <svg viewBox="0 0 24 24" fill="white" width="20" height="20"><path d="M13.966 22.624l-1.69-4.281H8.122l4.294-8.835 4.808 13.116zM3 6.834l3.682 10.093H1.212zm17.786 0L18 16.927h5.47z"/></svg>
+    </div>
+  );
+  if (id === "elevenlabs") return (
+    <div className={`${base} bg-gradient-to-br from-orange-500 to-orange-700`} style={{ boxShadow: glow }}>
+      <span className="text-white font-black text-sm tracking-tight">11</span>
     </div>
   );
   if (id === "card-generator") return (

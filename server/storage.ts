@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts, elevenLabsAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount, ElevenLabsAccount, InsertElevenLabsAccount } from "@shared/schema";
 import { eq, desc, sql, count, and, or, inArray } from "drizzle-orm";
 import pg from "pg";
 
@@ -91,6 +91,11 @@ export interface IStorage {
   getAllAdobeAccounts(): Promise<AdobeAccount[]>;
   getAdobeAccountsByOwner(ownerId: string): Promise<AdobeAccount[]>;
   deleteAdobeAccount(id: string): Promise<void>;
+  createElevenLabsAccount(data: InsertElevenLabsAccount): Promise<ElevenLabsAccount>;
+  getAllElevenLabsAccounts(): Promise<ElevenLabsAccount[]>;
+  getElevenLabsAccountsByOwner(ownerId: string): Promise<ElevenLabsAccount[]>;
+  updateElevenLabsAccount(id: string, data: Partial<InsertElevenLabsAccount>): Promise<ElevenLabsAccount>;
+  deleteElevenLabsAccount(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -588,6 +593,28 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAdobeAccount(id: string): Promise<void> {
     await db.delete(adobeAccounts).where(eq(adobeAccounts.id, id));
+  }
+
+  async createElevenLabsAccount(data: InsertElevenLabsAccount): Promise<ElevenLabsAccount> {
+    const [row] = await db.insert(elevenLabsAccounts).values(data).returning();
+    return row;
+  }
+
+  async getAllElevenLabsAccounts(): Promise<ElevenLabsAccount[]> {
+    return db.select().from(elevenLabsAccounts).orderBy(desc(elevenLabsAccounts.createdAt));
+  }
+
+  async getElevenLabsAccountsByOwner(ownerId: string): Promise<ElevenLabsAccount[]> {
+    return db.select().from(elevenLabsAccounts).where(eq(elevenLabsAccounts.createdBy, ownerId)).orderBy(desc(elevenLabsAccounts.createdAt));
+  }
+
+  async updateElevenLabsAccount(id: string, data: Partial<InsertElevenLabsAccount>): Promise<ElevenLabsAccount> {
+    const [row] = await db.update(elevenLabsAccounts).set(data).where(eq(elevenLabsAccounts.id, id)).returning();
+    return row;
+  }
+
+  async deleteElevenLabsAccount(id: string): Promise<void> {
+    await db.delete(elevenLabsAccounts).where(eq(elevenLabsAccounts.id, id));
   }
 }
 
