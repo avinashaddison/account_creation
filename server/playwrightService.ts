@@ -12,6 +12,7 @@ import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService
 import { getAvailableDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
+import * as http from "http";
 
 const execFileAsync = promisify(execFile);
 
@@ -5971,8 +5972,8 @@ export async function createOutlookAccount(
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
       });
-      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const soaxProxyUrl = soaxTemplate ? soaxTemplate.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
+      const residentialTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      const soaxProxyUrl = residentialTemplate ? residentialTemplate.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
       const fallbackCtxOptions: any = {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         viewport: { width: 1920, height: 1080 },
@@ -5981,9 +5982,10 @@ export async function createOutlookAccount(
       if (soaxProxyUrl) {
         try {
           const parsed = new URL(soaxProxyUrl);
+          const cleanUser = (decodeURIComponent(parsed.username) || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
           fallbackCtxOptions.proxy = {
             server: `${parsed.protocol}//${parsed.hostname}:${parsed.port}`,
-            username: decodeURIComponent(parsed.username),
+            username: cleanUser,
             password: decodeURIComponent(parsed.password),
           };
           log("SOAX residential proxy configured: " + parsed.hostname);
@@ -9724,7 +9726,6 @@ export async function createGmailAccount(
         const cleanUsername = (u.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
         const cleanPassword = decodeURIComponent(u.password || "");
         const proxyHealthy = await new Promise<boolean>((resolve) => {
-          const http = require("http") as typeof import("http");
           const req = http.request({
             host: u.hostname, port: Number(u.port),
             method: "CONNECT", path: "google.com:443",
@@ -10565,9 +10566,7 @@ export async function registerReplitAccount(
     // ── SOAX residential proxy — unique IP per account to prevent ban ──────────
     // Use Playwright native proxy (no ProxyChain) to avoid ERR_TUNNEL_CONNECTION_FAILED
     try {
-      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const rawProxy = soaxTemplate || residentialUrl;
+      const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
       if (rawProxy) {
         // Fresh session ID = fresh residential IP for every account created
         const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
@@ -10585,7 +10584,6 @@ export async function registerReplitAccount(
         // Pass credentials natively — Playwright handles HTTPS CONNECT auth internally
         // ── Proxy health check: CONNECT test before committing to this proxy ──
         const proxyHealthy = await new Promise<boolean>((resolve) => {
-          const http = require("http") as typeof import("http");
           const req = http.request({
             host: pUrl.hostname, port: Number(pUrl.port),
             method: "CONNECT", path: "replit.com:443",
@@ -17408,9 +17406,7 @@ export async function onboardingCheckoutReplitAccount(
 
     // ── SOAX residential proxy — native Playwright proxy (no ProxyChain) ──
     try {
-      const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      const rawProxy = soaxTemplate || residentialUrl;
+      const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
       if (rawProxy) {
         const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
         let rotatedProxy = rawProxy;
@@ -17422,7 +17418,6 @@ export async function onboardingCheckoutReplitAccount(
         const cleanPassword = decodeURIComponent(pUrl.password || "");
         // Health-check before committing
         const proxyHealthy = await new Promise<boolean>((resolve) => {
-          const http = require("http") as typeof import("http");
           const req = http.request({
             host: pUrl.hostname, port: Number(pUrl.port),
             method: "CONNECT", path: "replit.com:443",
@@ -18882,10 +18877,7 @@ export async function generateSingleCheckoutLink(
     if (!usingZenRows) {
       // ── SOAX residential proxy — native Playwright proxy (no ProxyChain) ──
       try {
-        const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-        const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-        const browserProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'browser_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-        const rawProxy = soaxTemplate || residentialUrl || browserProxyUrl;
+        const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
         if (rawProxy) {
           const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
           let rotatedProxy = rawProxy;

@@ -20,24 +20,13 @@ import { clearZenrowsApiKeyCache } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
 
 async function getDefaultBrowserApiUrl(): Promise<string | null> {
-  const residential = await storage.getSetting("residential_proxy_url");
-  if (residential) return residential;
-  const soaxTemplate = await storage.getSetting("soax_proxy_template");
-  if (soaxTemplate) return soaxTemplate;
-  const saved = await storage.getSetting("browser_proxy_url");
-  return saved || null;
+  return await storage.getSetting("residential_proxy_url") || null;
 }
 
 // For Ticketmaster (Akamai-protected), always prefer WSS remote browser over HTTP proxy
 // Local headless Playwright is detected by Akamai regardless of stealth plugin
 async function getTMBrowserUrl(): Promise<string | null> {
-  const browserProxy = await storage.getSetting("browser_proxy_url");
-  if (browserProxy && browserProxy.trim().length > 0) return browserProxy;
-  const residential = await storage.getSetting("residential_proxy_url");
-  if (residential) return residential;
-  const soaxTemplate = await storage.getSetting("soax_proxy_template");
-  if (soaxTemplate) return soaxTemplate;
-  return null;
+  return await storage.getSetting("residential_proxy_url") || null;
 }
 
 // WSS browser URL used exclusively for the Shakira (or other) presale step
@@ -531,10 +520,6 @@ export async function registerRoutes(
     const residentialProxy = await storage.getSetting("residential_proxy_url");
     if (!residentialProxy) {
       console.log("[Auth] No residential proxy URL set. Please configure it in Settings.");
-    }
-    const browserEngine = await storage.getSetting("browser_proxy_url");
-    if (!browserEngine) {
-      console.log("[Auth] No browser engine URL set. Please configure it in Settings.");
     }
 
     const gmailEmail = await storage.getSetting("gmail_email");
@@ -4122,10 +4107,8 @@ export async function registerRoutes(
       (async () => {
         broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${total} account(s) · ${concurrency}x parallel browsers`, userId);
 
-        // Fetch SOAX proxy template once
-        const soaxTemplate = await storage.getSetting("soax_proxy_template");
-        const residentialProxy = await storage.getSetting("residential_proxy_url");
-        const baseProxy = soaxTemplate || residentialProxy || "";
+        // Fetch residential proxy once
+        const baseProxy = await storage.getSetting("residential_proxy_url") || "";
 
         // Shared atomic counters (safe in single-threaded JS event loop)
         let queueIndex = 0;
@@ -4234,9 +4217,7 @@ export async function registerRoutes(
       (async () => {
         broadcastLog(batchId, createId, `Starting Lovable account creation via mail.gw...`, userId);
         try {
-          const soaxTemplate = await storage.getSetting("soax_proxy_template");
-          const residentialProxy = await storage.getSetting("residential_proxy_url");
-          const baseProxy = soaxTemplate || residentialProxy || "";
+          const baseProxy = await storage.getSetting("residential_proxy_url") || "";
           const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
           if (rotatedProxy) broadcastLog(batchId, createId, `Using SOAX residential proxy (rotated session)`, userId);
 
@@ -5033,8 +5014,7 @@ export async function registerRoutes(
   // GET /api/extension/proxy — fresh SOAX proxy credentials (unique session)
   app.get("/api/extension/proxy", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
-      const raw = await storage.getSetting("soax_proxy_template") ||
-                  await storage.getSetting("residential_proxy_url");
+      const raw = await storage.getSetting("residential_proxy_url");
       if (!raw) return res.status(404).json({ error: "No SOAX proxy configured in settings" });
       const fresh = uniqueProxySession(raw);
       // Parse into host/port/user/pass for the extension
