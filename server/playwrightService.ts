@@ -10538,7 +10538,7 @@ export async function registerReplitAccount(
   let browser: any = null;
   let page: any = null;
   let zenrowsStripeBrowser: any = null; // separate ZenRows browser for Stripe checkout
-  let replitAnonymizedProxy: string | null = null;
+  let replitNativeProxy: { server: string; username: string; password: string } | null = null;
 
   try {
     let zenrowsApiKey = "";
@@ -10554,6 +10554,7 @@ export async function registerReplitAccount(
     const { chromium } = await import("playwright");
 
     // ── SOAX residential proxy — unique IP per account to prevent ban ──────────
+    // Use Playwright native proxy (no ProxyChain) to avoid ERR_TUNNEL_CONNECTION_FAILED
     try {
       const soaxTemplate = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
       const residentialUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
@@ -10570,12 +10571,17 @@ export async function registerReplitAccount(
           rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
         }
         const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
-        // Strip SOAX web-browser-mode suffix (-opt-wb) — not needed for standard HTTP tunnelling
         const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-        const cleanProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(pUrl.password || "")}@${pUrl.hostname}:${pUrl.port}`;
-        replitAnonymizedProxy = await ProxyChain.anonymizeProxy(cleanProxyUrl);
+        const cleanPassword = decodeURIComponent(pUrl.password || "");
+        // Pass credentials natively — Playwright handles HTTPS CONNECT auth internally
+        replitNativeProxy = {
+          server: `http://${pUrl.hostname}:${pUrl.port}`,
+          username: cleanUser,
+          password: cleanPassword,
+        };
         log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
-        await resolveProxyIp(replitAnonymizedProxy, log, "SOAX RESIDENTIAL");
+        const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
+        await resolveProxyIp(rawForIp, log, "SOAX RESIDENTIAL");
       } else {
         log("⚠️ No SOAX proxy configured — using direct connection (higher ban risk)");
       }
@@ -10613,8 +10619,8 @@ export async function registerReplitAccount(
         "--flag-switches-end",
       ];
       const launchOptions: any = { headless: true, args: launchArgs };
-      if (replitAnonymizedProxy) {
-        launchOptions.proxy = { server: replitAnonymizedProxy };
+      if (replitNativeProxy) {
+        launchOptions.proxy = replitNativeProxy;
       }
       browser = await chromium.launch(launchOptions);
       const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
@@ -12771,9 +12777,6 @@ export async function registerReplitAccount(
     try { if (page) await page.close(); } catch {}
     try { if (zenrowsStripeBrowser) await zenrowsStripeBrowser.close(); } catch {}
     try { if (browser) await browser.close(); } catch {}
-    if (replitAnonymizedProxy) {
-      try { await ProxyChain.closeAnonymizedProxy(replitAnonymizedProxy, true); } catch {}
-    }
   }
 }
 
