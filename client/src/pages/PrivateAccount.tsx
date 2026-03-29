@@ -1365,7 +1365,7 @@ export default function PrivateAccount() {
                       >
                         <button
                           onClick={() => copyToClipboard(
-                            `Email: ${acct.email}\nPassword: ${acct.password}\nUsername: @${acct.username}${acct.checkoutUrl ? `\nCheckout: ${acct.checkoutUrl}` : ""}`,
+                            `Email 📧: ${acct.email}\n\nPassword 🔑: ${acct.password}\n\nCredits ✈︎: $${acct.credits || "20"} 💰`,
                             `rall-${acct.id}`
                           )}
                           className="w-7 h-7 rounded flex items-center justify-center"
