@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
-import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain } from "./mailService";
+import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
 import * as http from "http";
@@ -19651,42 +19651,53 @@ export async function createElevenLabsAccount(
   let browser: any = null;
 
   try {
-    // ── STEP 1: Create temp email — try mail.gw first (real-looking business domains),
-    //            fall back to mail.tm if mail.gw is unavailable.
-    // Note: sharebot.net (mail.tm) fails ElevenLabs' email deliverability check.
-    // mail.gw domains (questtechsystems.com, teihu.com, etc.) look like real businesses
-    // and are more likely to pass the verification service.
-    log("📬 Generating temp email (preferring mail.gw business domains)...");
-    let gwDomain: string;
-    let mailProvider: "mail.gw" | "mail.tm";
-    try {
-      const gwDomains = await fetch("https://api.mail.gw/domains", { signal: AbortSignal.timeout(8000) })
-        .then(r => r.ok ? r.json() : { "hydra:member": [] })
-        .then((d: any) => (d["hydra:member"] || []).map((x: any) => x.domain as string));
-      if (gwDomains.length > 0) {
-        gwDomain = gwDomains[Math.floor(Math.random() * gwDomains.length)];
-        mailProvider = "mail.gw";
-        registerMailGwDomain(gwDomain);
-        log(`📬 Using mail.gw domain: ${gwDomain}`);
-      } else {
+    // ── STEP 1: Choose email strategy ─────────────────────────────────────
+    // Priority: Gmail (dot-trick) > temp mail fallback
+    //
+    // Why Gmail? ElevenLabs' blocking function calls an email verification API
+    // (NeverBounce/ZeroBounce) that rejects ALL catch-all domains. Every temp
+    // mail service (mail.tm sharebot.net, mail.gw oakon.com, etc.) uses catch-all,
+    // so they all fail. Gmail uses per-address verification (not catch-all), so it
+    // passes. Gmail dot-trick generates unlimited unique addresses to the same inbox.
+    const useGmail = hasGmailCredentials();
+    let elEmail: string;
+    let elMailPassword: string;
+    let mailProvider: "mail.gw" | "mail.tm" | "gmail";
+
+    if (useGmail) {
+      elEmail = createGmailAddress();
+      elMailPassword = "";
+      mailProvider = "gmail";
+      log(`📬 Using Gmail dot-trick address: ${elEmail}`);
+    } else {
+      log("📬 No Gmail configured — falling back to temp email (may fail ElevenLabs email check)...");
+      let gwDomain: string;
+      try {
+        const gwDomains = await fetch("https://api.mail.gw/domains", { signal: AbortSignal.timeout(8000) })
+          .then(r => r.ok ? r.json() : { "hydra:member": [] })
+          .then((d: any) => (d["hydra:member"] || []).map((x: any) => x.domain as string));
+        if (gwDomains.length > 0) {
+          gwDomain = gwDomains[Math.floor(Math.random() * gwDomains.length)];
+          mailProvider = "mail.gw";
+          registerMailGwDomain(gwDomain);
+        } else {
+          gwDomain = await getMailTmOnlyDomain();
+          mailProvider = "mail.tm";
+        }
+      } catch {
         gwDomain = await getMailTmOnlyDomain();
         mailProvider = "mail.tm";
-        log(`📬 mail.gw unavailable — using mail.tm domain: ${gwDomain}`);
       }
-    } catch {
-      gwDomain = await getMailTmOnlyDomain();
-      mailProvider = "mail.tm";
-      log(`📬 mail.gw error — using mail.tm domain: ${gwDomain}`);
+      const adjectives = ["swift","bright","cool","smart","keen","bold","calm","glad","fine","pure","neat","wise","warm","fair","free"];
+      const nouns      = ["fox","owl","jay","bee","ark","elm","oak","ivy","fen","dew","ray","sky","sea","bay","glen"];
+      const adj  = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const noun = nouns[Math.floor(Math.random() * nouns.length)];
+      const num  = Math.floor(Math.random() * 9000 + 1000);
+      elEmail        = `${adj}${noun}${num}@${gwDomain}`;
+      elMailPassword = "MailTm@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
+      await createTempEmail(elEmail, elMailPassword);
+      log(`✅ Temp email created: ${elEmail} (provider: ${mailProvider})`);
     }
-    const adjectives = ["swift","bright","cool","smart","keen","bold","calm","glad","fine","pure","neat","wise","warm","fair","free"];
-    const nouns      = ["fox","owl","jay","bee","ark","elm","oak","ivy","fen","dew","ray","sky","sea","bay","glen"];
-    const adj  = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    const num  = Math.floor(Math.random() * 9000 + 1000);
-    const elEmail        = `${adj}${noun}${num}@${gwDomain}`;
-    const elMailPassword = "MailTm@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
-    await createTempEmail(elEmail, elMailPassword);
-    log(`✅ Email created: ${elEmail} (domain: ${gwDomain}, provider: ${mailProvider})`);
 
     // Generate a strong ElevenLabs account password
     const elPassword = "EL@" + Math.random().toString(36).substring(2, 8).toUpperCase() + Math.floor(Math.random() * 900 + 100) + "!";
@@ -19803,58 +19814,68 @@ export async function createElevenLabsAccount(
       log(`⚠️ sendOobCode error: ${verifErr.message?.substring(0, 80)}`);
     }
 
-    // ── STEP 6: Poll mail.tm inbox for verification email ─────────────────
-    log(`📬 Polling mail.tm inbox for ElevenLabs verification email (up to 90s)…`);
+    // ── STEP 6: Poll inbox for ElevenLabs verification link ───────────────
+    log(`📬 Polling inbox for ElevenLabs verification email (up to 120s)…`);
     let verificationLink: string | null = null;
-    let mailToken: string | null = null;
 
-    try {
-      mailToken = await getAuthToken(elEmail, elMailPassword, mailProvider);
-    } catch (authErr: any) {
-      log(`⚠️ mail.tm auth failed: ${authErr.message?.substring(0, 80)}`);
-    }
+    if (mailProvider === "gmail") {
+      // Gmail IMAP poll — direct IMAP connection, searches for ElevenLabs emails
+      log(`📭 Using Gmail IMAP to poll for verification link at ${elEmail}…`);
+      verificationLink = await pollGmailForElevenLabsLink(elEmail, 120000, 5000, log);
+    } else {
+      // mail.tm / mail.gw temp email poll
+      let mailToken: string | null = null;
+      try {
+        mailToken = await getAuthToken(elEmail, elMailPassword, mailProvider as "mail.tm" | "mail.gw");
+      } catch (authErr: any) {
+        log(`⚠️ Mail auth failed: ${authErr.message?.substring(0, 80)}`);
+      }
 
-    if (mailToken) {
-      const pollStart = Date.now();
-      while (Date.now() - pollStart < 90000 && !verificationLink) {
-        await sleep(4000);
-        try {
-          const messages = await fetchMessages(mailToken, mailProvider);
-          log(`📭 mail.tm: ${messages.length} message(s) found`);
-          for (const msg of messages) {
-            const from    = (msg.from?.address || msg.from || "").toLowerCase();
-            const subject = (msg.subject || "").toLowerCase();
-            if (
-              from.includes("elevenlabs") || from.includes("noreply") || from.includes("firebase") ||
-              subject.includes("elevenlabs") || subject.includes("verify") ||
-              subject.includes("confirm")    || subject.includes("email")
-            ) {
-              const content = await fetchMessageContent(mailToken, msg.id, mailProvider).catch(() => "");
-              const linkMatch =
-                content.match(/https?:\/\/[^\s"<>]+elevenlabs[^\s"<>]*/i) ||
-                content.match(/https?:\/\/[^\s"<>]*verify[^\s"<>]*/i)     ||
-                content.match(/https?:\/\/[^\s"<>]*confirm[^\s"<>]*/i)    ||
-                content.match(/https?:\/\/[^\s"<>]*oobCode[^\s"<>]*/i)    ||
-                content.match(/href="(https?:\/\/[^"]+)"/i);
-              if (linkMatch) {
-                verificationLink = linkMatch[1] || linkMatch[0];
-                log(`✅ Verification link found: ${verificationLink.substring(0, 80)}…`);
-                break;
+      if (mailToken) {
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 90000 && !verificationLink) {
+          await sleep(4000);
+          try {
+            const messages = await fetchMessages(mailToken, mailProvider as "mail.tm" | "mail.gw");
+            log(`📭 Inbox: ${messages.length} message(s) found`);
+            for (const msg of messages) {
+              const from    = (msg.from?.address || msg.from || "").toLowerCase();
+              const subject = (msg.subject || "").toLowerCase();
+              if (
+                from.includes("elevenlabs") || from.includes("noreply") || from.includes("firebase") ||
+                subject.includes("elevenlabs") || subject.includes("verify") ||
+                subject.includes("confirm")    || subject.includes("email")
+              ) {
+                const content = await fetchMessageContent(mailToken, msg.id, mailProvider as "mail.tm" | "mail.gw").catch(() => "");
+                const linkMatch =
+                  content.match(/https?:\/\/[^\s"<>]+elevenlabs[^\s"<>]*/i) ||
+                  content.match(/https?:\/\/[^\s"<>]*verify[^\s"<>]*/i)     ||
+                  content.match(/https?:\/\/[^\s"<>]*confirm[^\s"<>]*/i)    ||
+                  content.match(/https?:\/\/[^\s"<>]*oobCode[^\s"<>]*/i)    ||
+                  content.match(/href="(https?:\/\/[^"]+)"/i);
+                if (linkMatch) {
+                  verificationLink = linkMatch[1] || linkMatch[0];
+                  log(`✅ Verification link found: ${verificationLink.substring(0, 80)}…`);
+                  break;
+                }
               }
             }
+          } catch (pollErr: any) {
+            log(`⚠️ Poll error: ${pollErr.message?.substring(0, 60)}`);
           }
-        } catch (pollErr: any) {
-          log(`⚠️ Poll error: ${pollErr.message?.substring(0, 60)}`);
-        }
-        if (!verificationLink) {
-          log(`Waiting for verification email… (${Math.round((Date.now() - pollStart) / 1000)}s)`);
+          if (!verificationLink) {
+            log(`Waiting for verification email… (${Math.round((Date.now() - Date.now() + pollStart) / 1000)}s elapsed)`);
+          }
         }
       }
     }
 
     if (!verificationLink) {
-      log("❌ No verification email received within 90s");
-      return { success: false, email: elEmail, password: elPassword, error: "Verification email not received within 90s" };
+      const tip = mailProvider !== "gmail"
+        ? " Tip: Configure Gmail credentials in Settings to bypass ElevenLabs' email verification check."
+        : "";
+      log(`❌ No verification email received within 120s.${tip}`);
+      return { success: false, email: elEmail, password: elPassword, error: `Verification email not received.${tip}` };
     }
 
     // ── STEP 7: Browser — navigate to verification link ───────────────────

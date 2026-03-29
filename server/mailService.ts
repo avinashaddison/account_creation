@@ -168,6 +168,103 @@ export async function pollGmailForVerificationCode(
   return null;
 }
 
+export async function pollGmailForElevenLabsLink(
+  targetAddress: string,
+  maxWaitMs: number = 120000,
+  intervalMs: number = 5000,
+  log: (msg: string) => void = console.log
+): Promise<string | null> {
+  if (!_gmailAddress || !_gmailAppPassword) {
+    log("[Gmail] No credentials configured — cannot poll for ElevenLabs link");
+    return null;
+  }
+
+  const startTime = new Date(Date.now() - 60 * 1000); // look back 1 min for safety
+  const baseUser = targetAddress.split("@")[0].replace(/\./g, "").toLowerCase();
+
+  const client = new ImapFlow({
+    host: "imap.gmail.com",
+    port: 993,
+    secure: true,
+    auth: { user: _gmailAddress, pass: _gmailAppPassword },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    const mailboxesToTry = ["[Gmail]/All Mail", "INBOX", "[Gmail]/Spam", "[Gmail]/Promotions"];
+    let activeLock: any = null;
+    for (const box of mailboxesToTry) {
+      try { activeLock = await client.getMailboxLock(box); log(`[Gmail] Opened mailbox: ${box}`); break; }
+      catch { log(`[Gmail] Could not open ${box}, trying next...`); }
+    }
+    if (!activeLock) throw new Error("Could not open any Gmail mailbox");
+    const lock = activeLock;
+
+    const deadline = Date.now() + maxWaitMs;
+    let attempt = 0;
+    try {
+      while (Date.now() < deadline) {
+        attempt++;
+        log(`[Gmail] Polling for ElevenLabs verification email... attempt ${attempt}`);
+        try {
+          // Search from ElevenLabs domain — they send from noreply@elevenlabs.io
+          const uids = await client.search(
+            { or: [{ from: "elevenlabs.io" }, { from: "elevenlabs" }], since: startTime },
+            { uid: true }
+          );
+          log(`[Gmail] Found ${uids.length} ElevenLabs message(s)`);
+          if (uids.length > 0) {
+            const range = (uids as number[]).join(",");
+            for await (const msg of client.fetch(range, { source: true, envelope: true }, { uid: true })) {
+              const toAddr = (msg.envelope?.to?.[0]?.address || "").toLowerCase();
+              const toUser = toAddr.split("@")[0].replace(/\./g, "");
+              // Accept if addressed to our base user (dot variants all map to same user)
+              if (toUser !== baseUser) {
+                log(`[Gmail] Skipping — addressed to ${toAddr}, expected ${baseUser}`);
+                continue;
+              }
+              log(`[Gmail] Matched email to: ${toAddr}`);
+              const raw = msg.source.toString("utf8");
+              // Look for ElevenLabs verification link (oobCode or verify in URL)
+              const linkPatterns = [
+                /https?:\/\/[^\s"<>\]]+oobCode[^\s"<>\]]*/i,
+                /https?:\/\/[^\s"<>\]]+elevenlabs[^\s"<>\]]*verify[^\s"<>\]]*/i,
+                /https?:\/\/elevenlabs\.io\/[^\s"<>\]]*/i,
+                /href="(https?:\/\/[^"]+oobCode[^"]*)">/i,
+                /href="(https?:\/\/[^"]+elevenlabs[^"]+)">/i,
+              ];
+              for (const pattern of linkPatterns) {
+                const m = raw.match(pattern);
+                if (m) {
+                  const link = (m[1] || m[0]).replace(/=\r?\n/g, "").replace(/=3D/g, "=");
+                  log(`[Gmail] ✅ Verification link found: ${link.substring(0, 80)}…`);
+                  return link;
+                }
+              }
+              log("[Gmail] Email found but no verification link in body");
+            }
+          }
+        } catch (searchErr: any) {
+          log(`[Gmail] Search error: ${searchErr.message}`);
+        }
+        if (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, intervalMs));
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  } catch (err: any) {
+    log(`[Gmail] IMAP connection error: ${err.message}`);
+  } finally {
+    try { await client.logout(); } catch {}
+  }
+
+  log("[Gmail] Timed out waiting for ElevenLabs verification email");
+  return null;
+}
+
 export function detectProviderFromDomain(domain: string): Provider {
   if (MAIL_TM_DOMAINS.has(domain)) return "mail.tm";
   if (MAIL_GW_DOMAINS.has(domain)) return "mail.gw";
