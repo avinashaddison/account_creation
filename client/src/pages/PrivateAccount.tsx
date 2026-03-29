@@ -86,6 +86,8 @@ export default function PrivateAccount() {
   const [bulkCopyCount, setBulkCopyCount] = useState(10);
   const [bulkCopyCredits, setBulkCopyCredits] = useState<"any" | "5" | "20">("any");
   const [bulkCopiedIds, setBulkCopiedIds] = useState<string[] | null>(null);
+  const [replitBulkCopyCount, setReplitBulkCopyCount] = useState(10);
+  const [replitBulkCopiedIds, setReplitBulkCopiedIds] = useState<string[] | null>(null);
   const [bulkStatusTarget, setBulkStatusTarget] = useState("sold_out");
   const [bulkApplying, setBulkApplying] = useState(false);
   const [warmLogs, setWarmLogs] = useState<string[]>([]);
@@ -1416,6 +1418,50 @@ export default function PrivateAccount() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Replit Bulk copy toolbar */}
+          {replitAccounts.filter((a) => a.status === "processing").length > 0 && (
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-violet-500/10 flex-wrap">
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Bulk Copy</span>
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={replitBulkCopyCount}
+                onChange={(e) => setReplitBulkCopyCount(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-16 h-7 rounded-md px-2 text-xs font-mono text-center bg-black/40 border border-violet-500/20 text-violet-300 focus:outline-none focus:border-violet-500/50"
+                data-testid="input-replit-bulk-copy-count"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-3 font-mono text-xs border border-violet-500/20"
+                style={{ color: "#a78bfa" }}
+                onClick={() => {
+                  const eligible = replitAccounts.filter((a) => a.status === "processing");
+                  const slice = eligible.slice(0, replitBulkCopyCount);
+                  if (slice.length === 0) {
+                    toast({ title: "No accounts", description: "No processing Replit accounts available to copy" });
+                    return;
+                  }
+                  const text = slice.map((a) => `Email 📧: ${a.email}\n\nPassword 🔑: ${a.password || ""}\n\nCredits ✈︎: $${a.credits || "20"} 💰`).join("\n\n---\n\n");
+                  navigator.clipboard.writeText(text).then(() => {
+                    setReplitBulkCopiedIds(slice.map((a) => String(a.id)));
+                    toast({ title: `Copied ${slice.length} accounts`, description: "Email + Password + Credits format" });
+                  }).catch(() => {
+                    toast({ title: "Clipboard error", description: "Could not write to clipboard — check browser permissions", variant: "destructive" });
+                  });
+                }}
+                data-testid="button-replit-bulk-copy"
+              >
+                <Copy className="w-3 h-3 mr-1" />
+                Copy {Math.min(replitBulkCopyCount, replitAccounts.filter((a) => a.status === "processing").length)}
+              </Button>
+              <span className="text-[10px] font-mono text-zinc-600">
+                {replitAccounts.filter((a) => a.status === "processing").length} ready
+              </span>
             </div>
           )}
         </div>
