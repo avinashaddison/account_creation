@@ -88,6 +88,9 @@ export default function PrivateAccount() {
   const [bulkCopiedIds, setBulkCopiedIds] = useState<string[] | null>(null);
   const [replitBulkCopyCount, setReplitBulkCopyCount] = useState(10);
   const [replitBulkCopiedIds, setReplitBulkCopiedIds] = useState<string[] | null>(null);
+  const [replitBulkStatusFilter, setReplitBulkStatusFilter] = useState<"any" | "processing" | "working" | "sold_out">("any");
+  const [replitBulkStatusTarget, setReplitBulkStatusTarget] = useState("sold_out");
+  const [replitBulkApplying, setReplitBulkApplying] = useState(false);
   const [bulkStatusTarget, setBulkStatusTarget] = useState("sold_out");
   const [bulkApplying, setBulkApplying] = useState(false);
   const [warmLogs, setWarmLogs] = useState<string[]>([]);
@@ -1434,15 +1437,37 @@ export default function PrivateAccount() {
                 className="w-16 h-7 rounded-md px-2 text-xs font-mono text-center bg-black/40 border border-violet-500/20 text-violet-300 focus:outline-none focus:border-violet-500/50"
                 data-testid="input-replit-bulk-copy-count"
               />
+              {/* Status filter toggle */}
+              <div className="flex items-center rounded-md overflow-hidden border border-violet-500/20" data-testid="toggle-replit-bulk-status-filter">
+                {(["any", "processing", "working", "sold_out"] as const).map((opt, i, arr) => (
+                  <button
+                    key={opt}
+                    onClick={() => setReplitBulkStatusFilter(opt)}
+                    className="h-7 px-2.5 text-[10px] font-mono transition-colors"
+                    style={{
+                      background: replitBulkStatusFilter === opt ? "rgba(139,92,246,0.2)" : "rgba(0,0,0,0.4)",
+                      color: replitBulkStatusFilter === opt ? "#c4b5fd" : "rgba(255,255,255,0.3)",
+                      borderRight: i < arr.length - 1 ? "1px solid rgba(139,92,246,0.2)" : "none",
+                    }}
+                    data-testid={`button-replit-filter-${opt}`}
+                  >
+                    {opt === "any" ? "any" : opt === "processing" ? "processing" : opt === "working" ? "available" : "sold out"}
+                  </button>
+                ))}
+              </div>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-3 font-mono text-xs border border-violet-500/20"
                 style={{ color: "#a78bfa" }}
                 onClick={() => {
-                  const slice = replitAccounts.slice(0, replitBulkCopyCount);
+                  const eligible = replitAccounts.filter((a) => {
+                    if (replitBulkStatusFilter === "any") return true;
+                    return a.status === replitBulkStatusFilter;
+                  });
+                  const slice = eligible.slice(0, replitBulkCopyCount);
                   if (slice.length === 0) {
-                    toast({ title: "No accounts", description: "No Replit accounts available to copy" });
+                    toast({ title: "No accounts", description: `No ${replitBulkStatusFilter === "any" ? "" : replitBulkStatusFilter + " "}Replit accounts available` });
                     return;
                   }
                   const text = slice.map((a) => `Email 📧: ${a.email}\n\nPassword 🔑: ${a.password || ""}\n\nCredits ✈︎: $${a.credits || "20"} 💰`).join("\n\n---\n\n");
@@ -1456,11 +1481,71 @@ export default function PrivateAccount() {
                 data-testid="button-replit-bulk-copy"
               >
                 <Copy className="w-3 h-3 mr-1" />
-                Copy {Math.min(replitBulkCopyCount, replitAccounts.length)}
+                Copy {Math.min(replitBulkCopyCount, replitAccounts.filter((a) => replitBulkStatusFilter === "any" || a.status === replitBulkStatusFilter).length)}
               </Button>
               <span className="text-[10px] font-mono text-zinc-600">
-                {replitAccounts.length} total
+                {replitAccounts.filter((a) => replitBulkStatusFilter === "any" || a.status === replitBulkStatusFilter).length} ready
               </span>
+            </div>
+          )}
+
+          {/* Post-copy status bar */}
+          {replitBulkCopiedIds && (
+            <div className="flex items-center gap-2 mt-2 px-3 py-2.5 rounded-lg flex-wrap" style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}>
+              <span className="text-[11px] font-mono text-violet-300 font-semibold">
+                {replitBulkCopiedIds.length} copied
+              </span>
+              <span className="text-[10px] font-mono text-zinc-500">· set status:</span>
+              <select
+                value={replitBulkStatusTarget}
+                onChange={(e) => setReplitBulkStatusTarget(e.target.value)}
+                className="h-7 rounded-md px-2 text-xs font-mono bg-black/40 border border-violet-500/20 text-violet-200 focus:outline-none"
+                data-testid="select-replit-bulk-status-target"
+              >
+                <option value="processing">Processing</option>
+                <option value="working">Available (Working)</option>
+                <option value="sold_out">Sold Out</option>
+                <option value="error">Error</option>
+              </select>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={replitBulkApplying}
+                className="h-7 px-3 font-mono text-xs border border-violet-500/25"
+                style={{ color: "#a78bfa" }}
+                onClick={async () => {
+                  setReplitBulkApplying(true);
+                  try {
+                    const res = await fetch("/api/replit-accounts/bulk-status", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({ ids: replitBulkCopiedIds.map(Number), status: replitBulkStatusTarget }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || "Failed");
+                    toast({ title: `Updated ${data.updated ?? replitBulkCopiedIds.length} accounts`, description: `Status set to ${replitBulkStatusTarget.replace("_", " ")}` });
+                    setReplitBulkCopiedIds(null);
+                    fetchReplit();
+                  } catch (err: any) {
+                    toast({ title: "Error", description: err.message, variant: "destructive" });
+                  } finally {
+                    setReplitBulkApplying(false);
+                  }
+                }}
+                data-testid="button-replit-bulk-status-apply"
+              >
+                {replitBulkApplying ? "Applying..." : "Apply"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-zinc-600 hover:text-zinc-400"
+                onClick={() => setReplitBulkCopiedIds(null)}
+                data-testid="button-replit-bulk-status-dismiss"
+              >
+                <X className="w-3 h-3" />
+              </Button>
             </div>
           )}
         </div>
