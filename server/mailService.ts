@@ -10,6 +10,14 @@ type Provider = keyof typeof PROVIDERS;
 const MAIL_TM_DOMAINS = new Set<string>();
 const MAIL_GW_DOMAINS = new Set<string>();
 
+export function registerMailGwDomain(domain: string): void {
+  MAIL_GW_DOMAINS.add(domain);
+}
+
+export function registerMailTmDomain(domain: string): void {
+  MAIL_TM_DOMAINS.add(domain);
+}
+
 let _gmailAddress: string | null = null;
 let _gmailAppPassword: string | null = null;
 

@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
-import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent } from "./mailService";
+import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
 import * as http from "http";
@@ -19651,9 +19651,33 @@ export async function createElevenLabsAccount(
   let browser: any = null;
 
   try {
-    // ── STEP 1: Create mail.tm temp email ──────────────────────────────────
-    log("📬 Generating mail.tm temp email...");
-    const gwDomain = await getMailTmOnlyDomain();
+    // ── STEP 1: Create temp email — try mail.gw first (real-looking business domains),
+    //            fall back to mail.tm if mail.gw is unavailable.
+    // Note: sharebot.net (mail.tm) fails ElevenLabs' email deliverability check.
+    // mail.gw domains (questtechsystems.com, teihu.com, etc.) look like real businesses
+    // and are more likely to pass the verification service.
+    log("📬 Generating temp email (preferring mail.gw business domains)...");
+    let gwDomain: string;
+    let mailProvider: "mail.gw" | "mail.tm";
+    try {
+      const gwDomains = await fetch("https://api.mail.gw/domains", { signal: AbortSignal.timeout(8000) })
+        .then(r => r.ok ? r.json() : { "hydra:member": [] })
+        .then((d: any) => (d["hydra:member"] || []).map((x: any) => x.domain as string));
+      if (gwDomains.length > 0) {
+        gwDomain = gwDomains[Math.floor(Math.random() * gwDomains.length)];
+        mailProvider = "mail.gw";
+        registerMailGwDomain(gwDomain);
+        log(`📬 Using mail.gw domain: ${gwDomain}`);
+      } else {
+        gwDomain = await getMailTmOnlyDomain();
+        mailProvider = "mail.tm";
+        log(`📬 mail.gw unavailable — using mail.tm domain: ${gwDomain}`);
+      }
+    } catch {
+      gwDomain = await getMailTmOnlyDomain();
+      mailProvider = "mail.tm";
+      log(`📬 mail.gw error — using mail.tm domain: ${gwDomain}`);
+    }
     const adjectives = ["swift","bright","cool","smart","keen","bold","calm","glad","fine","pure","neat","wise","warm","fair","free"];
     const nouns      = ["fox","owl","jay","bee","ark","elm","oak","ivy","fen","dew","ray","sky","sea","bay","glen"];
     const adj  = adjectives[Math.floor(Math.random() * adjectives.length)];
@@ -19661,9 +19685,8 @@ export async function createElevenLabsAccount(
     const num  = Math.floor(Math.random() * 9000 + 1000);
     const elEmail        = `${adj}${noun}${num}@${gwDomain}`;
     const elMailPassword = "MailTm@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
-    const mailProvider: "mail.gw" | "mail.tm" = "mail.tm";
     await createTempEmail(elEmail, elMailPassword);
-    log(`✅ mail.tm email created: ${elEmail} (domain: ${gwDomain})`);
+    log(`✅ Email created: ${elEmail} (domain: ${gwDomain}, provider: ${mailProvider})`);
 
     // Generate a strong ElevenLabs account password
     const elPassword = "EL@" + Math.random().toString(36).substring(2, 8).toUpperCase() + Math.floor(Math.random() * 900 + 100) + "!";
