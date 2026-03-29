@@ -19630,6 +19630,7 @@ export async function createElevenLabsAccount(
   options: { log?: (msg: string) => void } = {}
 ): Promise<{ success: boolean; email?: string; password?: string; apiKey?: string; error?: string }> {
   const log = options.log || ((msg: string) => console.log("[ElevenLabs]", msg));
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
   let browser: any = null;
 
   try {
@@ -19694,7 +19695,7 @@ export async function createElevenLabsAccount(
     // ── STEP 3: Navigate to ElevenLabs sign-up ────────────────────────────
     log("🔗 Navigating to https://elevenlabs.io/app/sign-up ...");
     await page.goto("https://elevenlabs.io/app/sign-up", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await waitMs(3000);
+    await sleep(3000);
 
     // Handle Cloudflare if needed
     const postNavTitle = await page.title().catch(() => "");
@@ -19712,7 +19713,7 @@ export async function createElevenLabsAccount(
       const input = await page.$(sel).catch(() => null);
       if (input) {
         await input.click().catch(() => {});
-        await waitMs(200);
+        await sleep(200);
         await input.fill(mailGwEmail);
         emailFilled = true;
         log(`Email filled via: ${sel}`);
@@ -19724,7 +19725,7 @@ export async function createElevenLabsAccount(
       log(`Page HTML snippet: ${html}`);
       return { success: false, error: "Could not find email input on ElevenLabs sign-up page" };
     }
-    await waitMs(500);
+    await sleep(500);
 
     // ── STEP 5: Fill password ─────────────────────────────────────────────
     log("🔑 Filling password...");
@@ -19734,7 +19735,7 @@ export async function createElevenLabsAccount(
       const input = await page.$(sel).catch(() => null);
       if (input) {
         await input.click().catch(() => {});
-        await waitMs(200);
+        await sleep(200);
         await input.fill(elPassword);
         pwdFilled = true;
         log("Password filled");
@@ -19744,7 +19745,7 @@ export async function createElevenLabsAccount(
     if (!pwdFilled) {
       log("Warning: password field not found — may be email-only step");
     }
-    await waitMs(500);
+    await sleep(500);
 
     // ── STEP 6: Click "Create account" / "Continue" / "Sign up" ──────────
     log("🖱️ Clicking sign-up submit button...");
@@ -19770,7 +19771,7 @@ export async function createElevenLabsAccount(
       await page.keyboard.press("Enter");
       log("No button found — pressed Enter");
     }
-    await waitMs(5000);
+    await sleep(5000);
 
     const afterSubmitUrl = page.url();
     log(`After submit: ${afterSubmitUrl.substring(0, 100)}`);
@@ -19789,7 +19790,7 @@ export async function createElevenLabsAccount(
     if (mailToken) {
       const pollStart = Date.now();
       while (Date.now() - pollStart < 90000 && !verificationLink) {
-        await waitMs(4000);
+        await sleep(4000);
         try {
           const messages = await fetchMessages(mailToken, providerStr as any);
           log(`📭 mail.gw: ${messages.length} message(s) found`);
@@ -19827,7 +19828,7 @@ export async function createElevenLabsAccount(
     // ── STEP 8: Click verification link ──────────────────────────────────
     log(`🔗 Navigating to verification link...`);
     await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await waitMs(5000);
+    await sleep(5000);
     const verifyUrl = page.url();
     log(`After verification: ${verifyUrl.substring(0, 100)}`);
 
@@ -19836,7 +19837,7 @@ export async function createElevenLabsAccount(
     let apiKey: string | undefined;
     try {
       await page.goto("https://elevenlabs.io/app/settings/api-keys", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await waitMs(3000);
+      await sleep(3000);
       const apiKeyUrl = page.url();
       log(`API keys page: ${apiKeyUrl.substring(0, 80)}`);
 
