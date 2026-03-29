@@ -1,0 +1,137 @@
+19:26:02
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+19:26:02
+>
+🚀 Starting ZenRows registration via SOAX proxy...
+19:26:02
+·
+📧 Using Outlook: rodneyturner1645@outlook.com
+19:26:02
+·
+[batch: zenrows-reg-15c56b11]
+19:26:03
+>
+Register page response: 403 (length=5492)
+19:26:03
+!
+REST API error: <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=Edge"><meta nam
+19:26:03
+!
+REST API signup failed: ZenRows REST API returned 403: <!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta http-equiv="Content-Typ — falling back to browser signup
+19:26:03
+>
+Launching browser for proxy registration (SOAX residential proxy mode)...
+19:26:03
+>
+SOAX proxy configured: proxy.soax.com:5000 (session=rqczwb6ar4k)
+19:26:03
+>
+Launching browser for ZenRows registration
+19:26:03
+>
+Browser launched with SOAX residential proxy
+19:26:03
+>
+Navigating to proxy register page...
+19:26:10
+>
+Initial page: https://app.zenrows.com/register
+19:26:10
+·
+Page title: Sign Up - Web Data Automation Made Easy - ZenRows, body preview:
+19:26:10
+·
+Cloudflare challenge detected, waiting up to 45s for auto-solve...
+19:26:15
+·
+Cloudflare challenge resolved after 5s
+19:26:15
+>
+After CF wait: https://app.zenrows.com/register
+19:26:15
+·
+Found email input with: input[type="email"]
+19:26:16
+·
+Email filled: rodneyturner1645@outlook.com
+19:26:18
+·
+Password filled
+19:26:19
+~
+Checking for captcha on registration page...
+19:26:19
+~
+Captcha scan: turnstile=none recaptchaV2=none recaptchaV3=none hcaptcha=none
+19:26:19
+·
+Iframes: (no src), (no src), (no src), (no src)
+19:26:19
+·
+Buttons found: submit|Sign up with Google|inline-flex items-center gap-1 justify-c | submit|Sign up with Github|inline-flex items-center gap-1 justify-c | button||absolute right-2 top-1/2 transform -tran | submit|Sign Up|inline-flex items-center gap-1 justify-c
+19:26:20
+·
+Found email signup button: 'Sign Up'
+19:26:23
+·
+Clicked signup button
+19:26:32
+·
+After signup: https://app.zenrows.com/email/verify
+19:26:32
+>
+Proxy redirected to verification/phone page: https://app.zenrows.com/email/verify
+19:26:32
+·
+Phone page content: 2,000+ companies rely on our infrastructure "We power it all with ZenRows. It's the most cost-effective and reliable data enrichment tool on the market." Eric Nowoslawski Certified Expert at Clay Let's verify your email Before getting started, please verify your email address rodneyturner1645@outlo
+19:26:32
+·
+Phone page inputs: [{"tag":"INPUT","type":"hidden","name":"_token","placeholder":"","id":""}]
+19:26:32
+·
+Phone page buttons: [{"tag":"BUTTON","text":"Resend verification email","type":"submit"}]
+19:26:32
++
+Phone page forms: [{"action":"https://app.zenrows.com/email/verification-notification","method":"post","id":"","html":"<form method=\"POST\" action=\"https://app.zenrows.com/email/verification-notification\" data-hs-cf-bound=\"true\">\n <input type=\"hidden\" name=\"_token\" value=\"PrrcMhw5quu0ZwpdvRT35bJUD3C1P51XaYvn3QBb\" autocomplete=\"off\"> <button class=\"inline-flex items-center gap-1 justify-center text-center rounded-lg whitespace-nowrap transition ease-in-out duration-150 cursor-pointer disabled:opacity-80 disabled:cursor-not-allowed font-semibold "}]
+19:26:32
+·
+Phone page DOM snapshot: <div class="flex justify-center items-start p-4 sm:p-12 lg:p-24 2xl:p-36"> <!-- Left Panel --> <div class="hidden lg:flex flex-col p-8 gap-10 max-w-xl"> <div class="flex"> <a href="https://www.zenrows.com" class="flex items-center gap-2" aria-label="ZenRows" dact="{&quot;e&quot;:&quot;Registration: Clicked Logo&quot;,&quot;p&quot;:{&quot;section&quot;:&quot;Logo&quot;}}"> <svg class="h-6 w-6" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"> <mask id="ma
+19:26:32
+·
+Step 2/6: Logging into Outlook to get verification email...
+19:26:32
+>
+Using Addison Proxy browser for Outlook login (anti-bot bypass)...
+19:26:32
+!
+Addison Proxy connection failed for Outlook: browserType.connectOverCDP: WebSocket error: wss://browser.zenrows.com/ 400 Bad Request {"code":"REQ, falling back to local browser
+19:26:32
+>
+Connecting via Addison Proxy for Outlook login...
+19:26:32
+>
+Connecting via Addison Proxy...
+19:26:33
+>
+Addison Proxy connected.
+19:26:33
+>
+Addison Proxy connected for Outlook login
+19:26:33
+·
+Navigating to Outlook login...
+19:26:37
+·
+Outlook login page URL: https://outlook.live.com/mail/
+19:26:37
+>
+Not redirected to login, trying login.live.com directly...
+19:27:02
+!
+Error: page.waitForSelector: Timeout 20000ms exceeded. Call log: [2m - waiting for locator('input[type="email"], input[name="loginfmt"]') to be visible[22m
+19:27:02
+!
+Registration failed: page.waitForSelector: Timeout 20000ms exceeded. Call log: [2m - waiting for locator('input[type="email"], input[name="loginfmt"]') to be visible[22m
+19:27:02
+!
+❌ Registration failed: page.waitForSelector: Timeout 20000ms exceeded. Call log: [2m - waiting for locator('input[type="email"], input[name="loginfmt"]') to be visible[22m

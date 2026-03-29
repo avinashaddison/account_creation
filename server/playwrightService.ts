@@ -8731,75 +8731,89 @@ export async function registerZenrowsAccount(
     let zenrowsRegContext = context;
     let zenrowsRegBrowserRef = localBrowser;
 
+    // Use SOAX residential proxy for Outlook login (same as Replit creation — avoids ZenRows CDP issues with Microsoft login)
     let outlookBrowser: any = null;
-    let useZenRowsForOutlook = false;
 
-    if (zenrowsUrl) {
-      log("Using Addison Proxy browser for Outlook login (anti-bot bypass)...");
-      let zrOutlookUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-      const resProxyOL = await getResidentialProxyUrl();
-      zrOutlookUrl = buildCDPUrlWithProxy(zrOutlookUrl, resProxyOL);
+    await ensureBrowserInstalled();
+    const olLaunchArgs = [
+      "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
+    ];
+
+    const olRawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+    const olSoaxUrl = olRawProxy ? olRawProxy.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
+    const olCtxOptions: any = {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1920, height: 1080 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      ignoreHTTPSErrors: true,
+    };
+    if (olSoaxUrl) {
       try {
-        outlookBrowser = await chromium.connectOverCDP(zrOutlookUrl, { timeout: 60000 });
-        zenrowsBrowser = outlookBrowser;
-        useZenRowsForOutlook = true;
-        log("Addison Proxy browser connected for Outlook login");
-      } catch (zrErr: any) {
-        log("Addison Proxy connection failed for Outlook: " + (zrErr.message || "").substring(0, 100) + ", falling back to local browser");
+        const olParsed = new URL(olSoaxUrl);
+        const olCleanUser = (decodeURIComponent(olParsed.username) || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        olCtxOptions.proxy = {
+          server: `${olParsed.protocol}//${olParsed.hostname}:${olParsed.port}`,
+          username: olCleanUser,
+          password: decodeURIComponent(olParsed.password),
+        };
+        log(`SOAX proxy for Outlook login: ${olParsed.hostname}:${olParsed.port} (session=${olCleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+      } catch (olProxyErr: any) {
+        log("Warning: could not parse SOAX proxy for Outlook — using direct: " + olProxyErr.message);
       }
+    } else {
+      log("No SOAX proxy configured — Outlook login will run direct (no proxy)");
     }
 
-    if (!useZenRowsForOutlook) {
-      try {
-        log("Connecting via Addison Proxy for Outlook login...");
-        outlookBrowser = await connectViaZenRows(log);
-        useZenRowsForOutlook = true;
-        log("Addison Proxy connected for Outlook login");
-      } catch (zenErr: any) {
-        console.log("[OutlookLogin] Addison Proxy fallback failed: " + zenErr.message);
-        await ensureBrowserInstalled();
-        const olLaunchArgs = [
-          "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-          "--disable-blink-features=AutomationControlled", "--ignore-certificate-errors",
-        ];
-        log("Launching direct browser for Outlook login (no proxy)");
-        outlookBrowser = await chromium.launch({ headless: true, args: olLaunchArgs });
-        localBrowser = outlookBrowser;
-      }
-    }
+    outlookBrowser = await chromium.launch({ headless: true, args: olLaunchArgs });
+    localBrowser = outlookBrowser;
 
     let outlookCtx: any;
     let outlookPage: any;
 
-    if (useZenRowsForOutlook) {
-      outlookCtx = outlookBrowser.contexts()[0] || await outlookBrowser.newContext();
-      outlookPage = await outlookCtx.newPage();
-    } else {
-      outlookCtx = await outlookBrowser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        viewport: { width: 1920, height: 1080 },
-        ignoreHTTPSErrors: true,
-      });
-      outlookPage = await outlookCtx.newPage();
-    }
+    outlookCtx = await outlookBrowser.newContext(olCtxOptions);
+    outlookPage = await outlookCtx.newPage();
     await optimizePageBandwidth(outlookPage, { allowStylesheets: true });
     await outlookPage.setDefaultNavigationTimeout(120000);
     await outlookPage.setDefaultTimeout(30000);
 
+    // Go directly to the Outlook sign-in URL (avoids redirect timing issues with fresh proxy IPs)
     log("Navigating to Outlook login...");
-    await outlookPage.goto("https://outlook.live.com/mail/", { waitUntil: "domcontentloaded", timeout: 120000 });
+    const olLoginUrl = "https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US";
+    await outlookPage.goto(olLoginUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
     await outlookPage.waitForTimeout(3000 + Math.random() * 2000);
 
     const currentLoginUrl = outlookPage.url();
     log("Outlook login page URL: " + currentLoginUrl.substring(0, 120));
 
+    // If for some reason we're not on a login page, also try the plain login URL
     if (!currentLoginUrl.includes("login.live.com") && !currentLoginUrl.includes("login.microsoftonline.com")) {
-      log("Not redirected to login, trying login.live.com directly...");
-      await outlookPage.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 120000 });
+      log("Unexpected redirect, trying login.live.com root...");
+      await outlookPage.goto("https://login.live.com/", { waitUntil: "domcontentloaded", timeout: 60000 });
       await outlookPage.waitForTimeout(3000 + Math.random() * 1500);
     }
 
-    const olEmailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 20000 });
+    // Wait for email input with extended timeout and log page state if not found
+    let olEmailInput: any = null;
+    try {
+      olEmailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 30000 });
+    } catch {
+      const olPageTitle = await outlookPage.title().catch(() => "?");
+      const olPageUrl = outlookPage.url();
+      log(`Email input not found — url=${olPageUrl.substring(0, 100)}, title="${olPageTitle}"`);
+      // Try clicking a "Sign in" button if present (some locales show a splash before the form)
+      const signInBtn = await outlookPage.$('a[href*="login.live.com"], button:has-text("Sign in"), a:has-text("Sign in")').catch(() => null);
+      if (signInBtn) {
+        log("Found Sign-in button, clicking...");
+        await signInBtn.click().catch(() => {});
+        await outlookPage.waitForTimeout(3000);
+        olEmailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 20000 }).catch(() => null);
+      }
+      if (!olEmailInput) {
+        throw new Error(`Outlook login page failed to load email input (url: ${olPageUrl.substring(0, 100)}, title: ${olPageTitle})`);
+      }
+    }
     if (olEmailInput) {
       await olEmailInput.click();
       await outlookPage.waitForTimeout(500);
