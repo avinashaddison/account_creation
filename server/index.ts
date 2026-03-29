@@ -11,21 +11,60 @@ import path from "path";
 import { execSync } from "child_process";
 import fs from "fs";
 
+// Set browser path before any playwright import resolves launch paths
+const BROWSERS_PATH = path.join(process.cwd(), ".cache/ms-playwright");
+process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_PATH;
+
 (function ensurePlaywrightBrowsers() {
-  const cacheDir = path.join(process.cwd(), ".cache/ms-playwright");
-  let found = false;
-  if (fs.existsSync(cacheDir)) {
-    const entries = fs.readdirSync(cacheDir);
-    found = entries.some(e => e.startsWith("chromium_headless_shell"));
+  const playwrightBin = path.join(process.cwd(), "node_modules/.bin/playwright");
+  const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS_PATH };
+
+  function hasBrowser(prefix: string): boolean {
+    if (!fs.existsSync(BROWSERS_PATH)) return false;
+    return fs.readdirSync(BROWSERS_PATH).some(e => e.startsWith(prefix));
   }
-  if (!found) {
-    console.log("[startup] Playwright browsers missing — installing (this may take a moment)...");
+
+  function runInstall(args: string): boolean {
+    // Use process.execPath (current node binary) to bypass #!/usr/bin/env node
+    // shebang resolution failures in production containers where node may not be in shell PATH
+    const cmd = `${process.execPath} ${playwrightBin} ${args}`;
     try {
-      execSync("node_modules/.bin/playwright install chromium chromium-headless-shell --quiet", { stdio: "inherit", timeout: 120000 });
-      console.log("[startup] Playwright browsers installed.");
-    } catch (e) {
-      console.warn("[startup] Playwright install failed:", e);
+      const out = execSync(cmd, {
+        encoding: "utf8",
+        timeout: 180000,
+        env: installEnv,
+      });
+      if (out) console.log("[startup] playwright install output:", out.trim());
+      return true;
+    } catch (e: any) {
+      console.error(`[startup] playwright install "${args}" FAILED`);
+      if (e.stdout) console.error("[startup] stdout:", (e.stdout as string).trim());
+      if (e.stderr) console.error("[startup] stderr:", (e.stderr as string).trim());
+      console.error("[startup] exit code:", e.status);
+      return false;
     }
+  }
+
+  const needsHeadlessShell = !hasBrowser("chromium_headless_shell");
+  const needsChromium      = !hasBrowser("chromium-");
+
+  if (!needsHeadlessShell && !needsChromium) {
+    console.log("[startup] Playwright browsers already present.");
+    return;
+  }
+
+  console.log("[startup] Playwright browsers missing — installing...");
+
+  // Try full install first
+  if (!runInstall("install chromium chromium-headless-shell")) {
+    // Fallback: install only chromium and force headless-new mode
+    console.log("[startup] Falling back to chromium-only install + headless-new mode...");
+    if (runInstall("install chromium")) {
+      process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW = "1";
+      console.log("[startup] Chromium installed. PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW=1 set.");
+    }
+  } else {
+    console.log("[startup] Playwright browsers installed successfully.");
   }
 })();
 
