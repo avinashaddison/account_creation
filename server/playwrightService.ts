@@ -19624,13 +19624,14 @@ export async function checkReplitBanStatus(
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// ElevenLabs account creation — REST-only flow (no browser needed until verification)
+// ElevenLabs account creation — REST + Outlook inbox scan flow
 // Strategy:
-//   1. Solve hCaptcha via CapSolver (site key: 3aad1500-7e79-4051-aac5-6852324dab76)
-//   2. POST /v1/user/pre-sign-up with real hCaptcha token (stores token in ElevenLabs DB)
-//   3. Firebase REST API sign-up (blocking function validates stored hCaptcha via hCaptcha siteverify)
-//   4. Poll mail.tm for verification email
-//   5. Browser (SOAX proxy) only for verification link navigation + API key extraction
+//   1. Get an existing Outlook account from DB (or create a new one)
+//   2. Solve hCaptcha via CapSolver (site key: 3aad1500-7e79-4051-aac5-6852324dab76)
+//   3. POST /v1/user/pre-sign-up with real hCaptcha token
+//   4. Firebase REST API sign-up (outlook.com passes email deliverability check)
+//   5. Scan Outlook inbox via browser for the ElevenLabs verification link
+//   6. Navigate verification link + extract API key
 // ══════════════════════════════════════════════════════════════════════════
 const ELEVENLABS_FIREBASE_API_KEY = "AIzaSyBSsRE_1Os04-bxpd5JTLIniy3UK4OqKys";
 const ELEVENLABS_HCAPTCHA_SITEKEY  = "3aad1500-7e79-4051-aac5-6852324dab76";
@@ -19651,52 +19652,44 @@ export async function createElevenLabsAccount(
   let browser: any = null;
 
   try {
-    // ── STEP 1: Choose email strategy ─────────────────────────────────────
-    // Priority: Gmail (dot-trick) > temp mail fallback
-    //
-    // Why Gmail? ElevenLabs' blocking function calls an email verification API
-    // (NeverBounce/ZeroBounce) that rejects ALL catch-all domains. Every temp
-    // mail service (mail.tm sharebot.net, mail.gw oakon.com, etc.) uses catch-all,
-    // so they all fail. Gmail uses per-address verification (not catch-all), so it
-    // passes. Gmail dot-trick generates unlimited unique addresses to the same inbox.
-    const useGmail = hasGmailCredentials();
+    // ── STEP 1: Get/create an Outlook account for ElevenLabs signup ────────
+    // Why Outlook? ElevenLabs' blocking function calls an email deliverability API
+    // (NeverBounce/ZeroBounce) that rejects ALL catch-all domains. Every temp mail
+    // service (mail.tm/mail.gw) uses catch-all and gets rejected. Outlook.com is a
+    // real provider with per-address mailboxes → passes the deliverability check.
     let elEmail: string;
     let elMailPassword: string;
-    let mailProvider: "mail.gw" | "mail.tm" | "gmail";
 
-    if (useGmail) {
-      elEmail = createGmailAddress();
-      elMailPassword = "";
-      mailProvider = "gmail";
-      log(`📬 Using Gmail dot-trick address: ${elEmail}`);
+    // Prefer @outlook.com over @hotmail.com (more realistic usernames, better NeverBounce score)
+    const outlookRows = await db.execute(
+      sql`SELECT id, email, password FROM private_outlook_accounts
+          WHERE status = 'active'
+          ORDER BY CASE WHEN email LIKE '%@outlook.com' THEN 0 ELSE 1 END, created_at ASC
+          LIMIT 20`
+    ).catch(() => ({ rows: [] as any[] }));
+
+    if (outlookRows.rows.length > 0) {
+      const pick = outlookRows.rows[Math.floor(Math.random() * outlookRows.rows.length)];
+      elEmail       = pick.email as string;
+      elMailPassword = pick.password as string;
+      log(`📬 Using existing Outlook account: ${elEmail}`);
     } else {
-      log("📬 No Gmail configured — falling back to temp email (may fail ElevenLabs email check)...");
-      let gwDomain: string;
-      try {
-        const gwDomains = await fetch("https://api.mail.gw/domains", { signal: AbortSignal.timeout(8000) })
-          .then(r => r.ok ? r.json() : { "hydra:member": [] })
-          .then((d: any) => (d["hydra:member"] || []).map((x: any) => x.domain as string));
-        if (gwDomains.length > 0) {
-          gwDomain = gwDomains[Math.floor(Math.random() * gwDomains.length)];
-          mailProvider = "mail.gw";
-          registerMailGwDomain(gwDomain);
-        } else {
-          gwDomain = await getMailTmOnlyDomain();
-          mailProvider = "mail.tm";
-        }
-      } catch {
-        gwDomain = await getMailTmOnlyDomain();
-        mailProvider = "mail.tm";
+      log("📬 No Outlook accounts in DB — creating a new one (this may take ~2 min)…");
+      const outlookResult = await createOutlookAccount(log);
+      if (!outlookResult.success || !outlookResult.email || !outlookResult.password) {
+        return { success: false, error: `Outlook account creation failed: ${outlookResult.error || "unknown error"}` };
       }
-      const adjectives = ["swift","bright","cool","smart","keen","bold","calm","glad","fine","pure","neat","wise","warm","fair","free"];
-      const nouns      = ["fox","owl","jay","bee","ark","elm","oak","ivy","fen","dew","ray","sky","sea","bay","glen"];
-      const adj  = adjectives[Math.floor(Math.random() * adjectives.length)];
-      const noun = nouns[Math.floor(Math.random() * nouns.length)];
-      const num  = Math.floor(Math.random() * 9000 + 1000);
-      elEmail        = `${adj}${noun}${num}@${gwDomain}`;
-      elMailPassword = "MailTm@Pass9!" + Math.floor(Math.random() * 9000 + 1000);
-      await createTempEmail(elEmail, elMailPassword);
-      log(`✅ Temp email created: ${elEmail} (provider: ${mailProvider})`);
+      elEmail       = outlookResult.email;
+      elMailPassword = outlookResult.password;
+      try {
+        await db.execute(
+          sql`INSERT INTO private_outlook_accounts (id, email, password, status, created_by)
+              VALUES (gen_random_uuid(), ${elEmail}, ${elMailPassword}, 'active', 'elevenlabs-auto')`
+        );
+        log(`✅ New Outlook account saved to DB: ${elEmail}`);
+      } catch (saveErr: any) {
+        log(`⚠️ Could not save Outlook account to DB: ${saveErr.message?.substring(0, 60)}`);
+      }
     }
 
     // Generate a strong ElevenLabs account password
@@ -19814,68 +19807,113 @@ export async function createElevenLabsAccount(
       log(`⚠️ sendOobCode error: ${verifErr.message?.substring(0, 80)}`);
     }
 
-    // ── STEP 6: Poll inbox for ElevenLabs verification link ───────────────
-    log(`📬 Polling inbox for ElevenLabs verification email (up to 120s)…`);
+    // ── STEP 6: Scan Outlook inbox for ElevenLabs verification link ───────
+    log(`📬 Scanning Outlook inbox for ElevenLabs verification email…`);
     let verificationLink: string | null = null;
 
-    if (mailProvider === "gmail") {
-      // Gmail IMAP poll — direct IMAP connection, searches for ElevenLabs emails
-      log(`📭 Using Gmail IMAP to poll for verification link at ${elEmail}…`);
-      verificationLink = await pollGmailForElevenLabsLink(elEmail, 120000, 5000, log);
-    } else {
-      // mail.tm / mail.gw temp email poll
-      let mailToken: string | null = null;
+    {
+      const { chromium: outlookChromium } = await import("playwright");
+      let outlookBrowser: any = null;
       try {
-        mailToken = await getAuthToken(elEmail, elMailPassword, mailProvider as "mail.tm" | "mail.gw");
-      } catch (authErr: any) {
-        log(`⚠️ Mail auth failed: ${authErr.message?.substring(0, 80)}`);
-      }
+        outlookBrowser = await outlookChromium.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        });
+        const outlookCtx  = await outlookBrowser.newContext({ locale: "en-US" });
+        const outlookPage = await outlookCtx.newPage();
+        await outlookPage.setDefaultNavigationTimeout(60000);
+        await outlookPage.setDefaultTimeout(30000);
 
-      if (mailToken) {
-        const pollStart = Date.now();
-        while (Date.now() - pollStart < 90000 && !verificationLink) {
-          await sleep(4000);
-          try {
-            const messages = await fetchMessages(mailToken, mailProvider as "mail.tm" | "mail.gw");
-            log(`📭 Inbox: ${messages.length} message(s) found`);
-            for (const msg of messages) {
-              const from    = (msg.from?.address || msg.from || "").toLowerCase();
-              const subject = (msg.subject || "").toLowerCase();
-              if (
-                from.includes("elevenlabs") || from.includes("noreply") || from.includes("firebase") ||
-                subject.includes("elevenlabs") || subject.includes("verify") ||
-                subject.includes("confirm")    || subject.includes("email")
-              ) {
-                const content = await fetchMessageContent(mailToken, msg.id, mailProvider as "mail.tm" | "mail.gw").catch(() => "");
-                const linkMatch =
-                  content.match(/https?:\/\/[^\s"<>]+elevenlabs[^\s"<>]*/i) ||
-                  content.match(/https?:\/\/[^\s"<>]*verify[^\s"<>]*/i)     ||
-                  content.match(/https?:\/\/[^\s"<>]*confirm[^\s"<>]*/i)    ||
-                  content.match(/https?:\/\/[^\s"<>]*oobCode[^\s"<>]*/i)    ||
-                  content.match(/href="(https?:\/\/[^"]+)"/i);
-                if (linkMatch) {
-                  verificationLink = linkMatch[1] || linkMatch[0];
-                  log(`✅ Verification link found: ${verificationLink.substring(0, 80)}…`);
-                  break;
-                }
-              }
+        log(`📧 Signing into Outlook as ${elEmail}…`);
+        await outlookPage.goto("https://login.live.com", { waitUntil: "domcontentloaded", timeout: 60000 });
+        await sleep(2000);
+
+        await outlookPage.fill('input[type="email"], input[name="loginfmt"]', elEmail).catch(() => {});
+        await sleep(400);
+        await outlookPage.keyboard.press("Enter");
+        await sleep(3000);
+
+        await outlookPage.fill('input[type="password"]', elMailPassword).catch(() => {});
+        await sleep(400);
+        await outlookPage.keyboard.press("Enter");
+        await sleep(4000);
+
+        // Dismiss "Stay signed in?" prompt if present
+        const noBtn = await outlookPage.$('#idBtn_Back').catch(() => null);
+        if (noBtn) { await noBtn.click(); await sleep(2000); }
+
+        await outlookPage.goto("https://outlook.live.com/mail/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await sleep(3000);
+
+        const inboxUrl = outlookPage.url();
+        if (inboxUrl.includes("login") || inboxUrl.includes("account.live.com")) {
+          log(`⚠️ Outlook login may have failed — URL: ${inboxUrl.substring(0, 80)}`);
+        } else {
+          log(`📭 Outlook inbox loaded — scanning for ElevenLabs email…`);
+
+          // Extract ElevenLabs verification link from raw HTML
+          const extractElevenLabsLink = (html: string): string | null => {
+            const m =
+              html.match(/href="(https?:\/\/[^"]*(?:elevenlabs|firebase)[^"]*)"/i) ||
+              html.match(/(https?:\/\/[^\s"<>]*oobCode=[^\s"<>]+)/i)               ||
+              html.match(/(https?:\/\/[^\s"<>]*__\/auth\/action[^\s"<>]*)/i)        ||
+              html.match(/(https?:\/\/[^\s"<>]*elevenlabs[^\s"<>]+)/i);
+            if (!m) return null;
+            return (m[1] || m[0])
+              .replace(/&amp;/g, "&")
+              .replace(/=\r\n/g, "")
+              .replace(/=\n/g, "")
+              .replace(/=3D/g, "=");
+          };
+
+          const scanFolder = async (folderUrl: string, folderName: string): Promise<boolean> => {
+            await outlookPage.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+            await sleep(3000);
+            const itemSelectors = ['[role="option"]', '[data-convid]', 'div[aria-label][tabindex]', '.jGG6V'];
+            let items: any[] = [];
+            for (const sel of itemSelectors) {
+              items = await outlookPage.$$(sel).catch(() => [] as any[]);
+              if (items.length > 0) break;
             }
-          } catch (pollErr: any) {
-            log(`⚠️ Poll error: ${pollErr.message?.substring(0, 60)}`);
-          }
-          if (!verificationLink) {
-            log(`Waiting for verification email… (${Math.round((Date.now() - Date.now() + pollStart) / 1000)}s elapsed)`);
+            log(`📁 ${folderName}: ${items.length} item(s)`);
+            for (const item of items.slice(0, 25)) {
+              const text = await item.textContent().catch(() => "");
+              if (!/elevenlabs|verify|confirm|email/i.test(text)) continue;
+              await item.click().catch(() => {});
+              await sleep(2000);
+              let html = await outlookPage.evaluate(() => document.body?.innerHTML || "").catch(() => "");
+              for (const frame of outlookPage.frames()) {
+                try { html += await frame.evaluate(() => document.body?.innerHTML || "").catch(() => ""); } catch {}
+              }
+              const link = extractElevenLabsLink(html);
+              if (link) { verificationLink = link; return true; }
+              // Fallback: all hrefs
+              const hrefs = await outlookPage.$$eval("a[href]", (els: any[]) => els.map((e: any) => e.href)).catch(() => [] as string[]);
+              const elHref = hrefs.find((h: string) => /elevenlabs|oobCode|__\/auth\/action/i.test(h));
+              if (elHref) { verificationLink = elHref; return true; }
+            }
+            return false;
+          };
+
+          for (let attempt = 0; attempt < 12 && !verificationLink; attempt++) {
+            if (attempt > 0) {
+              await sleep(7000);
+              log(`⏳ Waiting for ElevenLabs email… (${attempt * 7}s elapsed)`);
+            }
+            if (await scanFolder("https://outlook.live.com/mail/inbox", "Inbox")) break;
+            if (attempt === 0) await scanFolder("https://outlook.live.com/mail/junkemail", "Junk/Spam");
           }
         }
+      } catch (outlookErr: any) {
+        log(`⚠️ Outlook scan error: ${outlookErr.message?.substring(0, 100)}`);
+      } finally {
+        if (outlookBrowser) await outlookBrowser.close().catch(() => {});
       }
     }
 
     if (!verificationLink) {
-      const tip = mailProvider !== "gmail"
-        ? " Tip: Configure Gmail credentials in Settings to bypass ElevenLabs' email verification check."
-        : "";
-      log(`❌ No verification email received within 120s.${tip}`);
-      return { success: false, email: elEmail, password: elPassword, error: `Verification email not received.${tip}` };
+      log(`❌ No ElevenLabs verification email found in Outlook inbox within ~90s.`);
+      return { success: false, email: elEmail, password: elPassword, error: "Verification email not found in Outlook inbox. The email may have been delivered but not found, or the Outlook account may need to be replaced." };
     }
 
     // ── STEP 7: Browser — navigate to verification link ───────────────────
