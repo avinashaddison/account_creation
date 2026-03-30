@@ -11146,19 +11146,25 @@ export async function registerReplitAccount(
       log(`After login URL: ${currentLoginUrl.substring(0, 100)}`);
 
       if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
-        log("Microsoft security proofs / confirmation page — extracting posturl to skip...");
+        log("Microsoft security proofs / confirmation page — skipping directly to inbox...");
         let destUrl = "https://outlook.live.com/mail/0/inbox";
         try {
           const parsedUrl = new URL(currentLoginUrl);
           const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
           if (posturl) {
-            destUrl = decodeURIComponent(posturl);
-            log(`Extracted posturl: ${destUrl.substring(0, 100)}`);
+            const decoded = decodeURIComponent(posturl);
+            // Only use the posturl if it goes to Outlook — ppsecure URLs require POST and will loop
+            if (decoded.includes("outlook.live.com") || decoded.includes("outlook.office") || decoded.includes("outlook.com/mail")) {
+              destUrl = decoded;
+              log(`Extracted posturl (Outlook): ${destUrl.substring(0, 100)}`);
+            } else {
+              log(`posturl points to non-Outlook host — skipping straight to inbox`);
+            }
           }
         } catch {}
         log(`Navigating directly to: ${destUrl.substring(0, 100)}`);
         await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(3000);
+        await owaPage.waitForTimeout(2000);
         currentLoginUrl = owaPage.url();
         log(`URL after skip navigation: ${currentLoginUrl.substring(0, 100)}`);
       }
