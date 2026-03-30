@@ -1,0 +1,166 @@
+18:45:28
+·
+🤖 Auto Coupon job started [replit-auto-mnd7nq7u]
+18:45:28
+·
+👤 Using account: adamaiburtzhooq@hotmail.com
+STOCK OUT
+18:45:28
+·
+🔐 Logging into Replit as adamaiburtzhooq@hotmail.com...
+STOCK OUT
+18:45:38
++
+✅ Logged in
+18:45:38
+·
+🔗 Opening referral page...
+18:45:43
+·
+📊 Referral usage: 0 of 4 used → 4 slot(s) remaining
+18:45:43
++
+✅ Coupon: AGENT48F3805BA6844
+18:45:43
+$
+🔗 Referral URL: https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon...
+18:45:43
+·
+──────────────────────────────────────────────────
+18:45:43
+·
+🎟️ Coupon: AGENT48F3805BA6844
+18:45:43
+·
+📊 Slots: 0/4 used — 4 remaining
+18:45:43
++
+💾 Coupon saved to account adamaiburtzhooq@hotmail.com
+STOCK OUT
+18:45:43
+~
+⚠️ 3 account(s) not warmed — ban risk higher
+18:45:43
+·
+──────────────────────────────────────────────────
+18:45:43
+$
+🔗 Generating 3/3 checkout link(s) using coupon AGENT48F3805BA6844
+18:45:43
+·
+📋 Accounts: steuphrazaipy@hotmail.com, judithturner5403@outlook.com, kauracroggewj@hotmail.com
+PROCESSING
+18:45:43
+·
+──────────────────────────────────────────────────
+18:45:43
+~
+[1/3] 🚀 steuphrazaipy@hotmail.com ⚠️ not warmed
+PROCESSING
+18:45:43
+·
+Connecting via Addison Proxy...
+18:45:45
+·
+Addison Proxy connected.
+18:45:45
++
+✅ ZenRows anti-bot browser connected — ban protection active
+18:45:46
+·
+🔐 Logging into Replit as steuphrazaipy@hotmail.com...
+PROCESSING
+18:45:48
+·
+→ Login page loaded: https://replit.com/login
+18:45:59
+·
+→ Login submitted — waiting for redirect...
+18:46:04
+»
+→ Post-submit URL: https://replit.com/login | page text: Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue wi
+18:46:04
+!
+❌ Error: Login blocked by hCaptcha — cannot auto-solve — login_captcha
+18:46:04
+!
+❌ Failed for steuphrazaipy@hotmail.com: Login blocked by hCaptcha — cannot auto-solve — login_captcha
+PROCESSING
+18:46:04
+·
+──────────────────────────────────────────────────
+18:46:04
+~
+[2/3] 🚀 judithturner5403@outlook.com ⚠️ not warmed
+PROCESSING
+18:46:04
+·
+Connecting via Addison Proxy...
+18:46:15
+·
+Addison Proxy connected.
+18:46:15
++
+✅ ZenRows anti-bot browser connected — ban protection active
+18:46:15
+·
+🔐 Logging into Replit as judithturner5403@outlook.com...
+PROCESSING
+18:46:28
+·
+→ Login page loaded: https://replit.com/login
+18:46:46
+·
+→ Login submitted — waiting for redirect...
+18:46:51
+»
+→ Post-submit URL: https://replit.com/login | page text: Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue wi
+18:46:51
+!
+❌ Error: Login blocked by hCaptcha — cannot auto-solve — login_captcha
+18:46:51
+!
+❌ Failed for judithturner5403@outlook.com: Login blocked by hCaptcha — cannot auto-solve — login_captcha
+PROCESSING
+18:46:51
+·
+──────────────────────────────────────────────────
+18:46:51
+~
+[3/3] 🚀 kauracroggewj@hotmail.com ⚠️ not warmed
+PROCESSING
+18:46:51
+·
+Connecting via Addison Proxy...
+18:47:02
+·
+Addison Proxy connected.
+18:47:02
++
+✅ ZenRows anti-bot browser connected — ban protection active
+18:47:02
+·
+🔐 Logging into Replit as kauracroggewj@hotmail.com...
+PROCESSING
+18:47:05
+·
+→ Login page loaded: https://replit.com/login
+18:47:17
+·
+→ Login submitted — waiting for redirect...
+18:47:23
+»
+→ Post-submit URL: https://replit.com/login | page text: Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue wi
+18:47:23
+!
+❌ Error: Login blocked by hCaptcha — cannot auto-solve — login_captcha
+18:47:23
+!
+❌ Failed for kauracroggewj@hotmail.com: Login blocked by hCaptcha — cannot auto-solve — login_captcha
+PROCESSING
+18:47:23
+·
+──────────────────────────────────────────────────
+18:47:23
++
+✅ Done — 0/3 links generated

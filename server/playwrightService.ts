@@ -19069,6 +19069,49 @@ export async function generateSingleCheckoutLink(
     await glHumanType(passInput, password);
     await glSleep(600 + Math.floor(Math.random() * 400));
 
+    // ── hCaptcha pre-solve (Replit embeds invisible hCaptcha on login for unwarmed accounts) ──
+    let hcaptchaPreSolved = false;
+    const preHtml = await page.content().catch(() => "");
+    if (preHtml.includes("hcaptcha") || preHtml.includes("h-captcha")) {
+      log(`  🔒 hCaptcha detected on login page — solving via CapSolver...`);
+      try {
+        // Extract sitekey dynamically from the widget div
+        const siteKey = await page.evaluate(() => {
+          const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], #h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
+          return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
+        }).catch(() => null) as string | null;
+
+        const keyToUse = siteKey || "4c672d35-0701-42b2-88c3-78380b0db560"; // Replit's known hCaptcha sitekey fallback
+        log(`  → sitekey: ${keyToUse.substring(0, 20)}...`);
+
+        const capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
+        if (capResult.success && capResult.token) {
+          log(`  ✅ hCaptcha solved — injecting token...`);
+          await page.evaluate((token: string) => {
+            // Inject into all h-captcha-response fields
+            document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
+              "textarea[name='h-captcha-response'], input[name='h-captcha-response'], textarea[name='g-recaptcha-response']"
+            ).forEach(el => { el.value = token; });
+            // Fire hCaptcha widget callback if present
+            const w = window as any;
+            if (w.hcaptcha) {
+              try { w.hcaptcha.setResponse(token); } catch {}
+            }
+            // Dispatch change event so React/Vue listeners pick it up
+            document.querySelectorAll<HTMLElement>(
+              "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+            ).forEach(el => el.dispatchEvent(new Event("change", { bubbles: true })));
+          }, capResult.token);
+          await glSleep(800);
+          hcaptchaPreSolved = true;
+        } else {
+          log(`  ⚠️ CapSolver failed: ${capResult.error || "unknown"} — proceeding anyway`);
+        }
+      } catch (capErr: any) {
+        log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — proceeding`);
+      }
+    }
+
     // Click Log In button
     const loginBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
     await loginBtn.click();
@@ -19089,10 +19132,14 @@ export async function generateSingleCheckoutLink(
     }
 
     // Detect Turnstile / hCaptcha on login page (not text-based)
-    const hasTurnstile = postHtml.includes("turnstile") || postHtml.includes("cf-turnstile") || postHtml.includes("challenges.cloudflare.com");
-    const hasHcaptcha = postHtml.includes("hcaptcha") || postHtml.includes("h-captcha");
-    if (hasTurnstile || hasHcaptcha) {
-      throw new Error(`Login blocked by ${hasTurnstile ? "Cloudflare Turnstile" : "hCaptcha"} — cannot auto-solve — login_captcha`);
+    // Only throw if still on /login AND we didn't already pre-solve it (hcaptcha HTML is always embedded)
+    const hasTurnstile = postHtml.includes("cf-turnstile") || postHtml.includes("challenges.cloudflare.com");
+    const hasHcaptcha = !hcaptchaPreSolved && (postHtml.includes("hcaptcha") || postHtml.includes("h-captcha")) && postUrl.includes("replit.com/login");
+    if (hasTurnstile) {
+      throw new Error(`Login blocked by Cloudflare Turnstile — cannot auto-solve — login_captcha`);
+    }
+    if (hasHcaptcha) {
+      throw new Error(`Login blocked by hCaptcha — cannot auto-solve — login_captcha`);
     }
 
     let verificationHandled = false;
