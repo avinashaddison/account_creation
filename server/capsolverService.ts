@@ -245,7 +245,7 @@ export async function solveHCaptchaViaNopeCHA(
   websiteURL: string,
   websiteKey: string,
   rqdata?: string | null,
-  maxWaitSec: number = 180
+  maxWaitSec: number = 300
 ): Promise<CapSolverTaskResult> {
   try {
     const authHeader = `Basic ${apiKey}`;
@@ -316,7 +316,7 @@ export async function solveHCaptchaViaNopeCHA(
       }
     }
 
-    return { success: false, error: "NopeCHA solving timeout (180s)" };
+    return { success: false, error: "NopeCHA solving timeout (300s)" };
   } catch (err: any) {
     const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 200) : "";
     console.log(`[NopeCHA] Network error: ${err.message} ${body}`);
@@ -392,7 +392,7 @@ export async function solveHCaptchaWith2Captcha(
     });
   }
 
-  // Without rqdata: try sequentially (cheapest → fallback)
+  // Without rqdata: try sequentially (cheapest → fallback → CapSolver)
   if (nopeKey) {
     console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com...`);
     const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata);
@@ -407,9 +407,19 @@ export async function solveHCaptchaWith2Captcha(
   }
   if (tcKey) {
     console.log(`[2captcha] Attempting hCaptcha solve via 2captcha.com...`);
-    return solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey, rqdata);
+    const result = await solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", websiteURL, websiteKey, rqdata);
+    if (result.success) return result;
+    console.log(`[2captcha] Failed: ${result.error} — retrying NopeCHA as last resort...`);
   }
-  return { success: false, error: "No CAPTCHA solver configured — add NopeCHA, anti-captcha.com, or 2captcha API key in Settings" };
+  // Final attempt: retry NopeCHA with a fresh task (ElevenLabs hCaptcha is NopeCHA-exclusive)
+  if (nopeKey) {
+    console.log(`[NopeCHA] Final retry — submitting fresh task (last resort)...`);
+    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata, 300);
+    if (result.success) return result;
+    console.log(`[NopeCHA] Final retry failed: ${result.error}`);
+    return result;
+  }
+  return { success: false, error: "No captcha solver available or all solvers failed" };
 }
 
 export interface FunCaptchaClassifyResult {

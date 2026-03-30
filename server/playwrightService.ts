@@ -19652,43 +19652,53 @@ export async function createElevenLabsAccount(
   let browser: any = null;
 
   try {
-    // ── STEP 1: Get/create an Outlook account for ElevenLabs signup ────────
-    // Why Outlook? ElevenLabs' blocking function calls an email deliverability API
-    // (NeverBounce/ZeroBounce) that rejects ALL catch-all domains. Every temp mail
-    // service (mail.tm/mail.gw) uses catch-all and gets rejected. Outlook.com is a
-    // real provider with per-address mailboxes → passes the deliverability check.
+    // ── STEP 1: Get email address for ElevenLabs signup ─────────────────────
+    // Gmail is the only provider that passes ElevenLabs' Firebase blocking function.
+    // That function calls NeverBounce which classifies Outlook/Hotmail as "accept-all"
+    // (catch-all) and rejects them. Gmail addresses pass per-address SMTP verification.
+    // When Gmail credentials are configured we use the dot-trick to generate unique
+    // variations (a.vina@gmail.com → av.ina@gmail.com etc) that all deliver to the
+    // same inbox. Falls back to Outlook only when Gmail is NOT configured.
     let elEmail: string;
-    let elMailPassword: string;
+    let elMailPassword: string = "";
+    const useGmail = hasGmailCredentials();
 
-    // Prefer @outlook.com over @hotmail.com (more realistic usernames, better NeverBounce score)
-    const outlookRows = await db.execute(
-      sql`SELECT id, email, password FROM private_outlook_accounts
-          WHERE status = 'active'
-          ORDER BY CASE WHEN email LIKE '%@outlook.com' THEN 0 ELSE 1 END, created_at ASC
-          LIMIT 20`
-    ).catch(() => ({ rows: [] as any[] }));
-
-    if (outlookRows.rows.length > 0) {
-      const pick = outlookRows.rows[Math.floor(Math.random() * outlookRows.rows.length)];
-      elEmail       = pick.email as string;
-      elMailPassword = pick.password as string;
-      log(`📬 Using existing Outlook account: ${elEmail}`);
+    if (useGmail) {
+      elEmail = createGmailAddress();
+      log(`📧 Using Gmail dot-trick address: ${elEmail}`);
     } else {
-      log("📬 No Outlook accounts in DB — creating a new one (this may take ~2 min)…");
-      const outlookResult = await createOutlookAccount(log);
-      if (!outlookResult.success || !outlookResult.email || !outlookResult.password) {
-        return { success: false, error: `Outlook account creation failed: ${outlookResult.error || "unknown error"}` };
-      }
-      elEmail       = outlookResult.email;
-      elMailPassword = outlookResult.password;
-      try {
-        await db.execute(
-          sql`INSERT INTO private_outlook_accounts (id, email, password, status, created_by)
-              VALUES (gen_random_uuid(), ${elEmail}, ${elMailPassword}, 'active', 'elevenlabs-auto')`
-        );
-        log(`✅ New Outlook account saved to DB: ${elEmail}`);
-      } catch (saveErr: any) {
-        log(`⚠️ Could not save Outlook account to DB: ${saveErr.message?.substring(0, 60)}`);
+      // Fallback: Outlook (will fail ElevenLabs' NeverBounce check — configure Gmail!)
+      log("⚠️ Gmail not configured — falling back to Outlook (will likely fail NeverBounce)");
+      // Prefer @outlook.com over @hotmail.com
+      const outlookRows = await db.execute(
+        sql`SELECT id, email, password FROM private_outlook_accounts
+            WHERE status = 'active'
+            ORDER BY CASE WHEN email LIKE '%@outlook.com' THEN 0 ELSE 1 END, created_at ASC
+            LIMIT 20`
+      ).catch(() => ({ rows: [] as any[] }));
+
+      if (outlookRows.rows.length > 0) {
+        const pick = outlookRows.rows[Math.floor(Math.random() * outlookRows.rows.length)];
+        elEmail       = pick.email as string;
+        elMailPassword = pick.password as string;
+        log(`📬 Using existing Outlook account: ${elEmail}`);
+      } else {
+        log("📬 No Outlook accounts in DB — creating a new one (this may take ~2 min)…");
+        const outlookResult = await createOutlookAccount(log);
+        if (!outlookResult.success || !outlookResult.email || !outlookResult.password) {
+          return { success: false, error: `Outlook account creation failed: ${outlookResult.error || "unknown error"}` };
+        }
+        elEmail       = outlookResult.email;
+        elMailPassword = outlookResult.password;
+        try {
+          await db.execute(
+            sql`INSERT INTO private_outlook_accounts (id, email, password, status, created_by)
+                VALUES (gen_random_uuid(), ${elEmail}, ${elMailPassword}, 'active', 'elevenlabs-auto')`
+          );
+          log(`✅ New Outlook account saved to DB: ${elEmail}`);
+        } catch (saveErr: any) {
+          log(`⚠️ Could not save Outlook account to DB: ${saveErr.message?.substring(0, 60)}`);
+        }
       }
     }
 
@@ -19807,11 +19817,16 @@ export async function createElevenLabsAccount(
       log(`⚠️ sendOobCode error: ${verifErr.message?.substring(0, 80)}`);
     }
 
-    // ── STEP 6: Scan Outlook inbox for ElevenLabs verification link ───────
-    log(`📬 Scanning Outlook inbox for ElevenLabs verification email…`);
+    // ── STEP 6: Get verification link from inbox ───────────────────────────
     let verificationLink: string | null = null;
 
-    {
+    if (useGmail) {
+      // Gmail: poll via IMAP (no browser needed — fast and reliable)
+      log(`📬 Polling Gmail inbox via IMAP for ElevenLabs verification link…`);
+      verificationLink = await pollGmailForElevenLabsLink(log);
+    } else {
+      // Outlook: browser-based inbox scan
+      log(`📬 Scanning Outlook inbox for ElevenLabs verification email…`);
       const { chromium: outlookChromium } = await import("playwright");
       let outlookBrowser: any = null;
       try {
@@ -19851,7 +19866,6 @@ export async function createElevenLabsAccount(
         } else {
           log(`📭 Outlook inbox loaded — scanning for ElevenLabs email…`);
 
-          // Extract ElevenLabs verification link from raw HTML
           const extractElevenLabsLink = (html: string): string | null => {
             const m =
               html.match(/href="(https?:\/\/[^"]*(?:elevenlabs|firebase)[^"]*)"/i) ||
@@ -19887,7 +19901,6 @@ export async function createElevenLabsAccount(
               }
               const link = extractElevenLabsLink(html);
               if (link) { verificationLink = link; return true; }
-              // Fallback: all hrefs
               const hrefs = await outlookPage.$$eval("a[href]", (els: any[]) => els.map((e: any) => e.href)).catch(() => [] as string[]);
               const elHref = hrefs.find((h: string) => /elevenlabs|oobCode|__\/auth\/action/i.test(h));
               if (elHref) { verificationLink = elHref; return true; }
@@ -19912,8 +19925,9 @@ export async function createElevenLabsAccount(
     }
 
     if (!verificationLink) {
-      log(`❌ No ElevenLabs verification email found in Outlook inbox within ~90s.`);
-      return { success: false, email: elEmail, password: elPassword, error: "Verification email not found in Outlook inbox. The email may have been delivered but not found, or the Outlook account may need to be replaced." };
+      const inboxType = useGmail ? "Gmail inbox" : "Outlook inbox";
+      log(`❌ No ElevenLabs verification email found in ${inboxType} within ~90s.`);
+      return { success: false, email: elEmail, password: elPassword, error: `Verification email not found in ${inboxType}. Check that the email credentials are correct and the inbox is accessible.` };
     }
 
     // ── STEP 7: Browser — navigate to verification link ───────────────────
