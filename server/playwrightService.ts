@@ -19073,7 +19073,7 @@ export async function generateSingleCheckoutLink(
     let hcaptchaPreSolved = false;
     const preHtml = await page.content().catch(() => "");
     if (preHtml.includes("hcaptcha") || preHtml.includes("h-captcha")) {
-      log(`  🔒 hCaptcha detected on login page — solving via CapSolver...`);
+      log(`  🔒 hCaptcha detected on login page — solving via NopeCHA...`);
       try {
         // Extract sitekey dynamically from the widget div
         const siteKey = await page.evaluate(() => {
@@ -19084,7 +19084,24 @@ export async function generateSingleCheckoutLink(
         const keyToUse = siteKey || "4c672d35-0701-42b2-88c3-78380b0db560"; // Replit's known hCaptcha sitekey fallback
         log(`  → sitekey: ${keyToUse.substring(0, 20)}...`);
 
-        const capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
+        // Fetch NopeCHA API key from settings; fall back to CapSolver if not configured
+        const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+        const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
+
+        let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
+
+        if (nopeKey) {
+          log(`  → Using NopeCHA solver...`);
+          capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 90);
+          if (!capResult.success) {
+            log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"} — trying CapSolver fallback...`);
+            capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
+          }
+        } else {
+          log(`  ⚠️ NopeCHA key not configured — using CapSolver...`);
+          capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
+        }
+
         if (capResult.success && capResult.token) {
           log(`  ✅ hCaptcha solved — injecting token...`);
           await page.evaluate((token: string) => {
@@ -19105,7 +19122,7 @@ export async function generateSingleCheckoutLink(
           await glSleep(800);
           hcaptchaPreSolved = true;
         } else {
-          log(`  ⚠️ CapSolver failed: ${capResult.error || "unknown"} — proceeding anyway`);
+          log(`  ⚠️ All solvers failed: ${capResult.error || "unknown"} — proceeding anyway`);
         }
       } catch (capErr: any) {
         log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — proceeding`);
