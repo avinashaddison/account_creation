@@ -19027,28 +19027,29 @@ export async function generateSingleCheckoutLink(
     };
 
     log(`🔐 Logging into Replit as ${email}...`);
-    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await glSleep(3000); // let page fully render + Cloudflare resolve
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 25000 });
+    log(`  → Login page loaded: ${page.url().substring(0, 60)}`);
+    await glSleep(2000); // let page fully render + Cloudflare resolve
 
     // Detect Cloudflare challenge
     const cfContent = await page.content().catch(() => "");
     if (cfContent.includes("Please enable cookies") || cfContent.includes("Checking your browser") || cfContent.includes("challenge-platform")) {
-      log(`  ⚠️ Cloudflare challenge — waiting up to 15s...`);
+      log(`  ⚠️ Cloudflare challenge — waiting up to 10s...`);
       try {
-        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 15000, polling: 1000 });
+        await page.waitForFunction(() => !document.title.toLowerCase().includes("please wait") && !document.body?.innerText?.includes("Please enable cookies"), { timeout: 10000, polling: 1000 });
         log(`  ✅ Cloudflare resolved`);
-        await glSleep(2000);
+        await glSleep(1500);
       } catch {
         log(`  ⚠️ Cloudflare did not resolve — proceeding`);
       }
     }
 
     // Wait for any input to appear
-    await page.waitForSelector('input', { timeout: 20000, state: "visible" });
+    await page.waitForSelector('input', { timeout: 12000, state: "visible" });
 
     // ── Step 1: Enter email/username ──
     const emailInput = page.locator('input[name="username"], input[type="email"], input[placeholder*="email" i], input[placeholder*="username" i]').first();
-    await emailInput.waitFor({ state: "visible", timeout: 15000 });
+    await emailInput.waitFor({ state: "visible", timeout: 10000 });
     await glHumanType(emailInput, email);
     await glSleep(700 + Math.floor(Math.random() * 400));
 
@@ -19064,7 +19065,7 @@ export async function generateSingleCheckoutLink(
 
     // ── Step 2: Enter password ──
     const passInput = page.locator('input[type="password"]').first();
-    await passInput.waitFor({ state: "visible", timeout: 15000 });
+    await passInput.waitFor({ state: "visible", timeout: 10000 });
     await glHumanType(passInput, password);
     await glSleep(600 + Math.floor(Math.random() * 400));
 
