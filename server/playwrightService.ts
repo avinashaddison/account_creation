@@ -19077,12 +19077,23 @@ export async function generateSingleCheckoutLink(
     // ── Detect common post-submit states before long timeout ──
     await glSleep(3000);
     const postUrl = page.url();
-    const postBody = await page.evaluate(() => document.body?.innerText?.substring(0, 2000)).catch(() => "");
+    // Use page.content() for richer detection (works with ZenRows remote browser too)
+    const postHtml = await page.content().catch(() => "");
+    const postBody = await page.evaluate(() => document.body?.innerText?.substring(0, 3000)).catch(() => postHtml.substring(0, 3000));
     const postBodyLower = postBody.toLowerCase();
+    log(`  → Post-submit URL: ${postUrl.substring(0, 80)} | page text: ${postBody.replace(/\n/g, " ").substring(0, 120)}`);
 
     if (postBodyLower.includes("incorrect password") || postBodyLower.includes("invalid credentials") || postBodyLower.includes("wrong password")) {
       throw new Error(`Login failed — incorrect password for ${email}`);
     }
+
+    // Detect Turnstile / hCaptcha on login page (not text-based)
+    const hasTurnstile = postHtml.includes("turnstile") || postHtml.includes("cf-turnstile") || postHtml.includes("challenges.cloudflare.com");
+    const hasHcaptcha = postHtml.includes("hcaptcha") || postHtml.includes("h-captcha");
+    if (hasTurnstile || hasHcaptcha) {
+      throw new Error(`Login blocked by ${hasTurnstile ? "Cloudflare Turnstile" : "hCaptcha"} — cannot auto-solve — login_captcha`);
+    }
+
     let verificationHandled = false;
     const needsVerify =
       postBodyLower.includes("verify your email") ||
@@ -19093,9 +19104,21 @@ export async function generateSingleCheckoutLink(
       postBodyLower.includes("enter the code") ||
       postBodyLower.includes("verify account") ||
       postBodyLower.includes("email verification") ||
+      postBodyLower.includes("sent you an email") ||
+      postBodyLower.includes("check your inbox") ||
       postUrl.includes("/verify") ||
       postUrl.includes("/confirm");
-    if (needsVerify) {
+
+    // Also check for inline OTP code input on the same login page
+    const hasCodeInput = await page.locator('input[name="code"], input[autocomplete="one-time-code"], input[placeholder*="code" i], input[placeholder*="otp" i]').first().isVisible().catch(() => false);
+    if (hasCodeInput && !needsVerify) {
+      log(`📧 Inline OTP code input detected on login page — handling via Outlook...`);
+      await handleReplitEmailVerification(page, email, log);
+      verificationHandled = true;
+      await glSleep(2000);
+    }
+
+    if (!verificationHandled && needsVerify) {
       log(`📧 Replit requires email verification (URL: ${postUrl.substring(0, 80)}) — auto-handling via Outlook...`);
       await handleReplitEmailVerification(page, email, log);
       verificationHandled = true;
@@ -19110,30 +19133,34 @@ export async function generateSingleCheckoutLink(
     if (!currentLoginUrl.includes("replit.com/login") && !currentLoginUrl.includes("replit.com/signup")) {
       log(`✅ Logged in (fast redirect)`);
     } else {
-      // Wait for redirect away from /login
+      // Wait for redirect away from /login — reduced to 25s (was 45s) to fail faster
       try {
         await page.waitForURL(
           (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
-          { timeout: 45000 }
+          { timeout: 25000 }
         );
       } catch {
         const stuckUrl  = page.url();
         const pageTitle = await page.title().catch(() => "");
-        const bodyFull  = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
+        const stuckHtml = await page.content().catch(() => "");
+        const bodyFull  = await page.evaluate(() => document.body?.innerText?.substring(0, 800)).catch(() => stuckHtml.substring(0, 800));
         log(`⚠️  Login stuck — URL: ${stuckUrl.substring(0, 80)}`);
         if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
-        if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 300)}`);
+        if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 400)}`);
         // Specific detectable failure reasons — throw named errors so batch can act on them
-        if (/you have been banned|banned from replit/i.test(bodyFull)) {
+        if (/you have been banned|banned from replit/i.test(bodyFull) || /you have been banned|banned from replit/i.test(stuckHtml)) {
           throw new Error(`Account is permanently banned by Replit — banned_account`);
         }
-        if (/signed up without adding a password|without adding a password/i.test(bodyFull)) {
+        if (/signed up without adding a password|without adding a password/i.test(bodyFull) || /signed up without adding a password/i.test(stuckHtml)) {
           throw new Error(`Account has no password set — registered via social auth only. Cannot log in with credentials — no_password_account`);
         }
-        if (/invalid username or password|incorrect password|wrong password|password is incorrect/i.test(bodyFull)) {
+        if (/invalid username or password|incorrect password|wrong password|password is incorrect/i.test(bodyFull) || /invalid username or password|incorrect password/i.test(stuckHtml)) {
           throw new Error(`Login failed — incorrect password stored for this account — bad_credentials`);
         }
-        throw new Error(`Login timed out — page stuck. Check logs above for reason.`);
+        if (stuckHtml.includes("turnstile") || stuckHtml.includes("cf-turnstile") || stuckHtml.includes("challenges.cloudflare.com")) {
+          throw new Error(`Login blocked by Cloudflare Turnstile — cannot auto-solve — login_captcha`);
+        }
+        throw new Error(`Login timed out — page stuck — login_timeout`);
       }
     }
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page after redirect wait");

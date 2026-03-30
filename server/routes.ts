@@ -3746,9 +3746,9 @@ export async function registerRoutes(
             (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
           );
 
-          // Skip retry for unrecoverable errors (banned, already subscribed, no password, bad creds)
+          // Skip retry for unrecoverable errors (banned, already subscribed, no password, bad creds, login blocked)
           const isUnrecoverable = (e?: string) =>
-            !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials"));
+            !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha") || e.includes("login_timeout"));
 
           // Auto-retry once on failure — but skip retry if error is unrecoverable
           if (!result.success && !isUnrecoverable(result.error)) {
@@ -3915,7 +3915,7 @@ export async function registerRoutes(
               (msg) => broadcastLog(batchId, jobId, `${tag}   ${msg}`, userId)
             );
             const isUnrecoverableErr = (e?: string) =>
-              !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials"));
+              !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha") || e.includes("login_timeout"));
 
             if (!result.success && !isUnrecoverableErr(result.error)) {
               broadcastLog(batchId, jobId, `${tag} ↩️  Retrying...`, userId);
