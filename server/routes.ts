@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, liveScreenshot, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -3329,11 +3329,6 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  });
-
-  // Live screenshot endpoint — polls during checkout to show browser state
-  app.get("/api/screenshot/latest", requireAuth, (req: Request, res: Response) => {
-    res.json({ data: liveScreenshot.data, label: liveScreenshot.label, ts: liveScreenshot.ts });
   });
 
   app.post("/api/replit-checkout", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
