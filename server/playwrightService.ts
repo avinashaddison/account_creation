@@ -18494,18 +18494,30 @@ export async function extractCouponFromReplitAccount(
 
     // Intercept any API responses that might contain the referral URL
     let interceptedUrl = "";
+    // Real Replit AGENT coupon codes are alphanumeric only (no underscores)
+    // e.g. AGENT4C672D35ABC... — never AGENT_STATE_UNKNOWN or other enum values
+    const isRealAgentCoupon = (code: string) => /^AGENT[A-Za-z0-9]{6,}$/.test(code);
+
     page.on("response", async (res: any) => {
       try {
-        if (res.url().includes("referral") || res.url().includes("coupon")) {
-          const text = await res.text().catch(() => "");
-          const m = text.match(/https:\/\/replit\.com\/stripe-checkout-by-price[^"'\s<>\\]+/);
-          if (m && m[0].includes("coupon=")) interceptedUrl = m[0];
+        const text = await res.text().catch(() => "");
+        // Pattern 1: direct stripe checkout with coupon — validate the coupon value
+        const m1 = text.match(/https:\/\/replit\.com\/stripe-checkout-by-price[^"'\s<>\\]+coupon=([A-Za-z0-9_-]+)/);
+        if (m1 && isRealAgentCoupon(m1[1])) {
+          interceptedUrl = m1[0].replace(/coupon=[^&"'\s<>\\]+/, `coupon=${m1[1]}`);
+          return;
         }
+        // Pattern 2: /refer/ or /invite/ style URLs with alphanumeric code
+        const m2 = text.match(/https:\/\/replit\.com\/(refer|invite)\/([A-Za-z0-9]+)/);
+        if (m2 && m2[2].length >= 6) { interceptedUrl = m2[0]; return; }
+        // Pattern 3: bare AGENT code in JSON (no underscores)
+        const m3 = text.match(/"(AGENT[A-Za-z0-9]{6,})"/);
+        if (m3 && isRealAgentCoupon(m3[1])) { interceptedUrl = `__AGENT__${m3[1]}`; return; }
       } catch {}
     });
 
     await page.goto("https://replit.com/~?referral.show=true", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(4000); // wait for modal + JS to load
+    await page.waitForTimeout(5000); // wait for modal + JS to load
 
     // ── Read "X of Y used" ──
     let usedSlots = 0, totalSlots = 4;
@@ -18520,25 +18532,63 @@ export async function extractCouponFromReplitAccount(
     const remainingSlots = totalSlots - usedSlots;
     log(`📊 Referral usage: ${usedSlots} of ${totalSlots} used → ${remainingSlots} slot(s) remaining`);
 
+    // ── Helper: extract coupon from any URL/token format ──
+    const extractCouponFromAny = (raw: string): string => {
+      if (!raw) return "";
+      raw = raw.replace(/&amp;/g, "&").split(/[\s"'<>]/)[0];
+      // AGENT bare token
+      if (raw.startsWith("__AGENT__")) return raw.replace("__AGENT__", "");
+      try {
+        const u = new URL(raw);
+        // stripe checkout: ?coupon=AGENT...
+        const c = u.searchParams.get("coupon");
+        if (c) return c;
+        // /refer/AGENT... or /invite/AGENT...
+        const pathParts = u.pathname.split("/").filter(Boolean);
+        const refIdx = pathParts.findIndex(p => p === "refer" || p === "invite");
+        if (refIdx !== -1 && pathParts[refIdx + 1]) return pathParts[refIdx + 1];
+        // last path segment if it looks like an AGENT code
+        const last = pathParts[pathParts.length - 1] || "";
+        if (/^AGENT/i.test(last)) return last;
+      } catch {}
+      // raw text match for AGENT code (no underscores — those are enum values)
+      const m = raw.match(/AGENT[A-Za-z0-9]{6,}/);
+      return m ? m[0] : "";
+    };
+
     // ── Extract referral URL ──
     let referralUrl = interceptedUrl;
 
     if (!referralUrl) {
-      // Try DOM: look for the full URL in anchors / inputs / text
+      // Try DOM: look for any referral URL format in anchors / inputs / text
       referralUrl = await page.evaluate(() => {
+        const patterns = [
+          // stripe checkout
+          /https:\/\/replit\.com\/stripe-checkout-by-price[^"'\s<>\\]+coupon=[^"'\s<>\\]+/,
+          // /refer/ or /invite/
+          /https:\/\/replit\.com\/(refer|invite)\/[A-Za-z0-9_-]+/,
+          // any replit URL containing an AGENT code
+          /https:\/\/replit\.com\/[^"'\s<>\\]*AGENT[A-Za-z0-9_-]+/i,
+        ];
         // Check anchor hrefs
         for (const a of Array.from(document.querySelectorAll("a"))) {
-          if (a.href?.includes("stripe-checkout-by-price") && a.href.includes("coupon=")) return a.href;
+          for (const p of patterns) { if (p.test(a.href || "")) return a.href; }
         }
         // Check input values
         for (const inp of Array.from(document.querySelectorAll("input"))) {
-          const v = (inp as HTMLInputElement).value;
-          if (v?.includes("stripe-checkout-by-price") && v.includes("coupon=")) return v;
+          const v = (inp as HTMLInputElement).value || "";
+          for (const p of patterns) { if (p.test(v)) return v; }
         }
-        // Scan all text nodes
-        const bodyText = document.body.innerHTML;
-        const m = bodyText.match(/https:\/\/replit\.com\/stripe-checkout-by-price[^"'\s<>\\]+/);
-        if (m && m[0].includes("coupon=")) return m[0].replace(/&amp;/g, "&");
+        // Scan full HTML
+        const html = document.body.innerHTML;
+        for (const p of patterns) {
+          const m = html.match(p);
+          if (m) return m[0].replace(/&amp;/g, "&");
+        }
+        // Scan visible text for bare AGENT codes (no underscores — those are enum values like AGENT_STATE_UNKNOWN)
+        const textContent = document.body.innerText || "";
+        const agentMatch = textContent.match(/AGENT[A-Za-z0-9]{6,}/);
+        if (agentMatch) return `__AGENT__${agentMatch[0]}`;
         return "";
       });
     }
@@ -18546,10 +18596,10 @@ export async function extractCouponFromReplitAccount(
     if (!referralUrl) {
       // Try clicking Copy button and reading clipboard
       log(`⏳ Trying Copy button approach...`);
-      const copyBtn = page.locator('button:has-text("Copy"), button:has-text("copy")').first();
-      if (await copyBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const copyBtn = page.locator('button:has-text("Copy"), button:has-text("copy"), button:has-text("Share")').first();
+      if (await copyBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
         await copyBtn.click();
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(1000);
         try {
           referralUrl = await page.evaluate(async () => {
             return await navigator.clipboard.readText();
@@ -18558,14 +18608,31 @@ export async function extractCouponFromReplitAccount(
       }
     }
 
-    if (!referralUrl || !referralUrl.includes("coupon=")) {
-      throw new Error(`Could not extract referral URL from page. Make sure this account has the Agent 4 referral feature enabled.`);
+    if (!referralUrl) {
+      // Last resort: dump what's visible on page for debugging
+      const visibleText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+      log(`📄 Page text snippet: ${visibleText}`);
+      if (usedMatch) {
+        // The referral panel IS showing (X of Y used found) — technical extraction failure, not a missing feature
+        throw new Error(`__HAS_FEATURE__ Could not parse referral URL from page despite referral feature being present.`);
+      } else {
+        // The page showed no referral panel at all — account has no referral feature
+        throw new Error(`__NO_FEATURE__ Account has no referral feature available on this page.`);
+      }
     }
 
-    // Clean up any HTML entities
-    referralUrl = referralUrl.replace(/&amp;/g, "&").split(/[\s"'<>]/)[0];
-    const coupon = new URL(referralUrl).searchParams.get("coupon") || "";
-    if (!coupon) throw new Error("No coupon parameter found in referral URL");
+    // ── Resolve coupon from whatever format we got ──
+    const coupon = extractCouponFromAny(referralUrl);
+    if (!coupon) {
+      throw new Error(`Found referral token but could not parse coupon code from: ${referralUrl.substring(0, 100)}`);
+    }
+
+    // ── Normalize referralUrl to stripe checkout format if needed ──
+    if (!referralUrl.includes("stripe-checkout-by-price")) {
+      referralUrl = `https://replit.com/stripe-checkout-by-price/price_1PsGgmKnqbzFOD8CRhOl4S0u?coupon=${coupon}&success_url=https://replit.com/~&cancel_url=https://replit.com/~`;
+    } else {
+      referralUrl = referralUrl.replace(/&amp;/g, "&").split(/[\s"'<>]/)[0];
+    }
 
     log(`✅ Coupon: ${coupon}`);
     log(`🔗 Referral URL: ${referralUrl.substring(0, 80)}...`);

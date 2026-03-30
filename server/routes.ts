@@ -3689,15 +3689,23 @@ export async function registerRoutes(
         if (!couponResult.success || !couponResult.coupon) {
           broadcastLog(batchId, jobId, `❌ Failed to extract coupon: ${couponResult.error}`, userId);
           // Mark source so it won't be selected again on next run
-          const srcErrLower = (couponResult.error || "").toLowerCase();
+          const srcErr = couponResult.error || "";
+          const srcErrLower = srcErr.toLowerCase();
           if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password")) {
             await storage.updateReplitAccountStatus(sourceAccount.id, "error").catch(() => {});
             await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
             broadcastLog(batchId, jobId, `  🚫 Source account banned/invalid — marked as error, skipping permanently`, userId);
-          } else if (srcErrLower.includes("referral") || srcErrLower.includes("agent") || srcErrLower.includes("extract")) {
-            // Account doesn't have the Core referral feature — skip it, don't waste quota
+          } else if (srcErr.includes("__NO_FEATURE__")) {
+            // Page showed no referral panel at all — account genuinely lacks the feature
             await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
             broadcastLog(batchId, jobId, `  ⚠️ Source has no referral feature — marked as used, will be skipped`, userId);
+          } else if (srcErr.includes("__HAS_FEATURE__")) {
+            // Page showed referral panel but URL couldn't be parsed — transient issue, don't skip permanently
+            broadcastLog(batchId, jobId, `  ⚠️ Referral feature present but URL parsing failed — will retry next run`, userId);
+          } else if (srcErrLower.includes("referral") || srcErrLower.includes("agent") || srcErrLower.includes("extract")) {
+            // Legacy catch-all: unknown referral extraction failure — skip to avoid endless loops
+            await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+            broadcastLog(batchId, jobId, `  ⚠️ Could not extract referral link — marked as used, will be skipped`, userId);
           }
           broadcastBatchComplete(batchId, userId);
           return;
