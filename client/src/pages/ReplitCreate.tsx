@@ -149,21 +149,6 @@ export default function ReplitCreate() {
   const wsRef = useRef<WebSocket | null>(null);
   const activeBatchId = useRef<string | null>(null);
 
-  // ── Live screenshot viewer ──
-  const [screenshot, setScreenshot] = useState<{ data: string | null; label: string; ts: number }>({ data: null, label: "", ts: 0 });
-  useEffect(() => {
-    if (!running) return;
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/screenshot/latest", { credentials: "include" });
-        if (res.ok) { const d = await res.json(); setScreenshot(d); }
-      } catch {}
-    };
-    poll();
-    const iv = setInterval(poll, 2000);
-    return () => clearInterval(iv);
-  }, [running]);
-
   const { data: savedCards = [] } = useQuery<{ id: string; label: string; cardNumber: string; cardType: string }[]>({
     queryKey: ["/api/my-cards"],
   });
@@ -1317,41 +1302,6 @@ export default function ReplitCreate() {
             </div>
           </div>
 
-          {/* ── Live browser screenshot viewer ── */}
-          {(running || screenshot.data) && (
-            <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${BA(0.18)}`, background: "rgba(0,0,0,0.6)" }}>
-              {/* Title bar */}
-              <div className="flex items-center justify-between px-3 py-2" style={{ background: BA(0.06), borderBottom: `1px solid ${BA(0.1)}` }}>
-                <div className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: B, boxShadow: `0 0 6px ${BA(0.8)}` }} />
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest" style={{ color: BA(0.7) }}>LIVE BROWSER VIEW</span>
-                </div>
-                {screenshot.label && (
-                  <span className="text-[9px] font-mono px-2 py-0.5 rounded" style={{ background: BA(0.1), color: BA(0.6) }}>{screenshot.label}</span>
-                )}
-              </div>
-              {/* Screenshot */}
-              <div className="relative" style={{ minHeight: "180px" }}>
-                {screenshot.data ? (
-                  <img src={screenshot.data} alt="Live browser" className="w-full block" style={{ imageRendering: "auto" }} />
-                ) : (
-                  <div className="flex items-center justify-center" style={{ height: "180px" }}>
-                    <div className="text-center space-y-2">
-                      <div className="w-6 h-6 rounded-full border-2 animate-spin mx-auto" style={{ borderColor: `${BA(0.3)} ${BA(0.3)} ${BA(0.3)} ${B}` }} />
-                      <p className="text-[10px] font-mono" style={{ color: BA(0.35) }}>Waiting for browser to start...</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {screenshot.ts > 0 && (
-                <div className="px-3 py-1.5" style={{ borderTop: `1px solid ${BA(0.07)}` }}>
-                  <span className="text-[8px] font-mono" style={{ color: BA(0.25) }}>
-                    Updated {new Date(screenshot.ts).toLocaleTimeString()} · refreshes every 2s
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
