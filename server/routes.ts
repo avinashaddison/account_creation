@@ -3660,13 +3660,12 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      // Auto-pick: prefer sold_out accounts first (they have Replit Core = valid coupon), then processing
-      // Both statuses are valid sources. Never re-use an account that already had its coupon extracted.
+      // Auto-pick source: use processing accounts only (sold_out accounts may be banned/disabled)
+      // Never re-use an account that already had its coupon extracted.
       const sourceAccount =
-        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out") ||
         allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing");
       if (!sourceAccount) {
-        return res.status(400).json({ error: "No sold_out or processing accounts available for coupon extraction — all have been used" });
+        return res.status(400).json({ error: "No processing accounts available for coupon extraction — all have been used or none exist" });
       }
 
       const batchId = `replit-auto-${Date.now().toString(36)}`;
