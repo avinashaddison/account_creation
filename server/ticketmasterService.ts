@@ -1,4 +1,5 @@
-import { chromium, type Browser, type Page } from "playwright-extra";
+import { chromium } from "playwright-extra";
+import type { Browser, Page } from "playwright";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import { orderFivesimNumber, pollFivesimSMS, cancelFivesimOrder, isFivesimConfigured } from "./fivesimService";

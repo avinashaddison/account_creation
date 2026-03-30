@@ -67,6 +67,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
   password: true,
   role: true,
+  panelName: true,
 });
 
 export const insertAccountSchema = createInsertSchema(accounts).omit({

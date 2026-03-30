@@ -1,11 +1,11 @@
-import type { Page } from "playwright-extra";
+import type { Page } from "playwright";
 
 const SHAKIRA_PRESALE_URL = "https://signup.ticketmaster.es/shakira";
 
 export async function doShakiraPresaleStep(
   page: Page,
   log: (msg: string) => void
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; redirectUrl?: string }> {
   try {
     log(`🎤 Navigating to Shakira presale signup...`);
     console.log("[Shakira] Navigating to presale page...");
