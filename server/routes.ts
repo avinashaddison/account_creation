@@ -3665,11 +3665,13 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      // Auto-pick: first non-processing account with couponExtracted=false that has credentials
-      // (never pick processing accounts as sources — they are targets waiting for checkout links)
-      const sourceAccount = allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status !== "processing" && a.status !== "error");
+      // Auto-pick: prefer sold_out accounts first (they have Replit Core = valid coupon), then processing
+      // Both statuses are valid sources. Never re-use an account that already had its coupon extracted.
+      const sourceAccount =
+        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out") ||
+        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing");
       if (!sourceAccount) {
-        return res.status(400).json({ error: "No unused accounts available for coupon extraction — all accounts have already been used" });
+        return res.status(400).json({ error: "No sold_out or processing accounts available for coupon extraction — all have been used" });
       }
 
       const batchId = `replit-auto-${Date.now().toString(36)}`;
@@ -3712,11 +3714,12 @@ export async function registerRoutes(
           return;
         }
 
-        // Step 2: Pick processing accounts (exclude source account)
+        // Step 2: Pick processing accounts as targets (exclude source account), cap at 3 links per coupon
+        const maxLinks = Math.min(remainingSlots, 3);
         const candidates = allAccounts.filter(a =>
           a.id !== sourceAccount.id && a.email && a.password && a.status === "processing"
         );
-        const toProcess = candidates.slice(0, remainingSlots);
+        const toProcess = candidates.slice(0, maxLinks);
 
         if (toProcess.length === 0) {
           broadcastLog(batchId, jobId, `❌ No "processing" accounts available to generate links for`, userId);
@@ -3724,23 +3727,15 @@ export async function registerRoutes(
           return;
         }
 
-        // Read checkout spacing setting (default 5 min between links)
-        const checkoutDelayMinutes = await storage.getSetting("replit_checkout_delay_minutes").then(v => { const p = parseInt(v || "5", 10); return Number.isNaN(p) ? 5 : p; }).catch(() => 5);
-        const checkoutDelayMs = checkoutDelayMinutes * 60 * 1000;
-
         // Warn about unwarmed accounts
         const unwarmed = toProcess.filter(a => !a.warmedAt);
         if (unwarmed.length > 0) {
-          broadcastLog(batchId, jobId, `⚠️  ${unwarmed.length} account(s) not warmed — ban risk higher (use Warm Accounts first)`, userId);
-          broadcastLog(batchId, jobId, `   Unwarmed: ${unwarmed.map(a => a.email).join(", ")}`, userId);
+          broadcastLog(batchId, jobId, `⚠️  ${unwarmed.length} account(s) not warmed — ban risk higher`, userId);
         }
 
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
-        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) using coupon ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length}/${maxLinks} checkout link(s) using coupon ${coupon}`, userId);
         broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
-        if (checkoutDelayMinutes > 0) {
-          broadcastLog(batchId, jobId, `⏱️  Spacing: ${checkoutDelayMinutes} min between each link`, userId);
-        }
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
         // Step 3: Generate links (with 1 automatic retry on failure)
@@ -3792,13 +3787,6 @@ export async function registerRoutes(
             }
           }
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
-
-          // Inter-account delay to spread referral timing across Replit's servers
-          if (checkoutDelayMs > 0 && i < toProcess.length - 1) {
-            const mins = Math.round(checkoutDelayMs / 60000);
-            broadcastLog(batchId, jobId, `⏳ Waiting ${mins} min before next account...`, userId);
-            await new Promise<void>(r => setTimeout(r, checkoutDelayMs));
-          }
         }
 
         broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);

@@ -855,31 +855,46 @@ export default function ReplitCreate() {
 
               {/* ── AUTO MODE ── */}
               {linksSubMode === "auto" && (() => {
-                const nextSource = replitAccounts.find(a => !a.couponExtracted && a.email && a.password);
+                // Source candidates: sold_out first (have Core = valid coupon), then processing
+                const nextSource =
+                  replitAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out") ||
+                  replitAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing");
                 const exhausted = !nextSource;
                 const usedCount = replitAccounts.filter(a => a.couponExtracted).length;
+                const soldOutAvail = replitAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out").length;
+                const processingAvail = replitAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status === "processing").length;
+                const processingTargets = replitAccounts.filter(a => a.status === "processing").length;
                 return (
                   <>
                     {/* Queue status */}
                     <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${LA(0.18)}` }}>
                       <div className="flex items-center justify-between">
                         <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Coupon Queue</span>
-                        <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>{usedCount} used · {replitAccounts.length - usedCount} remaining</span>
+                        <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>{usedCount} used · {soldOutAvail + processingAvail} remaining</span>
                       </div>
                       {exhausted ? (
-                        <p className="text-[10px] font-mono" style={{ color: "#ef4444" }}>⚠️ All accounts have been used for coupon extraction</p>
+                        <p className="text-[10px] font-mono" style={{ color: "#ef4444" }}>⚠️ No sold_out or processing accounts available for coupon extraction</p>
                       ) : (
                         <div className="space-y-1">
-                          <p className="text-[9px] font-mono" style={{ color: LA(0.4) }}>Next account (auto-selected):</p>
+                          <p className="text-[9px] font-mono" style={{ color: LA(0.4) }}>Next source (auto-selected):</p>
                           <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: LA(0.06), border: `1px solid ${LA(0.2)}` }}>
                             <User className="w-3 h-3 flex-shrink-0" style={{ color: LA(0.6) }} />
                             <div className="min-w-0">
                               <p className="text-[11px] font-mono font-bold truncate" style={{ color: L }}>@{nextSource!.username}</p>
                               <p className="text-[9px] font-mono truncate" style={{ color: LA(0.5) }}>{nextSource!.email}</p>
                             </div>
-                            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(0,255,65,0.08)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.2)" }}>
-                              unused
+                            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded" style={{
+                              background: nextSource!.status === "sold_out" ? "rgba(239,68,68,0.1)" : "rgba(251,191,36,0.1)",
+                              color: nextSource!.status === "sold_out" ? "#ef4444" : "#fbbf24",
+                              border: `1px solid ${nextSource!.status === "sold_out" ? "rgba(239,68,68,0.3)" : "rgba(251,191,36,0.3)"}`,
+                            }}>
+                              {nextSource!.status}
                             </span>
+                          </div>
+                          <div className="flex gap-3 text-[9px] font-mono pt-0.5" style={{ color: LA(0.35) }}>
+                            <span><span style={{ color: "#ef4444" }}>{soldOutAvail}</span> sold_out sources</span>
+                            <span><span style={{ color: "#fbbf24" }}>{processingAvail}</span> processing sources</span>
+                            <span><span style={{ color: "rgba(34,197,94,0.8)" }}>{processingTargets}</span> processing targets</span>
                           </div>
                         </div>
                       )}
@@ -903,130 +918,32 @@ export default function ReplitCreate() {
 
                     <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.03), border: `1px solid ${LA(0.1)}` }}>
                       <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.4) }}>
-                        Auto-picks the next unused account → reads coupon + remaining slots → generates that many links → marks account as used in DB
+                        Picks next sold_out or processing account → extracts coupon → generates up to 3 checkout links → marks source as used (never re-logs into extracted accounts)
                       </p>
                     </div>
 
-                    {/* Checkout spacing setting */}
-                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${LA(0.14)}` }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Checkout Spacing</span>
-                        <span className="text-[9px] font-mono" style={{ color: LA(0.25) }}>delay between link gens</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={0}
-                          max={480}
-                          value={checkoutDelayMinutes}
-                          onChange={e => setCheckoutDelayMinutes(Math.max(0, Math.min(480, parseInt(e.target.value) || 0)))}
-                          className="w-20 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
-                          style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
-                          data-testid="input-checkout-delay"
-                        />
-                        <span className="text-[10px] font-mono" style={{ color: LA(0.4) }}>min</span>
-                        <span className="text-[10px] font-mono flex-1" style={{ color: LA(0.25) }}>
-                          {checkoutDelayMinutes === 0 ? "no delay" : `~${Math.round(checkoutDelayMinutes * 3 / 60 * 10) / 10}h for 4 links`}
-                        </span>
-                        <button
-                          onClick={handleSaveCheckoutDelay}
-                          disabled={checkoutDelaySaving}
-                          className="px-2 py-1 rounded text-[10px] font-mono font-bold"
-                          style={{ background: LA(0.1), border: `1px solid ${LA(0.3)}`, color: L, cursor: checkoutDelaySaving ? "not-allowed" : "pointer" }}
-                          data-testid="button-save-checkout-delay"
-                        >
-                          <Save className="w-3 h-3 inline mr-1" />
-                          {checkoutDelaySaving ? "..." : "Save"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Parallel batch controls */}
-                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${LA(0.18)}` }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Parallel Batch</span>
-                        <span className="text-[9px] font-mono" style={{ color: LA(0.25) }}>run N jobs simultaneously</span>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="number"
-                            min={1}
-                            max={20}
-                            value={batchCount}
-                            onChange={e => setBatchCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
-                            className="w-14 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
-                            style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
-                            data-testid="input-batch-count"
-                          />
-                          <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>sources</span>
-                        </div>
-                        <span className="text-[9px] font-mono" style={{ color: LA(0.2) }}>×</span>
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="number"
-                            min={1}
-                            max={5}
-                            value={linksPerSource}
-                            onChange={e => setLinksPerSource(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
-                            className="w-14 rounded px-2 py-1 text-xs font-mono bg-transparent text-center"
-                            style={{ border: `1px solid ${LA(0.3)}`, color: L, outline: "none" }}
-                            data-testid="input-links-per-source"
-                          />
-                          <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>links/source</span>
-                        </div>
-                        <span className="text-[10px] font-mono" style={{ color: "rgba(34,197,94,0.7)" }}>
-                          = {batchCount * linksPerSource} max links
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
-                          {Math.min(batchCount, replitAccounts.filter(a => !a.couponExtracted).length + replitAccounts.filter(a => a.couponExtracted && a.couponCode).length)} available sources · {
-                            replitAccounts.filter(a => a.status === "processing").length
-                          } targets
-                        </div>
-                        <div className="text-[9px] font-mono" style={{ color: "rgba(34,197,94,0.5)" }}>
-                          only processing accounts used as targets
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleBatchCouponLinks}
-                        disabled={running || exhausted}
-                        className="relative w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
-                        style={{
-                          background: running || exhausted ? LA(0.03) : `linear-gradient(135deg, rgba(34,197,94,0.25), rgba(34,197,94,0.08))`,
-                          border: `1px solid ${running || exhausted ? LA(0.08) : "rgba(34,197,94,0.6)"}`,
-                          color: running || exhausted ? LA(0.2) : "#22c55e",
-                          textShadow: running || exhausted ? "none" : "0 0 12px rgba(34,197,94,0.8)",
-                          boxShadow: running || exhausted ? "none" : "0 0 20px rgba(34,197,94,0.1)",
-                          cursor: running || exhausted ? "not-allowed" : "pointer",
-                        }}
-                        data-testid="button-batch-coupon-links"
-                      >
-                        <Zap className={`w-3.5 h-3.5 relative z-10 ${running ? "animate-pulse" : ""}`} />
-                        <span className="relative z-10">
-                          {running ? `running batch...` : exhausted ? "no_accounts_remaining" : `run_batch_${batchCount}x${linksPerSource}_parallel`}
-                        </span>
-                      </button>
-                    </div>
-
+                    {/* Single smart run button */}
                     <button
                       onClick={handleAutoCouponLinks}
                       disabled={running || exhausted}
                       className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
                       style={{
-                        background: running || exhausted ? LA(0.03) : `linear-gradient(135deg, ${LA(0.2)}, ${LA(0.07)})`,
-                        border: `1px solid ${running || exhausted ? LA(0.08) : LA(0.6)}`,
-                        color: running || exhausted ? LA(0.2) : L,
+                        background: running ? LA(0.07) : exhausted ? LA(0.03) : `linear-gradient(135deg, ${LA(0.22)}, ${LA(0.08)})`,
+                        border: `1px solid ${running ? LA(0.3) : exhausted ? LA(0.08) : LA(0.7)}`,
+                        color: running ? L : exhausted ? LA(0.2) : L,
                         textShadow: running || exhausted ? "none" : `0 0 14px ${L}`,
-                        boxShadow: running || exhausted ? "none" : `0 0 25px ${LA(0.1)}`,
+                        boxShadow: running || exhausted ? "none" : `0 0 25px ${LA(0.12)}`,
                         cursor: running || exhausted ? "not-allowed" : "pointer",
                       }}
                       data-testid="button-auto-coupon-links"
                     >
                       <Hash className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
                       <span className="relative z-10">
-                        {running ? "extracting coupon & generating..." : exhausted ? "no_accounts_remaining" : "auto_extract_coupon_and_generate (1x)"}
+                        {running
+                          ? "extracting coupon & generating links..."
+                          : exhausted
+                            ? "no_sources_remaining"
+                            : `run_auto_coupon · ${nextSource!.status} → up to 3 links`}
                       </span>
                     </button>
                   </>
