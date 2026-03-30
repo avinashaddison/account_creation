@@ -5961,7 +5961,7 @@ export async function createOutlookAccount(
     log("Page content preview: " + pagePreview);
 
     if (pagePreview.toLowerCase().includes("host_not_allowed") || pagePreview.toLowerCase().includes("host not allowed") || pagePreview.toLowerCase().includes("access denied") || pagePreview.toLowerCase().includes("blocked")) {
-      log("Proxy blocked this host. Falling back to SOAX residential proxy...");
+      log("Proxy blocked this host. Falling back to Webshare residential proxy...");
       try { await page.close(); } catch {}
       try { await context.close(); } catch {}
       try { if (browser && browser.isConnected && browser.isConnected()) await browser.close(); else if (browser && browser.close) await browser.close(); } catch {}
@@ -5988,7 +5988,7 @@ export async function createOutlookAccount(
             username: cleanUser,
             password: decodeURIComponent(parsed.password),
           };
-          log("SOAX residential proxy configured: " + parsed.hostname);
+          log("Webshare residential proxy configured: " + parsed.hostname);
         } catch {}
       }
       // Add Sec-CH-UA headers matching a real Chrome 131 on Windows 10
@@ -6185,7 +6185,7 @@ export async function createOutlookAccount(
       await optimizePageBandwidth(page, { allowStylesheets: true });
       await page.setDefaultNavigationTimeout(120000);
       await page.setDefaultTimeout(30000);
-      log("Retrying navigation via SOAX residential proxy...");
+      log("Retrying navigation via Webshare residential proxy...");
 
       // Try alternate Microsoft signup URL first — only keep it if PerimeterX is absent
       const standardSignupUrl = "https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1";
@@ -7221,7 +7221,7 @@ export async function registerZenrowsAccount(
 
     if (!restSignupDone) {
 
-    log("Launching browser for proxy registration (SOAX residential proxy mode)...");
+    log("Launching browser for proxy registration (Webshare residential proxy mode)...");
 
     await ensureBrowserInstalled();
     const launchArgs = [
@@ -7232,7 +7232,7 @@ export async function registerZenrowsAccount(
       "--ignore-certificate-errors",
     ];
 
-    // Load SOAX residential proxy
+    // Load Webshare residential proxy
     const rawProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
     const soaxUrl = rawProxyUrl ? rawProxyUrl.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
     const soaxCtxOptions: any = {
@@ -7251,9 +7251,9 @@ export async function registerZenrowsAccount(
           username: cleanUser,
           password: decodeURIComponent(parsedSoax.password),
         };
-        log(`SOAX proxy configured: ${parsedSoax.hostname}:${parsedSoax.port} (session=${cleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+        log(`Webshare proxy configured: ${parsedSoax.hostname}:${parsedSoax.port} (session=${cleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
       } catch (proxyErr: any) {
-        log("Warning: could not parse SOAX proxy URL — falling back to no proxy: " + proxyErr.message);
+        log("Warning: could not parse Webshare proxy URL — falling back to no proxy: " + proxyErr.message);
       }
     } else {
       log("Warning: no residential_proxy_url set — launching without proxy");
@@ -7264,7 +7264,7 @@ export async function registerZenrowsAccount(
     localBrowser = dedicatedBrowser;
     context = await dedicatedBrowser.newContext(soaxCtxOptions);
     page = await context.newPage();
-    log(`Browser launched ${soaxUrl ? "with SOAX residential proxy" : "(no proxy — direct)"}`);
+    log(`Browser launched ${soaxUrl ? "with Webshare residential proxy" : "(no proxy — direct)"}`);
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
@@ -7325,7 +7325,7 @@ export async function registerZenrowsAccount(
         Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         (window as any).chrome = { runtime: {} };
       });
-      log(`Retry browser launched ${soaxUrl ? "with fresh SOAX session" : "(no proxy)"}. Navigating to proxy site...`);
+      log(`Retry browser launched ${soaxUrl ? "with fresh Webshare session" : "(no proxy)"}. Navigating to proxy site...`);
       try {
         await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 120000 });
         navSuccess = true;
@@ -8731,7 +8731,7 @@ export async function registerZenrowsAccount(
     let zenrowsRegContext = context;
     let zenrowsRegBrowserRef = localBrowser;
 
-    // Use SOAX residential proxy for Outlook login (same as Replit creation — avoids ZenRows CDP issues with Microsoft login)
+    // Use Webshare residential proxy for Outlook login (same as Replit creation — avoids ZenRows CDP issues with Microsoft login)
     let outlookBrowser: any = null;
 
     await ensureBrowserInstalled();
@@ -8758,12 +8758,12 @@ export async function registerZenrowsAccount(
           username: olCleanUser,
           password: decodeURIComponent(olParsed.password),
         };
-        log(`SOAX proxy for Outlook login: ${olParsed.hostname}:${olParsed.port} (session=${olCleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+        log(`Webshare proxy for Outlook login: ${olParsed.hostname}:${olParsed.port} (session=${olCleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
       } catch (olProxyErr: any) {
-        log("Warning: could not parse SOAX proxy for Outlook — using direct: " + olProxyErr.message);
+        log("Warning: could not parse Webshare proxy for Outlook — using direct: " + olProxyErr.message);
       }
     } else {
-      log("No SOAX proxy configured — Outlook login will run direct (no proxy)");
+      log("No Webshare proxy configured — Outlook login will run direct (no proxy)");
     }
 
     outlookBrowser = await chromium.launch({ headless: true, args: olLaunchArgs });
@@ -9783,7 +9783,7 @@ export async function createGmailAccount(
           log(`Proxy rejected CONNECT — falling back to direct`);
         } else {
           gmailNativeProxy = { server: `http://${u.hostname}:${u.port}`, username: cleanUsername, password: cleanPassword };
-          log(`SOAX proxy → ${u.hostname}:${u.port}`);
+          log(`Webshare proxy → ${u.hostname}:${u.port}`);
           launchOptions.proxy = gmailNativeProxy;
         }
       } catch (e) {
@@ -10605,7 +10605,7 @@ export async function registerReplitAccount(
     log("Launching stealth browser for Replit...");
     const { chromium } = await import("playwright");
 
-    // ── SOAX residential proxy — unique IP per account to prevent ban ──────────
+    // ── Webshare residential proxy — unique IP per account to prevent ban ──────────
     // Use Playwright native proxy (no ProxyChain) to avoid ERR_TUNNEL_CONNECTION_FAILED
     try {
       const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
@@ -10639,7 +10639,7 @@ export async function registerReplitAccount(
         });
 
         if (!proxyHealthy) {
-          log(`❌ SOAX proxy rejected CONNECT (package may be suspended/expired) — falling back to DIRECT connection`);
+          log(`❌ Webshare proxy rejected CONNECT (package may be suspended/expired) — falling back to DIRECT connection`);
           log(`   ⚠  Check dashboard.soax.com for package-${pUrl.hostname.includes("soax") ? cleanUser.match(/package-(\d+)/)?.[1] || "?" : "?"} status`);
           // replitNativeProxy stays null → browser launches without proxy
         } else {
@@ -10648,12 +10648,12 @@ export async function registerReplitAccount(
             username: cleanUser,
             password: cleanPassword,
           };
-          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          log(`🌐 Webshare connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
         }
         const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
-        await resolveProxyIp(rawForIp, log, "SOAX RESIDENTIAL");
+        await resolveProxyIp(rawForIp, log, "WEBSHARE RESIDENTIAL");
       } else {
-        log("⚠️ No SOAX proxy configured — using direct connection (higher ban risk)");
+        log("⚠️ No Webshare proxy configured — using direct connection (higher ban risk)");
       }
     } catch (proxyErr: any) {
       log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
@@ -13077,10 +13077,10 @@ export async function registerLovableAccount(
         const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
         const storedZrUrl = zrUrlRow.rows.length > 0 ? (zrUrlRow.rows[0].value as string) : "";
         let wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
-        // Append SOAX proxy to non-ZenRows CDP endpoints (ZenRows cloud handles proxy internally)
+        // Append Webshare proxy to non-ZenRows CDP endpoints (ZenRows cloud handles proxy internally)
         if (proxyUrl && proxyUrl !== "local" && !wsEndpoint.includes("browser.zenrows.com")) {
           wsEndpoint = buildCDPUrlWithProxy(wsEndpoint, proxyUrl);
-          log(`Using SOAX proxy via CDP endpoint`);
+          log(`Using Webshare proxy via CDP endpoint`);
         }
         log(`Connecting to ZenRows browser: ${wsEndpoint.substring(0, 60)}...`);
         const { chromium: vanillaChromium } = await import("playwright");
@@ -13119,11 +13119,11 @@ export async function registerLovableAccount(
           "Sec-Ch-Ua-Platform": '"Windows"',
         },
       };
-      // Inject SOAX residential proxy into the stealth browser context
+      // Inject Webshare residential proxy into the stealth browser context
       if (proxyUrl && proxyUrl !== "local") {
         const proxyServer = proxyUrl.startsWith("http") ? proxyUrl : `http://${proxyUrl}`;
         contextOpts.proxy = { server: proxyServer };
-        log(`Using SOAX residential proxy for stealth browser`);
+        log(`Using Webshare residential proxy for stealth browser`);
       }
       context = await browser.newContext(contextOpts);
       log("Using stealth headless browser (playwright-extra + StealthPlugin)");
@@ -13134,9 +13134,9 @@ export async function registerLovableAccount(
 
     // ── Show exit IP via server-side request (same method as Replit creation) ──
     if (proxyUrl && proxyUrl !== "local") {
-      // Normalize URL scheme — SOAX templates may be stored without "http://"
+      // Normalize URL scheme — proxy templates may be stored without "http://"
       const normalizedProxy = proxyUrl.startsWith("http") ? proxyUrl : `http://${proxyUrl}`;
-      await resolveProxyIp(normalizedProxy, log, "SOAX PROXY");
+      await resolveProxyIp(normalizedProxy, log, "WEBSHARE PROXY");
     } else {
       // No proxy — direct server-side check to show datacenter IP
       await resolveProxyIp("", log, "DIRECT");
@@ -17446,7 +17446,7 @@ export async function onboardingCheckoutReplitAccount(
     log(`   Coupon : ${couponCode}`);
     log("═".repeat(55));
 
-    // ── SOAX residential proxy — native Playwright proxy (no ProxyChain) ──
+    // ── Webshare residential proxy — native Playwright proxy (no ProxyChain) ──
     try {
       const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
       if (rawProxy) {
@@ -17472,15 +17472,15 @@ export async function onboardingCheckoutReplitAccount(
           req.end();
         });
         if (!proxyHealthy) {
-          log(`❌ SOAX proxy rejected CONNECT — package suspended. Falling back to DIRECT.`);
+          log(`❌ Webshare proxy rejected CONNECT — package suspended. Falling back to DIRECT.`);
         } else {
           checkoutNativeProxy = { server: `http://${pUrl.hostname}:${pUrl.port}`, username: cleanUser, password: cleanPassword };
-          log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          log(`🌐 Webshare connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
           const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
-          await resolveProxyIp(rawForIp, log, "SOAX CHECKOUT");
+          await resolveProxyIp(rawForIp, log, "WEBSHARE CHECKOUT");
         }
       } else {
-        log("⚠️ No SOAX proxy configured — checkout using direct connection (higher ban risk)");
+        log("⚠️ No Webshare proxy configured — checkout using direct connection (higher ban risk)");
       }
     } catch (proxyErr: any) {
       log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
@@ -18905,7 +18905,7 @@ export async function generateSingleCheckoutLink(
       usingZenRows = true;
       log("✅ ZenRows anti-bot browser connected — ban protection active");
     } catch (zrErr: any) {
-      log(`⚠️ ZenRows not available (${(zrErr.message || "").substring(0, 60)}) — falling back to SOAX + stealth browser`);
+      log(`⚠️ ZenRows not available (${(zrErr.message || "").substring(0, 60)}) — falling back to Webshare + stealth browser`);
     }
 
     // ── Randomised fingerprint (used for browser context regardless of browser type) ──
@@ -18917,7 +18917,7 @@ export async function generateSingleCheckoutLink(
     const glCv = GL_CVS[Math.floor(Math.random() * GL_CVS.length)];
 
     if (!usingZenRows) {
-      // ── SOAX residential proxy — native Playwright proxy (no ProxyChain) ──
+      // ── Webshare residential proxy — native Playwright proxy (no ProxyChain) ──
       try {
         const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
         if (rawProxy) {
@@ -18946,12 +18946,12 @@ export async function generateSingleCheckoutLink(
           });
 
           if (!proxyHealthy) {
-            log(`❌ SOAX proxy rejected CONNECT — package may be suspended. Falling back to DIRECT.`);
+            log(`❌ Webshare proxy rejected CONNECT — package may be suspended. Falling back to DIRECT.`);
           } else {
             linkNativeProxy = { server: `http://${pUrl.hostname}:${pUrl.port}`, username: cleanUser, password: cleanPassword };
-            log(`🌐 SOAX connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+            log(`🌐 Webshare connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
             const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
-            await resolveProxyIp(rawForIp, log, "SOAX LINK-GEN");
+            await resolveProxyIp(rawForIp, log, "WEBSHARE LINK-GEN");
           }
         }
       } catch { /* continue without proxy */ }
@@ -18972,7 +18972,7 @@ export async function generateSingleCheckoutLink(
       };
       if (linkNativeProxy) glLaunchOptions.proxy = linkNativeProxy;
       browser = await stealthChromium.launch(glLaunchOptions);
-      log("🖥️  Local stealth browser launched" + (linkNativeProxy ? " with SOAX proxy" : " (no proxy)"));
+      log("🖥️  Local stealth browser launched" + (linkNativeProxy ? " with Webshare proxy" : " (no proxy)"));
     }
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
@@ -19705,7 +19705,7 @@ export async function createElevenLabsAccount(
     // Generate a strong ElevenLabs account password
     const elPassword = "EL@" + Math.random().toString(36).substring(2, 8).toUpperCase() + Math.floor(Math.random() * 900 + 100) + "!";
 
-    // ── Build SOAX proxy agent (used for ALL API calls + browser) ─────────
+    // ── Build Webshare proxy agent (used for ALL API calls + browser) ─────────
     const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`)
       .then(r => r.rows[0]?.value as string || "").catch(() => "");
     const soaxUrl = rawProxy
@@ -19715,10 +19715,10 @@ export async function createElevenLabsAccount(
     if (soaxUrl) {
       try {
         const parsed = new URL(soaxUrl);
-        log(`🌐 SOAX proxy: ${parsed.hostname}:${parsed.port}`);
+        log(`🌐 Webshare proxy: ${parsed.hostname}:${parsed.port}`);
       } catch {}
     } else {
-      log("No SOAX proxy configured — running direct");
+      log("No Webshare proxy configured — running direct");
     }
 
     // ── STEP 2: Solve hCaptcha via CapSolver ──────────────────────────────

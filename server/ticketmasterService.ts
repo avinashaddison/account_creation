@@ -223,7 +223,7 @@ export async function tmFullRegistrationFlow(
     // Rotate SOAX session ID on every attempt to get a fresh residential IP (avoids Akamai blocklisted IPs)
     const attemptProxyUrl = attempt === 0 ? proxyUrl : rotateSoaxSession(proxyUrl || "");
     if (attempt > 0 && attemptProxyUrl !== proxyUrl) {
-      console.log(`[TM-Playwright] Rotated SOAX session for retry ${attempt + 1}: ${attemptProxyUrl?.substring(0, 70)}...`);
+      console.log(`[TM-Playwright] Rotated Webshare session for retry ${attempt + 1}: ${attemptProxyUrl?.substring(0, 70)}...`);
     }
     const result = await doTMRegistration(email, firstName, lastName, password, onStatusUpdate, getVerificationCode, log, attemptProxyUrl, keepBrowserOpen, shakiraPresale, presaleProxyUrl);
     totalSmsCost += result.smsCost || 0;
@@ -1195,7 +1195,7 @@ async function doTMRegistration(
       if (proxyUrl && proxyUrl.startsWith("http")) {
         try {
           const parsed = new URL(proxyUrl);
-          // Strip SOAX web-bypass flag (-opt-wb) from username — it blocks Playwright's CONNECT tunnel
+          // Strip Webshare web-bypass flag (-opt-wb) from username — it blocks Playwright's CONNECT tunnel
           const cleanUsername = (parsed.username ? decodeURIComponent(parsed.username) : "")
             .replace(/-opt-wb$/i, "")
             .replace(/-opt-[a-z0-9]+$/i, "");

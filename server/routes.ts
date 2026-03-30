@@ -1258,7 +1258,7 @@ export async function registerRoutes(
       return res.status(403).json({ error: "Forbidden" });
     }
     const ZENROWS_WSS = "wss://browser.zenrows.com?apikey=16ad08cfa1bc9df048d189ed3fafd0e1957d178a";
-    // Use BRD scraping browser for TM account creation (SOAX proxy is broken: ERR_TUNNEL_CONNECTION_FAILED)
+    // Use BRD scraping browser for TM account creation (Webshare proxy issue: ERR_TUNNEL_CONNECTION_FAILED)
     const BRD_BROWSER = process.env.LA28_PROXY_URL || "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222";
     const tmProxy = BRD_BROWSER;
     const FIRST_NAMES = ["James","John","Robert","Michael","William","David","Richard","Joseph","Thomas","Charles"];
@@ -4123,7 +4123,7 @@ export async function registerRoutes(
             if (i >= total) break;
 
             const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
-            if (rotatedProxy) broadcastLog(batchId, bulkId, `[W${i % concurrency + 1}] Using SOAX proxy (rotated session)`, userId);
+            if (rotatedProxy) broadcastLog(batchId, bulkId, `[W${i % concurrency + 1}] Using Webshare proxy (rotated session)`, userId);
             broadcastLog(batchId, bulkId, `━━━ [slot ${i + 1}/${total}] ━━━`, userId);
 
             try {
@@ -4219,7 +4219,7 @@ export async function registerRoutes(
         try {
           const baseProxy = await storage.getSetting("residential_proxy_url") || "";
           const rotatedProxy = baseProxy ? uniqueProxySession(baseProxy) : "";
-          if (rotatedProxy) broadcastLog(batchId, createId, `Using SOAX residential proxy (rotated session)`, userId);
+          if (rotatedProxy) broadcastLog(batchId, createId, `Using Webshare residential proxy (rotated session)`, userId);
 
           const result = await registerLovableAccount(
             (msg) => broadcastLog(batchId, createId, msg, userId),
@@ -5059,11 +5059,11 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/extension/proxy — fresh SOAX proxy credentials (unique session)
+  // GET /api/extension/proxy — fresh Webshare proxy credentials (unique session)
   app.get("/api/extension/proxy", requireAuth, requireSuperAdmin, async (_req, res) => {
     try {
       const raw = await storage.getSetting("residential_proxy_url");
-      if (!raw) return res.status(404).json({ error: "No SOAX proxy configured in settings" });
+      if (!raw) return res.status(404).json({ error: "No Webshare proxy configured in settings" });
       const fresh = uniqueProxySession(raw);
       // Parse into host/port/user/pass for the extension
       const match = fresh.match(/^https?:\/\/([^:@]+):([^@]+)@([^:]+):(\d+)/) ||
