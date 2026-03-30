@@ -88,7 +88,7 @@ export default function PrivateAccount() {
   const [bulkCopiedIds, setBulkCopiedIds] = useState<string[] | null>(null);
   const [replitBulkCopyCount, setReplitBulkCopyCount] = useState(10);
   const [replitBulkCopiedIds, setReplitBulkCopiedIds] = useState<string[] | null>(null);
-  const [replitBulkStatusFilter, setReplitBulkStatusFilter] = useState<"any" | "processing" | "working" | "sold_out">("any");
+  const [replitBulkStatusFilter, setReplitBulkStatusFilter] = useState<"any" | "processing" | "available" | "working" | "sold_out">("any");
   const [replitBulkStatusTarget, setReplitBulkStatusTarget] = useState("sold_out");
   const [replitBulkApplying, setReplitBulkApplying] = useState(false);
   const [bulkStatusTarget, setBulkStatusTarget] = useState("sold_out");
@@ -523,7 +523,7 @@ export default function PrivateAccount() {
       id: "replit" as TabType,
       label: "Replit Accounts",
       count: replitAccounts.length,
-      sub: `${replitAccounts.filter((a) => a.status === "working").length} ready`,
+      sub: `${replitAccounts.filter((a) => a.status === "available" || a.status === "working").length} ready`,
       color: "#7c3aed",
       glow: "rgba(124,58,237,0.18)",
       border: "rgba(124,58,237,0.25)",
@@ -1195,13 +1195,14 @@ export default function PrivateAccount() {
 
                 {/* Data rows */}
                 {[...replitAccounts].sort((a, b) => {
-                  const rank: Record<string, number> = { processing: 0, working: 1, sold_out: 2, error: 3 };
+                  const rank: Record<string, number> = { processing: 0, available: 1, working: 2, sold_out: 3, error: 4 };
                   return (rank[a.status] ?? 1) - (rank[b.status] ?? 1);
                 }).map((acct, idx) => {
                   const st = acct.status;
                   type StatusCfg = { label: string; icon: string; color: string; glow: string; bg: string; border: string };
                   const statusConfig: Record<string, StatusCfg> = {
                     processing:  { label: "Processing",  icon: "◌", color: "#f97316", glow: "rgba(249,115,22,0.25)",  bg: "rgba(249,115,22,0.07)",  border: "rgba(249,115,22,0.35)"  },
+                    available:   { label: "Available",   icon: "✓", color: "#38bdf8", glow: "rgba(56,189,248,0.25)",  bg: "rgba(56,189,248,0.07)",  border: "rgba(56,189,248,0.35)"  },
                     working:     { label: "Working",     icon: "●", color: "#4ade80", glow: "rgba(74,222,128,0.25)",  bg: "rgba(74,222,128,0.07)",  border: "rgba(74,222,128,0.35)"  },
                     sold_out:    { label: "Stock Out",   icon: "⊘", color: "#94a3b8", glow: "rgba(148,163,184,0.2)", bg: "rgba(148,163,184,0.06)", border: "rgba(148,163,184,0.25)" },
                     error:       { label: "Error",       icon: "✕", color: "#ef4444", glow: "rgba(239,68,68,0.25)",   bg: "rgba(239,68,68,0.07)",   border: "rgba(239,68,68,0.3)"    },
@@ -1326,6 +1327,7 @@ export default function PrivateAccount() {
                           data-testid={`select-replit-status-${acct.id}`}
                         >
                           <option value="processing">◌ Processing</option>
+                          <option value="available">✓ Available</option>
                           <option value="working">● Working</option>
                           <option value="sold_out">⊘ Stock Out</option>
                           <option value="error">✕ Error</option>
@@ -1439,7 +1441,7 @@ export default function PrivateAccount() {
               />
               {/* Status filter toggle */}
               <div className="flex items-center rounded-md overflow-hidden border border-violet-500/20" data-testid="toggle-replit-bulk-status-filter">
-                {(["any", "processing", "working", "sold_out"] as const).map((opt, i, arr) => (
+                {(["any", "processing", "available", "working", "sold_out"] as const).map((opt, i, arr) => (
                   <button
                     key={opt}
                     onClick={() => setReplitBulkStatusFilter(opt)}
@@ -1451,7 +1453,7 @@ export default function PrivateAccount() {
                     }}
                     data-testid={`button-replit-filter-${opt}`}
                   >
-                    {opt === "any" ? "any" : opt === "processing" ? "processing" : opt === "working" ? "available" : "sold out"}
+                    {opt === "any" ? "any" : opt === "processing" ? "processing" : opt === "available" ? "available" : opt === "working" ? "working" : "sold out"}
                   </button>
                 ))}
               </div>
@@ -1503,7 +1505,8 @@ export default function PrivateAccount() {
                 data-testid="select-replit-bulk-status-target"
               >
                 <option value="processing">Processing</option>
-                <option value="working">Available (Working)</option>
+                <option value="available">Available</option>
+                <option value="working">Working</option>
                 <option value="sold_out">Sold Out</option>
                 <option value="error">Error</option>
               </select>
