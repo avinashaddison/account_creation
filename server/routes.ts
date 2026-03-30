@@ -3660,12 +3660,13 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      // Auto-pick source: use processing accounts only (sold_out accounts may be banned/disabled)
-      // Never re-use an account that already had its coupon extracted.
+      // Auto-pick source: prefer processing accounts, fall back to sold_out accounts.
+      // Never re-use an account that already had its coupon extracted or is marked error.
       const sourceAccount =
-        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing");
+        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing" && a.status !== "error") ||
+        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out");
       if (!sourceAccount) {
-        return res.status(400).json({ error: "No processing accounts available for coupon extraction — all have been used or none exist" });
+        return res.status(400).json({ error: "No available source accounts for coupon extraction — all have been used or none exist" });
       }
 
       const batchId = `replit-auto-${Date.now().toString(36)}`;
@@ -3691,10 +3692,10 @@ export async function registerRoutes(
           // Mark source so it won't be selected again on next run
           const srcErr = couponResult.error || "";
           const srcErrLower = srcErr.toLowerCase();
-          if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password")) {
+          if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password") || srcErrLower.includes("wrong password") || srcErrLower.includes("invalid username") || srcErrLower.includes("incorrect password")) {
             await storage.updateReplitAccountStatus(sourceAccount.id, "error").catch(() => {});
             await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
-            broadcastLog(batchId, jobId, `  🚫 Source account banned/invalid — marked as error, skipping permanently`, userId);
+            broadcastLog(batchId, jobId, `  🚫 Source account banned/invalid/bad-creds — marked as error, skipping permanently`, userId);
           } else if (srcErr.includes("__NO_FEATURE__")) {
             // Page showed no referral panel at all — account genuinely lacks the feature
             await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
