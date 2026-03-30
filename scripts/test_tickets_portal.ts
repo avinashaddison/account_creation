@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 
 async function main() {
-  var PROXY = "http://okdpvmze-1:iy0zkuc7dt2s@p.webshare.io:80/";
+  var PROXY = "http://addisontheking-1:b6hzcr9gewvo@p.webshare.io:80/";
   var EMAIL = "wildhawk7117@dollicons.com";
   var PASSWORD = "9q5arNZN@wwjs#";
 
