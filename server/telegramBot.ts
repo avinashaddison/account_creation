@@ -145,24 +145,28 @@ export function startTelegramBot() {
 
     runningScans.set(userId, true);
     await ctx.reply(
-      `Starting auto-scan of *${uncheckedAccounts.length} accounts*...\n\nI'll update you every 5 accounts. Send /cancel to stop.\n\n_This will take ${Math.round(uncheckedAccounts.length * 0.7)} – ${uncheckedAccounts.length * 1} minutes._`,
+      `Starting auto-scan of *${uncheckedAccounts.length} accounts*...\n\nYou will get a result for every account. Send /cancel to stop.`,
       { parse_mode: "Markdown" }
     );
 
     let found = 0, noFeature = 0, errors = 0;
-    const foundList: string[] = [];
 
     for (let i = 0; i < uncheckedAccounts.length; i++) {
-      // Check if user cancelled
       if (runningScans.get(userId) !== true) {
         await ctx.reply(
-          `Scan stopped at ${i}/${uncheckedAccounts.length}.\n\n*Found so far:* ${found} with referral panel\n*No feature:* ${noFeature}\n*Errors:* ${errors}`,
+          `Scan stopped at ${i}/${uncheckedAccounts.length}.\n\n✅ Found: ${found} | ❌ No feature: ${noFeature} | ⚠️ Errors: ${errors}`,
           { parse_mode: "Markdown" }
         );
         break;
       }
 
       const acct = uncheckedAccounts[i];
+      const prefix = `[${i + 1}/${uncheckedAccounts.length}]`;
+
+      // "checking..." indicator
+      type AccountOutcome = "found" | "no_feature" | "error" | "transient_error";
+      let outcome: AccountOutcome = "transient_error";
+      let couponFound = "";
 
       try {
         const result = await extractCouponFromReplitAccount(acct.email, acct.password, () => {});
@@ -170,62 +174,56 @@ export function startTelegramBot() {
         const updatePool = makePool();
         try {
           if (result.success && result.coupon) {
-            // Has referral panel — save coupon code
             await updatePool.query(
               `UPDATE replit_accounts SET coupon_extracted = true, coupon_code = $1 WHERE id = $2`,
               [result.coupon, acct.id]
             );
             found++;
-            foundList.push(`✅ \`${acct.email}\` → \`${result.coupon}\``);
+            couponFound = result.coupon;
+            outcome = "found";
           } else {
-            const err = result.error || "";
-            if (err.includes("__NO_FEATURE__") || err.includes("__HAS_FEATURE__") ||
-                err.toLowerCase().includes("banned") || err.toLowerCase().includes("disabled") ||
-                err.toLowerCase().includes("wrong password") || err.toLowerCase().includes("invalid username") ||
-                err.toLowerCase().includes("bad_credentials")) {
-              // Permanent skip — mark as extracted with empty code
+            const errMsg = result.error || "";
+            const isPermanent = errMsg.includes("__NO_FEATURE__") || errMsg.includes("__HAS_FEATURE__") ||
+              errMsg.toLowerCase().includes("banned") || errMsg.toLowerCase().includes("disabled") ||
+              errMsg.toLowerCase().includes("wrong password") || errMsg.toLowerCase().includes("invalid username") ||
+              errMsg.toLowerCase().includes("bad_credentials");
+            if (isPermanent) {
               await updatePool.query(
                 `UPDATE replit_accounts SET coupon_extracted = true, coupon_code = '' WHERE id = $1`,
                 [acct.id]
               );
               noFeature++;
+              outcome = "no_feature";
             } else {
-              // Transient error — don't mark, retry next scan
               errors++;
+              outcome = "transient_error";
             }
           }
         } finally {
           await updatePool.end();
         }
-      } catch (err: any) {
+      } catch {
         errors++;
+        outcome = "error";
       }
 
-      // Progress update every 5 accounts
-      if ((i + 1) % 5 === 0 || i === uncheckedAccounts.length - 1) {
-        const isLast = i === uncheckedAccounts.length - 1;
-        let update = isLast
-          ? `*Scan complete!* (${i + 1}/${uncheckedAccounts.length})\n\n`
-          : `*Progress: ${i + 1}/${uncheckedAccounts.length}*\n\n`;
-        update += `✅ Found referral panel: *${found}*\n`;
-        update += `❌ No referral panel: *${noFeature}*\n`;
-        update += `⚠️ Errors (will retry): *${errors}*\n`;
-
-        if (foundList.length > 0) {
-          update += `\n*New coupons found:*\n`;
-          update += foundList.slice(-10).join("\n");
-          if (foundList.length > 10) update = `...\n` + update;
-        }
-
-        if (isLast) {
-          update += `\n\nUse /list to see the full account list.`;
-          runningScans.delete(userId);
-        } else {
-          update += `\n_Send /cancel to stop_`;
-        }
-
-        await ctx.reply(update, { parse_mode: "Markdown" });
+      // Send result for this account
+      const isLast = i === uncheckedAccounts.length - 1;
+      let msg = "";
+      if (outcome === "found") {
+        msg = `${prefix} ✅ \`${acct.email}\`\nCoupon: \`${couponFound}\``;
+      } else if (outcome === "no_feature") {
+        msg = `${prefix} ❌ \`${acct.email}\` — no referral panel`;
+      } else {
+        msg = `${prefix} ⚠️ \`${acct.email}\` — error (will retry next scan)`;
       }
+
+      if (isLast) {
+        msg += `\n\n*Scan complete!*\n✅ Found: ${found} | ❌ No feature: ${noFeature} | ⚠️ Errors: ${errors}\n\nUse /list to see full results.`;
+        runningScans.delete(userId);
+      }
+
+      await ctx.reply(msg, { parse_mode: "Markdown" });
     }
 
     runningScans.delete(userId);
