@@ -19158,8 +19158,17 @@ export async function generateSingleCheckoutLink(
         let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
 
         if (nopeKey) {
-          log(`  → Using NopeCHA solver...`);
-          capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 90);
+          log(`  → Using NopeCHA solver... (this takes 30–60s)`);
+          const nopeStart = Date.now();
+          const nopeTicker = setInterval(() => {
+            const elapsed = Math.round((Date.now() - nopeStart) / 1000);
+            log(`  ⏳ Captcha solving in progress... (${elapsed}s elapsed)`);
+          }, 12000);
+          try {
+            capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 90);
+          } finally {
+            clearInterval(nopeTicker);
+          }
           if (!capResult.success) {
             log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"} — trying CapSolver fallback...`);
             capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
