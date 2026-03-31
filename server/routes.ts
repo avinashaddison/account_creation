@@ -878,6 +878,24 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/apify-proxy", requireAuth, async (_req, res) => {
+    try {
+      const url = await storage.getSetting("apify_proxy_url");
+      res.json({ url: url || "" });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.put("/api/admin/apify-proxy", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string" || url.trim().length < 5) {
+        return res.status(400).json({ error: "Valid Apify proxy URL is required" });
+      }
+      await storage.setSetting("apify_proxy_url", url.trim());
+      res.json({ success: true, url: url.trim() });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
   app.get("/api/settings/zenrows-proxy", requireAuth, async (_req, res) => {
     try {
       const url = await storage.getSetting("zenrows_api_url");
@@ -4975,35 +4993,85 @@ export async function registerRoutes(
       const proxyUrl = soaxResult.rows[0].value as string;
       const pUrl = new URL(proxyUrl);
       const proxyHost = pUrl.hostname;
-      const proxyPort = parseInt(pUrl.port, 10);
-      const proxyUser = decodeURIComponent(pUrl.username);
       const proxyPass = decodeURIComponent(pUrl.password);
+      const proxyUser = decodeURIComponent(pUrl.username);
+      const net = await import("net");
 
-      const { SocksClient } = await import("socks");
-      const testDomains = [
-        { host: "google.com", port: 443 },
-        { host: "httpbin.org", port: 443 },
-        { host: "chatgpt.com", port: 443 },
-        { host: "auth.openai.com", port: 443 },
-        { host: "openai.com", port: 443 },
-      ];
-
+      const testDomains = ["google.com", "httpbin.org", "chatgpt.com", "auth.openai.com", "openai.com"];
+      const portsToTry = [5000, 9000];
       const results: any[] = [];
-      for (const dest of testDomains) {
-        try {
-          const info = await (SocksClient as any).createConnection({
-            proxy: { host: proxyHost, port: proxyPort, type: 5, userId: proxyUser, password: proxyPass },
-            command: "connect",
-            destination: { host: dest.host, port: dest.port },
-            timeout: 8000,
+
+      function httpConnectTest(host: string, port: number, dest: string): Promise<string> {
+        return new Promise((resolve) => {
+          const auth = Buffer.from(`${proxyUser}:${proxyPass}`).toString("base64");
+          const s = net.default.connect(port, host, () => {
+            s.write(`CONNECT ${dest}:443 HTTP/1.1\r\nHost: ${dest}:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
           });
-          (info.socket as any).destroy();
-          results.push({ domain: dest.host, status: "✅ OK" });
-        } catch (e: any) {
-          results.push({ domain: dest.host, status: `❌ ${e.message}` });
-        }
+          s.setTimeout(8000);
+          let buf = "";
+          s.on("data", (d: Buffer) => {
+            buf += d.toString();
+            if (buf.includes("\r\n\r\n") || buf.includes("\n")) {
+              resolve(buf.split("\r\n")[0].trim());
+              s.destroy();
+            }
+          });
+          s.on("timeout", () => { resolve("TIMEOUT"); s.destroy(); });
+          s.on("error", (e: Error) => resolve(`ERR: ${e.message}`));
+        });
       }
-      res.json({ proxy: `${proxyHost}:${proxyPort}`, user: proxyUser.substring(0, 60), pass_len: proxyPass.length, results });
+
+      for (const port of portsToTry) {
+        const portResults: any[] = [];
+        for (const domain of testDomains) {
+          const status = await httpConnectTest(proxyHost, port, domain);
+          portResults.push({ domain, status });
+        }
+        results.push({ port, portResults });
+      }
+
+      res.json({ proxy: proxyHost, user: proxyUser.substring(0, 60), pass_len: proxyPass.length, results });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/debug/apify-test", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const apifyUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'apify_proxy_url'`);
+      if (!apifyUrlRow.rows.length || !apifyUrlRow.rows[0].value) return res.json({ error: "apify_proxy_url not set in settings" });
+      const apifyUrl = new URL(apifyUrlRow.rows[0].value as string);
+      const user = decodeURIComponent(apifyUrl.username);
+      const pass = decodeURIComponent(apifyUrl.password);
+      const proxyHost = apifyUrl.hostname;
+      const proxyPort = parseInt(apifyUrl.port, 10) || 8000;
+      const net = await import("net");
+      const testDomains = ["google.com", "httpbin.org", "chatgpt.com", "auth.openai.com", "openai.com"];
+      const results: any[] = [];
+
+      function httpConnectTest(dest: string): Promise<string> {
+        return new Promise((resolve) => {
+          const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+          const s = net.default.connect(proxyPort, proxyHost, () => {
+            s.write(`CONNECT ${dest}:443 HTTP/1.1\r\nHost: ${dest}:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
+          });
+          s.setTimeout(8000);
+          let buf = "";
+          s.on("data", (d: Buffer) => {
+            buf += d.toString();
+            if (buf.includes("\r\n\r\n") || buf.includes("\n")) {
+              resolve(buf.split("\r\n")[0].trim());
+              s.destroy();
+            }
+          });
+          s.on("timeout", () => { resolve("TIMEOUT"); s.destroy(); });
+          s.on("error", (e: Error) => resolve(`ERR: ${e.message}`));
+        });
+      }
+
+      for (const domain of testDomains) {
+        const status = await httpConnectTest(domain);
+        results.push({ domain, status });
+      }
+      res.json({ proxy: `${proxyHost}:${proxyPort}`, user, results });
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 

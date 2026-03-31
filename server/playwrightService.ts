@@ -20363,67 +20363,56 @@ export async function registerChatGptAccount(
 
   let browser: any = null;
   let page: any = null;
-  let bridgeServer: net.Server | null = null;
 
   try {
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
     stealthChromium.use(StealthPlugin());
 
-    // Fetch SOAX residential proxy for ChatGPT (SOAX = true ISP/residential IPs, bypasses OpenAI)
-    // Fallback to Webshare if SOAX not configured
+    // Proxy selection: Apify (primary) → SOAX (fallback) → Webshare (last resort)
     let proxyConfig: any = undefined;
     let proxyUrl: string | null = null;
+
+    // 1. Apify residential proxy (preferred — HTTP proxy, Playwright supports natively)
     try {
-      const soaxResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
-      if (soaxResult.rows.length > 0 && soaxResult.rows[0].value) {
-        proxyUrl = soaxResult.rows[0].value as string;
-        log("Using SOAX residential proxy (ISP-grade IPs for OpenAI bypass)");
+      const apifyResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'apify_proxy_url'`);
+      if (apifyResult.rows.length > 0 && apifyResult.rows[0].value) {
+        proxyUrl = apifyResult.rows[0].value as string;
+        log("Using Apify residential proxy");
       }
     } catch {}
+
+    // 2. SOAX fallback (HTTP proxy — note: SOAX CONNECT returns 422, not recommended)
     if (!proxyUrl) {
-      // Try the general residential-proxy key (SOAX)
       try {
-        const r2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential-proxy'`);
-        if (r2.rows.length > 0 && r2.rows[0].value) {
-          proxyUrl = r2.rows[0].value as string;
-          log("Using residential-proxy key for ChatGPT proxy");
+        const soaxResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
+        if (soaxResult.rows.length > 0 && soaxResult.rows[0].value) {
+          proxyUrl = soaxResult.rows[0].value as string;
+          log("Using SOAX residential proxy");
         }
       } catch {}
     }
+
+    // 3. Last resort: Webshare (datacenter — often blocked by OpenAI)
     if (!proxyUrl) {
-      // Last fallback: Webshare
       proxyUrl = await getResidentialProxyUrl();
       if (proxyUrl) log("⚠️ Using Webshare fallback proxy (datacenter IPs, may be blocked by OpenAI)");
     }
+
     if (proxyUrl) {
       try {
         const pUrl = new URL(proxyUrl);
         const host = pUrl.hostname;
         const port = pUrl.port;
         const username = decodeURIComponent(pUrl.username);
-        const isSoax = host.includes('soax.com');
-        if (isSoax) {
-          // SOAX only works via SOCKS5, but Playwright Chromium doesn't support SOCKS5 with auth.
-          // Start a local HTTP CONNECT bridge that tunnels through SOAX SOCKS5 with full credentials.
-          try {
-            const bridge = await startSocks5Bridge(proxyUrl);
-            bridgeServer = bridge.server;
-            proxyConfig = { server: `http://127.0.0.1:${bridge.port}` };
-            log(`SOAX SOCKS5 bridge started on :${bridge.port} → ${host}:${port} (user: ${username.substring(0, 12)}...)`);
-          } catch (bErr: any) {
-            log(`SOAX bridge failed: ${bErr.message} — proceeding without proxy`);
-          }
-        } else {
-          // Non-SOAX (e.g. Webshare HTTP proxy) — use directly
-          const password2 = decodeURIComponent(pUrl.password);
-          proxyConfig = {
-            server: `${pUrl.protocol}//${host}:${port}`,
-            username,
-            password: password2,
-          };
-          log(`Proxy server: ${pUrl.protocol}//${host}:${port} (user: ${username.substring(0, 12)}...)`);
-        }
+        const password2 = decodeURIComponent(pUrl.password);
+        // All supported proxies use HTTP CONNECT — pass directly to Playwright
+        proxyConfig = {
+          server: `${pUrl.protocol}//${host}:${port}`,
+          username,
+          password: password2,
+        };
+        log(`Proxy: ${pUrl.protocol}//${host}:${port} (user: ${username.substring(0, 18)}...)`);
       } catch (pErr: any) {
         log(`Proxy URL parse error: ${pErr.message} — proceeding without proxy`);
       }
@@ -21065,7 +21054,6 @@ export async function registerChatGptAccount(
     return { success: false, error: err.message?.substring(0, 200) };
   } finally {
     if (browser) await browser.close().catch(() => {});
-    if (bridgeServer) bridgeServer.close();
   }
 }
 

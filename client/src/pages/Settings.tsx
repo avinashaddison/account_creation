@@ -47,6 +47,18 @@ const apiKeyFields: ApiKeyField[] = [
     iconColor: "text-purple-400",
   },
   {
+    id: "apify-proxy",
+    label: "Apify Proxy (ChatGPT)",
+    description: "Apify residential proxy — used for ChatGPT account creation (requires 'Proxy external access' on Apify plan). Format: http://auto:TOKEN@proxy.apify.com:8000",
+    icon: <Globe className="w-4 h-4" />,
+    getEndpoint: "/api/settings/apify-proxy",
+    putEndpoint: "/api/admin/apify-proxy",
+    fieldName: "url",
+    placeholder: "http://auto:apify_proxy_TOKEN@proxy.apify.com:8000",
+    borderColor: "rgba(255,140,0,0.18)",
+    iconColor: "text-orange-400",
+  },
+  {
     id: "residential-proxy",
     label: "Residential Proxy",
     description: "Residential proxy for IP rotation — used for all automations (Replit, Lovable, Ticketmaster). Format: http://user:pass@host:port",
