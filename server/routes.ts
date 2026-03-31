@@ -5003,7 +5003,7 @@ export async function registerRoutes(
           results.push({ domain: dest.host, status: `❌ ${e.message}` });
         }
       }
-      res.json({ proxy: `${proxyHost}:${proxyPort}`, user: proxyUser.substring(0, 15), results });
+      res.json({ proxy: `${proxyHost}:${proxyPort}`, user: proxyUser.substring(0, 60), pass_len: proxyPass.length, results });
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
