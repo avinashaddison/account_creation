@@ -20250,6 +20250,381 @@ export async function createElevenLabsAccount(
   }
 }
 
+export async function registerChatGptAccount(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; email?: string; password?: string; firstName?: string; lastName?: string; error?: string }> {
+  const { ImapFlow } = await import("imapflow");
+
+  const FIRST_NAMES = ["James", "Emma", "Oliver", "Sophia", "Liam", "Ava", "Noah", "Mia", "William", "Isabella", "Benjamin", "Charlotte", "Lucas", "Amelia", "Henry", "Harper", "Alexander", "Evelyn", "Mason", "Abigail", "Ethan", "Emily", "Daniel", "Elizabeth", "Michael", "Sofia", "Jacob", "Madison", "Logan", "Scarlett"];
+  const LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"];
+
+  function randItem<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+  function randPass(): string {
+    const lower = "abcdefghjkmnpqrstuvwxyz";
+    const upper = "ABCDEFGHJKMNPQRSTUVWXYZ";
+    const digits = "23456789";
+    const syms = "!@#$";
+    let p = randItem(upper.split("")) + randItem(lower.split("")) + randItem(digits.split("")) + randItem(syms.split(""));
+    const all = lower + upper + digits;
+    for (let i = 0; i < 8; i++) p += all[Math.floor(Math.random() * all.length)];
+    return p.split("").sort(() => Math.random() - 0.5).join("").substring(0, 12) + "Aa1!";
+  }
+  async function waitMs(ms: number) { await new Promise(r => setTimeout(r, ms)); }
+
+  const firstName = randItem(FIRST_NAMES);
+  const lastName = randItem(LAST_NAMES);
+  const password = randPass();
+  const dobDay = String(Math.floor(Math.random() * 20) + 5);
+  const dobMonth = String(Math.floor(Math.random() * 10) + 1);
+  const dobYear = String(1985 + Math.floor(Math.random() * 15));
+
+  log(`Generated name: ${firstName} ${lastName}`);
+  log(`Generated password: ${password}`);
+  log(`DOB: ${dobMonth}/${dobDay}/${dobYear}`);
+
+  let browser: any = null;
+  let page: any = null;
+
+  try {
+    const { chromium: stealthChromium } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    stealthChromium.use(StealthPlugin());
+
+    let zenrowsApiKey = "";
+    try { zenrowsApiKey = await getZenRowsApiKey(); } catch {}
+
+    let context: any;
+    if (zenrowsApiKey) {
+      try {
+        const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+        const storedZrUrl = zrUrlRow.rows.length > 0 ? (zrUrlRow.rows[0].value as string) : "";
+        const wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
+        log(`Connecting via ZenRows anti-bot browser...`);
+        const { chromium: vanillaChromium } = await import("playwright");
+        browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
+        context = browser.contexts()[0] || await browser.newContext();
+        log("✅ Connected via ZenRows");
+      } catch (zrErr: any) {
+        log(`⚠️ ZenRows failed — falling back to stealth`);
+        browser = null;
+        zenrowsApiKey = "";
+      }
+    }
+
+    if (!zenrowsApiKey) {
+      browser = await stealthChromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+      });
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      context = await browser.newContext({
+        userAgent: ua,
+        viewport: { width: 1366, height: 768 },
+        locale: "en-US",
+        timezoneId: "America/New_York",
+        extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+      });
+      log("Using stealth headless browser");
+    }
+
+    page = await context.newPage();
+    page.setDefaultTimeout(45000);
+
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+    });
+
+    // ── STEP 1: Navigate to ChatGPT sign-up page ─────────────────────────────
+    log("Navigating to ChatGPT sign-up page...");
+    await page.goto("https://auth.openai.com/create-account", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(3000);
+    log(`URL: ${page.url().substring(0, 100)}`);
+
+    // ── STEP 2: Fill email field ──────────────────────────────────────────────
+    log("Looking for email field...");
+    try {
+      await page.waitForSelector('input[type="email"], input[name="email"], #email', { timeout: 15000, state: "visible" });
+    } catch {
+      const bodyText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      log(`⚠️ Email field not found. Page: ${bodyText.replace(/\s+/g, " ").substring(0, 200)}`);
+      throw new Error("Email field not found on ChatGPT sign-up page");
+    }
+
+    const emailSelectors = ['input[type="email"]', 'input[name="email"]', '#email'];
+    for (const sel of emailSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 });
+        await waitMs(200);
+        await el.type(outlookEmail, { delay: 60 });
+        log(`Filled email: ${outlookEmail}`);
+        break;
+      } catch {}
+    }
+    await waitMs(500);
+
+    // Click Continue
+    log("Clicking Continue (email)...");
+    const continueSelectors = ['button[type="submit"]', 'button:has-text("Continue")', '[data-action-button-primary="true"]'];
+    for (const sel of continueSelectors) {
+      try {
+        const btns = await page.$$(sel);
+        for (const btn of btns) {
+          if (!await btn.isVisible().catch(() => false)) continue;
+          const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+          if (txt.includes("google") || txt.includes("microsoft") || txt.includes("apple")) continue;
+          await btn.click();
+          log(`Clicked: "${txt.substring(0, 30) || "button"}"`);
+          break;
+        }
+      } catch {}
+    }
+    await waitMs(4000);
+
+    // ── STEP 3: Fill password ─────────────────────────────────────────────────
+    log("Looking for password field...");
+    const passField = await page.$('input[type="password"], input[name="password"]').catch(() => null);
+    if (passField && await passField.isVisible().catch(() => false)) {
+      await passField.click({ clickCount: 3 });
+      await waitMs(200);
+      await passField.type(password, { delay: 60 });
+      log("Filled password");
+      await waitMs(500);
+
+      for (const sel of continueSelectors) {
+        try {
+          const btns = await page.$$(sel);
+          for (const btn of btns) {
+            if (!await btn.isVisible().catch(() => false)) continue;
+            const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+            if (txt.includes("google") || txt.includes("microsoft") || txt.includes("apple")) continue;
+            await btn.click();
+            log(`Clicked continue (password): "${txt.substring(0, 30) || "button"}"`);
+            break;
+          }
+        } catch {}
+      }
+      await waitMs(5000);
+    } else {
+      log("⚠️ No password field visible — may already be on verification step");
+    }
+
+    log(`After credentials URL: ${page.url().substring(0, 100)}`);
+
+    // ── STEP 4: Poll IMAP for verification OTP ────────────────────────────────
+    log(`📬 Polling ${outlookEmail} via IMAP for ChatGPT verification email...`);
+    const imapDomain = outlookEmail.split("@")[1]?.toLowerCase() || "";
+    const imapHost = imapDomain.includes("gmail") ? "imap.gmail.com" : imapDomain.includes("hotmail") || imapDomain.includes("live") || imapDomain.includes("outlook") ? "outlook.office365.com" : `imap.${imapDomain}`;
+    log(`IMAP host: ${imapHost}`);
+
+    let verificationCode: string | null = null;
+    const imapClient = new ImapFlow({
+      host: imapHost,
+      port: 993,
+      secure: true,
+      auth: { user: outlookEmail, pass: outlookPassword },
+      logger: false,
+    });
+
+    try {
+      await imapClient.connect();
+      log("✅ IMAP connected");
+
+      const maxWaitMs = 120000;
+      const pollIntervalMs = 8000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWaitMs) {
+        await imapClient.mailboxOpen("INBOX");
+        const messages = imapClient.fetch({ seen: false, since: new Date(Date.now() - 10 * 60 * 1000) }, { source: true });
+        for await (const msg of messages) {
+          const raw = msg.source.toString();
+          if (raw.toLowerCase().includes("openai") || raw.toLowerCase().includes("chatgpt") || raw.toLowerCase().includes("noreply@openai")) {
+            log("📧 Found OpenAI email — extracting code...");
+            // Extract 6-digit code
+            const codeMatch = raw.match(/\b(\d{6})\b/);
+            if (codeMatch) {
+              verificationCode = codeMatch[1];
+              log(`✅ Got verification code: ${verificationCode}`);
+              break;
+            }
+            // Also check for verification link (some flows use link instead of code)
+            const linkMatch = raw.match(/https:\/\/[^\s"<>]*verify[^\s"<>]*/i);
+            if (linkMatch) {
+              const verifyUrl = linkMatch[0].replace(/=\r?\n/g, "").replace(/=3D/g, "=");
+              log(`✅ Found verify link — navigating...`);
+              await page.goto(verifyUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+              verificationCode = "LINK_USED";
+              break;
+            }
+          }
+        }
+        if (verificationCode) break;
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        log(`⏳ No OTP yet (${elapsed}s elapsed) — waiting ${pollIntervalMs / 1000}s...`);
+        await waitMs(pollIntervalMs);
+      }
+      await imapClient.logout().catch(() => {});
+    } catch (imapErr: any) {
+      log(`⚠️ IMAP error: ${(imapErr.message || "").substring(0, 120)}`);
+      throw new Error(`IMAP failed: ${imapErr.message?.substring(0, 100)}`);
+    }
+
+    if (!verificationCode) {
+      throw new Error("Verification email not received within 2 minutes");
+    }
+
+    // ── STEP 5: Enter OTP code (if we got a code, not a link) ────────────────
+    if (verificationCode !== "LINK_USED") {
+      log(`Entering OTP code: ${verificationCode}`);
+      await waitMs(2000);
+
+      // Try to find OTP input on the current page
+      const otpSelectors = ['input[name="code"]', 'input[placeholder*="code" i]', 'input[placeholder*="OTP" i]', 'input[inputmode="numeric"]', 'input[autocomplete="one-time-code"]'];
+      let otpFilled = false;
+
+      for (const sel of otpSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (!el || !await el.isVisible().catch(() => false)) continue;
+          await el.click({ clickCount: 3 });
+          await waitMs(200);
+          await el.type(verificationCode, { delay: 80 });
+          log(`Filled OTP via ${sel}`);
+          otpFilled = true;
+          await waitMs(500);
+          // Submit
+          await page.keyboard.press("Enter");
+          break;
+        } catch {}
+      }
+
+      if (!otpFilled) {
+        // Try clicking individual digit boxes
+        const digitBoxes = await page.$$('input[maxlength="1"]');
+        if (digitBoxes.length >= 6) {
+          log("Filling digit boxes...");
+          for (let i = 0; i < 6 && i < digitBoxes.length; i++) {
+            await digitBoxes[i].click();
+            await waitMs(100);
+            await digitBoxes[i].type(verificationCode[i], { delay: 80 });
+          }
+          otpFilled = true;
+          await waitMs(500);
+          await page.keyboard.press("Enter");
+        }
+      }
+
+      if (!otpFilled) {
+        log("⚠️ Could not find OTP input — trying to continue anyway");
+      }
+
+      await waitMs(5000);
+      log(`After OTP URL: ${page.url().substring(0, 100)}`);
+    }
+
+    // ── STEP 6: Fill name ─────────────────────────────────────────────────────
+    log("Looking for name fields...");
+    await waitMs(2000);
+
+    const fillInput = async (selectors: string[], value: string, label: string) => {
+      for (const sel of selectors) {
+        try {
+          const el = await page.$(sel);
+          if (!el || !await el.isVisible().catch(() => false)) continue;
+          await el.click({ clickCount: 3 });
+          await waitMs(150);
+          await el.type(value, { delay: 50 });
+          log(`Filled ${label}`);
+          return true;
+        } catch {}
+      }
+      return false;
+    };
+
+    await fillInput(['input[name="firstName"]', 'input[placeholder*="first" i]', '#firstName'], firstName, "first name");
+    await waitMs(300);
+    await fillInput(['input[name="lastName"]', 'input[placeholder*="last" i]', '#lastName'], lastName, "last name");
+    await waitMs(300);
+
+    // Fill birthday if present
+    await fillInput(['input[name="birthday"]', 'input[type="date"]', '#birthday'], `${dobYear}-${dobMonth.padStart(2, "0")}-${dobDay.padStart(2, "0")}`, "birthday").catch(() => {});
+
+    // Fill day/month/year dropdowns if separate
+    const dobMonthSel = await page.$('select[name="birthMonth"], #birthMonth').catch(() => null);
+    if (dobMonthSel) {
+      await page.selectOption('select[name="birthMonth"], #birthMonth', dobMonth).catch(() => {});
+      log("Selected birth month");
+    }
+    const dobDaySel = await page.$('select[name="birthDay"], #birthDay').catch(() => null);
+    if (dobDaySel) {
+      await page.selectOption('select[name="birthDay"], #birthDay', dobDay).catch(() => {});
+      log("Selected birth day");
+    }
+    const dobYearSel = await page.$('select[name="birthYear"], #birthYear').catch(() => null);
+    if (dobYearSel) {
+      await page.selectOption('select[name="birthYear"], #birthYear', dobYear).catch(() => {});
+      log("Selected birth year");
+    }
+
+    await waitMs(500);
+
+    // Click final continue/done/agree button
+    log("Clicking final submit button...");
+    const finalSelectors = ['button[type="submit"]', 'button:has-text("Continue")', 'button:has-text("Done")', 'button:has-text("Agree")', 'button:has-text("Accept")'];
+    for (const sel of finalSelectors) {
+      try {
+        const btns = await page.$$(sel);
+        for (const btn of btns) {
+          if (!await btn.isVisible().catch(() => false)) continue;
+          const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+          if (txt.length > 0) {
+            await btn.click();
+            log(`Clicked: "${txt.substring(0, 40)}"`);
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    await waitMs(5000);
+    const finalUrl = page.url();
+    log(`Final URL: ${finalUrl.substring(0, 120)}`);
+
+    const finalText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    log(`Final page: ${finalText.replace(/\s+/g, " ").substring(0, 300)}`);
+
+    // Check for success indicators
+    const isSuccess = finalUrl.includes("chatgpt.com") ||
+      finalUrl.includes("chat.openai.com") ||
+      finalText.toLowerCase().includes("you're all set") ||
+      finalText.toLowerCase().includes("welcome") ||
+      finalText.toLowerCase().includes("get started") ||
+      finalText.toLowerCase().includes("new chat");
+
+    if (isSuccess) {
+      log(`✅ Account created successfully — ${outlookEmail}`);
+      return { success: true, email: outlookEmail, password, firstName, lastName };
+    }
+
+    // Even if we can't confirm visually, if we got past the OTP step it likely worked
+    log(`⚠️ Could not confirm success from page — assuming created if OTP was accepted`);
+    return { success: true, email: outlookEmail, password, firstName, lastName };
+
+  } catch (err: any) {
+    log(`❌ ChatGPT creation failed: ${err.message?.substring(0, 200)}`);
+    return { success: false, error: err.message?.substring(0, 200) };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

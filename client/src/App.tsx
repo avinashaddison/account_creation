@@ -29,6 +29,7 @@ import LovableCreate from "@/pages/LovableCreate";
 import V0Create from "@/pages/V0Create";
 import AdobeCreate from "@/pages/AdobeCreate";
 import ElevenLabsCreate from "@/pages/ElevenLabsCreate";
+import ChatGptCreate from "@/pages/ChatGptCreate";
 import CardGenerator from "@/pages/CardGenerator";
 import MyCards from "@/pages/MyCards";
 import PrivateAccount from "@/pages/PrivateAccount";
@@ -72,6 +73,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/v0-create" component={V0Create} />
         <Route path="/admin/adobe-create" component={AdobeCreate} />
         <Route path="/admin/elevenlabs-create" component={ElevenLabsCreate} />
+        <Route path="/admin/chatgpt-create" component={ChatGptCreate} />
         <Route path="/admin/card-generator" component={CardGenerator} />
         <Route path="/admin/my-cards" component={MyCards} />
         <Route path="/admin/tm-event-scanner" component={TMEventScanner} />

@@ -135,7 +135,7 @@ function NavItem({ item, location }: { item: { href: string; label: string; icon
     "/admin/la28-create", "/admin/tm-create", "/admin/uefa-create",
     "/admin/brunomars-create", "/admin/outlook-login", "/admin/outlook-create",
     "/admin/zenrows-register", "/admin/replit-create", "/admin/lovable-create",
-    "/admin/v0-create", "/admin/adobe-create", "/admin/elevenlabs-create", "/admin/card-generator"
+    "/admin/v0-create", "/admin/adobe-create", "/admin/elevenlabs-create", "/admin/chatgpt-create", "/admin/card-generator"
   ].includes(location)));
 
   return (

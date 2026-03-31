@@ -309,3 +309,20 @@ export const elevenLabsAccounts = pgTable("eleven_labs_accounts", {
 export const insertElevenLabsAccountSchema = createInsertSchema(elevenLabsAccounts).omit({ id: true, createdAt: true });
 export type ElevenLabsAccount = typeof elevenLabsAccounts.$inferSelect;
 export type InsertElevenLabsAccount = z.infer<typeof insertElevenLabsAccountSchema>;
+
+export const chatgptAccounts = pgTable("chatgpt_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  password: text("password").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  outlookEmail: text("outlook_email"),
+  status: text("status").notNull().default("created"),
+  error: text("error"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertChatGptAccountSchema = createInsertSchema(chatgptAccounts).omit({ id: true, createdAt: true });
+export type ChatGptAccount = typeof chatgptAccounts.$inferSelect;
+export type InsertChatGptAccount = z.infer<typeof insertChatGptAccountSchema>;

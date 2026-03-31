@@ -1,0 +1,426 @@
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { sounds } from "@/lib/sounds";
+import { Layers, Play, Mail, Key, Hash, ChevronRight, Cpu, Radio, Trash2, User } from "lucide-react";
+
+type OutlookAccount = { id: string; email: string; password: string; status: string };
+type ChatGptAccount = { id: string; email: string; password: string | null; firstName: string | null; lastName: string | null; outlookEmail: string | null; status: string; error: string | null; createdAt: string };
+type LogLine = { text: string; ts: number; time: string };
+
+const G = "#10a37f";
+const GA = (a: number) => `rgba(16,163,127,${a})`;
+
+function getLogStyle(text: string): { color: string; prefix: string } {
+  if (text.startsWith("━━━") || text.startsWith("---")) return { color: GA(0.25), prefix: "" };
+  if (text.startsWith("🚀") || text.startsWith("🏁")) return { color: G, prefix: ">" };
+  if (text.includes("✅") || text.toLowerCase().includes("success") || text.toLowerCase().includes("saved") || text.toLowerCase().includes("verified") || text.toLowerCase().includes("complete") || text.toLowerCase().includes("created"))
+    return { color: G, prefix: "+" };
+  if (text.includes("❌") || text.toLowerCase().includes("failed") || text.toLowerCase().includes("error"))
+    return { color: "#ff4141", prefix: "!" };
+  if (text.includes("⚠️") || text.toLowerCase().includes("warn"))
+    return { color: "#ffaa00", prefix: "~" };
+  if (text.toLowerCase().includes("navigat") || text.toLowerCase().includes("launch") || text.toLowerCase().includes("browser"))
+    return { color: GA(0.7), prefix: ">" };
+  if (text.toLowerCase().includes("name") || text.toLowerCase().includes("password") || text.toLowerCase().includes("generated") || text.toLowerCase().includes("dob"))
+    return { color: GA(0.9), prefix: "»" };
+  if (text.toLowerCase().includes("email") || text.toLowerCase().includes("inbox") || text.toLowerCase().includes("outlook") || text.toLowerCase().includes("otp") || text.toLowerCase().includes("imap"))
+    return { color: "rgba(0,200,255,0.7)", prefix: "·" };
+  return { color: GA(0.45), prefix: "·" };
+}
+
+export default function ChatGptCreate() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [outlookEmail, setOutlookEmail] = useState("");
+  const [outlookPassword, setOutlookPassword] = useState("");
+  const [selectedOutlookId, setSelectedOutlookId] = useState("");
+  const [count, setCount] = useState(1);
+  const [logs, setLogs] = useState<LogLine[]>([]);
+  const [running, setRunning] = useState(false);
+  const [completedCount, setCompletedCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [tick, setTick] = useState(true);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const activeBatchId = useRef<string | null>(null);
+
+  const { data: outlookAccounts = [] } = useQuery<OutlookAccount[]>({ queryKey: ["/api/private/outlook"] });
+  const { data: chatgptAccounts = [] } = useQuery<ChatGptAccount[]>({ queryKey: ["/api/chatgpt-accounts"], refetchInterval: running ? 4000 : false });
+
+  const usedEmails = new Set(chatgptAccounts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+  const availableOutlookAccounts = outlookAccounts.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+  useEffect(() => { const t = setInterval(() => setTick((p) => !p), 600); return () => clearInterval(t); }, []);
+
+  function nowTime() { return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  function addLog(text: string) { setLogs((prev) => [...prev, { text, ts: Date.now(), time: nowTime() }]); }
+
+  useEffect(() => {
+    let destroyed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function connect() {
+      if (destroyed) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.batchId && data.batchId === activeBatchId.current) {
+            if (data.type === "log") { addLog(data.message); }
+            else if (data.type === "batch_complete") {
+              setRunning(false);
+              sounds.complete();
+              qc.invalidateQueries({ queryKey: ["/api/chatgpt-accounts"] });
+              qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
+            } else if (data.type === "chatgpt_create_result") {
+              if (data.success) {
+                setCompletedCount((p) => p + 1);
+                sounds.success();
+                toast({ title: "✅ ChatGPT Account Created", description: data.email });
+              } else {
+                sounds.error();
+                toast({ title: "❌ Creation Failed", description: data.error || "Unknown error", variant: "destructive" });
+              }
+            }
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (!destroyed) reconnectTimer = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+    return () => {
+      destroyed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, []);
+
+  const handleOutlookSelect = (id: string) => {
+    sounds.click();
+    setSelectedOutlookId(id);
+    const acct = availableOutlookAccounts.find((a) => a.id === id);
+    if (acct) { setOutlookEmail(acct.email); setOutlookPassword(acct.password); }
+  };
+
+  const handleCreate = async () => {
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+
+    if (count > 1) {
+      setTotalCount(count);
+      try {
+        const res = await apiRequest("POST", "/api/chatgpt-create/bulk", { count });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || "Failed to start bulk");
+        activeBatchId.current = data.batchId;
+        setTotalCount(data.count);
+        addLog(`🚀 Bulk job started — ${data.count} ChatGPT account(s) queued [${data.batchId}]`);
+      } catch (err: any) {
+        sounds.error();
+        toast({ title: "Error", description: err.message, variant: "destructive" });
+        setRunning(false);
+      }
+    } else {
+      if (!outlookEmail || !outlookPassword) {
+        sounds.error();
+        toast({ title: "Missing fields", description: "Select or enter an Outlook account", variant: "destructive" });
+        setRunning(false);
+        return;
+      }
+      setTotalCount(1);
+      try {
+        const res = await apiRequest("POST", "/api/chatgpt-create", { outlookEmail, outlookPassword });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || "Failed to start");
+        activeBatchId.current = data.batchId;
+        addLog(`Job started: ${data.batchId}`);
+      } catch (err: any) {
+        sounds.error();
+        toast({ title: "Error", description: err.message, variant: "destructive" });
+        setRunning(false);
+      }
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    sounds.click();
+    try {
+      await apiRequest("DELETE", `/api/chatgpt-accounts/${id}`);
+      qc.invalidateQueries({ queryKey: ["/api/chatgpt-accounts"] });
+    } catch {}
+  };
+
+  const isBulk = count > 1;
+  const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
+  const maxCount = Math.min(20, availableOutlookAccounts.length || 1);
+  const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
+
+  return (
+    <div className="space-y-6 animate-float-up">
+
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-5 h-5 flex items-center justify-center" style={{ filter: `drop-shadow(0 0 8px ${G})` }}>
+              <svg viewBox="0 0 24 24" fill={G} width="18" height="18">
+                <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.896zm16.597 3.855l-5.843-3.369 2.02-1.168a.076.076 0 0 1 .071 0l4.83 2.781a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.402-.671zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/>
+              </svg>
+            </div>
+            <h1 className="text-lg font-mono font-bold tracking-tight" style={{ color: G, textShadow: `0 0 24px ${GA(0.55)}` }}>
+              chatgpt_create<span style={{ color: G }}>{tick ? "_" : "\u00a0"}</span>
+            </h1>
+          </div>
+          <p className="text-[11px] font-mono mt-0.5 pl-8" style={{ color: GA(0.32) }}>
+            automate chatgpt account creation via outlook credentials
+          </p>
+        </div>
+        <div className="flex items-center gap-2.5 text-[10px] font-mono">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: GA(0.05), border: `1px solid ${GA(0.18)}` }}>
+            <Cpu className="w-3 h-3" style={{ color: GA(0.55) }} />
+            <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{availableOutlookAccounts.length}</span>
+            <span style={{ color: GA(0.3) }}>avail</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <span style={{ color: "rgba(255,255,255,0.3)" }}>{usedEmails.size}</span>
+            <span style={{ color: "rgba(255,255,255,0.14)" }}>created</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+
+        {/* Config panel */}
+        <div className="rounded-xl p-5 space-y-5 relative overflow-hidden" style={{ background: "rgba(0,0,0,0.55)", border: `1px solid ${GA(0.14)}`, boxShadow: `0 0 40px ${GA(0.04)} inset` }}>
+          <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(16,163,127,0.012) 2px, rgba(16,163,127,0.012) 4px)", borderRadius: "inherit" }} />
+
+          <div className="flex items-center gap-2">
+            <ChevronRight className="w-3.5 h-3.5" style={{ color: G }} />
+            <span className="text-[11px] font-mono uppercase tracking-widest" style={{ color: GA(0.55) }}>Configuration</span>
+            <div className="flex-1 h-px" style={{ background: GA(0.1) }} />
+          </div>
+
+          {/* Count slider */}
+          <div>
+            <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
+              <Hash className="w-3 h-3" />
+              Accounts to Create
+            </label>
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <input
+                  type="range" min={1} max={maxCount} value={count}
+                  onChange={(e) => { sounds.toggle(); setCount(parseInt(e.target.value)); }}
+                  className="w-full h-1.5 rounded-full cursor-pointer appearance-none"
+                  style={{ background: `linear-gradient(to right, ${GA(0.7)} ${pct}%, rgba(255,255,255,0.07) ${pct}%)`, accentColor: G }}
+                  data-testid="input-count-slider"
+                />
+              </div>
+              <div className="w-11 h-8 rounded-lg flex items-center justify-center text-base font-mono font-bold flex-shrink-0" style={{ background: GA(0.08), border: `1px solid ${GA(0.35)}`, color: G, textShadow: `0 0 10px ${G}`, boxShadow: `0 0 12px ${GA(0.1)} inset` }}>
+                {count}
+              </div>
+            </div>
+            {isBulk && (
+              <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: GA(0.32) }}>
+                <Layers className="w-3 h-3" />
+                bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
+              </p>
+            )}
+          </div>
+
+          {!isBulk && (
+            <>
+              {availableOutlookAccounts.length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>Stored Outlook Account</label>
+                  <select
+                    value={selectedOutlookId} onChange={(e) => handleOutlookSelect(e.target.value)}
+                    className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.18)}`, color: "rgba(255,255,255,0.75)" }}
+                    data-testid="select-outlook-account"
+                  >
+                    <option value="">— Select account —</option>
+                    {availableOutlookAccounts.map((a) => <option key={a.id} value={a.id}>{a.email}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
+                  <Mail className="w-2.5 h-2.5 inline mr-1" />Outlook Email
+                </label>
+                <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}>
+                  <Mail className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
+                  <input
+                    type="email" value={outlookEmail} onChange={(e) => setOutlookEmail(e.target.value)}
+                    onKeyDown={() => sounds.keypress()} placeholder="yourname@outlook.com"
+                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.8)", caretColor: G }}
+                    data-testid="input-outlook-email"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
+                  <Key className="w-2.5 h-2.5 inline mr-1" />Outlook Password
+                </label>
+                <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${GA(0.14)}` }}>
+                  <Key className="w-3.5 h-3.5 flex-shrink-0" style={{ color: GA(0.38) }} />
+                  <input
+                    type="password" value={outlookPassword} onChange={(e) => setOutlookPassword(e.target.value)}
+                    onKeyDown={() => sounds.keypress()} placeholder="••••••••"
+                    className="bg-transparent flex-1 text-xs font-mono focus:outline-none"
+                    style={{ color: "rgba(255,255,255,0.8)", caretColor: G }}
+                    data-testid="input-outlook-password"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Create button */}
+          <button
+            onClick={handleCreate} disabled={running || !canCreate}
+            className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+            style={{
+              background: running || !canCreate ? GA(0.04) : `linear-gradient(135deg, ${GA(0.2)}, ${GA(0.08)})`,
+              border: `1px solid ${running || !canCreate ? GA(0.08) : GA(0.5)}`,
+              color: running || !canCreate ? GA(0.25) : G,
+              textShadow: running || !canCreate ? "none" : `0 0 14px ${G}`,
+              boxShadow: running || !canCreate ? "none" : `0 0 25px ${GA(0.1)}, inset 0 1px 0 ${GA(0.12)}`,
+              cursor: running || !canCreate ? "not-allowed" : "pointer",
+            }}
+            data-testid="button-create-chatgpt"
+          >
+            {!(running || !canCreate) && <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(16,163,127,0.025) 2px, rgba(16,163,127,0.025) 4px)" }} />}
+            <Play className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+            <span className="relative z-10">
+              {running
+                ? totalCount > 1 ? `creating ${completedCount}/${totalCount}...` : "creating account..."
+                : isBulk ? `bulk_create ${count} account${count > 1 ? "s" : ""}` : "create_chatgpt_account"}
+            </span>
+          </button>
+
+          {running && totalCount > 1 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono" style={{ color: GA(0.38) }}>
+                <span>progress</span>
+                <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{completedCount}/{totalCount}</span>
+              </div>
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(completedCount / totalCount) * 100}%`, background: `linear-gradient(90deg, ${G}, rgba(0,210,110,0.7))`, boxShadow: `0 0 10px ${GA(0.7)}` }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Terminal panel */}
+        <div className="min-w-0">
+          <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "rgba(0,0,0,0.75)", border: `1px solid ${GA(0.12)}`, boxShadow: `0 0 40px ${GA(0.03)}` }}>
+            <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0" style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.08)}` }}>
+              <div className="flex items-center gap-2.5">
+                <Radio className="w-3 h-3" style={{ color: running ? G : GA(0.28), filter: running ? `drop-shadow(0 0 5px ${G})` : "none" }} />
+                <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.45) }}>live_output</span>
+                {running && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
+                    <span className="text-[9px] font-mono font-bold" style={{ color: GA(0.65) }}>RUNNING</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,59,48,0.55)" }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,149,0,0.55)" }} />
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: GA(0.55) }} />
+              </div>
+            </div>
+
+            <div className="overflow-y-auto overflow-x-hidden p-4 space-y-0.5 font-mono" style={{ height: "380px", wordBreak: "break-all", overflowWrap: "anywhere" }} data-testid="container-logs">
+              {logs.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center gap-3">
+                  <p className="text-[10px] font-mono" style={{ color: GA(0.18) }}>waiting for output...</p>
+                </div>
+              ) : (
+                logs.map((line, i) => {
+                  const { color, prefix } = getLogStyle(line.text);
+                  const isSep = line.text.startsWith("━━━") || line.text.startsWith("---");
+                  return (
+                    <div key={i} className={`flex items-start gap-2 min-w-0 ${isSep ? "mt-2 mb-1 opacity-30" : "py-px"}`}>
+                      <span className="text-[9px] flex-shrink-0 mt-0.5 tabular-nums" style={{ color: GA(0.22) }}>{line.time}</span>
+                      <span className="text-[10px] flex-shrink-0 mt-0.5 w-3 text-center font-bold" style={{ color }}>{prefix}</span>
+                      <span className="text-[11px] leading-relaxed break-words min-w-0 overflow-hidden" style={{ color, textShadow: color === G ? `0 0 8px ${GA(0.4)}` : "none" }}>{line.text}</span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={logsEndRef} />
+            </div>
+
+            <div className="px-4 py-2 flex items-center gap-2" style={{ background: GA(0.02), borderTop: `1px solid ${GA(0.07)}` }}>
+              <span className="text-[9px] font-mono" style={{ color: GA(0.25) }}>addison@panel:~$</span>
+              <span className="text-[9px] font-mono" style={{ color: GA(0.4) }}>{running ? "executing chatgpt_create..." : "ready"}</span>
+              <span className="w-1.5 h-3 ml-px" style={{ background: tick && !running ? G : "transparent", boxShadow: tick && !running ? `0 0 6px ${G}` : "none" }} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Accounts table */}
+      {chatgptAccounts.length > 0 && (
+        <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${GA(0.1)}` }}>
+          <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: GA(0.03), borderBottom: `1px solid ${GA(0.08)}` }}>
+            <User className="w-3.5 h-3.5" style={{ color: GA(0.55) }} />
+            <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.4) }}>Created ChatGPT Accounts</span>
+            <span className="ml-auto text-[10px] font-mono px-2 py-0.5 rounded" style={{ background: GA(0.1), color: G }}>{chatgptAccounts.length}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px] font-mono">
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${GA(0.07)}` }}>
+                  {["Email", "Name", "Password", "Outlook", "Status", "Created", ""].map((h) => (
+                    <th key={h} className="px-4 py-2 text-left font-medium" style={{ color: GA(0.35) }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {chatgptAccounts.map((acc) => (
+                  <tr key={acc.id} style={{ borderBottom: `1px solid ${GA(0.05)}` }} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-2.5" style={{ color: "rgba(255,255,255,0.75)" }}>{acc.email}</td>
+                    <td className="px-4 py-2.5" style={{ color: "rgba(255,255,255,0.55)" }}>{acc.firstName} {acc.lastName}</td>
+                    <td className="px-4 py-2.5" style={{ color: GA(0.8) }}>{acc.password || "—"}</td>
+                    <td className="px-4 py-2.5" style={{ color: "rgba(255,255,255,0.4)" }}>{acc.outlookEmail || "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="px-2 py-0.5 rounded text-[9px]" style={{ background: acc.status === "created" ? GA(0.12) : "rgba(255,100,100,0.1)", color: acc.status === "created" ? G : "#ff6464" }}>{acc.status}</span>
+                    </td>
+                    <td className="px-4 py-2.5" style={{ color: "rgba(255,255,255,0.3)" }}>{new Date(acc.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-2.5">
+                      <button onClick={() => handleDelete(acc.id)} className="p-1 rounded hover:bg-red-500/10 transition-colors" data-testid={`button-delete-chatgpt-${acc.id}`}>
+                        <Trash2 className="w-3 h-3" style={{ color: "rgba(255,100,100,0.5)" }} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
