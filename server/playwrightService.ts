@@ -19094,7 +19094,7 @@ export async function generateSingleCheckoutLink(
     };
 
     log(`🔐 Logging into Replit as ${email}...`);
-    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.goto("https://replit.com/login", { waitUntil: "domcontentloaded", timeout: 45000 });
     log(`  → Login page loaded: ${page.url().substring(0, 60)}`);
     await glSleep(2000); // let page fully render + Cloudflare resolve
 
@@ -19301,7 +19301,52 @@ export async function generateSingleCheckoutLink(
         if (stuckHtml.includes("turnstile") || stuckHtml.includes("cf-turnstile") || stuckHtml.includes("challenges.cloudflare.com")) {
           throw new Error(`Login blocked by Cloudflare Turnstile — cannot auto-solve — login_captcha`);
         }
-        throw new Error(`Login timed out — page stuck — login_timeout`);
+        // ── Retry: Replit may have presented a FRESH hCaptcha after rejecting the first token ──
+        const hasNewCaptcha = stuckHtml.includes("hcaptcha") || stuckHtml.includes("h-captcha");
+        if (hasNewCaptcha && stuckUrl.includes("replit.com/login")) {
+          log(`🔄 Replit presented a new hCaptcha — solving again (retry #2)...`);
+          try {
+            const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+            const nopeKey2 = nopeKeyRow2.rows.length > 0 ? (nopeKeyRow2.rows[0] as any).value as string : null;
+            let retryResult = { success: false, token: undefined as string | undefined, error: "no solver" };
+            if (nopeKey2) {
+              log(`  → Solving retry captcha via NopeCHA...`);
+              const retryStart = Date.now();
+              const retryTicker = setInterval(() => log(`  ⏳ Retry captcha solving... (${Math.round((Date.now() - retryStart) / 1000)}s)`), 12000);
+              try {
+                retryResult = await solveHCaptchaViaNopeCHA(nopeKey2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 90);
+              } finally {
+                clearInterval(retryTicker);
+              }
+            }
+            if (retryResult.success && retryResult.token) {
+              await page.evaluate((token: string) => {
+                document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
+                  "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+                ).forEach(el => { el.value = token; });
+                const w = window as any;
+                if (w.hcaptcha) { try { w.hcaptcha.setResponse(token); } catch {} }
+                document.querySelectorAll<HTMLElement>("textarea[name='h-captcha-response']")
+                  .forEach(el => el.dispatchEvent(new Event("change", { bubbles: true })));
+              }, retryResult.token);
+              await glSleep(800);
+              log(`  ✅ Retry captcha injected — resubmitting login...`);
+              const retryBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
+              await retryBtn.click();
+              await page.waitForURL(
+                (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
+                { timeout: 25000 }
+              );
+              // If we get here the retry succeeded — fall through
+            } else {
+              throw new Error(`Login timed out — captcha retry failed — login_timeout`);
+            }
+          } catch (retryErr: any) {
+            throw new Error(`Login timed out — page stuck after captcha retry — login_timeout`);
+          }
+        } else {
+          throw new Error(`Login timed out — page stuck — login_timeout`);
+        }
       }
     }
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page after redirect wait");

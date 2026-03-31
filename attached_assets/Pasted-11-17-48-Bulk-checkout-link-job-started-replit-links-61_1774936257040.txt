@@ -1,0 +1,118 @@
+11:17:48
+$
+🔗 Bulk checkout link job started [replit-links-610c8ab8]
+11:17:48
+·
+🎟️ Coupon: AGENT4B9098E8273F4 · Count: 2
+11:17:48
+$
+🔗 Generating 2 checkout link(s) — coupon: AGENT4B9098E8273F4
+11:17:48
+·
+📋 Accounts: kauracroggewj@hotmail.com, srnkamyixintk@hotmail.com
+PROCESSING
+11:17:48
+·
+──────────────────────────────────────────────────
+11:17:48
+·
+[1/2] 🚀 kauracroggewj@hotmail.com
+PROCESSING
+11:17:48
+·
+Connecting via Addison Proxy...
+11:17:49
+·
+Addison Proxy connected.
+11:17:49
++
+✅ ZenRows anti-bot browser connected — ban protection active
+11:17:50
+·
+🔐 Logging into Replit as kauracroggewj@hotmail.com...
+PROCESSING
+11:17:56
+·
+→ Login page loaded: https://replit.com/login
+11:18:06
+~
+🔒 hCaptcha detected on login page — solving via NopeCHA...
+11:18:06
+·
+→ sitekey: 4c672d35-0701-42b2-8...
+11:18:06
+·
+→ Using NopeCHA solver... (this takes 30–60s)
+11:18:18
+~
+⏳ Captcha solving in progress... (12s elapsed)
+11:18:30
+~
+⏳ Captcha solving in progress... (24s elapsed)
+11:18:42
+~
+⏳ Captcha solving in progress... (36s elapsed)
+11:18:54
+~
+⏳ Captcha solving in progress... (48s elapsed)
+11:19:06
+~
+⏳ Captcha solving in progress... (60s elapsed)
+11:19:10
++
+✅ hCaptcha solved — injecting token...
+11:19:10
+·
+→ Login submitted — waiting for redirect...
+11:19:15
+»
+→ Post-submit URL: https://replit.com/login | page text: Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue wi
+11:19:41
+~
+⚠️ Login stuck — URL: https://replit.com/login
+11:19:41
+~
+⚠️ Page title: Log In - Replit
+11:19:41
+~
+⚠️ Page text : Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue with GitHub Continue with X Continue with Apple Continue with Facebook New to Replit? Sign up Get help Creativity runs on
+11:19:41
+!
+❌ Error: Login timed out — page stuck — login_timeout
+11:19:41
+!
+❌ Failed for kauracroggewj@hotmail.com: Login timed out — page stuck — login_timeout
+PROCESSING
+11:19:41
+·
+──────────────────────────────────────────────────
+11:19:41
+·
+[2/2] 🚀 srnkamyixintk@hotmail.com
+PROCESSING
+11:19:41
+·
+Connecting via Addison Proxy...
+11:19:41
+·
+Addison Proxy connected.
+11:19:41
++
+✅ ZenRows anti-bot browser connected — ban protection active
+11:19:42
+·
+🔐 Logging into Replit as srnkamyixintk@hotmail.com...
+PROCESSING
+11:20:07
+!
+❌ Error: page.goto: Timeout 25000ms exceeded. Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+11:20:07
+!
+❌ Failed for srnkamyixintk@hotmail.com: page.goto: Timeout 25000ms exceeded. Call log: [2m - navigating to "https://replit.com/login", waiting until "domcontentloaded"[22m
+PROCESSING
+11:20:07
+·
+──────────────────────────────────────────────────
+11:20:07
++
+✅ Done — 0/2 links generated
