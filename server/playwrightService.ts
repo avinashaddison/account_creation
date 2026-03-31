@@ -13,6 +13,7 @@ import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken,
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
 import * as http from "http";
+import * as net from "net";
 
 const execFileAsync = promisify(execFile);
 
@@ -20250,12 +20251,88 @@ export async function createElevenLabsAccount(
   }
 }
 
+// ── SOAX SOCKS5 bridge: HTTP-CONNECT proxy → SOAX SOCKS5 with credentials ──
+// Playwright's Chromium doesn't support SOCKS5 with username/password auth.
+// This bridge accepts plain HTTP CONNECT from Playwright (no auth required)
+// and tunnels each connection through SOAX via SOCKS5 with full credentials.
+async function startSocks5Bridge(soaxUrl: string): Promise<{ port: number; server: net.Server }> {
+  const { SocksClient } = await import("socks");
+  const pUrl = new URL(soaxUrl);
+  const proxyHost = pUrl.hostname;
+  const proxyPort = parseInt(pUrl.port, 10);
+  const proxyUser = decodeURIComponent(pUrl.username);
+  const proxyPass = decodeURIComponent(pUrl.password);
+
+  const server = net.createServer((clientSocket) => {
+    let buf = Buffer.alloc(0);
+    let tunnelEstablished = false;
+
+    const onData = async (chunk: Buffer) => {
+      if (tunnelEstablished) return;
+      buf = Buffer.concat([buf, chunk]);
+      const headerEnd = buf.indexOf(Buffer.from("\r\n\r\n"));
+      if (headerEnd === -1) return; // wait for full HTTP header
+
+      clientSocket.removeListener("data", onData);
+
+      const header = buf.slice(0, headerEnd).toString("ascii");
+      const firstLine = header.split("\r\n")[0];
+      const match = firstLine.match(/^CONNECT ([^:]+):(\d+)\s+HTTP/i);
+      if (!match) {
+        clientSocket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+        return;
+      }
+      const [, destHost, destPortStr] = match;
+      const destPort = parseInt(destPortStr, 10);
+
+      try {
+        const info = await (SocksClient as any).createConnection({
+          proxy: {
+            host: proxyHost,
+            port: proxyPort,
+            type: 5,
+            userId: proxyUser,
+            password: proxyPass,
+          },
+          command: "connect",
+          destination: { host: destHost, port: destPort },
+        });
+        const remoteSocket: net.Socket = info.socket;
+        tunnelEstablished = true;
+        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        // remaining bytes after CONNECT header go to remote
+        const remainder = buf.slice(headerEnd + 4);
+        if (remainder.length > 0) remoteSocket.write(remainder);
+        remoteSocket.pipe(clientSocket);
+        clientSocket.pipe(remoteSocket);
+        clientSocket.on("error", () => remoteSocket.destroy());
+        remoteSocket.on("error", () => clientSocket.destroy());
+        clientSocket.on("close", () => remoteSocket.destroy());
+        remoteSocket.on("close", () => clientSocket.destroy());
+      } catch (err: any) {
+        console.error(`[SOCKS5 bridge] Failed to connect to ${destHost}:${destPort} via SOAX SOCKS5: ${err.message}`);
+        clientSocket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      }
+    };
+
+    clientSocket.on("data", onData);
+    clientSocket.on("error", () => {});
+  });
+
+  return new Promise((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address() as net.AddressInfo;
+      resolve({ port: addr.port, server });
+    });
+    server.on("error", reject);
+  });
+}
+
 export async function registerChatGptAccount(
   outlookEmail: string,
   outlookPassword: string,
   log: (msg: string) => void
 ): Promise<{ success: boolean; email?: string; password?: string; firstName?: string; lastName?: string; error?: string }> {
-  const { ImapFlow } = await import("imapflow");
 
   const FIRST_NAMES = ["James", "Emma", "Oliver", "Sophia", "Liam", "Ava", "Noah", "Mia", "William", "Isabella", "Benjamin", "Charlotte", "Lucas", "Amelia", "Henry", "Harper", "Alexander", "Evelyn", "Mason", "Abigail", "Ethan", "Emily", "Daniel", "Elizabeth", "Michael", "Sofia", "Jacob", "Madison", "Logan", "Scarlett"];
   const LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"];
@@ -20286,134 +20363,197 @@ export async function registerChatGptAccount(
 
   let browser: any = null;
   let page: any = null;
+  let bridgeServer: net.Server | null = null;
 
   try {
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
     stealthChromium.use(StealthPlugin());
 
-    let zenrowsApiKey = "";
-    try { zenrowsApiKey = await getZenRowsApiKey(); } catch {}
+    // Fetch SOAX residential proxy for ChatGPT (SOAX = true ISP/residential IPs, bypasses OpenAI)
+    // Fallback to Webshare if SOAX not configured
+    let proxyConfig: any = undefined;
+    let proxyUrl: string | null = null;
+    try {
+      const soaxResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
+      if (soaxResult.rows.length > 0 && soaxResult.rows[0].value) {
+        proxyUrl = soaxResult.rows[0].value as string;
+        log("Using SOAX residential proxy (ISP-grade IPs for OpenAI bypass)");
+      }
+    } catch {}
+    if (!proxyUrl) {
+      // Try the general residential-proxy key (SOAX)
+      try {
+        const r2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential-proxy'`);
+        if (r2.rows.length > 0 && r2.rows[0].value) {
+          proxyUrl = r2.rows[0].value as string;
+          log("Using residential-proxy key for ChatGPT proxy");
+        }
+      } catch {}
+    }
+    if (!proxyUrl) {
+      // Last fallback: Webshare
+      proxyUrl = await getResidentialProxyUrl();
+      if (proxyUrl) log("⚠️ Using Webshare fallback proxy (datacenter IPs, may be blocked by OpenAI)");
+    }
+    if (proxyUrl) {
+      try {
+        const pUrl = new URL(proxyUrl);
+        const host = pUrl.hostname;
+        const port = pUrl.port;
+        const username = decodeURIComponent(pUrl.username);
+        const isSoax = host.includes('soax.com');
+        if (isSoax) {
+          // SOAX only works via SOCKS5, but Playwright Chromium doesn't support SOCKS5 with auth.
+          // Start a local HTTP CONNECT bridge that tunnels through SOAX SOCKS5 with full credentials.
+          try {
+            const bridge = await startSocks5Bridge(proxyUrl);
+            bridgeServer = bridge.server;
+            proxyConfig = { server: `http://127.0.0.1:${bridge.port}` };
+            log(`SOAX SOCKS5 bridge started on :${bridge.port} → ${host}:${port} (user: ${username.substring(0, 12)}...)`);
+          } catch (bErr: any) {
+            log(`SOAX bridge failed: ${bErr.message} — proceeding without proxy`);
+          }
+        } else {
+          // Non-SOAX (e.g. Webshare HTTP proxy) — use directly
+          const password2 = decodeURIComponent(pUrl.password);
+          proxyConfig = {
+            server: `${pUrl.protocol}//${host}:${port}`,
+            username,
+            password: password2,
+          };
+          log(`Proxy server: ${pUrl.protocol}//${host}:${port} (user: ${username.substring(0, 12)}...)`);
+        }
+      } catch (pErr: any) {
+        log(`Proxy URL parse error: ${pErr.message} — proceeding without proxy`);
+      }
+    } else {
+      log("⚠️ No proxy configured — OpenAI may block this IP");
+    }
 
     let context: any;
-    if (zenrowsApiKey) {
-      try {
-        const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
-        const storedZrUrl = zrUrlRow.rows.length > 0 ? (zrUrlRow.rows[0].value as string) : "";
-        const wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
-        log(`Connecting via ZenRows anti-bot browser...`);
-        const { chromium: vanillaChromium } = await import("playwright");
-        browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
-        // Always create a FRESH context for ChatGPT to avoid stale session cookies
-        context = await browser.newContext({
-          locale: "en-US",
-          timezoneId: "America/New_York",
-          extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
-        });
-        // Clear any lingering cookies from the shared ZenRows pool
-        await context.clearCookies().catch(() => {});
-        log("✅ Connected via ZenRows (fresh context, cookies cleared)");
-      } catch (zrErr: any) {
-        log(`⚠️ ZenRows failed — falling back to stealth: ${(zrErr.message || "").substring(0, 80)}`);
-        browser = null;
-        zenrowsApiKey = "";
-      }
-    }
-
-    if (!zenrowsApiKey) {
-      browser = await stealthChromium.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-      });
-      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-      context = await browser.newContext({
-        userAgent: ua,
-        viewport: { width: 1366, height: 768 },
-        locale: "en-US",
-        timezoneId: "America/New_York",
-        extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
-      });
-      log("Using stealth headless browser");
-    }
+    browser = await stealthChromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-web-security",
+        "--no-first-run",
+        "--no-default-browser-check",
+      ],
+    });
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    context = await browser.newContext({
+      userAgent: ua,
+      viewport: { width: 1366, height: 768 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+      ...(proxyConfig ? { proxy: proxyConfig } : {}),
+    });
+    log("Using local stealth headless browser" + (proxyConfig ? " with residential proxy" : " (no proxy — direct IP)"));
 
     page = await context.newPage();
-    page.setDefaultTimeout(45000);
+    page.setDefaultTimeout(50000);
 
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
       Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
       Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
       (window as any).chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+      // Remove automation indicators
+      delete (window as any).__webdriver_evaluate;
+      delete (window as any).__selenium_unwrapped;
     });
 
-    // ── STEP 1: Navigate to signup via chatgpt.com ───────────────────────────
-    // Use chatgpt.com as the entry point so the auth flow is correctly initialized
-    log("Navigating to chatgpt.com to start signup flow...");
+    // ── STEP 1: Start from chatgpt.com to properly initialize Auth0 session ──
+    // Navigating directly to auth.openai.com/create-account causes "Your session
+    // has ended" because Auth0 requires a properly initialized session from the
+    // chatgpt.com origin before it will serve the signup form.
+    log("Navigating to chatgpt.com to initialize auth session...");
     await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await waitMs(2500);
-    log(`chatgpt.com URL: ${page.url().substring(0, 100)}`);
+    await waitMs(3000);
+    log(`chatgpt.com loaded: ${page.url().substring(0, 100)}`);
 
-    // Look for "Sign up" button on the landing page
-    let foundSignup = false;
-    const signupBtnSelectors = [
+    // Look for the "Sign up" button on chatgpt.com landing page
+    log("Looking for Sign up button...");
+    let navigatedToSignup = false;
+
+    // Common signup button patterns on chatgpt.com
+    const signupSelectors = [
+      '[data-testid="login-button"]',
       'a[href*="create-account"]',
       'a[href*="signup"]',
       'button:has-text("Sign up")',
       'a:has-text("Sign up")',
-      '[data-testid*="signup"]',
     ];
-    for (const sel of signupBtnSelectors) {
+
+    for (const sel of signupSelectors) {
       try {
         const el = await page.$(sel);
-        if (el && await el.isVisible().catch(() => false)) {
-          await el.click();
-          log(`Clicked signup button via: ${sel}`);
-          foundSignup = true;
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        const href = await el.getAttribute("href").catch(() => "");
+        // Only click Sign up, not Log in
+        const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase();
+        if (txt.includes("log in") || txt.includes("login") || txt.includes("sign in")) continue;
+        log(`Clicking signup: ${sel} "${txt.substring(0, 30)}"`);
+        await el.click();
+        navigatedToSignup = true;
+        await waitMs(3000);
+        break;
+      } catch {}
+    }
+
+    if (!navigatedToSignup) {
+      // If no signup button found, try navigating to the signup path manually
+      // with the referrer set to chatgpt.com (so Auth0 has a valid session)
+      log("No signup button found — navigating to create-account with chatgpt.com referrer...");
+      await page.goto("https://chatgpt.com/auth/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await waitMs(2000);
+      // Look for signup link on login page
+      try {
+        const signupLink = await page.$('a[href*="create-account"], a:has-text("Sign up")');
+        if (signupLink && await signupLink.isVisible().catch(() => false)) {
+          await signupLink.click();
           await waitMs(3000);
-          break;
+          navigatedToSignup = true;
+          log("Clicked signup from login page");
         }
       } catch {}
     }
 
-    if (!foundSignup) {
-      // Directly navigate to the create-account URL
-      log("Sign up button not found — navigating directly to create-account URL...");
-      await page.goto("https://auth.openai.com/create-account", { waitUntil: "domcontentloaded", timeout: 60000 });
-      await waitMs(3000);
-    }
-
-    log(`After signup nav URL: ${page.url().substring(0, 120)}`);
-
-    // If redirected to an unexpected page, try the direct URL
-    const afterNavUrl = page.url();
-    if (!afterNavUrl.includes("openai.com") && !afterNavUrl.includes("chatgpt.com")) {
-      log(`Unexpected redirect — trying direct URL`);
-      await page.goto("https://auth.openai.com/create-account", { waitUntil: "domcontentloaded", timeout: 60000 });
-      await waitMs(3000);
-    }
+    log(`After signup nav: ${page.url().substring(0, 120)}`);
 
     // ── STEP 2: Fill email field ──────────────────────────────────────────────
-    log("Looking for email field...");
+    log("Waiting for email input field...");
     const emailFieldSelector = 'input[type="email"], input[name="email"], input[id="email"], input[autocomplete="email"]';
     let emailFound = false;
+
+    // Wait up to 25s for the email field
     try {
-      await page.waitForSelector(emailFieldSelector, { timeout: 18000, state: "visible" });
+      await page.waitForSelector(emailFieldSelector, { timeout: 25000, state: "visible" });
       emailFound = true;
+      log("Email field found");
     } catch {
-      // Check if we're on a page with "Continue with email" button first
-      const continueEmailBtn = await page.$('button:has-text("Continue with email"), a:has-text("Continue with email"), [data-provider="email"]').catch(() => null);
-      if (continueEmailBtn && await continueEmailBtn.isVisible().catch(() => false)) {
-        await continueEmailBtn.click();
-        log("Clicked 'Continue with email' button");
-        await waitMs(2500);
-        try { await page.waitForSelector(emailFieldSelector, { timeout: 12000, state: "visible" }); emailFound = true; } catch {}
+      const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      // Check if we're on a page that has "Continue with email" type button
+      if (pageText.toLowerCase().includes("continue with email") || pageText.toLowerCase().includes("use email")) {
+        try {
+          await page.click('button:has-text("Continue with email"), a:has-text("Continue with email"), button:has-text("Email")');
+          log("Clicked 'Continue with email' option");
+          await waitMs(3000);
+          await page.waitForSelector(emailFieldSelector, { timeout: 15000, state: "visible" });
+          emailFound = true;
+        } catch {}
       }
     }
 
     if (!emailFound) {
       const bodyText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-      log(`⚠️ Email field not found. Page content: ${bodyText.replace(/\s+/g, " ").substring(0, 250)}`);
-      throw new Error(`Email field not found. Page: ${bodyText.replace(/\s+/g, " ").substring(0, 100)}`);
+      log(`⚠️ Email field not found. Page: ${bodyText.replace(/\s+/g, " ").substring(0, 300)}`);
+      throw new Error(`Email field not found. Page: ${bodyText.replace(/\s+/g, " ").substring(0, 120)}`);
     }
 
     const emailSelectors = ['input[type="email"]', 'input[name="email"]', '#email'];
@@ -20471,74 +20611,316 @@ export async function registerChatGptAccount(
           }
         } catch {}
       }
-      await waitMs(5000);
+      await waitMs(6000);
+
+      // Retry if OpenAI shows "timed out" or "error occurred"
+      for (let retryAttempt = 0; retryAttempt < 3; retryAttempt++) {
+        const currentPageText = await page.evaluate(() => document.body?.innerText?.replace(/\s+/g, " ") || "").catch(() => "");
+        const currentPageUrl = page.url();
+        log(`After submit attempt ${retryAttempt + 1} — URL: ${currentPageUrl.substring(0, 80)}`);
+        log(`Page text: ${currentPageText.substring(0, 200)}`);
+
+        // If we successfully navigated away from password page, break
+        if (!currentPageUrl.includes("create-account/password")) {
+          log("✅ Navigation successful — moved away from password page");
+          break;
+        }
+
+        // Check if "Failed to create account" (permanent error)
+        if (currentPageText.includes("Failed to create account") && !currentPageText.includes("timed out") && !currentPageText.includes("error occurred")) {
+          throw new Error("OpenAI signup rejected: Failed to create account (email may be banned or already exist)");
+        }
+
+        // Check if password form is shown (either after error or fresh) — re-fill and resubmit
+        const hasPasswordField = await page.$('input[type="password"]').then(el => el ? el.isVisible().catch(() => false) : false).catch(() => false);
+
+        // Check for "Try again" button (timeout/transient error) and retry
+        if (currentPageText.includes("timed out") || currentPageText.includes("error occurred") || currentPageText.includes("Try again")) {
+          log(`Transient error detected (attempt ${retryAttempt + 1}) — clicking Try again...`);
+          const tryAgainBtn = await page.$('button:has-text("Try again"), a:has-text("Try again")').catch(() => null);
+          if (tryAgainBtn && await tryAgainBtn.isVisible().catch(() => false)) {
+            await tryAgainBtn.click().catch(() => {});
+            log("Clicked Try again — waiting for form to reset...");
+            await waitMs(5000);
+            // Now re-fill and resubmit password
+            const passFieldAfterRetry = await page.$('input[type="password"]').catch(() => null);
+            if (passFieldAfterRetry && await passFieldAfterRetry.isVisible().catch(() => false)) {
+              await passFieldAfterRetry.click({ clickCount: 3 });
+              await waitMs(300);
+              await passFieldAfterRetry.fill("");
+              await waitMs(200);
+              await passFieldAfterRetry.type(password, { delay: 55 });
+              await waitMs(600);
+              // Click Continue button
+              const continueBtn = await page.$('button[type="submit"], button:has-text("Continue")').catch(() => null);
+              if (continueBtn && await continueBtn.isVisible().catch(() => false)) {
+                await continueBtn.click();
+                log("Re-submitted password after Try again");
+              } else {
+                await page.keyboard.press("Enter");
+                log("Re-submitted password with Enter after Try again");
+              }
+            }
+          } else {
+            // No "Try again" button — just re-fill
+            const passFieldRetry = await page.$('input[type="password"]').catch(() => null);
+            if (passFieldRetry && await passFieldRetry.isVisible().catch(() => false)) {
+              await passFieldRetry.click({ clickCount: 3 });
+              await waitMs(200);
+              await passFieldRetry.fill("");
+              await waitMs(200);
+              await passFieldRetry.type(password, { delay: 55 });
+              await waitMs(500);
+              await page.keyboard.press("Enter");
+              log("Re-filled and re-submitted password (no Try again btn)");
+            }
+          }
+          await waitMs(8000);
+          continue;
+        }
+
+        // Password form appeared again without error (e.g., after Try again cleared error) — resubmit
+        if (hasPasswordField && currentPageText.includes("Create a password")) {
+          log(`Password form visible again (attempt ${retryAttempt + 1}) — re-filling and resubmitting...`);
+          const passFieldRetry = await page.$('input[type="password"]').catch(() => null);
+          if (passFieldRetry) {
+            await passFieldRetry.click({ clickCount: 3 });
+            await waitMs(200);
+            await passFieldRetry.fill("");
+            await waitMs(200);
+            await passFieldRetry.type(password, { delay: 55 });
+            await waitMs(500);
+            const continueBtn = await page.$('button[type="submit"], button:has-text("Continue")').catch(() => null);
+            if (continueBtn && await continueBtn.isVisible().catch(() => false)) {
+              await continueBtn.click();
+              log("Re-submitted password (form reappeared)");
+            } else {
+              await page.keyboard.press("Enter");
+            }
+          }
+          await waitMs(8000);
+          continue;
+        }
+
+        // No error — check for success indicators
+        if (currentPageText.includes("verify") || currentPageText.includes("email") || currentPageText.includes("code")) {
+          log("✅ Appears to be on verification step");
+          break;
+        }
+
+        break; // No known error pattern — proceed
+      }
+
+      // Final state check
+      const afterPassUrl = page.url();
+      const afterPassText = await page.evaluate(() => document.body?.innerText?.replace(/\s+/g, " ").substring(0, 400) || "").catch(() => "");
+      log(`After password URL: ${afterPassUrl.substring(0, 120)}`);
+      log(`After password page: ${afterPassText.substring(0, 300)}`);
     } else {
       log("⚠️ No password field visible — may already be on verification step");
     }
 
-    log(`After credentials URL: ${page.url().substring(0, 100)}`);
+    const currentUrl = page.url();
+    log(`After credentials URL: ${currentUrl.substring(0, 100)}`);
 
-    // ── STEP 4: Poll IMAP for verification OTP ────────────────────────────────
-    log(`📬 Polling ${outlookEmail} via IMAP for ChatGPT verification email...`);
-    const imapDomain = outlookEmail.split("@")[1]?.toLowerCase() || "";
-    const imapHost = imapDomain.includes("gmail") ? "imap.gmail.com" : imapDomain.includes("hotmail") || imapDomain.includes("live") || imapDomain.includes("outlook") ? "outlook.office365.com" : `imap.${imapDomain}`;
-    log(`IMAP host: ${imapHost}`);
+    // If still on password page, try to detect error or wait for redirect
+    if (currentUrl.includes("create-account/password") || currentUrl.includes("create-account")) {
+      // Wait for navigation away from password page (up to 10s more)
+      try {
+        await page.waitForURL(url => !url.includes("create-account/password"), { timeout: 10000 });
+        log(`Navigated to: ${page.url().substring(0, 120)}`);
+      } catch {
+        // Still on password page — check for errors
+        const pageContent = await page.evaluate(() => document.body?.innerText?.replace(/\s+/g, " ").substring(0, 400) || "").catch(() => "");
+        log(`Still on password page — content: ${pageContent.substring(0, 250)}`);
+      }
+    }
+
+    // ── STEP 4: Login to Outlook Web and retrieve verification email ──────────
+    // IMAP basic auth is blocked by Microsoft — use Playwright OWA instead.
+    log(`📬 Logging into Outlook Web to retrieve ChatGPT verification email...`);
 
     let verificationCode: string | null = null;
-    const imapClient = new ImapFlow({
-      host: imapHost,
-      port: 993,
-      secure: true,
-      auth: { user: outlookEmail, pass: outlookPassword },
-      logger: false,
-    });
+    let outlookPage: any = null;
 
     try {
-      await imapClient.connect();
-      log("✅ IMAP connected");
+      outlookPage = await context.newPage();
+      outlookPage.setDefaultTimeout(30000);
 
-      const maxWaitMs = 120000;
-      const pollIntervalMs = 8000;
-      const startTime = Date.now();
+      // Navigate to Outlook login
+      const olLoginUrl = "https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US";
+      await outlookPage.goto(olLoginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await waitMs(3000);
+      log("Outlook login page loaded: " + outlookPage.url().substring(0, 80));
 
-      while (Date.now() - startTime < maxWaitMs) {
-        await imapClient.mailboxOpen("INBOX");
-        const messages = imapClient.fetch({ seen: false, since: new Date(Date.now() - 10 * 60 * 1000) }, { source: true });
-        for await (const msg of messages) {
-          const raw = msg.source.toString();
-          if (raw.toLowerCase().includes("openai") || raw.toLowerCase().includes("chatgpt") || raw.toLowerCase().includes("noreply@openai")) {
-            log("📧 Found OpenAI email — extracting code...");
-            // Extract 6-digit code
-            const codeMatch = raw.match(/\b(\d{6})\b/);
-            if (codeMatch) {
-              verificationCode = codeMatch[1];
-              log(`✅ Got verification code: ${verificationCode}`);
-              break;
-            }
-            // Also check for verification link (some flows use link instead of code)
-            const linkMatch = raw.match(/https:\/\/[^\s"<>]*verify[^\s"<>]*/i);
-            if (linkMatch) {
-              const verifyUrl = linkMatch[0].replace(/=\r?\n/g, "").replace(/=3D/g, "=");
-              log(`✅ Found verify link — navigating...`);
-              await page.goto(verifyUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-              verificationCode = "LINK_USED";
-              break;
-            }
+      // Fill email
+      const emailInput = await outlookPage.waitForSelector('input[type="email"], input[name="loginfmt"]', { timeout: 20000 }).catch(() => null);
+      if (!emailInput) throw new Error("Outlook login: email input not found");
+      await emailInput.click();
+      await waitMs(300);
+      await emailInput.type(outlookEmail, { delay: 60 });
+      log("Typed Outlook email");
+
+      await waitMs(1000);
+      await outlookPage.keyboard.press("Enter");
+      await waitMs(4000);
+      log("After email submit: " + outlookPage.url().substring(0, 80));
+
+      // Check for "use password" option (some accounts show passkey/passwordless first)
+      const bodyText1 = await outlookPage.evaluate(() => document.body?.innerText || "").catch(() => "");
+      if (bodyText1.toLowerCase().includes("use your password") || bodyText1.toLowerCase().includes("use a password") || bodyText1.toLowerCase().includes("try a different way")) {
+        log("Clicking 'Use password' option...");
+        const usePassBtn = await outlookPage.$('a:has-text("password"), button:has-text("password"), a[id*="otherOption"], a[id*="password"]').catch(() => null);
+        if (usePassBtn) { await usePassBtn.click(); await waitMs(3000); }
+        else {
+          // Try clicking "Try a different way" then password
+          const diffWay = await outlookPage.$('a:has-text("different"), a:has-text("another way")').catch(() => null);
+          if (diffWay) { await diffWay.click(); await waitMs(2000); }
+          const passOpt = await outlookPage.$('div[data-value="Password"], button:has-text("Password"), a:has-text("Password")').catch(() => null);
+          if (passOpt) { await passOpt.click(); await waitMs(2000); }
+        }
+      }
+
+      // Fill password
+      const passInput = await outlookPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 15000 }).catch(() => null);
+      if (!passInput) {
+        const bodyText2 = await outlookPage.evaluate(() => document.body?.innerText || "").catch(() => "");
+        throw new Error(`Outlook login: password input not found. Page: ${bodyText2.replace(/\s+/g, " ").substring(0, 200)}`);
+      }
+      await passInput.click();
+      await waitMs(300);
+      await passInput.type(outlookPassword, { delay: 60 });
+      log("Typed Outlook password");
+
+      await waitMs(1000);
+      // Click Sign In button
+      const signInBtn = await outlookPage.$('#idSIButton9, input[value="Sign in"], button:has-text("Sign in")').catch(() => null);
+      if (signInBtn) { await signInBtn.click(); } else { await outlookPage.keyboard.press("Enter"); }
+      await waitMs(4000);
+      log("After password submit: " + outlookPage.url().substring(0, 80));
+
+      // Handle "Stay signed in?" prompt
+      const staySignedInBtn = await outlookPage.$('#idSIButton9, button:has-text("Yes"), input[value="Yes"]').catch(() => null);
+      if (staySignedInBtn) {
+        log("Dismissing 'Stay signed in?' prompt...");
+        await staySignedInBtn.click().catch(() => {});
+        await waitMs(3000);
+      }
+      const noBtn = await outlookPage.$('#idBtn_Back, button:has-text("No"), input[value="No"]').catch(() => null);
+      if (noBtn) { await noBtn.click().catch(() => {}); await waitMs(2000); }
+
+      // Navigate to inbox
+      log("Navigating to Outlook inbox...");
+      await outlookPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await waitMs(5000);
+      log("Inbox URL: " + outlookPage.url().substring(0, 80));
+
+      // Helper: extract code/link from currently open email in Outlook
+      async function extractFromOpenEmail(): Promise<string | null> {
+        const bodyText = await outlookPage.evaluate(() => {
+          const selectors = ['[role="main"] article', '[role="main"] [data-render-id]', '.reading-pane-content', '[class*="ReadingPane"]', '#UniqueMessageBody', '[data-owapage="MailReadPage"]'];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) return (el.textContent || "").substring(0, 6000);
+          }
+          return (document.body?.textContent || "").substring(0, 6000);
+        }).catch(() => "");
+        log("Email body snippet: " + bodyText.replace(/\s+/g, " ").substring(0, 200));
+
+        // Extract 6-digit code
+        const codeMatch = bodyText.match(/\b([0-9]{6})\b/);
+        if (codeMatch) {
+          log(`✅ Found verification code: ${codeMatch[1]}`);
+          return codeMatch[1];
+        }
+
+        // Try to find verification link
+        const allLinks = await outlookPage.$$eval('a[href]', (links: any[]) =>
+          links.map((a: any) => ({ href: a.href || "", text: (a.textContent || "").substring(0, 100) }))
+        ).catch(() => [] as any[]);
+        const verifyLink = (allLinks as any[]).find((l: any) =>
+          l.href && (l.href.includes("openai.com") || l.href.includes("chatgpt.com")) &&
+          (l.href.includes("verify") || l.href.includes("confirm") || l.href.includes("callback") || l.href.includes("activate"))
+        );
+        if (verifyLink) {
+          log(`✅ Found OpenAI verify link: ${verifyLink.href.substring(0, 100)}`);
+          await page.goto(verifyLink.href, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+          return "LINK_USED";
+        }
+        return null;
+      }
+
+      // Helper: try to click an OpenAI email in a folder and extract code
+      async function scanFolder(folderUrl: string, folderName: string): Promise<boolean> {
+        await outlookPage.goto(folderUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+        await waitMs(4000);
+        log(`${folderName} URL: ${outlookPage.url().substring(0, 80)}`);
+
+        const emailItems = await outlookPage.$$('[role="listbox"] [role="option"], div[data-convid], div[role="option"][tabindex="0"], div[class*="jGG6V"], div[class*="hcpHN"] div[role="option"]').catch(() => [] as any[]);
+        log(`${folderName}: found ${emailItems.length} email items`);
+
+        // Check each item for OpenAI content
+        for (const item of emailItems) {
+          const text = (await item.textContent().catch(() => "") || "").toLowerCase();
+          if (text.includes("openai") || text.includes("chatgpt") || text.includes("verify your email") || text.includes("confirm your email") || text.includes("noreply@openai")) {
+            log(`Found OpenAI email in ${folderName}: ${text.replace(/\s+/g, " ").substring(0, 80)}`);
+            await item.click({ force: true, timeout: 5000 }).catch(async () => {
+              await outlookPage.evaluate((el: any) => el.click(), item).catch(() => {});
+            });
+            await waitMs(3000);
+            const code = await extractFromOpenEmail();
+            if (code) { verificationCode = code; return true; }
           }
         }
-        if (verificationCode) break;
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-        log(`⏳ No OTP yet (${elapsed}s elapsed) — waiting ${pollIntervalMs / 1000}s...`);
-        await waitMs(pollIntervalMs);
+
+        // Fallback: click unread emails and check content
+        const unreadItems = await outlookPage.$$('[aria-label*="Unread"], [data-is-unread="true"]').catch(() => [] as any[]);
+        for (const item of unreadItems.slice(0, 5)) {
+          await item.click({ force: true, timeout: 5000 }).catch(() => {});
+          await waitMs(2000);
+          const code = await extractFromOpenEmail();
+          if (code) { verificationCode = code; return true; }
+        }
+        return false;
       }
-      await imapClient.logout().catch(() => {});
-    } catch (imapErr: any) {
-      log(`⚠️ IMAP error: ${(imapErr.message || "").substring(0, 120)}`);
-      throw new Error(`IMAP failed: ${imapErr.message?.substring(0, 100)}`);
+
+      // Poll inbox for OpenAI email — up to 3 minutes, checking both inbox and junk
+      const maxWaitMs = 180000;
+      const pollStart = Date.now();
+      let pollCount = 0;
+
+      while (Date.now() - pollStart < maxWaitMs && !verificationCode) {
+        pollCount++;
+        log(`🔍 Poll #${pollCount} for OpenAI email (${Math.round((Date.now() - pollStart) / 1000)}s elapsed)...`);
+
+        try {
+          // Check inbox
+          const foundInInbox = await scanFolder("https://outlook.live.com/mail/0/inbox", "Inbox");
+          if (foundInInbox) break;
+
+          // Check junk/spam
+          if (!verificationCode) {
+            const foundInJunk = await scanFolder("https://outlook.live.com/mail/0/junkemail", "Junk");
+            if (foundInJunk) break;
+          }
+        } catch (pollErr: any) {
+          log(`Poll iteration error: ${(pollErr.message || "").substring(0, 80)}`);
+        }
+
+        if (!verificationCode) {
+          const remaining = Math.round((maxWaitMs - (Date.now() - pollStart)) / 1000);
+          log(`⏳ No email yet — ${remaining}s remaining, retrying in 12s...`);
+          await waitMs(12000);
+        }
+      }
+    } catch (outlookErr: any) {
+      log(`⚠️ Outlook Web error: ${(outlookErr.message || "").substring(0, 150)}`);
+    } finally {
+      if (outlookPage) await outlookPage.close().catch(() => {});
     }
 
     if (!verificationCode) {
-      throw new Error("Verification email not received within 2 minutes");
+      throw new Error("Verification code not received within 2 minutes");
     }
 
     // ── STEP 5: Enter OTP code (if we got a code, not a link) ────────────────
@@ -20683,6 +21065,7 @@ export async function registerChatGptAccount(
     return { success: false, error: err.message?.substring(0, 200) };
   } finally {
     if (browser) await browser.close().catch(() => {});
+    if (bridgeServer) bridgeServer.close();
   }
 }
 

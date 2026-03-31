@@ -4967,6 +4967,46 @@ export async function registerRoutes(
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
+  // Temporary diagnostic: test SOAX SOCKS5 connectivity for specific domains
+  app.get("/api/debug/soax-test", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const soaxResult = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
+      if (!soaxResult.rows.length || !soaxResult.rows[0].value) return res.json({ error: "soax_proxy_template not set" });
+      const proxyUrl = soaxResult.rows[0].value as string;
+      const pUrl = new URL(proxyUrl);
+      const proxyHost = pUrl.hostname;
+      const proxyPort = parseInt(pUrl.port, 10);
+      const proxyUser = decodeURIComponent(pUrl.username);
+      const proxyPass = decodeURIComponent(pUrl.password);
+
+      const { SocksClient } = await import("socks");
+      const testDomains = [
+        { host: "google.com", port: 443 },
+        { host: "httpbin.org", port: 443 },
+        { host: "chatgpt.com", port: 443 },
+        { host: "auth.openai.com", port: 443 },
+        { host: "openai.com", port: 443 },
+      ];
+
+      const results: any[] = [];
+      for (const dest of testDomains) {
+        try {
+          const info = await (SocksClient as any).createConnection({
+            proxy: { host: proxyHost, port: proxyPort, type: 5, userId: proxyUser, password: proxyPass },
+            command: "connect",
+            destination: { host: dest.host, port: dest.port },
+            timeout: 8000,
+          });
+          (info.socket as any).destroy();
+          results.push({ domain: dest.host, status: "✅ OK" });
+        } catch (e: any) {
+          results.push({ domain: dest.host, status: `❌ ${e.message}` });
+        }
+      }
+      res.json({ proxy: `${proxyHost}:${proxyPort}`, user: proxyUser.substring(0, 15), results });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
   app.get("/api/chatgpt-accounts", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
