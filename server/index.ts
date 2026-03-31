@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
+import { startTelegramBot } from "./telegramBot";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import pg from "pg";
@@ -207,6 +208,9 @@ app.use((req, res, next) => {
   );
 
   await registerRoutes(httpServer, app);
+
+  // Start Telegram bot
+  startTelegramBot();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
