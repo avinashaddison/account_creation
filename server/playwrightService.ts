@@ -19181,21 +19181,43 @@ export async function generateSingleCheckoutLink(
         if (capResult.success && capResult.token) {
           log(`  ✅ hCaptcha solved — injecting token...`);
           await page.evaluate((token: string) => {
-            // Inject into all h-captcha-response fields
-            document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
-              "textarea[name='h-captcha-response'], input[name='h-captcha-response'], textarea[name='g-recaptcha-response']"
-            ).forEach(el => { el.value = token; });
-            // Fire hCaptcha widget callback if present
+            // Use native property setters so React-controlled inputs register the change
+            const textareaNativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+            const inputNativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[name='g-recaptcha-response']").forEach(el => {
+              if (textareaNativeSetter) textareaNativeSetter.call(el, token);
+              else el.value = token;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+            document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
+              if (inputNativeSetter) inputNativeSetter.call(el, token);
+              else el.value = token;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+            // Fire hCaptcha widget callbacks
             const w = window as any;
             if (w.hcaptcha) {
-              try { w.hcaptcha.setResponse(token); } catch {}
+              try {
+                // Try all widget IDs
+                const widgets = document.querySelectorAll("[data-hcaptcha-widget-id]");
+                if (widgets.length > 0) {
+                  widgets.forEach(wEl => {
+                    const wid = (wEl as HTMLElement).getAttribute("data-hcaptcha-widget-id");
+                    if (wid) { try { w.hcaptcha.setResponse(wid, token); } catch {} }
+                  });
+                } else {
+                  w.hcaptcha.setResponse(token);
+                }
+              } catch {}
             }
-            // Dispatch change event so React/Vue listeners pick it up
-            document.querySelectorAll<HTMLElement>(
-              "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
-            ).forEach(el => el.dispatchEvent(new Event("change", { bubbles: true })));
+            // Fire any global hcaptcha success callback Replit may have registered
+            ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess"].forEach(name => {
+              if (typeof w[name] === "function") { try { w[name](token); } catch {} }
+            });
           }, capResult.token);
-          await glSleep(800);
+          await glSleep(1500); // give React time to process state update before clicking
           hcaptchaPreSolved = true;
         } else {
           log(`  ⚠️ All solvers failed: ${capResult.error || "unknown"} — proceeding anyway`);
@@ -19321,15 +19343,25 @@ export async function generateSingleCheckoutLink(
             }
             if (retryResult.success && retryResult.token) {
               await page.evaluate((token: string) => {
-                document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
-                  "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
-                ).forEach(el => { el.value = token; });
+                const textareaNativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+                const inputNativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response']").forEach(el => {
+                  if (textareaNativeSetter) textareaNativeSetter.call(el, token); else el.value = token;
+                  el.dispatchEvent(new Event("input", { bubbles: true }));
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                });
+                document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
+                  if (inputNativeSetter) inputNativeSetter.call(el, token); else el.value = token;
+                  el.dispatchEvent(new Event("input", { bubbles: true }));
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                });
                 const w = window as any;
                 if (w.hcaptcha) { try { w.hcaptcha.setResponse(token); } catch {} }
-                document.querySelectorAll<HTMLElement>("textarea[name='h-captcha-response']")
-                  .forEach(el => el.dispatchEvent(new Event("change", { bubbles: true })));
+                ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess"].forEach(name => {
+                  if (typeof w[name] === "function") { try { w[name](token); } catch {} }
+                });
               }, retryResult.token);
-              await glSleep(800);
+              await glSleep(1500);
               log(`  ✅ Retry captcha injected — resubmitting login...`);
               const retryBtn = page.getByRole("button", { name: /log in|sign in/i }).first();
               await retryBtn.click();
