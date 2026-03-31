@@ -18913,7 +18913,7 @@ async function handleReplitEmailVerification(
       return false;
     };
 
-    for (let attempt = 0; attempt < 10 && !verificationLink && !verificationCode; attempt++) {
+    for (let attempt = 0; attempt < 6 && !verificationLink && !verificationCode; attempt++) {
       if (attempt > 0) {
         await sleep(6000);
         log(`  ⏳ Waiting for Replit email... (${attempt * 6}s elapsed)`);
@@ -18923,8 +18923,8 @@ async function handleReplitEmailVerification(
       const foundInInbox = await scanFolder("https://outlook.live.com/mail/inbox", "Inbox");
       if (foundInInbox) break;
 
-      // 2. On first miss, also check junk/spam
-      if (attempt === 0) {
+      // 2. Check junk/spam on first attempt and every 3rd attempt after
+      if (attempt === 0 || attempt % 3 === 0) {
         const foundInJunk = await scanFolder("https://outlook.live.com/mail/junkemail", "Junk/Spam");
         if (foundInJunk) break;
       }
@@ -19324,11 +19324,11 @@ export async function generateSingleCheckoutLink(
 
     // ── Warm-up: visit Replit home to establish session trust before hitting checkout ──
     log(`🏠 Warming up session — visiting Replit home...`);
-    await page.goto("https://replit.com", { waitUntil: "domcontentloaded", timeout: 30000 })
+    await page.goto("https://replit.com", { waitUntil: "domcontentloaded", timeout: 12000 })
       .catch((err: Error) => log(`  ⚠️ Home warm-up navigation failed: ${(err.message || "").substring(0, 80)} — proceeding`));
-    await glSleep(2000);
+    await glSleep(1000);
     await waitForCf("home");
-    await glSleep(3000); // let session cookies propagate
+    await glSleep(1500); // let session cookies propagate
 
     // ── Navigate to direct checkout URL ──
     const checkoutUrl = couponCode

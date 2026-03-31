@@ -1,0 +1,177 @@
+10:42:59
+$
+🔗 Bulk checkout link job started [replit-links-f78258d6]
+10:42:59
+·
+🎟️ Coupon: AGENT4B9098E8273F4 · Count: 4
+10:43:00
+·
+Addison Proxy connected.
+10:43:00
++
+✅ ZenRows anti-bot browser connected — ban protection active
+10:43:00
+·
+🔐 Logging into Replit as steuphrazaipy@hotmail.com...
+AVAILABLE
+10:43:03
+·
+→ Login page loaded: https://replit.com/login
+10:43:13
+~
+🔒 hCaptcha detected on login page — solving via NopeCHA...
+10:43:13
+·
+→ sitekey: 4c672d35-0701-42b2-8...
+10:43:13
+·
+→ Using NopeCHA solver...
+10:43:45
++
+✅ hCaptcha solved — injecting token...
+10:43:46
+·
+→ Login submitted — waiting for redirect...
+10:43:52
+»
+→ Post-submit URL: https://replit.com/login | page text: Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue wi
+10:44:00
++
+✅ Logged in
+10:44:00
+·
+🏠 Warming up session — visiting Replit home...
+10:44:08
+>
+💰 Navigating to checkout URL...
+10:44:09
+$
+⏳ Waiting for Stripe redirect...
+10:44:11
++
+✅ Checkout link ready: https://checkout.stripe.com/c/pay/cs_live_a1Zvm7posBQlJw1gNuF5E5eCEWAmtcSQ8kB8u2...
+🔗 steuphrazaipy@hotmail.com
+open link
+download
+copy link
+https://checkout.stripe.com/c/pay/cs_live_a1Zvm7posBQlJw1gNuF5E5eCEWAmtcSQ8kB8u2...
+10:44:11
+·
+──────────────────────────────────────────────────
+10:44:11
+·
+[2/4] 🚀 kauracroggewj@hotmail.com
+PROCESSING
+10:44:11
+·
+Connecting via Addison Proxy...
+10:44:13
+·
+Addison Proxy connected.
+10:44:13
++
+✅ ZenRows anti-bot browser connected — ban protection active
+10:44:13
+·
+🔐 Logging into Replit as kauracroggewj@hotmail.com...
+PROCESSING
+10:44:17
+·
+→ Login page loaded: https://replit.com/login
+10:44:28
+~
+🔒 hCaptcha detected on login page — solving via NopeCHA...
+10:44:28
+·
+→ sitekey: 4c672d35-0701-42b2-8...
+10:44:28
+·
+→ Using NopeCHA solver...
+10:44:34
++
+✅ hCaptcha solved — injecting token...
+10:44:35
+·
+→ Login submitted — waiting for redirect...
+10:44:40
+»
+→ Post-submit URL: https://replit.com/login | page text: Log in to your account EMAIL OR USERNAME PASSWORD Log In Forgot password? Use SSO login Continue with Google Continue wi
+10:44:46
++
+✅ Logged in
+10:44:46
+·
+🏠 Warming up session — visiting Replit home...
+10:45:16
+!
+⚠️ Home warm-up navigation failed: page.goto: Timeout 30000ms exceeded. Call log: - navigating to "https://replit — proceeding
+10:45:21
+>
+💰 Navigating to checkout URL...
+10:45:23
+$
+⏳ Waiting for Stripe redirect...
+10:45:25
+·
+📧 Checkout blocked by email verification — auto-handling via Outlook...
+10:45:26
+·
+📧 Signing into Outlook as kauracroggewj@hotmail.com...
+PROCESSING
+10:45:40
+·
+📬 Scanning Outlook inbox for Replit verification email...
+10:45:50
+·
+📁 Inbox: 1 items found
+10:45:57
+·
+📁 Junk/Spam: 1 items found
+10:46:03
+·
+⏳ Waiting for Replit email... (6s elapsed)
+10:46:10
+·
+📁 Inbox: 1 items found
+10:46:16
+·
+⏳ Waiting for Replit email... (12s elapsed)
+10:46:23
+·
+📁 Inbox: 1 items found
+10:46:29
+·
+⏳ Waiting for Replit email... (18s elapsed)
+10:46:36
+·
+📁 Inbox: 1 items found
+10:46:42
+·
+⏳ Waiting for Replit email... (24s elapsed)
+10:46:49
+·
+📁 Inbox: 1 items found
+10:46:55
+·
+⏳ Waiting for Replit email... (30s elapsed)
+10:47:02
+·
+📁 Inbox: 1 items found
+10:47:08
+·
+⏳ Waiting for Replit email... (36s elapsed)
+10:47:15
+·
+📁 Inbox: 1 items found
+10:47:21
+·
+⏳ Waiting for Replit email... (42s elapsed)
+10:47:28
+·
+📁 Inbox: 1 items found
+10:47:34
+·
+⏳ Waiting for Replit email... (48s elapsed)
+10:47:41
+·
+📁 Inbox: 1 items found
