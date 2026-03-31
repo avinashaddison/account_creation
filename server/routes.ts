@@ -4950,7 +4950,6 @@ export async function registerRoutes(
     try {
       const pending = await storage.getLovableAccountsPendingVerification();
       if (pending.length === 0) return;
-      console.log(`[LovablePoller] Checking ${pending.length} pending verification account(s)...`);
 
       for (const acct of pending) {
         if (!acct.refreshToken || lovableOnboardingInProgress.has(acct.id)) continue;
@@ -4985,7 +4984,6 @@ export async function registerRoutes(
           const lookupData = await lookupResp.json() as any;
           const user = lookupData.users?.[0];
           if (!user?.emailVerified) {
-            console.log(`[LovablePoller] ${acct.email} — not yet verified`);
             continue;
           }
 
