@@ -181,43 +181,67 @@ export default function ReplitCreate() {
   }
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-    wsRef.current = ws;
+    let destroyed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.batchId && data.batchId === activeBatchId.current) {
-          if (data.type === "log") {
-            addLog(data.message);
-          } else if (data.type === "batch_complete") {
-            setRunning(false);
-            sounds.complete();
-            qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
-            qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
-          } else if (data.type === "replit_create_result") {
-            if (data.success) {
-              setCompletedCount((p) => p + 1);
-              sounds.success();
-              if (data.checkoutUrl) setCheckoutUrl(data.checkoutUrl);
-              if (data.checkoutComplete) {
-                toast({ title: "✅ Checkout Complete!", description: "Payment processed successfully" });
-              } else if (data.username) {
-                toast({ title: "✅ Account Created", description: `@${data.username}` });
+    function connect() {
+      if (destroyed) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.batchId && data.batchId === activeBatchId.current) {
+            if (data.type === "log") {
+              addLog(data.message);
+            } else if (data.type === "batch_complete") {
+              setRunning(false);
+              sounds.complete();
+              qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
+              qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
+            } else if (data.type === "replit_create_result") {
+              if (data.success) {
+                setCompletedCount((p) => p + 1);
+                sounds.success();
+                if (data.checkoutUrl) setCheckoutUrl(data.checkoutUrl);
+                if (data.checkoutComplete) {
+                  toast({ title: "✅ Checkout Complete!", description: "Payment processed successfully" });
+                } else if (data.username) {
+                  toast({ title: "✅ Account Created", description: `@${data.username}` });
+                } else {
+                  toast({ title: "✅ Checkout Done", description: "Finished" });
+                }
               } else {
-                toast({ title: "✅ Checkout Done", description: "Finished" });
+                sounds.error();
+                toast({ title: "❌ Failed", description: data.error || "Unknown error", variant: "destructive" });
               }
-            } else {
-              sounds.error();
-              toast({ title: "❌ Failed", description: data.error || "Unknown error", variant: "destructive" });
             }
           }
-        }
-      } catch {}
-    };
+        } catch {}
+      };
 
-    return () => ws.close();
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (!destroyed) {
+          reconnectTimer = setTimeout(connect, 2000);
+        }
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    }
+
+    connect();
+
+    return () => {
+      destroyed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
   }, []);
 
   const handleOutlookSelect = (id: string) => {

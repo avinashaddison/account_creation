@@ -441,7 +441,24 @@ export async function registerRoutes(
   const pgModule = await import("pg");
   const wsPool = new pgModule.default.Pool({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL, max: 2 });
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+
+  // Ping all clients every 20s to keep Replit proxy from closing idle connections
+  const wsPingInterval = setInterval(() => {
+    wss.clients.forEach((client) => {
+      if ((client as any)._isAlive === false) {
+        wsClients.delete(client as WebSocket);
+        return client.terminate();
+      }
+      (client as any)._isAlive = false;
+      client.ping();
+    });
+  }, 20000);
+  wss.on("close", () => clearInterval(wsPingInterval));
+
   wss.on("connection", (ws, req) => {
+    (ws as any)._isAlive = true;
+    ws.on("pong", () => { (ws as any)._isAlive = true; });
+
     const cookieHeader = req.headers.cookie || "";
     const sidMatch = cookieHeader.match(/connect\.sid=(?:s(?:%3A|:))?([^.;\s]+)/);
     const sessionId = sidMatch ? decodeURIComponent(sidMatch[1]) : null;
