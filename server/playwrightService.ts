@@ -20304,10 +20304,17 @@ export async function registerChatGptAccount(
         log(`Connecting via ZenRows anti-bot browser...`);
         const { chromium: vanillaChromium } = await import("playwright");
         browser = await vanillaChromium.connectOverCDP(wsEndpoint, { timeout: 60000 });
-        context = browser.contexts()[0] || await browser.newContext();
-        log("✅ Connected via ZenRows");
+        // Always create a FRESH context for ChatGPT to avoid stale session cookies
+        context = await browser.newContext({
+          locale: "en-US",
+          timezoneId: "America/New_York",
+          extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+        });
+        // Clear any lingering cookies from the shared ZenRows pool
+        await context.clearCookies().catch(() => {});
+        log("✅ Connected via ZenRows (fresh context, cookies cleared)");
       } catch (zrErr: any) {
-        log(`⚠️ ZenRows failed — falling back to stealth`);
+        log(`⚠️ ZenRows failed — falling back to stealth: ${(zrErr.message || "").substring(0, 80)}`);
         browser = null;
         zenrowsApiKey = "";
       }
@@ -20339,20 +20346,74 @@ export async function registerChatGptAccount(
       (window as any).chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
     });
 
-    // ── STEP 1: Navigate to ChatGPT sign-up page ─────────────────────────────
-    log("Navigating to ChatGPT sign-up page...");
-    await page.goto("https://auth.openai.com/create-account", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await waitMs(3000);
-    log(`URL: ${page.url().substring(0, 100)}`);
+    // ── STEP 1: Navigate to signup via chatgpt.com ───────────────────────────
+    // Use chatgpt.com as the entry point so the auth flow is correctly initialized
+    log("Navigating to chatgpt.com to start signup flow...");
+    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(2500);
+    log(`chatgpt.com URL: ${page.url().substring(0, 100)}`);
+
+    // Look for "Sign up" button on the landing page
+    let foundSignup = false;
+    const signupBtnSelectors = [
+      'a[href*="create-account"]',
+      'a[href*="signup"]',
+      'button:has-text("Sign up")',
+      'a:has-text("Sign up")',
+      '[data-testid*="signup"]',
+    ];
+    for (const sel of signupBtnSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el && await el.isVisible().catch(() => false)) {
+          await el.click();
+          log(`Clicked signup button via: ${sel}`);
+          foundSignup = true;
+          await waitMs(3000);
+          break;
+        }
+      } catch {}
+    }
+
+    if (!foundSignup) {
+      // Directly navigate to the create-account URL
+      log("Sign up button not found — navigating directly to create-account URL...");
+      await page.goto("https://auth.openai.com/create-account", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await waitMs(3000);
+    }
+
+    log(`After signup nav URL: ${page.url().substring(0, 120)}`);
+
+    // If redirected to an unexpected page, try the direct URL
+    const afterNavUrl = page.url();
+    if (!afterNavUrl.includes("openai.com") && !afterNavUrl.includes("chatgpt.com")) {
+      log(`Unexpected redirect — trying direct URL`);
+      await page.goto("https://auth.openai.com/create-account", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await waitMs(3000);
+    }
 
     // ── STEP 2: Fill email field ──────────────────────────────────────────────
     log("Looking for email field...");
+    const emailFieldSelector = 'input[type="email"], input[name="email"], input[id="email"], input[autocomplete="email"]';
+    let emailFound = false;
     try {
-      await page.waitForSelector('input[type="email"], input[name="email"], #email', { timeout: 15000, state: "visible" });
+      await page.waitForSelector(emailFieldSelector, { timeout: 18000, state: "visible" });
+      emailFound = true;
     } catch {
+      // Check if we're on a page with "Continue with email" button first
+      const continueEmailBtn = await page.$('button:has-text("Continue with email"), a:has-text("Continue with email"), [data-provider="email"]').catch(() => null);
+      if (continueEmailBtn && await continueEmailBtn.isVisible().catch(() => false)) {
+        await continueEmailBtn.click();
+        log("Clicked 'Continue with email' button");
+        await waitMs(2500);
+        try { await page.waitForSelector(emailFieldSelector, { timeout: 12000, state: "visible" }); emailFound = true; } catch {}
+      }
+    }
+
+    if (!emailFound) {
       const bodyText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-      log(`⚠️ Email field not found. Page: ${bodyText.replace(/\s+/g, " ").substring(0, 200)}`);
-      throw new Error("Email field not found on ChatGPT sign-up page");
+      log(`⚠️ Email field not found. Page content: ${bodyText.replace(/\s+/g, " ").substring(0, 250)}`);
+      throw new Error(`Email field not found. Page: ${bodyText.replace(/\s+/g, " ").substring(0, 100)}`);
     }
 
     const emailSelectors = ['input[type="email"]', 'input[name="email"]', '#email'];
