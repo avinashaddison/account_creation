@@ -20328,6 +20328,451 @@ async function startSocks5Bridge(soaxUrl: string): Promise<{ port: number; serve
   });
 }
 
+export async function registerNanoBananaAccount(
+  outlookEmail: string,
+  outlookPassword: string,
+  log: (msg: string) => void
+): Promise<{ success: boolean; email?: string; apiKey?: string; error?: string }> {
+  let browser: any = null;
+
+  try {
+    const { chromium: stealthChromium } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    stealthChromium.use(StealthPlugin());
+
+    // Get proxy
+    const proxyUrlRaw = await getResidentialProxyUrl();
+    let proxyConfig: any = undefined;
+    if (proxyUrlRaw) {
+      const pUrl = new URL(proxyUrlRaw);
+      proxyConfig = {
+        server: `${pUrl.protocol}//${pUrl.hostname}:${pUrl.port}`,
+        username: decodeURIComponent(pUrl.username),
+        password: decodeURIComponent(pUrl.password),
+      };
+      log(`Using proxy: ${pUrl.hostname}:${pUrl.port}`);
+    } else {
+      log("⚠️ No proxy configured");
+    }
+
+    // Get NopeCHA key for hCaptcha solving
+    let nopeKey = "";
+    try {
+      const r = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`);
+      if (r.rows.length > 0 && r.rows[0].value) nopeKey = r.rows[0].value as string;
+    } catch {}
+    log(`NopeCHA key loaded: ${nopeKey ? "yes" : "none"}`);
+
+    browser = await stealthChromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+    });
+
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const context = await browser.newContext({
+      userAgent: ua,
+      viewport: { width: 1366, height: 768 },
+      ...(proxyConfig ? { proxy: proxyConfig } : {}),
+    });
+    const page = await context.newPage();
+
+    log("Navigating to NanoBananaAPI dashboard...");
+    await page.goto("https://nanobananaapi.ai/dashboard", { waitUntil: "networkidle", timeout: 30000 });
+    log("Loaded dashboard. URL: " + page.url());
+
+    // Click "Sign in with Microsoft" — opens popup
+    log("Clicking 'Sign in with Microsoft'...");
+    const popupPromise = context.waitForEvent("page", { timeout: 15000 });
+    await page.getByRole("button", { name: /sign in with microsoft/i }).click();
+    const popup = await popupPromise;
+    log("Popup opened: " + popup.url().substring(0, 100));
+
+    // Wait for Microsoft login page to load
+    await popup.waitForURL(/microsoftonline\.com|live\.com/, { timeout: 20000 });
+    log("Microsoft login page: " + popup.url().substring(0, 100));
+    await popup.waitForLoadState("domcontentloaded");
+    await popup.waitForTimeout(2000);
+
+    // === ENTER EMAIL ===
+    log("Entering email: " + outlookEmail);
+    const emailField = popup.locator('input[type="email"], input[name="loginfmt"], input[name="email"]').first();
+    await emailField.waitFor({ state: "visible", timeout: 15000 });
+    await emailField.click();
+    await emailField.fill("");
+    await popup.keyboard.type(outlookEmail, { delay: 80 });
+    await popup.waitForTimeout(600);
+
+    // Click Next
+    const nextBtn = popup.locator('input[type="submit"][value="Next"], button[type="submit"]').first();
+    await nextBtn.waitFor({ state: "visible", timeout: 8000 });
+    await nextBtn.click();
+    log("Clicked Next (email step)");
+    await popup.waitForTimeout(3000);
+
+    // Check for hCaptcha on email step
+    const hcapSitekeyAfterEmail = await popup.evaluate(() => {
+      const el = document.querySelector('.h-captcha[data-sitekey], iframe[src*="hcaptcha"]');
+      return el ? (el.getAttribute("data-sitekey") || "unknown") : null;
+    }).catch(() => null);
+    if (hcapSitekeyAfterEmail && nopeKey) {
+      log("hCaptcha detected on email step — solving with NopeCHA...");
+      const solved = await solveHCaptchaViaNopeCHA(nopeKey, popup.url(), hcapSitekeyAfterEmail, undefined, 90);
+      if (solved.success && solved.token) {
+        await popup.evaluate((token: string) => {
+          const textarea = document.querySelector("textarea[name='h-captcha-response']") as any;
+          if (textarea) { textarea.value = token; textarea.dispatchEvent(new Event("change", { bubbles: true })); }
+        }, solved.token);
+        log("hCaptcha solved on email step ✅");
+      }
+    }
+
+    // === ENTER PASSWORD ===
+    log("Looking for password field...");
+    await popup.waitForTimeout(2000);
+    const pwField = popup.locator('input[type="password"], input[name="passwd"]').first();
+    await pwField.waitFor({ state: "visible", timeout: 15000 });
+    await pwField.click();
+    await pwField.fill("");
+    await popup.keyboard.type(outlookPassword, { delay: 80 });
+    log("Password entered");
+    await popup.waitForTimeout(600);
+
+    // Click Sign in
+    const signInBtn = popup.locator('input[type="submit"][value="Sign in"], button[type="submit"]').first();
+    await signInBtn.waitFor({ state: "visible", timeout: 8000 });
+    await signInBtn.click();
+    log("Clicked Sign in");
+    await popup.waitForTimeout(4000);
+
+    // Check for hCaptcha on password step
+    const hcapAfterPw = await popup.evaluate(() => {
+      const el = document.querySelector('.h-captcha[data-sitekey], iframe[src*="hcaptcha"]');
+      return el ? (el.getAttribute("data-sitekey") || "unknown") : null;
+    }).catch(() => null);
+    if (hcapAfterPw && nopeKey) {
+      log("hCaptcha detected after password — solving...");
+      const solved = await solveHCaptchaViaNopeCHA(nopeKey, popup.url(), hcapAfterPw, undefined, 90);
+      if (solved.success && solved.token) {
+        await popup.evaluate((token: string) => {
+          const textarea = document.querySelector("textarea[name='h-captcha-response']") as any;
+          if (textarea) { textarea.value = token; textarea.dispatchEvent(new Event("change", { bubbles: true })); }
+        }, solved.token);
+        const submitBtn2 = popup.locator('input[type="submit"], button[type="submit"]').first();
+        await submitBtn2.click().catch(() => {});
+        log("hCaptcha solved after password ✅");
+        await popup.waitForTimeout(3000);
+      }
+    }
+
+    // === HANDLE MICROSOFT INTERMEDIATE PAGES (loop up to 15 iterations) ===
+    let popupCompletedSuccessfully = false;
+    for (let i = 0; i < 15; i++) {
+      let curUrl: string;
+      try {
+        curUrl = popup.url();
+      } catch {
+        // Popup was closed — this is a success if the main page is on nanobananaapi.ai
+        log("Popup closed (browser context ended) — checking main page...");
+        popupCompletedSuccessfully = true;
+        break;
+      }
+      log(`[step ${i + 1}] Popup URL: ${curUrl.substring(0, 120)}`);
+
+      // Done — redirected back to NanoBanana
+      if (curUrl.includes("nanobananaapi.ai")) {
+        log("✅ Popup redirected to nanobananaapi.ai — login complete");
+        break;
+      }
+
+      // "Stay signed in?" (KMSI) — may appear at ppsecure/post.srf or any Microsoft URL
+      const isKmsiPage = curUrl.includes("kmsi") || curUrl.includes("ppsecure") ||
+        await popup.locator(':has-text("Stay signed in")').isVisible({ timeout: 1500 }).catch(() => false);
+      if (isKmsiPage) {
+        // Verify it's really the KMSI page by checking for Yes/No buttons
+        const hasYesBtn = await popup.locator('input[value="Yes"], button:has-text("Yes")').isVisible({ timeout: 2000 }).catch(() => false);
+        if (hasYesBtn) {
+          log("Handling 'Stay signed in?' — clicking Yes");
+          try {
+            await popup.locator('input[value="Yes"], button:has-text("Yes")').first().click();
+            await popup.waitForTimeout(3000);
+          } catch { popupCompletedSuccessfully = true; break; }
+          continue;
+        }
+        const hasNoBtn = await popup.locator('input[value="No"], button:has-text("No")').isVisible({ timeout: 1000 }).catch(() => false);
+        if (hasNoBtn) {
+          log("Handling 'Stay signed in?' — clicking No");
+          try {
+            await popup.locator('input[value="No"], button:has-text("No")').first().click();
+            await popup.waitForTimeout(3000);
+          } catch { popupCompletedSuccessfully = true; break; }
+          continue;
+        }
+        // No buttons visible yet — wait for page to load
+        log("KMSI page detected but no buttons yet — waiting...");
+        await popup.waitForTimeout(2000).catch(() => {});
+        continue;
+      }
+
+      // Permissions consent (Consent/Update page — waits for buttons to appear)
+      if (curUrl.includes("Consent") || curUrl.includes("consent")) {
+        log("Permissions consent page — waiting for buttons...");
+        await popup.waitForLoadState("domcontentloaded").catch(() => {});
+        await popup.waitForTimeout(2000);
+        const acceptBtn = popup.locator('input[value="Accept"], button:has-text("Accept"), input[value="Yes"], button:has-text("Yes")').first();
+        if (await acceptBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          log("Clicking Accept on consent page");
+          try { await acceptBtn.click(); await popup.waitForTimeout(3000); } catch { popupCompletedSuccessfully = true; break; }
+        } else {
+          log("No Accept button found on consent page — waiting for redirect...");
+          try {
+            await popup.waitForURL(url => !url.includes("Consent") && !url.includes("consent"), { timeout: 10000 });
+          } catch { await popup.waitForTimeout(3000).catch(() => {}); }
+        }
+        continue;
+      }
+
+      // "Let's protect your account" / proofs/Add — skip it
+      if (curUrl.includes("account.live.com/proofs") || curUrl.includes("account.microsoft.com/proofs") ||
+          await popup.locator('text="Let\'s protect your account"').isVisible({ timeout: 1500 }).catch(() => false)) {
+        log("Microsoft security proofs page — waiting for page to fully load...");
+        await popup.waitForLoadState("domcontentloaded").catch(() => {});
+        await popup.waitForTimeout(2000);
+        log("Microsoft security proofs page — scanning all clickable elements...");
+
+        // Dump all links and buttons to find skip option
+        const allEls = await popup.evaluate(() => {
+          const items: string[] = [];
+          document.querySelectorAll('a, button, input[type=submit], input[type=button]').forEach(el => {
+            const t = (el.textContent || (el as HTMLInputElement).value || "").trim().replace(/\s+/g, " ").substring(0, 60);
+            const h = (el as HTMLAnchorElement).href || "";
+            if (t) items.push(`[${el.tagName}] "${t}" href="${h}"`);
+          });
+          return items;
+        }).catch(() => [] as string[]);
+        log("Elements on proofs page: " + allEls.join(" | ").substring(0, 400));
+
+        // Try "Skip for now" link / button with broader selectors
+        const skipTexts = ["skip for now", "skip", "not now", "i'll do this later", "ask me later", "cancel", "do this later", "remind me later"];
+        let skipped = false;
+        for (const skipText of skipTexts) {
+          const el = popup.locator(`a, button, input[type=submit]`).filter({ hasText: new RegExp(skipText, "i") }).first();
+          if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
+            log(`Found skip element with text containing "${skipText}" — clicking`);
+            await el.click();
+            skipped = true;
+            await popup.waitForTimeout(3000);
+            break;
+          }
+        }
+
+        if (!skipped) {
+          // Try JavaScript scroll to find hidden skip link
+          await popup.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+          await popup.waitForTimeout(1000);
+          // Try again after scrolling
+          for (const skipText of skipTexts) {
+            const el = popup.locator(`a, button`).filter({ hasText: new RegExp(skipText, "i") }).first();
+            if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
+              log(`Found skip element after scroll: "${skipText}" — clicking`);
+              await el.click();
+              skipped = true;
+              await popup.waitForTimeout(3000);
+              break;
+            }
+          }
+        }
+
+        if (!skipped) {
+          log("No skip found — pressing Escape to dismiss...");
+          await popup.keyboard.press("Escape");
+          await popup.waitForTimeout(2000);
+        }
+        continue;
+      }
+
+      // Passkey enrollment page — click Cancel
+      if (curUrl.includes("interrupt/passkey") || await popup.locator('text="passkey"').isVisible({ timeout: 1500 }).catch(() => false)) {
+        log("Passkey enrollment page — clicking Cancel...");
+        const cancelBtn = popup.locator('button:has-text("Cancel"), a:has-text("Cancel"), input[value="Cancel"]').first();
+        if (await cancelBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await cancelBtn.click();
+          log("Clicked Cancel on passkey page");
+          await popup.waitForTimeout(3000);
+        } else {
+          // Try 'ru' redirect param
+          try {
+            const pUrl = new URL(curUrl);
+            const ru = pUrl.searchParams.get("ru");
+            if (ru) {
+              const decoded = decodeURIComponent(ru);
+              log("Navigating to ru param: " + decoded.substring(0, 100));
+              await popup.goto(decoded, { waitUntil: "domcontentloaded", timeout: 15000 });
+              await popup.waitForTimeout(3000);
+            } else {
+              await popup.waitForTimeout(3000);
+            }
+          } catch { await popup.waitForTimeout(3000); }
+        }
+        continue;
+      }
+
+      // "We need more information" / additional verification pages
+      if (curUrl.includes("account.live.com") || curUrl.includes("account.microsoft.com")) {
+        log("Other Microsoft account page — waiting for redirect...");
+        const bodyText = await popup.evaluate(() => document.body?.innerText || "").catch(() => "");
+        log("Body: " + bodyText.substring(0, 100));
+        // Try clicking any Cancel/Skip/Close buttons
+        const dismissBtns = ["Cancel", "Close", "Skip", "Not now", "Dismiss"];
+        let dismissed = false;
+        for (const btnText of dismissBtns) {
+          const btn = popup.locator(`button:has-text("${btnText}"), a:has-text("${btnText}")`).first();
+          if (await btn.isVisible({ timeout: 800 }).catch(() => false)) {
+            log(`Clicking "${btnText}" to dismiss page`);
+            await btn.click();
+            dismissed = true;
+            await popup.waitForTimeout(3000);
+            break;
+          }
+        }
+        if (!dismissed) {
+          try {
+            await popup.waitForURL(url => !url.includes("account.live.com") && !url.includes("account.microsoft.com"), { timeout: 8000 });
+          } catch {
+            await popup.waitForTimeout(3000);
+          }
+        }
+        continue;
+      }
+
+      // Microsoft FIDO/passkey creation interstitial — skip it
+      if (curUrl.includes("fido/create") || curUrl.includes("/fido")) {
+        log("FIDO/passkey creation page — waiting for it to pass...");
+        try {
+          await popup.waitForURL(url => !url.includes("fido"), { timeout: 8000 });
+        } catch {
+          // Try pressing Escape or waiting
+          await popup.keyboard.press("Escape").catch(() => {});
+          await popup.waitForTimeout(2000).catch(() => {});
+        }
+        continue;
+      }
+
+      // Still on Microsoft — wait a bit for redirect
+      if (curUrl.includes("microsoftonline.com") || curUrl.includes("login.live.com") || curUrl.includes("live.com") || curUrl.includes("login.microsoft.com")) {
+        log("Still on Microsoft — waiting for redirect...");
+        try {
+          await popup.waitForURL(url => !url.includes("microsoftonline.com") && !url.includes("live.com") && !url.includes("login.microsoft.com"), { timeout: 10000 });
+        } catch {}
+        continue;
+      }
+
+      // Unknown page — wait and check
+      await popup.waitForTimeout(2000);
+    }
+
+    // Final check — if popup was closed, it's considered success (redirect to nanobananaapi.ai closed the popup)
+    if (!popupCompletedSuccessfully) {
+      let finalPopupUrl = "";
+      try { finalPopupUrl = popup.url(); } catch { popupCompletedSuccessfully = true; }
+      if (!popupCompletedSuccessfully && !finalPopupUrl.includes("nanobananaapi.ai") && (finalPopupUrl.includes("live.com") || finalPopupUrl.includes("microsoft"))) {
+        const bodySnippet = await popup.evaluate(() => document.body?.innerText?.substring(0, 200) || "").catch(() => "");
+        log("Still on Microsoft after all steps. Final URL: " + finalPopupUrl.substring(0, 100));
+        log("Body: " + bodySnippet.substring(0, 150));
+        return { success: false, error: "Could not complete Microsoft OAuth. Page: " + bodySnippet.substring(0, 100) };
+      }
+    }
+    log("Microsoft OAuth flow completed — checking main page state...");
+
+    // Wait for main page to refresh
+    await page.waitForTimeout(4000);
+    await page.reload({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+    const mainUrl = page.url();
+    log("Main page URL: " + mainUrl);
+
+    // Check if logged in
+    const isLoggedIn = await page.evaluate(() => {
+      const text = document.body?.innerText || "";
+      return !text.includes("Please Login First") && !text.includes("Sign in with Microsoft");
+    }).catch(() => false);
+
+    if (!isLoggedIn) {
+      log("Not logged in on main page — checking dashboard...");
+      await page.goto("https://nanobananaapi.ai/dashboard", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+    }
+
+    // Try to grab or create an API key
+    log("Navigating to API Key page...");
+    await page.goto("https://nanobananaapi.ai/api-key", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    log("API Key page snippet: " + pageText.substring(0, 200).replace(/\s+/g, " "));
+
+    let apiKey = "";
+
+    // Check if there's already an API key in the list (table rows with long strings)
+    const existingKey = await page.evaluate(() => {
+      const cells = Array.from(document.querySelectorAll('td, input[readonly], input[type="text"]'));
+      for (const cell of cells) {
+        const text = ((cell as HTMLInputElement).value || cell.textContent || "").trim();
+        if (text.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(text)) return text;
+      }
+      return "";
+    }).catch(() => "");
+
+    if (existingKey) {
+      apiKey = existingKey;
+      log("✅ Existing API Key found: " + apiKey.substring(0, 12) + "...");
+    } else {
+      // Try to create a new API key
+      log("No existing API key — creating one...");
+      const nameInput = page.locator('input[placeholder], input[type="text"]').first();
+      if (await nameInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await nameInput.fill("main").catch(() => {});
+        await page.waitForTimeout(500);
+        // Click Add/Create button — try various element types
+        const addBtn = page.locator('button:has-text("Add"), a:has-text("Add"), span:has-text("Add"), [class*="btn"]:has-text("Add"), button:has-text("Create"), button:has-text("Generate"), [role="button"]:has-text("Add")').first();
+        const addBtnVisible = await addBtn.isVisible({ timeout: 2000 }).catch(() => false);
+        if (addBtnVisible) {
+          await addBtn.click();
+        } else {
+          // Fallback: press Enter in the name input
+          await nameInput.press("Enter");
+        }
+        log("Clicked/pressed Create API Key");
+        await page.waitForTimeout(3000);
+        // Re-read the page for the new key
+        const newKey = await page.evaluate(() => {
+          const cells = Array.from(document.querySelectorAll('td, input[readonly], input[type="text"]'));
+          for (const cell of cells) {
+            const text = ((cell as HTMLInputElement).value || cell.textContent || "").trim();
+            if (text.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(text)) return text;
+          }
+          return "";
+        }).catch(() => "");
+        if (newKey) {
+          apiKey = newKey;
+          log("✅ New API Key created: " + apiKey.substring(0, 12) + "...");
+        }
+      }
+    }
+
+    if (!apiKey) {
+      log("ℹ️ Could not extract/create API key — manual extraction needed");
+    }
+
+    log(`✅ NanoBanana signup complete for ${outlookEmail}`);
+    return { success: true, email: outlookEmail, apiKey: apiKey || undefined };
+
+  } catch (err: any) {
+    log(`❌ NanoBanana signup failed: ${err.message?.substring(0, 200)}`);
+    return { success: false, error: err.message?.substring(0, 200) };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 export async function registerChatGptAccount(
   outlookEmail: string,
   outlookPassword: string,

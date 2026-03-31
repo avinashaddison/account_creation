@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount, registerChatGptAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount, registerChatGptAccount, registerNanoBananaAccount } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -5088,6 +5088,23 @@ export async function registerRoutes(
     try {
       await storage.deleteChatGptAccount(req.params.id);
       res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── NanoBanana API signup ──
+  app.post("/api/nanobanana-create", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { outlookEmail, outlookPassword } = req.body;
+      if (!outlookEmail || !outlookPassword) return res.status(400).json({ error: "outlookEmail and outlookPassword are required" });
+      const userId = req.session.userId!;
+      const createId = `nano-${Date.now()}`;
+      const batchId = `nanobanana-create-${createId}`;
+      res.json({ batchId, createId, message: "NanoBanana signup started" });
+      // Run async
+      const result = await registerNanoBananaAccount(outlookEmail, outlookPassword, (msg) => broadcastLog(batchId, createId, msg, userId));
+      broadcastLog(batchId, createId, result.success
+        ? `✅ SUCCESS — Email: ${result.email}${result.apiKey ? " | API Key: " + result.apiKey : ""}`
+        : `❌ FAILED — ${result.error}`, userId);
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
