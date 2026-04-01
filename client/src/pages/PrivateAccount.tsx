@@ -692,137 +692,196 @@ export default function PrivateAccount() {
       )}
 
       {tab === "outlook" && (
-        <Card className="border-emerald-500/10 bg-black/20">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-mono text-emerald-50 flex items-center gap-2">
+        <div
+          className="rounded-2xl overflow-hidden flex flex-col"
+          style={{
+            background: "linear-gradient(145deg, rgba(59,130,246,0.04) 0%, rgba(0,0,0,0.6) 100%)",
+            border: "1px solid rgba(59,130,246,0.12)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(59,130,246,0.06)",
+          }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(59,130,246,0.08)", background: "rgba(59,130,246,0.03)" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.25)", boxShadow: "0 0 12px rgba(59,130,246,0.2)" }}>
                 <Mail className="w-4 h-4 text-blue-400" />
-                Outlook Accounts
-                <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/15 text-emerald-400/60 ml-2">{outlookAccounts.length} total</Badge>
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-mono text-xs"
-                onClick={() => { setAddOutlookOpen(!addOutlookOpen); sounds.navigate(); }}
-                data-testid="button-add-outlook"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" />
-                Add Manual
-              </Button>
+              </div>
+              <span className="text-sm font-mono font-semibold text-slate-100 tracking-wide">Outlook Accounts</span>
+              <span className="text-[9px] font-mono px-2 py-0.5 rounded-full" style={{ color: "#60a5fa", background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.2)" }}>
+                {outlookAccounts.length} total
+              </span>
             </div>
-          </CardHeader>
+            <button
+              onClick={() => { setAddOutlookOpen(!addOutlookOpen); sounds.navigate(); }}
+              data-testid="button-add-outlook"
+              className="flex items-center gap-1.5 text-[11px] font-mono font-semibold px-3 py-1.5 rounded-lg transition-all duration-200"
+              style={{
+                color: "#34d399",
+                background: "rgba(52,211,153,0.08)",
+                border: "1px solid rgba(52,211,153,0.2)",
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Manual
+            </button>
+          </div>
 
           {addOutlookOpen && (
-            <div className="mx-6 mb-4 p-4 rounded-lg border border-emerald-500/10" style={{ background: "rgba(0,255,65,0.02)" }}>
-              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-3">Add Outlook Account</p>
+            <div className="mx-6 my-4 p-4 rounded-xl" style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.1)" }}>
+              <p className="text-[9px] text-blue-400/60 font-mono uppercase tracking-[0.15em] mb-3">New Account</p>
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <Input
                   placeholder="email@outlook.com"
                   value={newOutlookEmail}
                   onChange={(e) => setNewOutlookEmail(e.target.value)}
-                  className="h-8 text-xs bg-black/30 border-emerald-500/10 text-emerald-50 font-mono"
+                  className="h-8 text-xs bg-black/40 border-blue-500/15 text-slate-100 font-mono placeholder:text-zinc-600"
                   data-testid="input-outlook-email"
                 />
                 <Input
                   placeholder="Password"
                   value={newOutlookPassword}
                   onChange={(e) => setNewOutlookPassword(e.target.value)}
-                  className="h-8 text-xs bg-black/30 border-emerald-500/10 text-emerald-50 font-mono"
+                  className="h-8 text-xs bg-black/40 border-blue-500/15 text-slate-100 font-mono placeholder:text-zinc-600"
                   data-testid="input-outlook-password"
                 />
               </div>
-              <Button size="sm" className="bg-blue-500/15 text-blue-400 border border-blue-500/20 hover:bg-blue-500/25 font-mono text-xs" onClick={addOutlookAccount} disabled={saving} data-testid="button-save-outlook">
+              <button
+                onClick={addOutlookAccount}
+                disabled={saving}
+                data-testid="button-save-outlook"
+                className="text-[11px] font-mono font-semibold px-4 py-1.5 rounded-lg transition-all duration-200 disabled:opacity-40"
+                style={{ color: "#60a5fa", background: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.2)" }}
+              >
                 {saving ? "Saving..." : "Save Account"}
-              </Button>
+              </button>
             </div>
           )}
 
-          <CardContent className="pt-0">
-            {outlookAccounts.length === 0 ? (
-              <div className="text-center py-12">
-                <Mail className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
-                <p className="text-sm text-zinc-500 font-mono">No Outlook accounts yet</p>
-                <p className="text-xs text-zinc-600 font-mono mt-1">Accounts are auto-saved when created via Outlook Create</p>
+          {/* Table */}
+          {outlookAccounts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.1)" }}>
+                <Mail className="w-5 h-5 text-blue-400/30" />
               </div>
-            ) : (
-              <div className="rounded-lg border border-emerald-500/8 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-emerald-500/8 hover:bg-transparent">
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Email</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Password</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Status</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8">Created</TableHead>
-                      <TableHead className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider h-8 text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {outlookAccounts.map((acc) => (
-                      <TableRow key={acc.id} className="border-emerald-500/5 hover:bg-emerald-500/[0.02]" data-testid={`row-outlook-${acc.id}`}>
-                        <TableCell className="py-2.5">
+              <p className="text-sm text-zinc-500 font-mono">No Outlook accounts yet</p>
+              <p className="text-[10px] text-zinc-700 font-mono">Accounts are auto-saved when created via Outlook Create</p>
+            </div>
+          ) : (
+            <div className="overflow-auto">
+              <table className="w-full">
+                <thead>
+                  <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    {["Email", "Password", "Status", "Created", "Actions"].map((h, i) => (
+                      <th key={h} className={`px-5 py-3 text-[9px] font-mono uppercase tracking-[0.15em] font-semibold ${i === 4 ? "text-right" : "text-left"}`} style={{ color: "rgba(255,255,255,0.2)" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {outlookAccounts.map((acc, idx) => {
+                    const isActive = acc.status === "active";
+                    const statusColor = isActive ? "#34d399" : "#f87171";
+                    return (
+                      <tr
+                        key={acc.id}
+                        data-testid={`row-outlook-${acc.id}`}
+                        className="group transition-all duration-150"
+                        style={{
+                          borderBottom: "1px solid rgba(255,255,255,0.03)",
+                          background: idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(59,130,246,0.04)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = idx % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)")}
+                      >
+                        {/* Email */}
+                        <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-emerald-50" data-testid={`text-email-${acc.id}`}>{acc.email}</span>
-                            <button onClick={() => copyToClipboard(acc.email, `e-${acc.id}`)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-copy-email-${acc.id}`}>
-                              {copied === `e-${acc.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span className="text-[11px] font-mono text-slate-200" data-testid={`text-email-${acc.id}`}>{acc.email}</span>
+                            <button
+                              onClick={() => copyToClipboard(acc.email, `e-${acc.id}`)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                              style={{ color: copied === `e-${acc.id}` ? "#34d399" : "rgba(255,255,255,0.25)" }}
+                              data-testid={`button-copy-email-${acc.id}`}
+                            >
+                              {copied === `e-${acc.id}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                             </button>
                           </div>
-                        </TableCell>
-                        <TableCell className="py-2.5">
+                        </td>
+
+                        {/* Password */}
+                        <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-zinc-400" data-testid={`text-password-${acc.id}`}>
+                            <span className="text-[11px] font-mono text-zinc-500" data-testid={`text-password-${acc.id}`}>
                               {showPasswords[acc.id] ? acc.password : "••••••••"}
                             </span>
-                            <button onClick={() => togglePassword(acc.id)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-toggle-password-${acc.id}`}>
+                            <button onClick={() => togglePassword(acc.id)} className="opacity-0 group-hover:opacity-100 transition-opacity duration-150" style={{ color: "rgba(255,255,255,0.25)" }} data-testid={`button-toggle-password-${acc.id}`}>
                               {showPasswords[acc.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                             </button>
-                            <button onClick={() => copyToClipboard(acc.password, `p-${acc.id}`)} className="text-zinc-600 hover:text-emerald-400 transition-colors" data-testid={`button-copy-password-${acc.id}`}>
-                              {copied === `p-${acc.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <button onClick={() => copyToClipboard(acc.password, `p-${acc.id}`)} className="opacity-0 group-hover:opacity-100 transition-opacity duration-150" style={{ color: copied === `p-${acc.id}` ? "#34d399" : "rgba(255,255,255,0.25)" }} data-testid={`button-copy-password-${acc.id}`}>
+                              {copied === `p-${acc.id}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                             </button>
                           </div>
-                        </TableCell>
-                        <TableCell className="py-2.5">
-                          <Badge variant="outline" className={`text-[9px] font-mono ${acc.status === "active" ? "border-emerald-500/20 text-emerald-400" : "border-red-500/20 text-red-400"}`} data-testid={`badge-status-${acc.id}`}>
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-5 py-3">
+                          <span
+                            className="text-[9px] font-mono font-bold px-2.5 py-1 rounded-full tracking-widest"
+                            style={{
+                              color: statusColor,
+                              background: `${statusColor}15`,
+                              border: `1px solid ${statusColor}30`,
+                              boxShadow: `0 0 8px ${statusColor}20`,
+                            }}
+                            data-testid={`badge-status-${acc.id}`}
+                          >
                             {acc.status.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-2.5">
+                          </span>
+                        </td>
+
+                        {/* Created */}
+                        <td className="px-5 py-3">
                           <span className="text-[10px] text-zinc-600 font-mono" title={formatDate(acc.createdAt)}>{timeAgo(acc.createdAt)}</span>
-                        </TableCell>
-                        <TableCell className="py-2.5 text-right">
-                          <div className="flex items-center gap-1 justify-end">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className={`h-6 px-2 font-mono text-[10px] ${
-                                registeringAccountIds.has(acc.id)
-                                  ? "text-purple-400/50 cursor-not-allowed"
-                                  : "text-purple-400/70 hover:text-purple-400 hover:bg-purple-500/10"
-                              }`}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2 justify-end">
+                            <button
                               onClick={() => registerZenrowsWithOutlook(acc)}
                               disabled={registeringAccountIds.has(acc.id) || acc.status !== "active"}
                               data-testid={`button-register-zenrows-${acc.id}`}
+                              className="flex items-center gap-1 text-[10px] font-mono font-semibold px-2.5 py-1 rounded-lg transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+                              style={{ color: "#c084fc", background: "rgba(192,132,252,0.08)", border: "1px solid rgba(192,132,252,0.15)" }}
                             >
                               {registeringAccountIds.has(acc.id) ? (
-                                <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                <Loader2 className="w-3 h-3 animate-spin" />
                               ) : (
-                                <Zap className="w-3 h-3 mr-1" />
+                                <Zap className="w-3 h-3" />
                               )}
-                              {registeringAccountIds.has(acc.id) ? "Registering..." : "Register"}
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-6 px-2 text-red-400/50 hover:text-red-400 hover:bg-red-500/10" onClick={() => deleteOutlook(acc.id)} data-testid={`button-delete-outlook-${acc.id}`}>
+                              {registeringAccountIds.has(acc.id) ? "Working..." : "Register"}
+                            </button>
+                            <button
+                              onClick={() => deleteOutlook(acc.id)}
+                              data-testid={`button-delete-outlook-${acc.id}`}
+                              className="w-6 h-6 flex items-center justify-center rounded-lg transition-all duration-150 opacity-40 hover:opacity-100"
+                              style={{ color: "#f87171", background: "transparent", border: "1px solid transparent" }}
+                              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(248,113,113,0.1)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(248,113,113,0.2)"; }}
+                              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.borderColor = "transparent"; }}
+                            >
                               <Trash2 className="w-3 h-3" />
-                            </Button>
+                            </button>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {tab === "zenrows" && (
