@@ -9,41 +9,20 @@ import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import path from "path";
-import { execSync } from "child_process";
+import { execSync, exec } from "child_process";
 import fs from "fs";
 
 // Set browser path before any playwright import resolves launch paths
 const BROWSERS_PATH = path.join(process.cwd(), ".cache/ms-playwright");
 process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_PATH;
 
-(function ensurePlaywrightBrowsers() {
+function ensurePlaywrightBrowsersAsync() {
   const playwrightBin = path.join(process.cwd(), "node_modules/.bin/playwright");
   const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS_PATH };
 
   function hasBrowser(prefix: string): boolean {
     if (!fs.existsSync(BROWSERS_PATH)) return false;
     return fs.readdirSync(BROWSERS_PATH).some(e => e.startsWith(prefix));
-  }
-
-  function runInstall(args: string): boolean {
-    // Use process.execPath (current node binary) to bypass #!/usr/bin/env node
-    // shebang resolution failures in production containers where node may not be in shell PATH
-    const cmd = `${process.execPath} ${playwrightBin} ${args}`;
-    try {
-      const out = execSync(cmd, {
-        encoding: "utf8",
-        timeout: 180000,
-        env: installEnv,
-      });
-      if (out) console.log("[startup] playwright install output:", out.trim());
-      return true;
-    } catch (e: any) {
-      console.error(`[startup] playwright install "${args}" FAILED`);
-      if (e.stdout) console.error("[startup] stdout:", (e.stdout as string).trim());
-      if (e.stderr) console.error("[startup] stderr:", (e.stderr as string).trim());
-      console.error("[startup] exit code:", e.status);
-      return false;
-    }
   }
 
   const needsHeadlessShell = !hasBrowser("chromium_headless_shell");
@@ -54,20 +33,28 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_PATH;
     return;
   }
 
-  console.log("[startup] Playwright browsers missing — installing...");
+  console.log("[startup] Playwright browsers missing — installing in background...");
 
-  // Try full install first
-  if (!runInstall("install chromium chromium-headless-shell")) {
-    // Fallback: install only chromium and force headless-new mode
-    console.log("[startup] Falling back to chromium-only install + headless-new mode...");
-    if (runInstall("install chromium")) {
-      process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW = "1";
-      console.log("[startup] Chromium installed. PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW=1 set.");
+  // Run install asynchronously so it doesn't block server startup
+  const cmd = `${process.execPath} ${playwrightBin} install chromium chromium-headless-shell`;
+  const child = exec(cmd, { env: installEnv, timeout: 300000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.warn("[startup] Playwright install failed, trying chromium-only fallback...");
+      const fallbackCmd = `${process.execPath} ${playwrightBin} install chromium`;
+      exec(fallbackCmd, { env: installEnv, timeout: 300000 }, (err2, stdout2) => {
+        if (err2) {
+          console.error("[startup] Playwright browser install failed:", err2.message);
+        } else {
+          process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW = "1";
+          console.log("[startup] Chromium installed (headless-new mode). Output:", stdout2?.trim());
+        }
+      });
+    } else {
+      console.log("[startup] Playwright browsers installed successfully.", stdout?.trim());
     }
-  } else {
-    console.log("[startup] Playwright browsers installed successfully.");
-  }
-})();
+  });
+  child.on("error", (e) => console.error("[startup] Playwright install spawn error:", e.message));
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -250,6 +237,8 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      // Install Playwright browsers in the background after server is up
+      ensurePlaywrightBrowsersAsync();
     },
   );
 })();
