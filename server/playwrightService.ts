@@ -20336,25 +20336,6 @@ export async function registerNanoBananaAccount(
   let browser: any = null;
 
   try {
-    const { chromium: stealthChromium } = await import("playwright-extra");
-    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    stealthChromium.use(StealthPlugin());
-
-    // Get proxy
-    const proxyUrlRaw = await getResidentialProxyUrl();
-    let proxyConfig: any = undefined;
-    if (proxyUrlRaw) {
-      const pUrl = new URL(proxyUrlRaw);
-      proxyConfig = {
-        server: `${pUrl.protocol}//${pUrl.hostname}:${pUrl.port}`,
-        username: decodeURIComponent(pUrl.username),
-        password: decodeURIComponent(pUrl.password),
-      };
-      log(`Using proxy: ${pUrl.hostname}:${pUrl.port}`);
-    } else {
-      log("⚠️ No proxy configured");
-    }
-
     // Get NopeCHA key for hCaptcha solving
     let nopeKey = "";
     try {
@@ -20363,29 +20344,61 @@ export async function registerNanoBananaAccount(
     } catch {}
     log(`NopeCHA key loaded: ${nopeKey ? "yes" : "none"}`);
 
-    browser = await stealthChromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-    });
-
-    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-    const context = await browser.newContext({
-      userAgent: ua,
+    // Use ZenRows browser — handles fingerprint randomisation, TLS masking, and proxy routing
+    // so Microsoft does not flag the session as automation on every login
+    browser = await connectViaZenRows(log);
+    const context = browser.contexts()[0] || await browser.newContext({
       viewport: { width: 1366, height: 768 },
-      ...(proxyConfig ? { proxy: proxyConfig } : {}),
+      locale: "en-US",
     });
     const page = await context.newPage();
 
     log("Navigating to NanoBananaAPI homepage...");
-    await page.goto("https://nanobananaapi.ai/", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(3000); // allow JS to render
-    log("Loaded homepage. URL: " + page.url());
+    // Retry navigation up to 3 times if ZenRows returns a proxy timeout error page
+    let homeText = "";
+    for (let navAttempt = 1; navAttempt <= 3; navAttempt++) {
+      await page.goto("https://nanobananaapi.ai/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(3000); // allow JS to render
+      log(`Loaded homepage (attempt ${navAttempt}). URL: ` + page.url());
+      homeText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      if (/proxy connection attempt timed out|connection timed out|zenrows|error loading/i.test(homeText)) {
+        log(`Proxy/load error on attempt ${navAttempt}: "${homeText.substring(0, 80).replace(/\s+/g, " ")}" — retrying...`);
+        if (navAttempt < 3) await page.waitForTimeout(5000);
+      } else {
+        break;
+      }
+    }
+    if (/proxy connection attempt timed out|connection timed out/i.test(homeText)) {
+      throw new Error("ZenRows proxy could not load NanoBanana homepage after 3 attempts. Try again later.");
+    }
 
     // Click "Get Started" button (top right corner)
     log("Clicking 'Get Started' button...");
+    // Wait for the button to appear (JS hydration)
+    await page.waitForSelector('button, a', { timeout: 15000 }).catch(() => {});
+    // Log page text to help diagnose rendering issues
+    log("Homepage text sample: " + homeText.substring(0, 150).replace(/\s+/g, " "));
+    // Try Playwright locator click first, fall back to JS evaluate click
     const getStartedBtn = page.locator('button, a').filter({ hasText: /get started/i }).first();
-    await getStartedBtn.waitFor({ state: "visible", timeout: 10000 });
-    await getStartedBtn.click();
+    const btnVisible = await getStartedBtn.isVisible().catch(() => false);
+    if (btnVisible) {
+      await getStartedBtn.click({ timeout: 15000, force: true }).catch(async () => {
+        // Fallback: click via JS evaluate
+        await page.evaluate(() => {
+          const els = Array.from(document.querySelectorAll("button, a"));
+          const btn = els.find(el => /get started/i.test(el.textContent || ""));
+          if (btn) (btn as HTMLElement).click();
+        });
+      });
+    } else {
+      // Direct JS click without waiting for visibility
+      log("Button not visible via locator — trying JS click...");
+      await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll("button, a"));
+        const btn = els.find(el => /get started/i.test(el.textContent || ""));
+        if (btn) (btn as HTMLElement).click();
+      });
+    }
     log("Clicked 'Get Started' — waiting for sign-in modal...");
     await page.waitForTimeout(1500);
 
@@ -20399,9 +20412,17 @@ export async function registerNanoBananaAccount(
     log("Popup opened: " + popup.url().substring(0, 100));
 
     // Wait for Microsoft login page to load
-    await popup.waitForURL(/microsoftonline\.com|live\.com/, { timeout: 20000 });
+    // With ZenRows CDP, the popup URL may already be at microsoftonline.com when captured,
+    // so waitForURL (which waits for a navigation event) may never fire. Check first.
+    {
+      const initialPopupUrl = popup.url();
+      const alreadyOnMs = /microsoftonline\.com|live\.com/.test(initialPopupUrl);
+      if (!alreadyOnMs) {
+        await popup.waitForURL(/microsoftonline\.com|live\.com/, { timeout: 20000 }).catch(() => {});
+      }
+    }
     log("Microsoft login page: " + popup.url().substring(0, 100));
-    await popup.waitForLoadState("domcontentloaded");
+    await popup.waitForLoadState("domcontentloaded").catch(() => {});
     await popup.waitForTimeout(2000);
 
     // === ENTER EMAIL ===
