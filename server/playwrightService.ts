@@ -20400,11 +20400,22 @@ export async function registerNanoBananaAccount(
       });
     }
     log("Clicked 'Get Started' — waiting for sign-in modal...");
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
     // Wait for modal to appear and click "Sign in with Microsoft"
+    // Retry clicking "Get Started" if modal doesn't open on first attempt
     const msBtn = page.locator('button').filter({ hasText: /sign in with microsoft/i }).first();
-    await msBtn.waitFor({ state: "visible", timeout: 10000 });
+    let modalVisible = await msBtn.isVisible().catch(() => false);
+    if (!modalVisible) {
+      log("Modal not visible yet — retrying Get Started click...");
+      await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll("button, a"));
+        const btn = els.find(el => /get started/i.test(el.textContent || ""));
+        if (btn) (btn as HTMLElement).click();
+      });
+      await page.waitForTimeout(2500);
+    }
+    await msBtn.waitFor({ state: "visible", timeout: 15000 });
     log("Modal opened — clicking 'Sign in with Microsoft'...");
     const popupPromise = context.waitForEvent("page", { timeout: 15000 });
     await msBtn.click();
@@ -20516,6 +20527,7 @@ export async function registerNanoBananaAccount(
       await msPage.waitForTimeout(4000);
 
       // 7. Handle intermediate MS pages (KMSI, consent, proofs, passkeys, etc.)
+      let catbProofsCount = 0;
       for (let i = 0; i < 15; i++) {
         const curUrl = msPage.url();
         log(`[ext step ${i + 1}] URL: ${curUrl.substring(0, 120)}`);
@@ -20555,8 +20567,15 @@ export async function registerNanoBananaAccount(
 
         // Proofs / "Let's protect your account"
         if (curUrl.includes("/proofs") || bodyLower.includes("protect your account")) {
+          // CATB (mandatory security proofs) — fail fast after 3 attempts
+          if (curUrl.includes("mpcxt=CATB")) {
+            catbProofsCount++;
+            if (catbProofsCount >= 3) {
+              throw new Error("PROOFS_BLOCKED: This account requires mandatory Microsoft security verification (CATB) that cannot be skipped");
+            }
+          }
           log("External: security proofs page — trying to skip");
-          const skipTexts = ["skip for now", "skip", "not now", "cancel", "do this later"];
+          const skipTexts = ["skip for now", "skip", "not now", "cancel", "do this later", "remind me later", "i'll do it later", "ask me later"];
           let skipped = false;
           for (const s of skipTexts) {
             const el = msPage.locator(`a, button`).filter({ hasText: new RegExp(s, "i") }).first();
@@ -20564,8 +20583,59 @@ export async function registerNanoBananaAccount(
               await el.click(); skipped = true; break;
             }
           }
-          if (!skipped) await msPage.keyboard.press("Escape");
+          if (!skipped) {
+            // Try JS-based skip element click first
+            const jsClicked = await msPage.evaluate(() => {
+              const texts = ["skip for now", "skip", "not now", "cancel", "remind me later", "i'll do it later", "do this later", "ask me later"];
+              const els = Array.from(document.querySelectorAll("a, button, input[type=button], input[type=submit]"));
+              for (const el of els) {
+                const t = (el.textContent || (el as HTMLInputElement).value || "").toLowerCase().trim();
+                if (texts.some(s => t.includes(s))) {
+                  (el as HTMLElement).click();
+                  return true;
+                }
+              }
+              return false;
+            }).catch(() => false);
+            if (jsClicked) {
+              log("External: proofs skip via JS click");
+              await msPage.waitForTimeout(2500);
+              continue;
+            }
+            // Last resort: JS-submit the proofs form (posts with auth context to posturl)
+            const formSubmitted = await msPage.evaluate(() => {
+              const form = document.querySelector("form");
+              if (form) { form.submit(); return true; }
+              return false;
+            }).catch(() => false);
+            if (formSubmitted) {
+              log("External: proofs form submitted via JS");
+              await msPage.waitForTimeout(3000);
+              continue;
+            }
+            await msPage.keyboard.press("Escape");
+          }
           await msPage.waitForTimeout(2000);
+          continue;
+        }
+
+        // ppsecure/post.srf — transitional MS post-auth page
+        if (curUrl.includes("ppsecure/post.srf")) {
+          const bodySnip = (await msPage.evaluate(() => document.body?.innerText || "").catch(() => "")).substring(0, 200);
+          log(`External: ppsecure/post.srf page — body: ${bodySnip.replace(/\n/g, " ")}`);
+          // Try clicking any action buttons present
+          const clicked = await msPage.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll("button, input[type=submit], a"));
+            const priority = ["continue", "next", "sign in", "ok", "confirm", "yes"];
+            for (const p of priority) {
+              const el = btns.find(b => (b.textContent || (b as HTMLInputElement).value || "").toLowerCase().includes(p));
+              if (el) { (el as HTMLElement).click(); return true; }
+            }
+            if (btns.length > 0) { (btns[0] as HTMLElement).click(); return true; }
+            return false;
+          }).catch(() => false);
+          if (clicked) log("External: ppsecure — clicked a button");
+          await msPage.waitForTimeout(3000);
           continue;
         }
 
@@ -20609,334 +20679,99 @@ export async function registerNanoBananaAccount(
       log("External browser at nanobananaapi.ai — waiting for MSAL to store tokens...");
       await msPage.waitForTimeout(5000); // let MSAL's handleRedirectPromise run
 
-      // 9. Read sessionStorage from external browser
-      const msSessionStorage = await msPage.evaluate(() => {
-        const data: Record<string, string> = {};
-        for (let i2 = 0; i2 < sessionStorage.length; i2++) {
-          const k = sessionStorage.key(i2);
-          if (k) data[k] = sessionStorage.getItem(k) || "";
-        }
-        return data;
+      // 9. External browser already has MSAL tokens in localStorage from the OAuth redirect.
+      //    Navigate it directly to /api-key — no ZenRows injection needed.
+      log("External browser already logged in — navigating directly to /api-key...");
+
+      let capturedKeyFromMsPage = "";
+      msPage.on("response", async (resp) => {
+        try {
+          const url = resp.url();
+          if (!url.includes("nanobananaapi.ai")) return;
+          const ct = resp.headers()["content-type"] || "";
+          if (!ct.includes("json")) return;
+          const body = await resp.text().catch(() => "");
+          log(`📡 API response ${resp.status()} ${url.replace("https://api.nanobananaapi.ai", "").replace("https://nanobananaapi.ai", "")} → ${body.substring(0, 200)}`);
+          const m = body.match(/"key"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"api_key"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"apiKey"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"token"\s*:\s*"([A-Za-z0-9_\-]{20,})"/);
+          if (m && !capturedKeyFromMsPage) {
+            capturedKeyFromMsPage = (m[1] || m[2] || m[3] || m[4]);
+            log("🔑 Key from network: " + capturedKeyFromMsPage.substring(0, 12) + "...");
+          }
+        } catch {}
       });
-      const msLocalStorage = await msPage.evaluate(() => {
-        const data: Record<string, string> = {};
-        for (let i2 = 0; i2 < localStorage.length; i2++) {
-          const k = localStorage.key(i2);
-          if (k) data[k] = localStorage.getItem(k) || "";
+
+      await msPage.goto("https://nanobananaapi.ai/api-key", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      await msPage.waitForTimeout(4000);
+
+      const pageTextMs = await msPage.evaluate(() => document.body?.innerText || "").catch(() => "");
+      log("API Key page state: " + pageTextMs.substring(0, 200).replace(/\s+/g, " "));
+
+      await msPage.waitForSelector("table tr td", { timeout: 10000 }).catch(() => {});
+      const tdCountMs = await msPage.locator("table tr td").count().catch(() => 0);
+      log(`Key rows found: ${tdCountMs}`);
+      if (tdCountMs === 0) {
+        log("No key rows yet — waiting 6s for account initialization...");
+        await msPage.waitForTimeout(6000);
+      }
+
+      let extractedApiKey = "";
+
+      if (capturedKeyFromMsPage) {
+        extractedApiKey = capturedKeyFromMsPage;
+        log("✅ API Key from network response: " + extractedApiKey.substring(0, 12) + "...");
+      }
+
+      if (!extractedApiKey) {
+        await msPage.evaluate(() => {
+          (window as any).__nb_key = "";
+          try {
+            const orig = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+            if (orig) navigator.clipboard.writeText = (t: string) => { (window as any).__nb_key = t; return orig(t).catch(() => {}); };
+          } catch {}
+        }).catch(() => {});
+
+        const copyResult = await msPage.evaluate(() => {
+          const rows = document.querySelectorAll("table tbody tr, table tr");
+          for (const row of Array.from(rows)) {
+            const cells = row.querySelectorAll("td");
+            if (cells.length < 2) continue;
+            if (!/default/i.test((cells[0].textContent || "").trim())) continue;
+            const keyCell = cells[1];
+            const el = keyCell.querySelector("button") || keyCell.querySelector('[role="button"]') ||
+              keyCell.querySelector("svg") || keyCell.querySelector('[class*="copy" i],[class*="clip" i]');
+            if (el) { (el as HTMLElement).click(); return "clicked-" + el.tagName; }
+            (keyCell as HTMLElement).click(); return "clicked-keycell";
+          }
+          return "no-default-row";
+        }).catch(() => "error");
+        log(`Copy click: ${copyResult}`);
+        await msPage.waitForTimeout(1500);
+
+        const clipKey = await msPage.evaluate(() => (window as any).__nb_key || "").catch(() => "");
+        if (clipKey && clipKey.length > 10 && /^[A-Za-z0-9_\-]+$/.test(clipKey)) {
+          extractedApiKey = clipKey;
+          log("✅ API Key from clipboard: " + extractedApiKey.substring(0, 12) + "...");
         }
-        return data;
-      });
-      log(`Captured ${Object.keys(msSessionStorage).length} sessionStorage + ${Object.keys(msLocalStorage).length} localStorage entries from MS login browser`);
+      }
 
-      // 10. Navigate the ZenRows main page to nanobananaapi.ai so we have a fresh page context
-      log("Navigating ZenRows page to nanobananaapi.ai to inject MSAL tokens...");
-      await page.goto("https://nanobananaapi.ai/", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(2000);
+      if (!extractedApiKey && capturedKeyFromMsPage) {
+        extractedApiKey = capturedKeyFromMsPage;
+        log("✅ API Key from network (fallback): " + extractedApiKey.substring(0, 12) + "...");
+      }
+      if (!extractedApiKey) log("ℹ️ Could not extract API key automatically");
 
-      // 11. Inject sessionStorage and localStorage into the ZenRows page
-      await page.evaluate(({ ss, ls }: { ss: Record<string, string>; ls: Record<string, string> }) => {
-        // Clear any stale interaction_in_progress flags
-        sessionStorage.removeItem("msal.interaction.status");
-        for (const [k, v] of Object.entries(ss)) {
-          try { sessionStorage.setItem(k, v); } catch {}
-        }
-        for (const [k, v] of Object.entries(ls)) {
-          try { localStorage.setItem(k, v); } catch {}
-        }
-      }, { ss: msSessionStorage, ls: msLocalStorage });
-      log("MSAL tokens injected into ZenRows page storage");
-
-      // 12. Reload the ZenRows page so MSAL re-initialises with the injected tokens
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-      await page.waitForTimeout(3000);
-
-      const postInjectText = await page.evaluate(() => document.body?.innerText?.substring(0, 200) || "").catch(() => "");
-      log(`ZenRows page after token injection: ${postInjectText.substring(0, 150).replace(/\s+/g, " ")}`);
+      log(`✅ NanoBanana signup complete for ${outlookEmail}`);
+      return { success: true, email: outlookEmail, apiKey: extractedApiKey || undefined };
 
     } finally {
       if (msBrowser) { await msBrowser.close().catch(() => {}); msBrowser = null; }
     }
-    log("Microsoft OAuth flow completed — waiting for main page to process auth...");
 
-    // Capture hcaptcha rqdata from checksiteconfig response (enterprise hcaptcha)
-    let nanoBananaRqdata: string | null = null;
-
-    // Register network logging IMMEDIATELY after OAuth completes (before any poll/navigation)
-    let capturedKeyFromNetwork = "";
-    page.on("response", async (response) => {
-      try {
-        const url = response.url();
-        // Capture hcaptcha rqdata from checksiteconfig (enterprise mode)
-        if (url.includes("hcaptcha.com/checksiteconfig") || url.includes("hcaptcha.com/api2/getcaptcha")) {
-          const body = await response.text().catch(() => "");
-          log(`🔒 hCaptcha config: ${body.substring(0, 200)}`);
-          try {
-            const parsed = JSON.parse(body);
-            if (parsed.c?.req && !nanoBananaRqdata) {
-              nanoBananaRqdata = parsed.c.req;
-              log(`🔒 hCaptcha rqdata captured (len=${nanoBananaRqdata.length})`);
-            }
-          } catch {}
-          return;
-        }
-        if (!url.includes("nanobananaapi.ai")) return;
-        const status = response.status();
-        const ct = response.headers()["content-type"] || "";
-        if (!ct.includes("json")) return;
-        const body = await response.text().catch(() => "");
-        log(`📡 API response ${status} ${url.replace("https://api.nanobananaapi.ai", "").replace("https://nanobananaapi.ai", "")} → ${body.substring(0, 200)}`);
-        const m = body.match(/"key"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"api_key"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"apiKey"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"token"\s*:\s*"([A-Za-z0-9_\-]{20,})"/);
-        if (m && !capturedKeyFromNetwork) {
-          capturedKeyFromNetwork = (m[1] || m[2] || m[3] || m[4]);
-          log("🔑 Key from network response: " + capturedKeyFromNetwork.substring(0, 12) + "...");
-        }
-      } catch {}
-    });
-
-    // Also log outlook-login request body to understand what fields are sent
-    page.on("request", (req) => {
-      if (req.url().includes("/user/outlook-login") || req.url().includes("/user/login")) {
-        const body = req.postData() || "(empty)";
-        log(`📤 Login request to ${req.url().split("/").pop()}: ${body.substring(0, 300)}`);
-      }
-    });
-
-    // IMPORTANT: Do NOT reload — the main page is still processing the loginPopup() promise.
-    // Auth poll: watch for auth success AND solve hcaptcha if it appears.
-    // The NanoBanana React app calls outlookLogin(data, captchaToken) where captchaToken
-    // is passed as the "verify" HTTP header. Injecting the token via hcaptcha._executeCallback
-    // triggers React's onVerify callback which retries the login with the verify header.
-    const NANOBANANA_HCAP_SITEKEY = "6d563e6e-e536-42be-adbc-67de0316acf2";
-    let authSettled = false;
-    let captchaSolveStarted = false;
-    let captchaSolvePromise: Promise<string | null> | null = null;
-    let captchaInjected = false;
-
-    for (let i = 0; i < 40; i++) {
-      await page.waitForTimeout(2000);
-      const navText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-
-      // Logged-in: "Login" disappears or user name / "Logout" / "Sign out" appears
-      if (!navText.includes("Login") || /logout|sign out|welcome/i.test(navText)) {
-        log(`Main page shows authenticated state after ${(i + 1) * 2}s`);
-        authSettled = true;
-        break;
-      }
-
-      // Start NopeCHA solve once rqdata is available (captured from checksiteconfig response).
-      // Wait for rqdata if possible; fall back at poll 8 (16s after popup close).
-      if (!captchaSolveStarted && (nanoBananaRqdata || i >= 7)) {
-        captchaSolveStarted = true;
-        const rqdataToUse = nanoBananaRqdata || undefined;
-        log(`🔓 Starting NopeCHA hCaptcha solve (poll ${i + 1}, rqdata=${rqdataToUse ? `yes (len=${rqdataToUse.length})` : "no"})...`);
-
-        if (nopeKey) {
-          captchaSolvePromise = solveHCaptchaViaNopeCHA(nopeKey, "https://nanobananaapi.ai", NANOBANANA_HCAP_SITEKEY, rqdataToUse, 120)
-            .then(r => {
-              if (r.success && r.token) {
-                log(`✅ NopeCHA hCaptcha solved! (len=${r.token.length})`);
-                return r.token;
-              }
-              log(`❌ NopeCHA hCaptcha failed: ${r.error}`);
-              return null;
-            })
-            .catch(err => { log(`❌ NopeCHA error: ${err.message}`); return null; });
-        } else {
-          log("❌ No NopeCHA key — cannot solve hCaptcha");
-          captchaSolvePromise = Promise.resolve(null);
-        }
-      }
-
-      // Check if captcha solve is done and inject via hcaptcha._executeCallback
-      // This triggers the React onVerify callback which retries outlook-login with verify header
-      if (captchaSolvePromise && !captchaInjected) {
-        const token = await Promise.race([
-          captchaSolvePromise,
-          new Promise<null>(r => setTimeout(r, 200, null)),
-        ]);
-        if (token) {
-          captchaInjected = true;
-          log(`💉 Injecting hCaptcha token into page (len=${token.length})...`);
-          const injected = await page.evaluate((tok: string) => {
-            const results: string[] = [];
-
-            // 1. Set hidden textarea (hcaptcha standard response field)
-            document.querySelectorAll<HTMLTextAreaElement>(
-              "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
-            ).forEach(el => {
-              try {
-                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(el, tok);
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-                el.dispatchEvent(new Event("change", { bubbles: true }));
-                results.push("textarea");
-              } catch { el.value = tok; }
-            });
-
-            // 2. Call window.hcaptcha._executeCallback to trigger React onVerify prop
-            //    The React @hcaptcha/react-hcaptcha component's handleSubmit reads getResponse()
-            //    after _executeCallback sets the internal state, then calls onVerify(token, key).
-            //    NanoBanana's onVerify calls outlookLogin(data, token) with token in verify header.
-            const hc = (window as any).hcaptcha;
-            if (hc) {
-              // Try widget IDs 0–5
-              for (let id = 0; id <= 5; id++) {
-                try { hc._executeCallback(id, tok); results.push(`_execCb(${id})`); } catch {}
-                try { hc._executeCallback(String(id), tok); } catch {}
-              }
-              // Also try from DOM widget-id attribute
-              document.querySelectorAll("[data-hcaptcha-widget-id]").forEach(w => {
-                const wid = w.getAttribute("data-hcaptcha-widget-id");
-                if (wid !== null) {
-                  try { hc._executeCallback(wid, tok); results.push(`_execCb(dom:${wid})`); } catch {}
-                  try { hc._executeCallback(parseInt(wid) || 0, tok); } catch {}
-                }
-              });
-
-              // Also try using execute() on managed widgets (newer API)
-              const store = hc._store || hc.store;
-              if (store && store._widgets) {
-                Object.keys(store._widgets).forEach(wid => {
-                  try { hc._executeCallback(wid, tok); results.push(`_execCb(store:${wid})`); } catch {}
-                });
-              }
-            }
-
-            return results.join(", ");
-          }, token).catch(() => "");
-          log(`💉 Injection methods: ${injected || "(none)"}`);
-          log("💉 Waiting for auth to settle after injection...");
-          await page.waitForTimeout(5000);
-          const navAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-          if (!navAfter.includes("Login") || /logout|sign out|welcome/i.test(navAfter)) {
-            log("Auth settled after hCaptcha injection!");
-            authSettled = true;
-            break;
-          }
-          // Log what requests were made after injection
-          const navSnippetAfter = navAfter.substring(0, 150).replace(/\s+/g, " ");
-          log(`Post-inject state: ${navSnippetAfter}`);
-        }
-      }
-
-      const navSnippet = navText.substring(0, 120).replace(/\s+/g, " ");
-      log(`Auth poll ${i + 1}/40: ${navSnippet}`);
-    }
-    if (!authSettled) {
-      log("⚠️ Auth did not settle in 80s — proceeding anyway");
-    }
-
-    // Navigate directly to API Key page — the MSAL tokens are already in localStorage
-    log("Navigating to API Key page...");
-    await page.goto("https://nanobananaapi.ai/api-key", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(3000);
-
-    const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    log("API Key page state: " + pageText.substring(0, 200).replace(/\s+/g, " "));
-
-    // Wait for table rows to appear (up to 10s)
-    await page.waitForSelector("table tr td", { timeout: 10000 }).catch(() => {});
-
-    // Check if a table row with a key is present
-    const tdCount = await page.locator("table tr td").count().catch(() => 0);
-    log(`Key rows found: ${tdCount}`);
-
-    // If no rows yet, wait a bit more (account might be getting initialized on first login)
-    if (tdCount === 0) {
-      log("No key rows yet — waiting 5s for account initialization...");
-      await page.waitForTimeout(5000);
-    }
-
-    let apiKey = "";
-
-    // Strategy 1: If network already captured the key (from the page's API call to list keys)
-    if (capturedKeyFromNetwork) {
-      apiKey = capturedKeyFromNetwork;
-      log("✅ API Key from network response: " + apiKey.substring(0, 12) + "...");
-    }
-
-    // Strategy 2: Click the clipboard copy icon next to the "Default" key in the table
-    if (!apiKey) {
-      // Intercept navigator.clipboard.writeText before clicking
-      await page.evaluate(() => {
-        (window as any).__nb_key = "";
-        try {
-          const origWrite = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-          if (origWrite) {
-            navigator.clipboard.writeText = (text: string) => {
-              (window as any).__nb_key = text;
-              return origWrite(text).catch(() => {});
-            };
-          }
-        } catch {}
-      }).catch(() => {});
-
-      // Find the "Default" row and click its copy/clipboard icon (SVG icon after masked key)
-      const copyResult = await page.evaluate(() => {
-        const rows = document.querySelectorAll("table tbody tr, table tr");
-        for (const row of Array.from(rows)) {
-          const cells = row.querySelectorAll("td");
-          if (cells.length < 2) continue;
-          // Check if this is the "Default" row (first column contains "Default")
-          if (!/default/i.test((cells[0].textContent || "").trim())) continue;
-
-          const keyCell = cells[1];
-          // Find the copy icon: prefer button > svg > role=button > anything with copy class
-          const copyEl =
-            keyCell.querySelector('button') ||
-            keyCell.querySelector('[role="button"]') ||
-            keyCell.querySelector('svg') ||
-            keyCell.querySelector('[class*="copy" i], [class*="clip" i], [title*="copy" i]');
-          if (copyEl) {
-            (copyEl as HTMLElement).click();
-            return "clicked-" + copyEl.tagName + (copyEl.className ? ("." + (copyEl as HTMLElement).className.substring(0, 30)) : "");
-          }
-          // Fallback: click entire key cell
-          (keyCell as HTMLElement).click();
-          return "clicked-keycell";
-        }
-        return "no-default-row";
-      }).catch(() => "error");
-      log(`Copy icon click: ${copyResult}`);
-
-      await page.waitForTimeout(1500);
-
-      // Read from clipboard interceptor first
-      const clipKey = await page.evaluate(() => (window as any).__nb_key || "").catch(() => "");
-      if (clipKey && clipKey.length > 10 && /^[A-Za-z0-9_\-]+$/.test(clipKey)) {
-        apiKey = clipKey;
-        log("✅ API Key from clipboard intercept: " + apiKey.substring(0, 12) + "...");
-      }
-
-      // Fallback: try native clipboard.readText()
-      if (!apiKey) {
-        try {
-          const nativeClip = await page.evaluate(async () => {
-            try { return await navigator.clipboard.readText(); } catch { return ""; }
-          });
-          if (nativeClip && nativeClip.length > 10 && /^[A-Za-z0-9_\-]+$/.test(nativeClip)) {
-            apiKey = nativeClip;
-            log("✅ API Key from native clipboard: " + apiKey.substring(0, 12) + "...");
-          }
-        } catch {}
-      }
-    }
-
-    // Strategy 3: Final network fallback
-    if (!apiKey && capturedKeyFromNetwork) {
-      apiKey = capturedKeyFromNetwork;
-      log("✅ API Key from network (post-copy): " + apiKey.substring(0, 12) + "...");
-    }
-
-    if (!apiKey) {
-      log("ℹ️ Could not extract API key automatically");
-    }
-
-    log(`✅ NanoBanana signup complete for ${outlookEmail}`);
-    return { success: true, email: outlookEmail, apiKey: apiKey || undefined };
 
   } catch (err: any) {
     log(`❌ NanoBanana signup failed: ${err.message?.substring(0, 200)}`);
+    // Re-throw PROOFS_BLOCKED so the route can handle account rotation
+    if (err.message?.startsWith("PROOFS_BLOCKED")) throw err;
     return { success: false, error: err.message?.substring(0, 200) };
   } finally {
     if (browser) await browser.close().catch(() => {});

@@ -5095,22 +5095,55 @@ export async function registerRoutes(
   app.post("/api/nanobanana-create", requireAuth, async (req: Request, res: Response) => {
     try {
       let { outlookEmail, outlookPassword } = req.body;
+      let pickedId: string | undefined;
       // Auto-pick a random active Outlook account if none provided
       if (!outlookEmail || !outlookPassword) {
         const picked = await storage.getRandomActivePrivateOutlook();
         if (!picked) return res.status(400).json({ error: "No active Outlook accounts available in pool" });
         outlookEmail = picked.email;
         outlookPassword = picked.password;
+        pickedId = picked.id;
       }
       const userId = req.session.userId!;
       const createId = `nano-${Date.now()}`;
       const batchId = `nanobanana-create-${createId}`;
       res.json({ batchId, createId, message: "NanoBanana signup started", outlookEmail });
-      // Run async
-      const result = await registerNanoBananaAccount(outlookEmail, outlookPassword, (msg) => broadcastLog(batchId, createId, msg, userId));
-      broadcastLog(batchId, createId, result.success
-        ? `✅ SUCCESS — Email: ${result.email}${result.apiKey ? " | API Key: " + result.apiKey : ""}`
-        : `❌ FAILED — ${result.error}`, userId);
+      // Run async with retry logic for PROOFS_BLOCKED accounts
+      const MAX_RETRIES = 5;
+      let attempt = 0;
+      while (attempt < MAX_RETRIES) {
+        attempt++;
+        try {
+          const result = await registerNanoBananaAccount(outlookEmail!, outlookPassword!, (msg) => broadcastLog(batchId, createId, msg, userId));
+          broadcastLog(batchId, createId, result.success
+            ? `✅ SUCCESS — Email: ${result.email}${result.apiKey ? " | API Key: " + result.apiKey : ""}`
+            : `❌ FAILED — ${result.error}`, userId);
+          break; // done
+        } catch (err: any) {
+          if (err.message?.startsWith("PROOFS_BLOCKED") && pickedId) {
+            // Mark this account as proofs_blocked so it won't be picked again
+            broadcastLog(batchId, createId, `⚠️ Account ${outlookEmail} blocked by Microsoft CATB security proofs — marking and retrying with next account...`, userId);
+            await storage.updatePrivateOutlookStatus(pickedId, "proofs_blocked");
+            // Pick a fresh account
+            if (attempt < MAX_RETRIES) {
+              const next = await storage.getRandomActivePrivateOutlook();
+              if (!next) {
+                broadcastLog(batchId, createId, "❌ FAILED — No more active Outlook accounts available in pool", userId);
+                break;
+              }
+              outlookEmail = next.email;
+              outlookPassword = next.password;
+              pickedId = next.id;
+              broadcastLog(batchId, createId, `🔄 Retry ${attempt}/${MAX_RETRIES - 1} — trying ${outlookEmail}`, userId);
+            } else {
+              broadcastLog(batchId, createId, `❌ FAILED — All ${MAX_RETRIES - 1} Outlook accounts were CATB-blocked`, userId);
+            }
+          } else {
+            broadcastLog(batchId, createId, `❌ FAILED — ${err.message}`, userId);
+            break;
+          }
+        }
+      }
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 
