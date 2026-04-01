@@ -20906,11 +20906,14 @@ export async function registerNanoBananaAccount(
 
     // Navigate directly to API Key page — the MSAL tokens are already in localStorage
     log("Navigating to API Key page...");
-    await page.goto("https://nanobananaapi.ai/api-key", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(4000);
+    await page.goto("https://nanobananaapi.ai/api-key", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(3000);
 
     const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     log("API Key page state: " + pageText.substring(0, 200).replace(/\s+/g, " "));
+
+    // Wait for table rows to appear (up to 10s)
+    await page.waitForSelector("table tr td", { timeout: 10000 }).catch(() => {});
 
     // Check if a table row with a key is present
     const tdCount = await page.locator("table tr td").count().catch(() => 0);
@@ -20927,63 +20930,77 @@ export async function registerNanoBananaAccount(
     // Strategy 1: If network already captured the key (from the page's API call to list keys)
     if (capturedKeyFromNetwork) {
       apiKey = capturedKeyFromNetwork;
-      log("✅ API Key from page load network response: " + apiKey.substring(0, 12) + "...");
+      log("✅ API Key from network response: " + apiKey.substring(0, 12) + "...");
     }
 
-    // Strategy 2: Click the clipboard copy icon next to the masked key in the table
+    // Strategy 2: Click the clipboard copy icon next to the "Default" key in the table
     if (!apiKey) {
-      // Override clipboard.writeText to capture what the copy button writes
+      // Intercept navigator.clipboard.writeText before clicking
       await page.evaluate(() => {
         (window as any).__nb_key = "";
-        const origWrite = navigator.clipboard?.writeText?.bind(navigator.clipboard);
-        if (origWrite) {
-          navigator.clipboard.writeText = (text: string) => {
-            (window as any).__nb_key = text;
-            return origWrite(text).catch(() => {});
-          };
-        }
+        try {
+          const origWrite = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+          if (origWrite) {
+            navigator.clipboard.writeText = (text: string) => {
+              (window as any).__nb_key = text;
+              return origWrite(text).catch(() => {});
+            };
+          }
+        } catch {}
       }).catch(() => {});
 
-      // Click the clipboard icon in the Key column (2nd td of first data row)
-      const clicked = await page.evaluate(() => {
-        // Find all data rows
+      // Find the "Default" row and click its copy/clipboard icon (SVG icon after masked key)
+      const copyResult = await page.evaluate(() => {
         const rows = document.querySelectorAll("table tbody tr, table tr");
         for (const row of Array.from(rows)) {
-          const tds = row.querySelectorAll("td");
-          if (tds.length < 2) continue;
-          // Key is in the 2nd column — find clickable elements in it
-          const keyTd = tds[1];
-          // Try all clickable children: button, svg, span with click handler, etc.
-          const candidates = Array.from(keyTd.querySelectorAll("*")).filter(el => {
-            const tag = el.tagName.toLowerCase();
-            return tag === "button" || tag === "svg" || (el as HTMLElement).onclick !== null ||
-              el.getAttribute("role") === "button" || /copy/i.test(el.className);
-          });
-          if (candidates.length > 0) {
-            // Click the outermost candidate (closest to td), not inner SVG path
-            const btn = candidates.find(c => c.tagName.toLowerCase() === "button") || candidates[0];
-            (btn as HTMLElement).click();
-            return "clicked-" + btn.tagName;
+          const cells = row.querySelectorAll("td");
+          if (cells.length < 2) continue;
+          // Check if this is the "Default" row (first column contains "Default")
+          if (!/default/i.test((cells[0].textContent || "").trim())) continue;
+
+          const keyCell = cells[1];
+          // Find the copy icon: prefer button > svg > role=button > anything with copy class
+          const copyEl =
+            keyCell.querySelector('button') ||
+            keyCell.querySelector('[role="button"]') ||
+            keyCell.querySelector('svg') ||
+            keyCell.querySelector('[class*="copy" i], [class*="clip" i], [title*="copy" i]');
+          if (copyEl) {
+            (copyEl as HTMLElement).click();
+            return "clicked-" + copyEl.tagName + (copyEl.className ? ("." + (copyEl as HTMLElement).className.substring(0, 30)) : "");
           }
-          // Fallback: click the td itself
-          (keyTd as HTMLElement).click();
-          return "clicked-td";
+          // Fallback: click entire key cell
+          (keyCell as HTMLElement).click();
+          return "clicked-keycell";
         }
-        return "";
-      }).catch(() => "");
-      log(`Copy click result: ${clicked}`);
+        return "no-default-row";
+      }).catch(() => "error");
+      log(`Copy icon click: ${copyResult}`);
 
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(1500);
 
-      // Read what clipboard interceptor captured
+      // Read from clipboard interceptor first
       const clipKey = await page.evaluate(() => (window as any).__nb_key || "").catch(() => "");
       if (clipKey && clipKey.length > 10 && /^[A-Za-z0-9_\-]+$/.test(clipKey)) {
         apiKey = clipKey;
         log("✅ API Key from clipboard intercept: " + apiKey.substring(0, 12) + "...");
       }
+
+      // Fallback: try native clipboard.readText()
+      if (!apiKey) {
+        try {
+          const nativeClip = await page.evaluate(async () => {
+            try { return await navigator.clipboard.readText(); } catch { return ""; }
+          });
+          if (nativeClip && nativeClip.length > 10 && /^[A-Za-z0-9_\-]+$/.test(nativeClip)) {
+            apiKey = nativeClip;
+            log("✅ API Key from native clipboard: " + apiKey.substring(0, 12) + "...");
+          }
+        } catch {}
+      }
     }
 
-    // Strategy 3: Final network check (copy button may trigger a fetch)
+    // Strategy 3: Final network fallback
     if (!apiKey && capturedKeyFromNetwork) {
       apiKey = capturedKeyFromNetwork;
       log("✅ API Key from network (post-copy): " + apiKey.substring(0, 12) + "...");
