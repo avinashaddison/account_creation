@@ -20494,18 +20494,42 @@ export async function registerNanoBananaAccount(
           log("Handling 'Stay signed in?' — clicking Yes");
           try {
             await popup.locator('input[value="Yes"], button:has-text("Yes")').first().click();
-            await popup.waitForTimeout(3000);
-          } catch { popupCompletedSuccessfully = true; break; }
-          continue;
+            // Wait for the popup to complete the OAuth callback and reach nanobananaapi.ai
+            try {
+              await popup.waitForURL(url => url.includes("nanobananaapi.ai"), { timeout: 20000 });
+              log("Popup reached nanobananaapi.ai — OAuth callback complete");
+              await popup.waitForTimeout(3000); // Let the session be established
+              popupCompletedSuccessfully = true;
+            } catch {
+              // Popup may have closed before we could detect the URL (it closed itself after callback)
+              try {
+                const u = popup.url();
+                log("Popup still open after KMSI: " + u.substring(0, 100));
+                await popup.waitForTimeout(3000);
+              } catch {
+                log("Popup closed after KMSI click — OAuth flow assumed complete");
+                popupCompletedSuccessfully = true;
+              }
+            }
+          } catch { popupCompletedSuccessfully = true; }
+          break;
         }
         const hasNoBtn = await popup.locator('input[value="No"], button:has-text("No")').isVisible({ timeout: 1000 }).catch(() => false);
         if (hasNoBtn) {
           log("Handling 'Stay signed in?' — clicking No");
           try {
             await popup.locator('input[value="No"], button:has-text("No")').first().click();
-            await popup.waitForTimeout(3000);
-          } catch { popupCompletedSuccessfully = true; break; }
-          continue;
+            // Wait for the popup to complete the OAuth callback
+            try {
+              await popup.waitForURL(url => url.includes("nanobananaapi.ai"), { timeout: 20000 });
+              log("Popup reached nanobananaapi.ai (No) — OAuth callback complete");
+              await popup.waitForTimeout(3000);
+              popupCompletedSuccessfully = true;
+            } catch {
+              try { popup.url(); await popup.waitForTimeout(3000); } catch { popupCompletedSuccessfully = true; }
+            }
+          } catch { popupCompletedSuccessfully = true; }
+          break;
         }
         // No buttons visible yet — check for error pages before waiting
         const bodyText = await popup.evaluate(() => document.body?.innerText?.toLowerCase() || "").catch(() => "");
@@ -20686,27 +20710,69 @@ export async function registerNanoBananaAccount(
         return { success: false, error: "Could not complete Microsoft OAuth. Page: " + bodySnippet.substring(0, 100) };
       }
     }
-    log("Microsoft OAuth flow completed — checking main page state...");
+    log("Microsoft OAuth flow completed — waiting for session to settle...");
 
-    // Wait for main page to refresh
-    await page.waitForTimeout(4000);
-    await page.reload({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+    // Give the main page time to receive the auth postMessage and update state
+    await page.waitForTimeout(5000);
+
+    // Check auth state from localStorage/sessionStorage before reloading
+    const storedAuth = await page.evaluate(() => {
+      const keys = Object.keys(localStorage).concat(Object.keys(sessionStorage));
+      const authKeys = keys.filter(k => /token|auth|session|user|access/i.test(k));
+      return authKeys.map(k => k + "=" + (localStorage.getItem(k) || sessionStorage.getItem(k) || "").substring(0, 20)).join("; ");
+    }).catch(() => "");
+    log("Stored auth keys: " + (storedAuth || "none"));
+
+    // Check main page URL
     const mainUrl = page.url();
     log("Main page URL: " + mainUrl);
 
-    // Check if logged in
+    // Check if logged in on the main page (may have updated without reload)
     const isLoggedIn = await page.evaluate(() => {
       const text = document.body?.innerText || "";
       return !text.includes("Please Login First") && !text.includes("Sign in with Microsoft");
     }).catch(() => false);
+    log("Is logged in (pre-reload): " + isLoggedIn);
 
     if (!isLoggedIn) {
-      log("Not logged in on main page — checking dashboard...");
-      await page.goto("https://nanobananaapi.ai/dashboard", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
-      await page.waitForTimeout(2000);
+      // Try a reload to pick up any cookies/tokens set by the popup callback
+      log("Not logged in yet — reloading main page to pick up session...");
+      await page.reload({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+
+      // Re-check after reload
+      const isLoggedIn2 = await page.evaluate(() => {
+        const text = document.body?.innerText || "";
+        return !text.includes("Please Login First") && !text.includes("Sign in with Microsoft");
+      }).catch(() => false);
+      log("Is logged in (post-reload): " + isLoggedIn2);
+
+      if (!isLoggedIn2) {
+        log("Still not logged in — will try navigating to dashboard...");
+        await page.goto("https://nanobananaapi.ai/dashboard", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+      }
     }
 
-    // Inject clipboard interceptor BEFORE navigating — captures whatever the copy button sends
+    // Intercept network responses to capture full API key from server JSON
+    let capturedKeyFromNetwork = "";
+    page.on("response", async (response) => {
+      try {
+        const url = response.url();
+        if (!url.includes("nanobananaapi.ai")) return;
+        const ct = response.headers()["content-type"] || "";
+        if (!ct.includes("json")) return;
+        const body = await response.text().catch(() => "");
+        // Look for key fields in the JSON response
+        const keyMatch = body.match(/"key"\s*:\s*"([A-Za-z0-9_\-]{20,})"/);
+        if (keyMatch && !capturedKeyFromNetwork) {
+          capturedKeyFromNetwork = keyMatch[1];
+          log("🔑 Captured API key from network: " + capturedKeyFromNetwork.substring(0, 12) + "...");
+        }
+      } catch {}
+    });
+
+    // Also inject clipboard interceptor BEFORE navigating — captures copy button writes
     await page.addInitScript(() => {
       (window as any).__nb_captured_key = "";
       const orig = navigator.clipboard.writeText.bind(navigator.clipboard);
@@ -20778,32 +20844,76 @@ export async function registerNanoBananaAccount(
 
       if (jsClicked) {
         await page.waitForTimeout(2000);
+
+        // Debug: log all buttons visible after clicking Create API key
+        const modalBtns = await page.evaluate(() =>
+          Array.from(document.querySelectorAll("button")).map(b => b.textContent?.trim().substring(0, 40))
+        ).catch(() => [] as string[]);
+        log("Buttons after Create click: " + JSON.stringify(modalBtns));
+
         // Fill the name input in the modal/dialog
         const nameInput = page.locator('input[type="text"], input[placeholder]').first();
         const inputVisible = await nameInput.isVisible({ timeout: 4000 }).catch(() => false);
         log(`Name input visible: ${inputVisible}`);
+
         if (inputVisible) {
           await nameInput.fill("Default").catch(() => {});
           await page.waitForTimeout(300);
-          // Submit the form via JS (click Create/Add/Submit button or press Enter)
-          await page.evaluate(() => {
+
+          // Try all submit strategies
+          const submitted = await page.evaluate(() => {
             const btns = Array.from(document.querySelectorAll("button"));
-            const submitBtn = btns.find(b => /^(create|add|save|submit|confirm|ok)$/i.test((b.textContent || "").trim()));
-            if (submitBtn) { submitBtn.click(); return; }
+            // Strategy 1: EXACT match on common submit words (prevents matching "Create API key")
+            const submitBtn = btns.find(b => /^(create|add|save|submit|confirm|ok|generate)$/i.test((b.textContent || "").trim()));
+            if (submitBtn) { submitBtn.click(); return "clicked: " + submitBtn.textContent?.trim(); }
+            // Strategy 2: button inside a dialog/modal element
+            const dialog = document.querySelector("[role='dialog'], .modal, [class*='modal'], [class*='dialog']");
+            if (dialog) {
+              const dialogBtns = Array.from(dialog.querySelectorAll("button")).filter(b => !/cancel|close/i.test(b.textContent || ""));
+              if (dialogBtns.length > 0) { (dialogBtns[dialogBtns.length - 1] as HTMLElement).click(); return "dialog-btn: " + dialogBtns[dialogBtns.length - 1].textContent?.trim(); }
+            }
+            // Strategy 3: Enter on input
             const inp = document.querySelector("input[type='text']") as HTMLInputElement | null;
-            if (inp) inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true }));
-          }).catch(() => {});
-          log("Submitted create-key form");
-          await page.waitForTimeout(4000);
+            if (inp) {
+              inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true }));
+              inp.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", keyCode: 13, bubbles: true }));
+              return "enter-key";
+            }
+            return "none";
+          }).catch(() => "error");
+          log(`Submit strategy: ${submitted}`);
+          await page.waitForTimeout(5000);
+
+          // Log any network responses captured
+          log(`Network key captured so far: ${capturedKeyFromNetwork ? capturedKeyFromNetwork.substring(0, 15) + "..." : "none"}`);
+
+          // Check page state after submission
+          const postSubmitText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+          log("Post-submit page snippet: " + postSubmitText.replace(/\s+/g, " ").substring(0, 200));
         }
+
         // Wait for the new key row to appear
         await page.waitForSelector("table tr td", { timeout: 8000 }).catch(() => {});
-        // Click copy button on the new key row
-        apiKey = await clickCopyBtn();
-        if (apiKey) log("✅ New API Key created & copied: " + apiKey.substring(0, 12) + "...");
+
+        // Re-check network key one more time
+        await page.waitForTimeout(1000);
+        if (capturedKeyFromNetwork) {
+          apiKey = capturedKeyFromNetwork;
+          log("✅ API Key from network (post-creation): " + apiKey.substring(0, 12) + "...");
+        } else {
+          // Try clicking copy button
+          apiKey = await clickCopyBtn();
+          if (apiKey) log("✅ New API Key copied: " + apiKey.substring(0, 12) + "...");
+        }
       } else {
         log("⚠️ Could not find the 'Create API key' button");
       }
+    }
+
+    // Fall back to network-captured key if clipboard approach failed
+    if (!apiKey && capturedKeyFromNetwork) {
+      apiKey = capturedKeyFromNetwork;
+      log("✅ API Key from network response: " + apiKey.substring(0, 12) + "...");
     }
 
     if (!apiKey) {
