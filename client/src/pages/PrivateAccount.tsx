@@ -536,37 +536,104 @@ export default function PrivateAccount() {
   return (
     <div className="flex flex-col h-full p-7 gap-5">
       {/* ── STAT CARDS ── */}
-      <div className="grid grid-cols-4 gap-3 shrink-0">
-        {statCards.map((s) => (
-          <div
-            key={s.id}
-            onClick={() => { setTab(s.id); sounds.hover(); }}
-            data-testid={s.testId}
-            className="relative rounded-xl cursor-pointer group overflow-hidden transition-all duration-200"
-            style={{
-              background: tab === s.id ? `linear-gradient(135deg, ${s.glow} 0%, rgba(0,0,0,0.6) 100%)` : "rgba(0,0,0,0.35)",
-              border: `1px solid ${tab === s.id ? s.border : "rgba(255,255,255,0.06)"}`,
-              boxShadow: tab === s.id ? `0 0 24px ${s.glow}` : "none",
-            }}
-          >
-            {/* top accent bar */}
-            <div className="absolute top-0 left-0 right-0 h-[2px] rounded-t-xl transition-all duration-200" style={{ background: tab === s.id ? `linear-gradient(90deg, transparent, ${s.color}, transparent)` : "transparent" }} />
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200" style={{ background: `${s.glow}`, border: `1px solid ${s.border}`, color: s.color }}>
-                  {s.icon}
+      <div className="grid grid-cols-4 gap-4 shrink-0">
+        {statCards.map((s) => {
+          const isActive = tab === s.id;
+          return (
+            <div
+              key={s.id}
+              onClick={() => { setTab(s.id); sounds.hover(); }}
+              data-testid={s.testId}
+              className="relative rounded-2xl cursor-pointer group overflow-hidden transition-all duration-300"
+              style={{
+                background: isActive
+                  ? `linear-gradient(145deg, ${s.glow} 0%, rgba(10,10,15,0.9) 60%)`
+                  : "linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.5) 100%)",
+                border: `1px solid ${isActive ? s.color + "55" : "rgba(255,255,255,0.07)"}`,
+                boxShadow: isActive
+                  ? `0 0 0 1px ${s.color}22, 0 8px 32px ${s.glow}, 0 0 60px ${s.glow}`
+                  : "0 4px 16px rgba(0,0,0,0.4)",
+                transform: isActive ? "translateY(-2px)" : "translateY(0)",
+              }}
+            >
+              {/* shimmer sweep on hover */}
+              <div
+                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                style={{
+                  background: `linear-gradient(120deg, transparent 20%, ${s.color}0a 50%, transparent 80%)`,
+                }}
+              />
+
+              {/* top glow bar */}
+              <div
+                className="absolute top-0 left-0 right-0 h-[2px] transition-all duration-300"
+                style={{
+                  background: isActive
+                    ? `linear-gradient(90deg, transparent 0%, ${s.color} 40%, ${s.color} 60%, transparent 100%)`
+                    : `linear-gradient(90deg, transparent 0%, ${s.color}55 50%, transparent 100%)`,
+                  opacity: isActive ? 1 : 0.3,
+                }}
+              />
+
+              {/* bottom subtle glow */}
+              {isActive && (
+                <div
+                  className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-px pointer-events-none"
+                  style={{ background: `linear-gradient(90deg, transparent, ${s.color}66, transparent)` }}
+                />
+              )}
+
+              <div className="p-5">
+                {/* icon + badge row */}
+                <div className="flex items-start justify-between mb-4">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300"
+                    style={{
+                      background: isActive ? `${s.color}22` : "rgba(255,255,255,0.05)",
+                      border: `1px solid ${isActive ? s.color + "44" : "rgba(255,255,255,0.08)"}`,
+                      color: isActive ? s.color : "rgba(255,255,255,0.5)",
+                      boxShadow: isActive ? `0 0 12px ${s.glow}` : "none",
+                    }}
+                  >
+                    {s.icon}
+                  </div>
+
+                  <span
+                    className="text-[9px] font-mono font-semibold px-2 py-1 rounded-full tracking-wide"
+                    style={{
+                      color: s.color,
+                      background: `${s.color}15`,
+                      border: `1px solid ${s.color}35`,
+                      boxShadow: isActive ? `0 0 8px ${s.glow}` : "none",
+                    }}
+                  >
+                    {s.sub}
+                  </span>
                 </div>
-                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full transition-all duration-200" style={{ color: s.color, background: `${s.glow}`, border: `1px solid ${s.border}` }}>
-                  {s.sub}
-                </span>
+
+                {/* label */}
+                <p
+                  className="text-[9px] font-mono uppercase tracking-[0.18em] mb-1.5 transition-colors duration-200"
+                  style={{ color: isActive ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.25)" }}
+                >
+                  {s.label}
+                </p>
+
+                {/* big number */}
+                <p
+                  className="text-3xl font-black font-mono leading-none tracking-tight transition-all duration-300"
+                  style={{
+                    color: isActive ? s.color : "#e2e8f0",
+                    textShadow: isActive ? `0 0 20px ${s.glow}` : "none",
+                  }}
+                  data-testid={`text-${s.id}-count`}
+                >
+                  {s.count}
+                </p>
               </div>
-              <p className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>{s.label}</p>
-              <p className="text-2xl font-black font-mono leading-none transition-all duration-200" style={{ color: tab === s.id ? s.color : "#f1f5f9" }} data-testid={`text-${s.id}-count`}>
-                {s.count}
-              </p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {activeJobs.length > 0 && (
