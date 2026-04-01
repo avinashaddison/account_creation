@@ -20484,11 +20484,21 @@ export async function registerNanoBananaAccount(
         break;
       }
 
-      // "Stay signed in?" (KMSI) — may appear at ppsecure/post.srf or any Microsoft URL
-      const isKmsiPage = curUrl.includes("kmsi") || curUrl.includes("ppsecure") ||
-        await popup.locator(':has-text("Stay signed in")').isVisible({ timeout: 1500 }).catch(() => false);
+      // Check page body text early — detect rate-limiting before anything else
+      const pageBodyLower = await popup.evaluate(() => document.body?.innerText?.toLowerCase() || "").catch(() => "");
+      if (pageBodyLower.includes("too many times") || pageBodyLower.includes("too many requests") ||
+          pageBodyLower.includes("too many attempts") || pageBodyLower.includes("rate limit") ||
+          pageBodyLower.includes("unusual activity") || pageBodyLower.includes("temporarily blocked")) {
+        log("Microsoft rate-limit/block detected: " + pageBodyLower.substring(0, 100));
+        return { success: false, error: "Microsoft rate-limited this account. Wait a few minutes and try again." };
+      }
+
+      // "Stay signed in?" (KMSI) — check by text content, NOT by ppsecure URL (too broad)
+      const isKmsiPage = curUrl.includes("kmsi") ||
+        await popup.locator('text="Stay signed in?"').isVisible({ timeout: 1000 }).catch(() => false) ||
+        await popup.locator('text="Stay signed in"').isVisible({ timeout: 500 }).catch(() => false);
       if (isKmsiPage) {
-        // Verify it's really the KMSI page by checking for Yes/No buttons
+        // Check for Yes/No buttons
         const hasYesBtn = await popup.locator('input[value="Yes"], button:has-text("Yes")').isVisible({ timeout: 2000 }).catch(() => false);
         if (hasYesBtn) {
           log("Handling 'Stay signed in?' — clicking Yes");
@@ -20531,13 +20541,17 @@ export async function registerNanoBananaAccount(
           } catch { popupCompletedSuccessfully = true; }
           break;
         }
-        // No buttons visible yet — check for error pages before waiting
-        const bodyText = await popup.evaluate(() => document.body?.innerText?.toLowerCase() || "").catch(() => "");
-        if (bodyText.includes("too many requests") || bodyText.includes("rate limit") || bodyText.includes("blocked") || bodyText.includes("unusual activity")) {
-          log("Microsoft rate-limit detected on KMSI page: " + bodyText.substring(0, 80));
-          return { success: false, error: "Microsoft rate-limited this account. Wait a few minutes and try again." };
-        }
         log("KMSI page detected but no buttons yet — waiting...");
+        await popup.waitForTimeout(2000).catch(() => {});
+        continue;
+      }
+
+      // ppsecure page that is NOT KMSI (e.g., re-entry password page after rate limit)
+      if (curUrl.includes("ppsecure")) {
+        log("Non-KMSI ppsecure page — body: " + pageBodyLower.substring(0, 100));
+        if (pageBodyLower.includes("password") || pageBodyLower.includes("sign in")) {
+          return { success: false, error: "Microsoft re-requested credentials (rate-limited or session expired). Body: " + pageBodyLower.substring(0, 80) };
+        }
         await popup.waitForTimeout(2000).catch(() => {});
         continue;
       }
@@ -20710,210 +20724,264 @@ export async function registerNanoBananaAccount(
         return { success: false, error: "Could not complete Microsoft OAuth. Page: " + bodySnippet.substring(0, 100) };
       }
     }
-    log("Microsoft OAuth flow completed — waiting for session to settle...");
+    log("Microsoft OAuth flow completed — waiting for main page to process auth...");
 
-    // Give the main page time to receive the auth postMessage and update state
-    await page.waitForTimeout(5000);
+    // Capture hcaptcha rqdata from checksiteconfig response (enterprise hcaptcha)
+    let nanoBananaRqdata: string | null = null;
 
-    // Check auth state from localStorage/sessionStorage before reloading
-    const storedAuth = await page.evaluate(() => {
-      const keys = Object.keys(localStorage).concat(Object.keys(sessionStorage));
-      const authKeys = keys.filter(k => /token|auth|session|user|access/i.test(k));
-      return authKeys.map(k => k + "=" + (localStorage.getItem(k) || sessionStorage.getItem(k) || "").substring(0, 20)).join("; ");
-    }).catch(() => "");
-    log("Stored auth keys: " + (storedAuth || "none"));
-
-    // Check main page URL
-    const mainUrl = page.url();
-    log("Main page URL: " + mainUrl);
-
-    // Check if logged in on the main page (may have updated without reload)
-    const isLoggedIn = await page.evaluate(() => {
-      const text = document.body?.innerText || "";
-      return !text.includes("Please Login First") && !text.includes("Sign in with Microsoft");
-    }).catch(() => false);
-    log("Is logged in (pre-reload): " + isLoggedIn);
-
-    if (!isLoggedIn) {
-      // Try a reload to pick up any cookies/tokens set by the popup callback
-      log("Not logged in yet — reloading main page to pick up session...");
-      await page.reload({ waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
-      await page.waitForTimeout(3000);
-
-      // Re-check after reload
-      const isLoggedIn2 = await page.evaluate(() => {
-        const text = document.body?.innerText || "";
-        return !text.includes("Please Login First") && !text.includes("Sign in with Microsoft");
-      }).catch(() => false);
-      log("Is logged in (post-reload): " + isLoggedIn2);
-
-      if (!isLoggedIn2) {
-        log("Still not logged in — will try navigating to dashboard...");
-        await page.goto("https://nanobananaapi.ai/dashboard", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
-        await page.waitForTimeout(2000);
-      }
-    }
-
-    // Intercept network responses to capture full API key from server JSON
+    // Register network logging IMMEDIATELY after OAuth completes (before any poll/navigation)
     let capturedKeyFromNetwork = "";
     page.on("response", async (response) => {
       try {
         const url = response.url();
+        // Capture hcaptcha rqdata from checksiteconfig (enterprise mode)
+        if (url.includes("hcaptcha.com/checksiteconfig") || url.includes("hcaptcha.com/api2/getcaptcha")) {
+          const body = await response.text().catch(() => "");
+          log(`🔒 hCaptcha config: ${body.substring(0, 200)}`);
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed.c?.req && !nanoBananaRqdata) {
+              nanoBananaRqdata = parsed.c.req;
+              log(`🔒 hCaptcha rqdata captured (len=${nanoBananaRqdata.length})`);
+            }
+          } catch {}
+          return;
+        }
         if (!url.includes("nanobananaapi.ai")) return;
+        const status = response.status();
         const ct = response.headers()["content-type"] || "";
         if (!ct.includes("json")) return;
         const body = await response.text().catch(() => "");
-        // Look for key fields in the JSON response
-        const keyMatch = body.match(/"key"\s*:\s*"([A-Za-z0-9_\-]{20,})"/);
-        if (keyMatch && !capturedKeyFromNetwork) {
-          capturedKeyFromNetwork = keyMatch[1];
-          log("🔑 Captured API key from network: " + capturedKeyFromNetwork.substring(0, 12) + "...");
+        log(`📡 API response ${status} ${url.replace("https://api.nanobananaapi.ai", "").replace("https://nanobananaapi.ai", "")} → ${body.substring(0, 200)}`);
+        const m = body.match(/"key"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"api_key"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"apiKey"\s*:\s*"([A-Za-z0-9_\-]{20,})"|"token"\s*:\s*"([A-Za-z0-9_\-]{20,})"/);
+        if (m && !capturedKeyFromNetwork) {
+          capturedKeyFromNetwork = (m[1] || m[2] || m[3] || m[4]);
+          log("🔑 Key from network response: " + capturedKeyFromNetwork.substring(0, 12) + "...");
         }
       } catch {}
     });
 
-    // Also inject clipboard interceptor BEFORE navigating — captures copy button writes
-    await page.addInitScript(() => {
-      (window as any).__nb_captured_key = "";
-      const orig = navigator.clipboard.writeText.bind(navigator.clipboard);
-      navigator.clipboard.writeText = (text: string) => {
-        (window as any).__nb_captured_key = text;
-        return orig(text).catch(() => {});
-      };
+    // Also log outlook-login request body to understand what fields are sent
+    page.on("request", (req) => {
+      if (req.url().includes("/user/outlook-login") || req.url().includes("/user/login")) {
+        const body = req.postData() || "(empty)";
+        log(`📤 Login request to ${req.url().split("/").pop()}: ${body.substring(0, 300)}`);
+      }
     });
 
-    // Navigate to API Key page
+    // IMPORTANT: Do NOT reload — the main page is still processing the loginPopup() promise.
+    // Auth poll: watch for auth success AND solve hcaptcha if it appears.
+    // The NanoBanana React app calls outlookLogin(data, captchaToken) where captchaToken
+    // is passed as the "verify" HTTP header. Injecting the token via hcaptcha._executeCallback
+    // triggers React's onVerify callback which retries the login with the verify header.
+    const NANOBANANA_HCAP_SITEKEY = "6d563e6e-e536-42be-adbc-67de0316acf2";
+    let authSettled = false;
+    let captchaSolveStarted = false;
+    let captchaSolvePromise: Promise<string | null> | null = null;
+    let captchaInjected = false;
+
+    for (let i = 0; i < 40; i++) {
+      await page.waitForTimeout(2000);
+      const navText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+
+      // Logged-in: "Login" disappears or user name / "Logout" / "Sign out" appears
+      if (!navText.includes("Login") || /logout|sign out|welcome/i.test(navText)) {
+        log(`Main page shows authenticated state after ${(i + 1) * 2}s`);
+        authSettled = true;
+        break;
+      }
+
+      // Start capsolver solve once rqdata is available (captured from checksiteconfig response).
+      // Do NOT start without rqdata — enterprise hcaptcha requires it for accurate solving.
+      // If rqdata never arrives, fall back at poll 8 (16s after popup close).
+      if (!captchaSolveStarted && (nanoBananaRqdata || i >= 7)) {
+        captchaSolveStarted = true;
+        const rqdataToUse = nanoBananaRqdata || undefined;
+        log(`🔓 Starting capsolver hCaptcha solve (poll ${i + 1}, rqdata=${rqdataToUse ? `yes (len=${rqdataToUse.length})` : "no"})...`);
+
+        // Use capsolver (solveHCaptcha) — supports enterprise rqdata; NopeCHA fails on this sitekey
+        captchaSolvePromise = solveHCaptcha("https://nanobananaapi.ai", NANOBANANA_HCAP_SITEKEY, undefined, rqdataToUse)
+          .then(r => {
+            if (r.success && r.token) {
+              log(`✅ Capsolver hCaptcha solved! (len=${r.token.length})`);
+              return r.token;
+            }
+            log(`❌ Capsolver hCaptcha failed: ${r.error} — trying NopeCHA fallback...`);
+            // NopeCHA fallback
+            if (nopeKey) {
+              return solveHCaptchaViaNopeCHA(nopeKey, "https://nanobananaapi.ai", NANOBANANA_HCAP_SITEKEY, rqdataToUse, 90)
+                .then(r2 => {
+                  if (r2.success && r2.token) { log(`✅ NopeCHA fallback solved! (len=${r2.token.length})`); return r2.token; }
+                  log(`❌ NopeCHA fallback also failed: ${r2.error}`);
+                  return null;
+                }).catch(() => null);
+            }
+            return null;
+          })
+          .catch(err => { log(`❌ Capsolver error: ${err.message}`); return null; });
+      }
+
+      // Check if captcha solve is done and inject via hcaptcha._executeCallback
+      // This triggers the React onVerify callback which retries outlook-login with verify header
+      if (captchaSolvePromise && !captchaInjected) {
+        const token = await Promise.race([
+          captchaSolvePromise,
+          new Promise<null>(r => setTimeout(r, 200, null)),
+        ]);
+        if (token) {
+          captchaInjected = true;
+          log(`💉 Injecting hCaptcha token into page (len=${token.length})...`);
+          const injected = await page.evaluate((tok: string) => {
+            const results: string[] = [];
+
+            // 1. Set hidden textarea (hcaptcha standard response field)
+            document.querySelectorAll<HTMLTextAreaElement>(
+              "textarea[name='h-captcha-response'], input[name='h-captcha-response']"
+            ).forEach(el => {
+              try {
+                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(el, tok);
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+                results.push("textarea");
+              } catch { el.value = tok; }
+            });
+
+            // 2. Call window.hcaptcha._executeCallback to trigger React onVerify prop
+            //    The React @hcaptcha/react-hcaptcha component's handleSubmit reads getResponse()
+            //    after _executeCallback sets the internal state, then calls onVerify(token, key).
+            //    NanoBanana's onVerify calls outlookLogin(data, token) with token in verify header.
+            const hc = (window as any).hcaptcha;
+            if (hc) {
+              // Try widget IDs 0–5
+              for (let id = 0; id <= 5; id++) {
+                try { hc._executeCallback(id, tok); results.push(`_execCb(${id})`); } catch {}
+                try { hc._executeCallback(String(id), tok); } catch {}
+              }
+              // Also try from DOM widget-id attribute
+              document.querySelectorAll("[data-hcaptcha-widget-id]").forEach(w => {
+                const wid = w.getAttribute("data-hcaptcha-widget-id");
+                if (wid !== null) {
+                  try { hc._executeCallback(wid, tok); results.push(`_execCb(dom:${wid})`); } catch {}
+                  try { hc._executeCallback(parseInt(wid) || 0, tok); } catch {}
+                }
+              });
+
+              // Also try using execute() on managed widgets (newer API)
+              const store = hc._store || hc.store;
+              if (store && store._widgets) {
+                Object.keys(store._widgets).forEach(wid => {
+                  try { hc._executeCallback(wid, tok); results.push(`_execCb(store:${wid})`); } catch {}
+                });
+              }
+            }
+
+            return results.join(", ");
+          }, token).catch(() => "");
+          log(`💉 Injection methods: ${injected || "(none)"}`);
+          log("💉 Waiting for auth to settle after injection...");
+          await page.waitForTimeout(5000);
+          const navAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+          if (!navAfter.includes("Login") || /logout|sign out|welcome/i.test(navAfter)) {
+            log("Auth settled after hCaptcha injection!");
+            authSettled = true;
+            break;
+          }
+          // Log what requests were made after injection
+          const navSnippetAfter = navAfter.substring(0, 150).replace(/\s+/g, " ");
+          log(`Post-inject state: ${navSnippetAfter}`);
+        }
+      }
+
+      const navSnippet = navText.substring(0, 120).replace(/\s+/g, " ");
+      log(`Auth poll ${i + 1}/40: ${navSnippet}`);
+    }
+    if (!authSettled) {
+      log("⚠️ Auth did not settle in 80s — proceeding anyway");
+    }
+
+    // Navigate directly to API Key page — the MSAL tokens are already in localStorage
     log("Navigating to API Key page...");
     await page.goto("https://nanobananaapi.ai/api-key", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(4000);
 
     const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    log("API Key page snippet: " + pageText.substring(0, 200).replace(/\s+/g, " "));
+    log("API Key page state: " + pageText.substring(0, 200).replace(/\s+/g, " "));
+
+    // Check if a table row with a key is present
+    const tdCount = await page.locator("table tr td").count().catch(() => 0);
+    log(`Key rows found: ${tdCount}`);
+
+    // If no rows yet, wait a bit more (account might be getting initialized on first login)
+    if (tdCount === 0) {
+      log("No key rows yet — waiting 5s for account initialization...");
+      await page.waitForTimeout(5000);
+    }
 
     let apiKey = "";
 
-    // Helper: click the copy button in the first table row and return intercepted clipboard value
-    const clickCopyBtn = async (): Promise<string> => {
-      // Reset interceptor
-      await page.evaluate(() => { (window as any).__nb_captured_key = ""; }).catch(() => {});
-      // Find and click the copy button in the first data row using JS
-      await page.evaluate(() => {
-        // Look for the copy icon/button inside a table row
-        const tds = Array.from(document.querySelectorAll("table tr td"));
-        for (const td of tds) {
-          const btns = td.querySelectorAll("button, svg, [role='button'], [class*='copy']");
-          if (btns.length > 0) {
-            (btns[0] as HTMLElement).click();
-            return;
-          }
-        }
-        // Fallback: any button/svg that is NOT in a th (header)
-        const allBtns = document.querySelectorAll("td button, td svg");
-        if (allBtns.length > 0) (allBtns[0] as HTMLElement).click();
-      }).catch(() => {});
-      await page.waitForTimeout(1500);
-      const captured = await page.evaluate(() => (window as any).__nb_captured_key || "").catch(() => "");
-      return (captured && captured.length > 10 && /^[A-Za-z0-9_\-]+$/.test(captured)) ? captured : "";
-    };
-
-    // Check if there are data rows in the table
-    const tdCount = await page.locator("table tr td").count().catch(() => 0);
-    log(`Table data cells found: ${tdCount}`);
-
-    if (tdCount > 0) {
-      log("Found existing API key row — clicking copy button...");
-      apiKey = await clickCopyBtn();
-      if (apiKey) log("✅ Existing API Key copied: " + apiKey.substring(0, 12) + "...");
+    // Strategy 1: If network already captured the key (from the page's API call to list keys)
+    if (capturedKeyFromNetwork) {
+      apiKey = capturedKeyFromNetwork;
+      log("✅ API Key from page load network response: " + apiKey.substring(0, 12) + "...");
     }
 
+    // Strategy 2: Click the clipboard copy icon next to the masked key in the table
     if (!apiKey) {
-      log("No existing API key — clicking 'Create API key' button...");
-      // Click the BUTTON element (not heading) that has "Create API key" text
-      const jsClicked = await page.evaluate(() => {
-        // Find the most specific element: prefer button tag, smallest element with exact text
-        const buttons = Array.from(document.querySelectorAll("button"));
-        const btn = buttons.find(b => (b.textContent || "").toLowerCase().replace(/\s+/g, " ").trim().includes("create api key"));
-        if (btn) { btn.click(); return "button"; }
-        // Fallback: any element where the DIRECT text matches
-        const all = Array.from(document.querySelectorAll("a, [role='button']"));
-        const el = all.find(e => (e.textContent || "").toLowerCase().replace(/\s+/g, " ").trim().includes("create api key"));
-        if (el) { (el as HTMLElement).click(); return "other"; }
+      // Override clipboard.writeText to capture what the copy button writes
+      await page.evaluate(() => {
+        (window as any).__nb_key = "";
+        const origWrite = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+        if (origWrite) {
+          navigator.clipboard.writeText = (text: string) => {
+            (window as any).__nb_key = text;
+            return origWrite(text).catch(() => {});
+          };
+        }
+      }).catch(() => {});
+
+      // Click the clipboard icon in the Key column (2nd td of first data row)
+      const clicked = await page.evaluate(() => {
+        // Find all data rows
+        const rows = document.querySelectorAll("table tbody tr, table tr");
+        for (const row of Array.from(rows)) {
+          const tds = row.querySelectorAll("td");
+          if (tds.length < 2) continue;
+          // Key is in the 2nd column — find clickable elements in it
+          const keyTd = tds[1];
+          // Try all clickable children: button, svg, span with click handler, etc.
+          const candidates = Array.from(keyTd.querySelectorAll("*")).filter(el => {
+            const tag = el.tagName.toLowerCase();
+            return tag === "button" || tag === "svg" || (el as HTMLElement).onclick !== null ||
+              el.getAttribute("role") === "button" || /copy/i.test(el.className);
+          });
+          if (candidates.length > 0) {
+            // Click the outermost candidate (closest to td), not inner SVG path
+            const btn = candidates.find(c => c.tagName.toLowerCase() === "button") || candidates[0];
+            (btn as HTMLElement).click();
+            return "clicked-" + btn.tagName;
+          }
+          // Fallback: click the td itself
+          (keyTd as HTMLElement).click();
+          return "clicked-td";
+        }
         return "";
       }).catch(() => "");
-      log(`Create API key click result: "${jsClicked}"`);
+      log(`Copy click result: ${clicked}`);
 
-      if (jsClicked) {
-        await page.waitForTimeout(2000);
+      await page.waitForTimeout(2000);
 
-        // Debug: log all buttons visible after clicking Create API key
-        const modalBtns = await page.evaluate(() =>
-          Array.from(document.querySelectorAll("button")).map(b => b.textContent?.trim().substring(0, 40))
-        ).catch(() => [] as string[]);
-        log("Buttons after Create click: " + JSON.stringify(modalBtns));
-
-        // Fill the name input in the modal/dialog
-        const nameInput = page.locator('input[type="text"], input[placeholder]').first();
-        const inputVisible = await nameInput.isVisible({ timeout: 4000 }).catch(() => false);
-        log(`Name input visible: ${inputVisible}`);
-
-        if (inputVisible) {
-          await nameInput.fill("Default").catch(() => {});
-          await page.waitForTimeout(300);
-
-          // Try all submit strategies
-          const submitted = await page.evaluate(() => {
-            const btns = Array.from(document.querySelectorAll("button"));
-            // Strategy 1: EXACT match on common submit words (prevents matching "Create API key")
-            const submitBtn = btns.find(b => /^(create|add|save|submit|confirm|ok|generate)$/i.test((b.textContent || "").trim()));
-            if (submitBtn) { submitBtn.click(); return "clicked: " + submitBtn.textContent?.trim(); }
-            // Strategy 2: button inside a dialog/modal element
-            const dialog = document.querySelector("[role='dialog'], .modal, [class*='modal'], [class*='dialog']");
-            if (dialog) {
-              const dialogBtns = Array.from(dialog.querySelectorAll("button")).filter(b => !/cancel|close/i.test(b.textContent || ""));
-              if (dialogBtns.length > 0) { (dialogBtns[dialogBtns.length - 1] as HTMLElement).click(); return "dialog-btn: " + dialogBtns[dialogBtns.length - 1].textContent?.trim(); }
-            }
-            // Strategy 3: Enter on input
-            const inp = document.querySelector("input[type='text']") as HTMLInputElement | null;
-            if (inp) {
-              inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true }));
-              inp.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", keyCode: 13, bubbles: true }));
-              return "enter-key";
-            }
-            return "none";
-          }).catch(() => "error");
-          log(`Submit strategy: ${submitted}`);
-          await page.waitForTimeout(5000);
-
-          // Log any network responses captured
-          log(`Network key captured so far: ${capturedKeyFromNetwork ? capturedKeyFromNetwork.substring(0, 15) + "..." : "none"}`);
-
-          // Check page state after submission
-          const postSubmitText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-          log("Post-submit page snippet: " + postSubmitText.replace(/\s+/g, " ").substring(0, 200));
-        }
-
-        // Wait for the new key row to appear
-        await page.waitForSelector("table tr td", { timeout: 8000 }).catch(() => {});
-
-        // Re-check network key one more time
-        await page.waitForTimeout(1000);
-        if (capturedKeyFromNetwork) {
-          apiKey = capturedKeyFromNetwork;
-          log("✅ API Key from network (post-creation): " + apiKey.substring(0, 12) + "...");
-        } else {
-          // Try clicking copy button
-          apiKey = await clickCopyBtn();
-          if (apiKey) log("✅ New API Key copied: " + apiKey.substring(0, 12) + "...");
-        }
-      } else {
-        log("⚠️ Could not find the 'Create API key' button");
+      // Read what clipboard interceptor captured
+      const clipKey = await page.evaluate(() => (window as any).__nb_key || "").catch(() => "");
+      if (clipKey && clipKey.length > 10 && /^[A-Za-z0-9_\-]+$/.test(clipKey)) {
+        apiKey = clipKey;
+        log("✅ API Key from clipboard intercept: " + apiKey.substring(0, 12) + "...");
       }
     }
 
-    // Fall back to network-captured key if clipboard approach failed
+    // Strategy 3: Final network check (copy button may trigger a fetch)
     if (!apiKey && capturedKeyFromNetwork) {
       apiKey = capturedKeyFromNetwork;
-      log("✅ API Key from network response: " + apiKey.substring(0, 12) + "...");
+      log("✅ API Key from network (post-copy): " + apiKey.substring(0, 12) + "...");
     }
 
     if (!apiKey) {
