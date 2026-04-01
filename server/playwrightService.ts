@@ -20507,7 +20507,12 @@ export async function registerNanoBananaAccount(
           } catch { popupCompletedSuccessfully = true; break; }
           continue;
         }
-        // No buttons visible yet — wait for page to load
+        // No buttons visible yet — check for error pages before waiting
+        const bodyText = await popup.evaluate(() => document.body?.innerText?.toLowerCase() || "").catch(() => "");
+        if (bodyText.includes("too many requests") || bodyText.includes("rate limit") || bodyText.includes("blocked") || bodyText.includes("unusual activity")) {
+          log("Microsoft rate-limit detected on KMSI page: " + bodyText.substring(0, 80));
+          return { success: false, error: "Microsoft rate-limited this account. Wait a few minutes and try again." };
+        }
         log("KMSI page detected but no buttons yet — waiting...");
         await popup.waitForTimeout(2000).catch(() => {});
         continue;
@@ -20701,65 +20706,108 @@ export async function registerNanoBananaAccount(
       await page.waitForTimeout(2000);
     }
 
-    // Try to grab or create an API key
+    // Inject clipboard interceptor BEFORE navigating — captures whatever the copy button sends
+    await page.addInitScript(() => {
+      (window as any).__nb_captured_key = "";
+      const orig = navigator.clipboard.writeText.bind(navigator.clipboard);
+      navigator.clipboard.writeText = (text: string) => {
+        (window as any).__nb_captured_key = text;
+        return orig(text).catch(() => {});
+      };
+    });
+
+    // Navigate to API Key page
     log("Navigating to API Key page...");
     await page.goto("https://nanobananaapi.ai/api-key", { waitUntil: "networkidle", timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
 
     const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
     log("API Key page snippet: " + pageText.substring(0, 200).replace(/\s+/g, " "));
 
     let apiKey = "";
 
-    // Check if there's already an API key in the list (table rows with long strings)
-    const existingKey = await page.evaluate(() => {
-      const cells = Array.from(document.querySelectorAll('td, input[readonly], input[type="text"]'));
-      for (const cell of cells) {
-        const text = ((cell as HTMLInputElement).value || cell.textContent || "").trim();
-        if (text.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(text)) return text;
-      }
-      return "";
-    }).catch(() => "");
-
-    if (existingKey) {
-      apiKey = existingKey;
-      log("✅ Existing API Key found: " + apiKey.substring(0, 12) + "...");
-    } else {
-      // Try to create a new API key
-      log("No existing API key — creating one...");
-      const nameInput = page.locator('input[placeholder], input[type="text"]').first();
-      if (await nameInput.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await nameInput.fill("main").catch(() => {});
-        await page.waitForTimeout(500);
-        // Click Add/Create button — try various element types
-        const addBtn = page.locator('button:has-text("Add"), a:has-text("Add"), span:has-text("Add"), [class*="btn"]:has-text("Add"), button:has-text("Create"), button:has-text("Generate"), [role="button"]:has-text("Add")').first();
-        const addBtnVisible = await addBtn.isVisible({ timeout: 2000 }).catch(() => false);
-        if (addBtnVisible) {
-          await addBtn.click();
-        } else {
-          // Fallback: press Enter in the name input
-          await nameInput.press("Enter");
-        }
-        log("Clicked/pressed Create API Key");
-        await page.waitForTimeout(3000);
-        // Re-read the page for the new key
-        const newKey = await page.evaluate(() => {
-          const cells = Array.from(document.querySelectorAll('td, input[readonly], input[type="text"]'));
-          for (const cell of cells) {
-            const text = ((cell as HTMLInputElement).value || cell.textContent || "").trim();
-            if (text.length >= 20 && /^[A-Za-z0-9_\-]+$/.test(text)) return text;
+    // Helper: click the copy button in the first table row and return intercepted clipboard value
+    const clickCopyBtn = async (): Promise<string> => {
+      // Reset interceptor
+      await page.evaluate(() => { (window as any).__nb_captured_key = ""; }).catch(() => {});
+      // Find and click the copy button in the first data row using JS
+      await page.evaluate(() => {
+        // Look for the copy icon/button inside a table row
+        const tds = Array.from(document.querySelectorAll("table tr td"));
+        for (const td of tds) {
+          const btns = td.querySelectorAll("button, svg, [role='button'], [class*='copy']");
+          if (btns.length > 0) {
+            (btns[0] as HTMLElement).click();
+            return;
           }
-          return "";
-        }).catch(() => "");
-        if (newKey) {
-          apiKey = newKey;
-          log("✅ New API Key created: " + apiKey.substring(0, 12) + "...");
         }
+        // Fallback: any button/svg that is NOT in a th (header)
+        const allBtns = document.querySelectorAll("td button, td svg");
+        if (allBtns.length > 0) (allBtns[0] as HTMLElement).click();
+      }).catch(() => {});
+      await page.waitForTimeout(1500);
+      const captured = await page.evaluate(() => (window as any).__nb_captured_key || "").catch(() => "");
+      return (captured && captured.length > 10 && /^[A-Za-z0-9_\-]+$/.test(captured)) ? captured : "";
+    };
+
+    // Check if there are data rows in the table
+    const tdCount = await page.locator("table tr td").count().catch(() => 0);
+    log(`Table data cells found: ${tdCount}`);
+
+    if (tdCount > 0) {
+      log("Found existing API key row — clicking copy button...");
+      apiKey = await clickCopyBtn();
+      if (apiKey) log("✅ Existing API Key copied: " + apiKey.substring(0, 12) + "...");
+    }
+
+    if (!apiKey) {
+      log("No existing API key — clicking 'Create API key' button...");
+      // Click the BUTTON element (not heading) that has "Create API key" text
+      const jsClicked = await page.evaluate(() => {
+        // Find the most specific element: prefer button tag, smallest element with exact text
+        const buttons = Array.from(document.querySelectorAll("button"));
+        const btn = buttons.find(b => (b.textContent || "").toLowerCase().replace(/\s+/g, " ").trim().includes("create api key"));
+        if (btn) { btn.click(); return "button"; }
+        // Fallback: any element where the DIRECT text matches
+        const all = Array.from(document.querySelectorAll("a, [role='button']"));
+        const el = all.find(e => (e.textContent || "").toLowerCase().replace(/\s+/g, " ").trim().includes("create api key"));
+        if (el) { (el as HTMLElement).click(); return "other"; }
+        return "";
+      }).catch(() => "");
+      log(`Create API key click result: "${jsClicked}"`);
+
+      if (jsClicked) {
+        await page.waitForTimeout(2000);
+        // Fill the name input in the modal/dialog
+        const nameInput = page.locator('input[type="text"], input[placeholder]').first();
+        const inputVisible = await nameInput.isVisible({ timeout: 4000 }).catch(() => false);
+        log(`Name input visible: ${inputVisible}`);
+        if (inputVisible) {
+          await nameInput.fill("Default").catch(() => {});
+          await page.waitForTimeout(300);
+          // Submit the form via JS (click Create/Add/Submit button or press Enter)
+          await page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll("button"));
+            const submitBtn = btns.find(b => /^(create|add|save|submit|confirm|ok)$/i.test((b.textContent || "").trim()));
+            if (submitBtn) { submitBtn.click(); return; }
+            const inp = document.querySelector("input[type='text']") as HTMLInputElement | null;
+            if (inp) inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true }));
+          }).catch(() => {});
+          log("Submitted create-key form");
+          await page.waitForTimeout(4000);
+        }
+        // Wait for the new key row to appear
+        await page.waitForSelector("table tr td", { timeout: 8000 }).catch(() => {});
+        // Click copy button on the new key row
+        apiKey = await clickCopyBtn();
+        if (apiKey) log("✅ New API Key created & copied: " + apiKey.substring(0, 12) + "...");
+      } else {
+        log("⚠️ Could not find the 'Create API key' button");
       }
     }
 
     if (!apiKey) {
-      log("ℹ️ Could not extract/create API key — manual extraction needed");
+      log("ℹ️ Could not extract API key automatically");
     }
 
     log(`✅ NanoBanana signup complete for ${outlookEmail}`);
