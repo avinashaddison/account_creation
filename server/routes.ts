@@ -5094,12 +5094,18 @@ export async function registerRoutes(
   // ── NanoBanana API signup ──
   app.post("/api/nanobanana-create", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword } = req.body;
-      if (!outlookEmail || !outlookPassword) return res.status(400).json({ error: "outlookEmail and outlookPassword are required" });
+      let { outlookEmail, outlookPassword } = req.body;
+      // Auto-pick a random active Outlook account if none provided
+      if (!outlookEmail || !outlookPassword) {
+        const picked = await storage.getRandomActivePrivateOutlook();
+        if (!picked) return res.status(400).json({ error: "No active Outlook accounts available in pool" });
+        outlookEmail = picked.email;
+        outlookPassword = picked.password;
+      }
       const userId = req.session.userId!;
       const createId = `nano-${Date.now()}`;
       const batchId = `nanobanana-create-${createId}`;
-      res.json({ batchId, createId, message: "NanoBanana signup started" });
+      res.json({ batchId, createId, message: "NanoBanana signup started", outlookEmail });
       // Run async
       const result = await registerNanoBananaAccount(outlookEmail, outlookPassword, (msg) => broadcastLog(batchId, createId, msg, userId));
       broadcastLog(batchId, createId, result.success

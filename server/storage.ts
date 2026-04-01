@@ -42,6 +42,7 @@ export interface IStorage {
   deleteTempEmail(id: string): Promise<void>;
   createPrivateOutlook(data: InsertPrivateOutlook): Promise<PrivateOutlookAccount>;
   getAllPrivateOutlooks(): Promise<PrivateOutlookAccount[]>;
+  getRandomActivePrivateOutlook(): Promise<PrivateOutlookAccount | null>;
   deletePrivateOutlook(id: string): Promise<void>;
   createPrivateZenrowsKey(data: InsertPrivateZenrowsKey): Promise<PrivateZenrowsKey>;
   getAllPrivateZenrowsKeys(): Promise<PrivateZenrowsKey[]>;
@@ -348,6 +349,14 @@ export class DatabaseStorage implements IStorage {
 
   async getAllPrivateOutlooks(): Promise<PrivateOutlookAccount[]> {
     return db.select().from(privateOutlookAccounts).orderBy(desc(privateOutlookAccounts.createdAt));
+  }
+
+  async getRandomActivePrivateOutlook(): Promise<PrivateOutlookAccount | null> {
+    const rows = await db.select().from(privateOutlookAccounts)
+      .where(eq(privateOutlookAccounts.status, "active"))
+      .orderBy(sql`RANDOM()`)
+      .limit(1);
+    return rows[0] ?? null;
   }
 
   async deletePrivateOutlook(id: string): Promise<void> {

@@ -20411,350 +20411,251 @@ export async function registerNanoBananaAccount(
     const popup = await popupPromise;
     log("Popup opened: " + popup.url().substring(0, 100));
 
-    // Wait for Microsoft login page to load
-    // With ZenRows CDP, the popup URL may already be at microsoftonline.com when captured,
-    // so waitForURL (which waits for a navigation event) may never fire. Check first.
-    {
-      const initialPopupUrl = popup.url();
-      const alreadyOnMs = /microsoftonline\.com|live\.com/.test(initialPopupUrl);
-      if (!alreadyOnMs) {
-        await popup.waitForURL(/microsoftonline\.com|live\.com/, { timeout: 20000 }).catch(() => {});
-      }
+    // ZenRows proxy blocks login.microsoftonline.com inside popups (returns host_not_allowed).
+    // Strategy: capture the OAuth URL from the popup, close it, then complete the MS login
+    // in a SEPARATE local browser with the Webshare residential proxy.
+    // After login, read MSAL tokens from that browser's sessionStorage and inject them
+    // into the main ZenRows page so MSAL recognises the user as logged in.
+
+    // 1. Get the OAuth URL (wait briefly for popup to navigate to microsoftonline.com)
+    let oauthUrl = popup.url();
+    if (!oauthUrl.includes("microsoftonline.com")) {
+      await popup.waitForURL(/microsoftonline\.com|live\.com/, { timeout: 12000 }).catch(() => {});
+      oauthUrl = popup.url();
     }
-    log("Microsoft login page: " + popup.url().substring(0, 100));
-    await popup.waitForLoadState("domcontentloaded").catch(() => {});
-    await popup.waitForTimeout(2000);
+    log("OAuth URL captured: " + oauthUrl.substring(0, 120));
+    await popup.close().catch(() => {});
+    log("Popup closed — starting MS login in external browser with residential proxy...");
 
-    // === ENTER EMAIL ===
-    log("Entering email: " + outlookEmail);
-    const emailField = popup.locator('input[type="email"], input[name="loginfmt"], input[name="email"]').first();
-    await emailField.waitFor({ state: "visible", timeout: 15000 });
-    await emailField.click();
-    await emailField.fill("");
-    await popup.keyboard.type(outlookEmail, { delay: 80 });
-    await popup.waitForTimeout(600);
-
-    // Click Next
-    const nextBtn = popup.locator('input[type="submit"][value="Next"], button[type="submit"]').first();
-    await nextBtn.waitFor({ state: "visible", timeout: 8000 });
-    await nextBtn.click();
-    log("Clicked Next (email step)");
-    await popup.waitForTimeout(3000);
-
-    // Check for hCaptcha on email step
-    const hcapSitekeyAfterEmail = await popup.evaluate(() => {
-      const el = document.querySelector('.h-captcha[data-sitekey], iframe[src*="hcaptcha"]');
-      return el ? (el.getAttribute("data-sitekey") || "unknown") : null;
-    }).catch(() => null);
-    if (hcapSitekeyAfterEmail && nopeKey) {
-      log("hCaptcha detected on email step — solving with NopeCHA...");
-      const solved = await solveHCaptchaViaNopeCHA(nopeKey, popup.url(), hcapSitekeyAfterEmail, undefined, 90);
-      if (solved.success && solved.token) {
-        await popup.evaluate((token: string) => {
-          const textarea = document.querySelector("textarea[name='h-captcha-response']") as any;
-          if (textarea) { textarea.value = token; textarea.dispatchEvent(new Event("change", { bubbles: true })); }
-        }, solved.token);
-        log("hCaptcha solved on email step ✅");
-      }
-    }
-
-    // === ENTER PASSWORD ===
-    log("Looking for password field...");
-    await popup.waitForTimeout(2000);
-    const pwField = popup.locator('input[type="password"], input[name="passwd"]').first();
-    await pwField.waitFor({ state: "visible", timeout: 15000 });
-    await pwField.click();
-    await pwField.fill("");
-    await popup.keyboard.type(outlookPassword, { delay: 80 });
-    log("Password entered");
-    await popup.waitForTimeout(600);
-
-    // Click Sign in
-    const signInBtn = popup.locator('input[type="submit"][value="Sign in"], button[type="submit"]').first();
-    await signInBtn.waitFor({ state: "visible", timeout: 8000 });
-    await signInBtn.click();
-    log("Clicked Sign in");
-    await popup.waitForTimeout(4000);
-
-    // Check for hCaptcha on password step
-    const hcapAfterPw = await popup.evaluate(() => {
-      const el = document.querySelector('.h-captcha[data-sitekey], iframe[src*="hcaptcha"]');
-      return el ? (el.getAttribute("data-sitekey") || "unknown") : null;
-    }).catch(() => null);
-    if (hcapAfterPw && nopeKey) {
-      log("hCaptcha detected after password — solving...");
-      const solved = await solveHCaptchaViaNopeCHA(nopeKey, popup.url(), hcapAfterPw, undefined, 90);
-      if (solved.success && solved.token) {
-        await popup.evaluate((token: string) => {
-          const textarea = document.querySelector("textarea[name='h-captcha-response']") as any;
-          if (textarea) { textarea.value = token; textarea.dispatchEvent(new Event("change", { bubbles: true })); }
-        }, solved.token);
-        const submitBtn2 = popup.locator('input[type="submit"], button[type="submit"]').first();
-        await submitBtn2.click().catch(() => {});
-        log("hCaptcha solved after password ✅");
-        await popup.waitForTimeout(3000);
-      }
-    }
-
-    // === HANDLE MICROSOFT INTERMEDIATE PAGES (loop up to 15 iterations) ===
-    let popupCompletedSuccessfully = false;
-    for (let i = 0; i < 15; i++) {
-      let curUrl: string;
+    // 2. Get Webshare residential proxy URL
+    const rawProxyForMs = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`)
+      .then(r => r.rows[0]?.value as string || "").catch(() => "");
+    const msSessionId = Math.random().toString(36).substring(2, 14);
+    const msProxyUrl = rawProxyForMs
+      ? rawProxyForMs.replace(/sessionid-[^-@]+/, `sessionid-${msSessionId}`)
+      : "";
+    if (msProxyUrl) {
       try {
-        curUrl = popup.url();
-      } catch {
-        // Popup was closed — this is a success if the main page is on nanobananaapi.ai
-        log("Popup closed (browser context ended) — checking main page...");
-        popupCompletedSuccessfully = true;
-        break;
-      }
-      log(`[step ${i + 1}] Popup URL: ${curUrl.substring(0, 120)}`);
-
-      // Done — redirected back to NanoBanana
-      if (curUrl.includes("nanobananaapi.ai")) {
-        log("✅ Popup redirected to nanobananaapi.ai — login complete");
-        break;
-      }
-
-      // Check page body text early — detect rate-limiting before anything else
-      const pageBodyLower = await popup.evaluate(() => document.body?.innerText?.toLowerCase() || "").catch(() => "");
-      if (pageBodyLower.includes("too many times") || pageBodyLower.includes("too many requests") ||
-          pageBodyLower.includes("too many attempts") || pageBodyLower.includes("rate limit") ||
-          pageBodyLower.includes("unusual activity") || pageBodyLower.includes("temporarily blocked")) {
-        log("Microsoft rate-limit/block detected: " + pageBodyLower.substring(0, 100));
-        return { success: false, error: "Microsoft rate-limited this account. Wait a few minutes and try again." };
-      }
-
-      // "Stay signed in?" (KMSI) — check by text content, NOT by ppsecure URL (too broad)
-      const isKmsiPage = curUrl.includes("kmsi") ||
-        await popup.locator('text="Stay signed in?"').isVisible({ timeout: 1000 }).catch(() => false) ||
-        await popup.locator('text="Stay signed in"').isVisible({ timeout: 500 }).catch(() => false);
-      if (isKmsiPage) {
-        // Check for Yes/No buttons
-        const hasYesBtn = await popup.locator('input[value="Yes"], button:has-text("Yes")').isVisible({ timeout: 2000 }).catch(() => false);
-        if (hasYesBtn) {
-          log("Handling 'Stay signed in?' — clicking Yes");
-          try {
-            await popup.locator('input[value="Yes"], button:has-text("Yes")').first().click();
-            // Wait for the popup to complete the OAuth callback and reach nanobananaapi.ai
-            try {
-              await popup.waitForURL(url => url.includes("nanobananaapi.ai"), { timeout: 20000 });
-              log("Popup reached nanobananaapi.ai — OAuth callback complete");
-              await popup.waitForTimeout(3000); // Let the session be established
-              popupCompletedSuccessfully = true;
-            } catch {
-              // Popup may have closed before we could detect the URL (it closed itself after callback)
-              try {
-                const u = popup.url();
-                log("Popup still open after KMSI: " + u.substring(0, 100));
-                await popup.waitForTimeout(3000);
-              } catch {
-                log("Popup closed after KMSI click — OAuth flow assumed complete");
-                popupCompletedSuccessfully = true;
-              }
-            }
-          } catch { popupCompletedSuccessfully = true; }
-          break;
-        }
-        const hasNoBtn = await popup.locator('input[value="No"], button:has-text("No")').isVisible({ timeout: 1000 }).catch(() => false);
-        if (hasNoBtn) {
-          log("Handling 'Stay signed in?' — clicking No");
-          try {
-            await popup.locator('input[value="No"], button:has-text("No")').first().click();
-            // Wait for the popup to complete the OAuth callback
-            try {
-              await popup.waitForURL(url => url.includes("nanobananaapi.ai"), { timeout: 20000 });
-              log("Popup reached nanobananaapi.ai (No) — OAuth callback complete");
-              await popup.waitForTimeout(3000);
-              popupCompletedSuccessfully = true;
-            } catch {
-              try { popup.url(); await popup.waitForTimeout(3000); } catch { popupCompletedSuccessfully = true; }
-            }
-          } catch { popupCompletedSuccessfully = true; }
-          break;
-        }
-        log("KMSI page detected but no buttons yet — waiting...");
-        await popup.waitForTimeout(2000).catch(() => {});
-        continue;
-      }
-
-      // ppsecure page that is NOT KMSI (e.g., re-entry password page after rate limit)
-      if (curUrl.includes("ppsecure")) {
-        log("Non-KMSI ppsecure page — body: " + pageBodyLower.substring(0, 100));
-        if (pageBodyLower.includes("password") || pageBodyLower.includes("sign in")) {
-          return { success: false, error: "Microsoft re-requested credentials (rate-limited or session expired). Body: " + pageBodyLower.substring(0, 80) };
-        }
-        await popup.waitForTimeout(2000).catch(() => {});
-        continue;
-      }
-
-      // Permissions consent (Consent/Update page — waits for buttons to appear)
-      if (curUrl.includes("Consent") || curUrl.includes("consent")) {
-        log("Permissions consent page — waiting for buttons...");
-        await popup.waitForLoadState("domcontentloaded").catch(() => {});
-        await popup.waitForTimeout(2000);
-        const acceptBtn = popup.locator('input[value="Accept"], button:has-text("Accept"), input[value="Yes"], button:has-text("Yes")').first();
-        if (await acceptBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-          log("Clicking Accept on consent page");
-          try { await acceptBtn.click(); await popup.waitForTimeout(3000); } catch { popupCompletedSuccessfully = true; break; }
-        } else {
-          log("No Accept button found on consent page — waiting for redirect...");
-          try {
-            await popup.waitForURL(url => !url.includes("Consent") && !url.includes("consent"), { timeout: 10000 });
-          } catch { await popup.waitForTimeout(3000).catch(() => {}); }
-        }
-        continue;
-      }
-
-      // "Let's protect your account" / proofs/Add — skip it
-      if (curUrl.includes("account.live.com/proofs") || curUrl.includes("account.microsoft.com/proofs") ||
-          await popup.locator('text="Let\'s protect your account"').isVisible({ timeout: 1500 }).catch(() => false)) {
-        log("Microsoft security proofs page — waiting for page to fully load...");
-        await popup.waitForLoadState("domcontentloaded").catch(() => {});
-        await popup.waitForTimeout(2000);
-        log("Microsoft security proofs page — scanning all clickable elements...");
-
-        // Dump all links and buttons to find skip option
-        const allEls = await popup.evaluate(() => {
-          const items: string[] = [];
-          document.querySelectorAll('a, button, input[type=submit], input[type=button]').forEach(el => {
-            const t = (el.textContent || (el as HTMLInputElement).value || "").trim().replace(/\s+/g, " ").substring(0, 60);
-            const h = (el as HTMLAnchorElement).href || "";
-            if (t) items.push(`[${el.tagName}] "${t}" href="${h}"`);
-          });
-          return items;
-        }).catch(() => [] as string[]);
-        log("Elements on proofs page: " + allEls.join(" | ").substring(0, 400));
-
-        // Try "Skip for now" link / button with broader selectors
-        const skipTexts = ["skip for now", "skip", "not now", "i'll do this later", "ask me later", "cancel", "do this later", "remind me later"];
-        let skipped = false;
-        for (const skipText of skipTexts) {
-          const el = popup.locator(`a, button, input[type=submit]`).filter({ hasText: new RegExp(skipText, "i") }).first();
-          if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
-            log(`Found skip element with text containing "${skipText}" — clicking`);
-            await el.click();
-            skipped = true;
-            await popup.waitForTimeout(3000);
-            break;
-          }
-        }
-
-        if (!skipped) {
-          // Try JavaScript scroll to find hidden skip link
-          await popup.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-          await popup.waitForTimeout(1000);
-          // Try again after scrolling
-          for (const skipText of skipTexts) {
-            const el = popup.locator(`a, button`).filter({ hasText: new RegExp(skipText, "i") }).first();
-            if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
-              log(`Found skip element after scroll: "${skipText}" — clicking`);
-              await el.click();
-              skipped = true;
-              await popup.waitForTimeout(3000);
-              break;
-            }
-          }
-        }
-
-        if (!skipped) {
-          log("No skip found — pressing Escape to dismiss...");
-          await popup.keyboard.press("Escape");
-          await popup.waitForTimeout(2000);
-        }
-        continue;
-      }
-
-      // Passkey enrollment page — click Cancel
-      if (curUrl.includes("interrupt/passkey") || await popup.locator('text="passkey"').isVisible({ timeout: 1500 }).catch(() => false)) {
-        log("Passkey enrollment page — clicking Cancel...");
-        const cancelBtn = popup.locator('button:has-text("Cancel"), a:has-text("Cancel"), input[value="Cancel"]').first();
-        if (await cancelBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await cancelBtn.click();
-          log("Clicked Cancel on passkey page");
-          await popup.waitForTimeout(3000);
-        } else {
-          // Try 'ru' redirect param
-          try {
-            const pUrl = new URL(curUrl);
-            const ru = pUrl.searchParams.get("ru");
-            if (ru) {
-              const decoded = decodeURIComponent(ru);
-              log("Navigating to ru param: " + decoded.substring(0, 100));
-              await popup.goto(decoded, { waitUntil: "domcontentloaded", timeout: 15000 });
-              await popup.waitForTimeout(3000);
-            } else {
-              await popup.waitForTimeout(3000);
-            }
-          } catch { await popup.waitForTimeout(3000); }
-        }
-        continue;
-      }
-
-      // "We need more information" / additional verification pages
-      if (curUrl.includes("account.live.com") || curUrl.includes("account.microsoft.com")) {
-        log("Other Microsoft account page — waiting for redirect...");
-        const bodyText = await popup.evaluate(() => document.body?.innerText || "").catch(() => "");
-        log("Body: " + bodyText.substring(0, 100));
-        // Try clicking any Cancel/Skip/Close buttons
-        const dismissBtns = ["Cancel", "Close", "Skip", "Not now", "Dismiss"];
-        let dismissed = false;
-        for (const btnText of dismissBtns) {
-          const btn = popup.locator(`button:has-text("${btnText}"), a:has-text("${btnText}")`).first();
-          if (await btn.isVisible({ timeout: 800 }).catch(() => false)) {
-            log(`Clicking "${btnText}" to dismiss page`);
-            await btn.click();
-            dismissed = true;
-            await popup.waitForTimeout(3000);
-            break;
-          }
-        }
-        if (!dismissed) {
-          try {
-            await popup.waitForURL(url => !url.includes("account.live.com") && !url.includes("account.microsoft.com"), { timeout: 8000 });
-          } catch {
-            await popup.waitForTimeout(3000);
-          }
-        }
-        continue;
-      }
-
-      // Microsoft FIDO/passkey creation interstitial — skip it
-      if (curUrl.includes("fido/create") || curUrl.includes("/fido")) {
-        log("FIDO/passkey creation page — waiting for it to pass...");
-        try {
-          await popup.waitForURL(url => !url.includes("fido"), { timeout: 8000 });
-        } catch {
-          // Try pressing Escape or waiting
-          await popup.keyboard.press("Escape").catch(() => {});
-          await popup.waitForTimeout(2000).catch(() => {});
-        }
-        continue;
-      }
-
-      // Still on Microsoft — wait a bit for redirect
-      if (curUrl.includes("microsoftonline.com") || curUrl.includes("login.live.com") || curUrl.includes("live.com") || curUrl.includes("login.microsoft.com")) {
-        log("Still on Microsoft — waiting for redirect...");
-        try {
-          await popup.waitForURL(url => !url.includes("microsoftonline.com") && !url.includes("live.com") && !url.includes("login.microsoft.com"), { timeout: 10000 });
-        } catch {}
-        continue;
-      }
-
-      // Unknown page — wait and check
-      await popup.waitForTimeout(2000);
+        const p = new URL(msProxyUrl);
+        log(`Residential proxy for MS login: ${p.hostname}:${p.port}`);
+      } catch {}
+    } else {
+      log("No residential proxy configured — MS login will run direct (may be blocked by Microsoft)");
     }
 
-    // Final check — if popup was closed, it's considered success (redirect to nanobananaapi.ai closed the popup)
-    if (!popupCompletedSuccessfully) {
-      let finalPopupUrl = "";
-      try { finalPopupUrl = popup.url(); } catch { popupCompletedSuccessfully = true; }
-      if (!popupCompletedSuccessfully && !finalPopupUrl.includes("nanobananaapi.ai") && (finalPopupUrl.includes("live.com") || finalPopupUrl.includes("microsoft"))) {
-        const bodySnippet = await popup.evaluate(() => document.body?.innerText?.substring(0, 200) || "").catch(() => "");
-        log("Still on Microsoft after all steps. Final URL: " + finalPopupUrl.substring(0, 100));
-        log("Body: " + bodySnippet.substring(0, 150));
-        return { success: false, error: "Could not complete Microsoft OAuth. Page: " + bodySnippet.substring(0, 100) };
+    // 3. Launch external browser for MS login
+    let msBrowser: import("playwright-core").Browser | null = null;
+    try {
+      await ensureBrowserInstalled();
+      const { chromium } = await import("playwright-core");
+      const launchArgs = [
+        "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+        "--disable-gpu", "--disable-extensions",
+      ];
+      msBrowser = await chromium.launch({ headless: true, args: launchArgs });
+
+      if (!oauthUrl || oauthUrl === "about:blank") {
+        throw new Error("OAuth URL was not captured from popup — cannot complete MS login externally");
       }
+
+      // Helper to create a browser context and navigate to the OAuth URL
+      const tryMsLogin = async (proxyServer?: string): Promise<import("playwright-core").Page> => {
+        const ctxOpts: import("playwright-core").BrowserContextOptions = {
+          viewport: { width: 1366, height: 768 },
+          locale: "en-US",
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        };
+        if (proxyServer) (ctxOpts as any).proxy = { server: proxyServer };
+        const ctx = await msBrowser!.newContext(ctxOpts);
+        const pg = await ctx.newPage();
+        log(`External browser navigating to MS OAuth URL${proxyServer ? " (via proxy)" : " (direct)"}...`);
+        await pg.goto(oauthUrl, { waitUntil: "domcontentloaded", timeout: 75000 });
+        return pg;
+      };
+
+      // 4. Navigate to OAuth URL — try with proxy first, fall back to direct
+      let msPage: import("playwright-core").Page;
+      try {
+        msPage = await tryMsLogin(msProxyUrl || undefined);
+        log("External browser loaded MS login page via proxy ✅");
+      } catch (proxyErr: any) {
+        log(`Proxy attempt failed: ${proxyErr.message?.substring(0, 80)} — retrying direct...`);
+        msPage = await tryMsLogin();
+        log("External browser loaded MS login page direct ✅");
+      }
+
+      await msPage.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
+      await msPage.waitForTimeout(2000);
+
+      const msInitTitle = await msPage.title().catch(() => "");
+      const msInitText = await msPage.evaluate(() => document.body?.innerText?.substring(0, 100) || "").catch(() => "");
+      log(`External MS page: title="${msInitTitle}" text="${msInitText.replace(/\s+/g, " ")}"`);
+
+      // 5. Enter email
+      log("External browser: entering email...");
+      const msEmail = msPage.locator('input[type="email"], input[name="loginfmt"]').first();
+      await msEmail.waitFor({ state: "visible", timeout: 25000 });
+      await msEmail.click();
+      await msEmail.fill(outlookEmail);
+      await msPage.waitForTimeout(400);
+      const msNext = msPage.locator('input[type="submit"][value="Next"], button[type="submit"]').first();
+      await msNext.click();
+      log("External browser: clicked Next on email");
+      await msPage.waitForTimeout(3000);
+
+      // 6. Enter password
+      log("External browser: entering password...");
+      const msPw = msPage.locator('input[type="password"], input[name="passwd"]').first();
+      await msPw.waitFor({ state: "visible", timeout: 20000 });
+      await msPw.click();
+      await msPw.fill(outlookPassword);
+      await msPage.waitForTimeout(400);
+      const msSignIn = msPage.locator('input[type="submit"][value="Sign in"], button[type="submit"]').first();
+      await msSignIn.click();
+      log("External browser: clicked Sign in");
+      await msPage.waitForTimeout(4000);
+
+      // 7. Handle intermediate MS pages (KMSI, consent, proofs, passkeys, etc.)
+      for (let i = 0; i < 15; i++) {
+        const curUrl = msPage.url();
+        log(`[ext step ${i + 1}] URL: ${curUrl.substring(0, 120)}`);
+        if (curUrl.includes("nanobananaapi.ai")) {
+          log("External browser: reached nanobananaapi.ai ✅");
+          break;
+        }
+
+        const bodyLower = await msPage.evaluate(() => document.body?.innerText?.toLowerCase() || "").catch(() => "");
+        if (bodyLower.includes("too many") || bodyLower.includes("rate limit") || bodyLower.includes("unusual activity")) {
+          throw new Error("Microsoft rate-limited this account: " + bodyLower.substring(0, 80));
+        }
+
+        // KMSI
+        const isKmsi = curUrl.includes("kmsi") ||
+          await msPage.locator('text="Stay signed in?"').isVisible({ timeout: 800 }).catch(() => false);
+        if (isKmsi) {
+          log("External: KMSI page — clicking Yes");
+          const yesBtn = msPage.locator('input[value="Yes"], button:has-text("Yes")').first();
+          if (await yesBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await yesBtn.click();
+          } else {
+            await msPage.locator('input[value="No"], button:has-text("No")').first().click().catch(() => {});
+          }
+          await msPage.waitForTimeout(3000);
+          continue;
+        }
+
+        // Consent
+        if (curUrl.includes("Consent") || curUrl.includes("consent")) {
+          log("External: consent page — clicking Accept");
+          await msPage.waitForTimeout(1000);
+          await msPage.locator('input[value="Accept"], button:has-text("Accept"), input[value="Yes"], button:has-text("Yes")').first().click().catch(() => {});
+          await msPage.waitForTimeout(3000);
+          continue;
+        }
+
+        // Proofs / "Let's protect your account"
+        if (curUrl.includes("/proofs") || bodyLower.includes("protect your account")) {
+          log("External: security proofs page — trying to skip");
+          const skipTexts = ["skip for now", "skip", "not now", "cancel", "do this later"];
+          let skipped = false;
+          for (const s of skipTexts) {
+            const el = msPage.locator(`a, button`).filter({ hasText: new RegExp(s, "i") }).first();
+            if (await el.isVisible({ timeout: 600 }).catch(() => false)) {
+              await el.click(); skipped = true; break;
+            }
+          }
+          if (!skipped) await msPage.keyboard.press("Escape");
+          await msPage.waitForTimeout(2000);
+          continue;
+        }
+
+        // Passkey enrollment
+        if (curUrl.includes("passkey") || curUrl.includes("/fido")) {
+          log("External: passkey page — clicking Cancel");
+          await msPage.locator('button:has-text("Cancel"), a:has-text("Cancel")').first().click().catch(() => {});
+          await msPage.waitForTimeout(2000);
+          continue;
+        }
+
+        // Other account.live.com / account.microsoft.com pages
+        if (curUrl.includes("account.live.com") || curUrl.includes("account.microsoft.com")) {
+          log("External: account page — trying dismiss buttons");
+          for (const t of ["Cancel", "Skip", "Not now", "Close"]) {
+            const b = msPage.locator(`button:has-text("${t}"), a:has-text("${t}")`).first();
+            if (await b.isVisible({ timeout: 600 }).catch(() => false)) { await b.click(); break; }
+          }
+          await msPage.waitForTimeout(2000);
+          continue;
+        }
+
+        // Still on MS — wait
+        if (/microsoftonline\.com|login\.live\.com|live\.com|login\.microsoft\.com/.test(curUrl)) {
+          log("External: still on MS — waiting for redirect...");
+          try {
+            await msPage.waitForURL(u => !/microsoftonline\.com|live\.com/.test(u), { timeout: 12000 });
+          } catch {}
+          continue;
+        }
+
+        await msPage.waitForTimeout(2000);
+      }
+
+      // 8. Wait for MSAL to process the OAuth callback on nanobananaapi.ai
+      const finalExtUrl = msPage.url();
+      if (!finalExtUrl.includes("nanobananaapi.ai")) {
+        const finalBody = await msPage.evaluate(() => document.body?.innerText?.substring(0, 200) || "").catch(() => "");
+        throw new Error(`MS login did not reach nanobananaapi.ai. Final URL: ${finalExtUrl.substring(0, 100)} | Body: ${finalBody.replace(/\s+/g, " ")}`);
+      }
+      log("External browser at nanobananaapi.ai — waiting for MSAL to store tokens...");
+      await msPage.waitForTimeout(5000); // let MSAL's handleRedirectPromise run
+
+      // 9. Read sessionStorage from external browser
+      const msSessionStorage = await msPage.evaluate(() => {
+        const data: Record<string, string> = {};
+        for (let i2 = 0; i2 < sessionStorage.length; i2++) {
+          const k = sessionStorage.key(i2);
+          if (k) data[k] = sessionStorage.getItem(k) || "";
+        }
+        return data;
+      });
+      const msLocalStorage = await msPage.evaluate(() => {
+        const data: Record<string, string> = {};
+        for (let i2 = 0; i2 < localStorage.length; i2++) {
+          const k = localStorage.key(i2);
+          if (k) data[k] = localStorage.getItem(k) || "";
+        }
+        return data;
+      });
+      log(`Captured ${Object.keys(msSessionStorage).length} sessionStorage + ${Object.keys(msLocalStorage).length} localStorage entries from MS login browser`);
+
+      // 10. Navigate the ZenRows main page to nanobananaapi.ai so we have a fresh page context
+      log("Navigating ZenRows page to nanobananaapi.ai to inject MSAL tokens...");
+      await page.goto("https://nanobananaapi.ai/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(2000);
+
+      // 11. Inject sessionStorage and localStorage into the ZenRows page
+      await page.evaluate(({ ss, ls }: { ss: Record<string, string>; ls: Record<string, string> }) => {
+        // Clear any stale interaction_in_progress flags
+        sessionStorage.removeItem("msal.interaction.status");
+        for (const [k, v] of Object.entries(ss)) {
+          try { sessionStorage.setItem(k, v); } catch {}
+        }
+        for (const [k, v] of Object.entries(ls)) {
+          try { localStorage.setItem(k, v); } catch {}
+        }
+      }, { ss: msSessionStorage, ls: msLocalStorage });
+      log("MSAL tokens injected into ZenRows page storage");
+
+      // 12. Reload the ZenRows page so MSAL re-initialises with the injected tokens
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+
+      const postInjectText = await page.evaluate(() => document.body?.innerText?.substring(0, 200) || "").catch(() => "");
+      log(`ZenRows page after token injection: ${postInjectText.substring(0, 150).replace(/\s+/g, " ")}`);
+
+    } finally {
+      if (msBrowser) { await msBrowser.close().catch(() => {}); msBrowser = null; }
     }
     log("Microsoft OAuth flow completed — waiting for main page to process auth...");
 
