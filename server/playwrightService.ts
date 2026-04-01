@@ -20376,14 +20376,25 @@ export async function registerNanoBananaAccount(
     });
     const page = await context.newPage();
 
-    log("Navigating to NanoBananaAPI dashboard...");
-    await page.goto("https://nanobananaapi.ai/dashboard", { waitUntil: "networkidle", timeout: 30000 });
-    log("Loaded dashboard. URL: " + page.url());
+    log("Navigating to NanoBananaAPI homepage...");
+    await page.goto("https://nanobananaapi.ai/", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(3000); // allow JS to render
+    log("Loaded homepage. URL: " + page.url());
 
-    // Click "Sign in with Microsoft" — opens popup
-    log("Clicking 'Sign in with Microsoft'...");
+    // Click "Get Started" button (top right corner)
+    log("Clicking 'Get Started' button...");
+    const getStartedBtn = page.locator('button, a').filter({ hasText: /get started/i }).first();
+    await getStartedBtn.waitFor({ state: "visible", timeout: 10000 });
+    await getStartedBtn.click();
+    log("Clicked 'Get Started' — waiting for sign-in modal...");
+    await page.waitForTimeout(1500);
+
+    // Wait for modal to appear and click "Sign in with Microsoft"
+    const msBtn = page.locator('button').filter({ hasText: /sign in with microsoft/i }).first();
+    await msBtn.waitFor({ state: "visible", timeout: 10000 });
+    log("Modal opened — clicking 'Sign in with Microsoft'...");
     const popupPromise = context.waitForEvent("page", { timeout: 15000 });
-    await page.getByRole("button", { name: /sign in with microsoft/i }).click();
+    await msBtn.click();
     const popup = await popupPromise;
     log("Popup opened: " + popup.url().substring(0, 100));
 
@@ -20791,34 +20802,28 @@ export async function registerNanoBananaAccount(
         break;
       }
 
-      // Start capsolver solve once rqdata is available (captured from checksiteconfig response).
-      // Do NOT start without rqdata — enterprise hcaptcha requires it for accurate solving.
-      // If rqdata never arrives, fall back at poll 8 (16s after popup close).
+      // Start NopeCHA solve once rqdata is available (captured from checksiteconfig response).
+      // Wait for rqdata if possible; fall back at poll 8 (16s after popup close).
       if (!captchaSolveStarted && (nanoBananaRqdata || i >= 7)) {
         captchaSolveStarted = true;
         const rqdataToUse = nanoBananaRqdata || undefined;
-        log(`🔓 Starting capsolver hCaptcha solve (poll ${i + 1}, rqdata=${rqdataToUse ? `yes (len=${rqdataToUse.length})` : "no"})...`);
+        log(`🔓 Starting NopeCHA hCaptcha solve (poll ${i + 1}, rqdata=${rqdataToUse ? `yes (len=${rqdataToUse.length})` : "no"})...`);
 
-        // Use capsolver (solveHCaptcha) — supports enterprise rqdata; NopeCHA fails on this sitekey
-        captchaSolvePromise = solveHCaptcha("https://nanobananaapi.ai", NANOBANANA_HCAP_SITEKEY, undefined, rqdataToUse)
-          .then(r => {
-            if (r.success && r.token) {
-              log(`✅ Capsolver hCaptcha solved! (len=${r.token.length})`);
-              return r.token;
-            }
-            log(`❌ Capsolver hCaptcha failed: ${r.error} — trying NopeCHA fallback...`);
-            // NopeCHA fallback
-            if (nopeKey) {
-              return solveHCaptchaViaNopeCHA(nopeKey, "https://nanobananaapi.ai", NANOBANANA_HCAP_SITEKEY, rqdataToUse, 90)
-                .then(r2 => {
-                  if (r2.success && r2.token) { log(`✅ NopeCHA fallback solved! (len=${r2.token.length})`); return r2.token; }
-                  log(`❌ NopeCHA fallback also failed: ${r2.error}`);
-                  return null;
-                }).catch(() => null);
-            }
-            return null;
-          })
-          .catch(err => { log(`❌ Capsolver error: ${err.message}`); return null; });
+        if (nopeKey) {
+          captchaSolvePromise = solveHCaptchaViaNopeCHA(nopeKey, "https://nanobananaapi.ai", NANOBANANA_HCAP_SITEKEY, rqdataToUse, 120)
+            .then(r => {
+              if (r.success && r.token) {
+                log(`✅ NopeCHA hCaptcha solved! (len=${r.token.length})`);
+                return r.token;
+              }
+              log(`❌ NopeCHA hCaptcha failed: ${r.error}`);
+              return null;
+            })
+            .catch(err => { log(`❌ NopeCHA error: ${err.message}`); return null; });
+        } else {
+          log("❌ No NopeCHA key — cannot solve hCaptcha");
+          captchaSolvePromise = Promise.resolve(null);
+        }
       }
 
       // Check if captcha solve is done and inject via hcaptcha._executeCallback
