@@ -508,18 +508,6 @@ export default function PrivateAccount() {
       testId: "card-outlook-summary",
     },
     {
-      id: "zenrows" as TabType,
-      label: "Proxy API Stock",
-      count: zenrowsKeys.length,
-      sub: `${activeZenrows} active`,
-      color: "#a855f7",
-      glow: "rgba(168,85,247,0.18)",
-      border: "rgba(168,85,247,0.25)",
-      textColor: "text-purple-400",
-      icon: <Key className="w-4 h-4" />,
-      testId: "card-zenrows-summary",
-    },
-    {
       id: "replit" as TabType,
       label: "Replit Accounts",
       count: replitAccounts.length,
@@ -548,7 +536,7 @@ export default function PrivateAccount() {
   return (
     <div className="flex flex-col h-full p-7 gap-5">
       {/* ── STAT CARDS ── */}
-      <div className="grid grid-cols-5 gap-3 shrink-0">
+      <div className="grid grid-cols-4 gap-3 shrink-0">
         {statCards.map((s) => (
           <div
             key={s.id}
