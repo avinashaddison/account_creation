@@ -4057,26 +4057,6 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/replit-accounts/sync-sheet", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const { spreadsheetId, statusFilter } = req.body;
-      const sheetId = (spreadsheetId as string) || "1iwwFquXt3cqSEIlQYaDkERPjwXTFpCefQ2lE-_yphio";
-      const userId = req.session.userId;
-      const role = req.session.role;
-      const allAccounts = role === "superadmin"
-        ? await storage.getAllReplitAccounts()
-        : await storage.getReplitAccountsByOwner(userId);
-      const accounts = statusFilter && statusFilter !== "all"
-        ? allAccounts.filter(a => a.status === statusFilter)
-        : allAccounts;
-      const { syncReplitAccountsToSheet } = await import("./googleSheetsService.js");
-      const result = await syncReplitAccountsToSheet(sheetId, accounts);
-      res.json({ success: true, updated: result.updated, total: accounts.length, sheetUrl: result.sheetUrl });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   app.post("/api/replit-accounts/bulk-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const { status } = req.body;
@@ -4086,7 +4066,6 @@ export async function registerRoutes(
       const ownerId = role === "superadmin" ? undefined : req.session.userId;
       const count = await storage.bulkUpdateReplitAccountStatus(normalizedStatus, ownerId);
       res.json({ success: true, updated: count });
-      import("./googleSheetsService.js").then(({ scheduleAutoSync }) => scheduleAutoSync(storage)).catch(() => {});
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -4098,7 +4077,6 @@ export async function registerRoutes(
       if (!status) return res.status(400).json({ error: "status required" });
       const row = await storage.updateReplitAccountStatus(req.params.id, status);
       res.json(row);
-      import("./googleSheetsService.js").then(({ scheduleAutoSync }) => scheduleAutoSync(storage)).catch(() => {});
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -4108,19 +4086,8 @@ export async function registerRoutes(
     try {
       await storage.deleteReplitAccount(req.params.id);
       res.json({ success: true });
-      import("./googleSheetsService.js").then(({ scheduleAutoSync }) => scheduleAutoSync(storage)).catch(() => {});
     } catch (err: any) {
       res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Sync status endpoint — used by the frontend to show last sync/poll times
-  app.get("/api/replit-accounts/sync-status", requireAuth, async (_req: Request, res: Response) => {
-    try {
-      const { lastAutoSyncAt, lastPollAt, lastPollChanges } = await import("./googleSheetsService.js");
-      res.json({ lastAutoSyncAt, lastPollAt, lastPollChanges });
-    } catch {
-      res.json({ lastAutoSyncAt: null, lastPollAt: null, lastPollChanges: 0 });
     }
   });
 
@@ -5449,11 +5416,6 @@ export async function registerRoutes(
       res.status(500).json({ error: err.message });
     }
   });
-
-  // ── Start Google Sheet → Panel polling (60s interval) ──
-  import("./googleSheetsService.js")
-    .then(({ startSheetPolling }) => startSheetPolling(storage, 60_000))
-    .catch((err) => console.warn("[Sheets] Could not start polling:", err.message));
 
   return httpServer;
 }
