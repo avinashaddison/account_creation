@@ -10,12 +10,12 @@ import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
 import { useAccountPrice } from "@/lib/useAccountPrice";
 
-const G = "#00ff41";
-const GA = (a: number) => `rgba(0,255,65,${a})`;
-const RED = "#ff3366";
-const AMBER = "#ffb000";
-const BLUE = "#00aaff";
-const PURPLE = "#a855f7";
+const G = "#30d158";
+const GA = (a: number) => `rgba(48,209,88,${a})`;
+const RED = "#ff453a";
+const AMBER = "#ff9f0a";
+const BLUE = "#0a84ff";
+const PURPLE = "#bf5af2";
 
 type DashboardData = {
   stats: { total: number; verified: number; failed: number; pending: number };
@@ -60,7 +60,7 @@ function LiveClock() {
     return () => clearInterval(t);
   }, []);
   return (
-    <span className="font-mono text-[10px] tabular-nums" style={{ color: GA(0.4) }}>
+    <span className="font-mono text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.35)" }}>
       {time.toUTCString().split(" ").slice(1, 5).join(" ")} UTC
     </span>
   );
@@ -81,9 +81,9 @@ function RingChart({ value, total }: { value: number; total: number }) {
       <svg className="w-36 h-36 -rotate-90" viewBox="0 0 130 130">
         <defs>
           <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor={G} />
-            <stop offset="70%" stopColor="#aaff00" />
-            <stop offset="100%" stopColor={AMBER} />
+            <stop offset="0%" stopColor={BLUE} />
+            <stop offset="60%" stopColor={G} />
+            <stop offset="100%" stopColor={G} />
           </linearGradient>
         </defs>
         <circle cx="65" cy="65" r={r} fill="none" stroke={GA(0.06)} strokeWidth="10" />
@@ -99,7 +99,7 @@ function RingChart({ value, total }: { value: number; total: number }) {
         <span className="text-[26px] font-bold font-mono" style={{ color: G, textShadow: `0 0 20px ${GA(0.7)}` }}>
           {Math.round(pct)}%
         </span>
-        <span className="text-[8px] font-mono uppercase tracking-[0.2em] mt-0.5" style={{ color: GA(0.35) }}>success</span>
+        <span className="text-[8px] font-mono uppercase tracking-[0.2em] mt-0.5" style={{ color: "rgba(255,255,255,0.28)" }}>success</span>
       </div>
     </div>
   );
@@ -112,12 +112,13 @@ function StatCard({ label, value, sub, accent, icon: Icon, pulse = false }: {
   return (
     <div className="relative overflow-hidden rounded-xl p-4 group transition-all duration-200"
       style={{
-        background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)",
-        border: `1px solid ${accent}18`,
-        boxShadow: `inset 0 1px 0 ${accent}10, 0 4px 20px rgba(0,0,0,0.4)`,
+        background: "rgba(255,255,255,0.04)",
+        backdropFilter: "blur(20px)",
+        border: `1px solid ${accent}22`,
+        boxShadow: `inset 0 1px 0 ${accent}12, 0 4px 24px rgba(0,0,0,0.35)`,
       }}
-      onMouseEnter={e => (e.currentTarget.style.boxShadow = `inset 0 1px 0 ${accent}18, 0 0 20px ${accent}18, 0 4px 20px rgba(0,0,0,0.4)`)}
-      onMouseLeave={e => (e.currentTarget.style.boxShadow = `inset 0 1px 0 ${accent}10, 0 4px 20px rgba(0,0,0,0.4)`)}
+      onMouseEnter={e => (e.currentTarget.style.boxShadow = `inset 0 1px 0 ${accent}20, 0 0 24px ${accent}20, 0 4px 24px rgba(0,0,0,0.35)`)}
+      onMouseLeave={e => (e.currentTarget.style.boxShadow = `inset 0 1px 0 ${accent}12, 0 4px 24px rgba(0,0,0,0.35)`)}
     >
       {/* corner glow */}
       <div className="absolute top-0 right-0 w-20 h-20 pointer-events-none overflow-hidden rounded-xl">
@@ -145,7 +146,7 @@ function StatCard({ label, value, sub, accent, icon: Icon, pulse = false }: {
             </span>
           : value}
       </div>
-      <div className="text-[10px] font-mono" style={{ color: GA(0.28) }}>{sub}</div>
+      <div className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.28)" }}>{sub}</div>
     </div>
   );
 }
@@ -153,16 +154,16 @@ function StatCard({ label, value, sub, accent, icon: Icon, pulse = false }: {
 function DataCell({ icon: Icon, label, value, color, sub }: { icon: any; label: string; value: string; color: string; sub?: string }) {
   return (
     <div className="p-4 rounded-xl transition-all duration-150"
-      style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${color}12` }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = `${color}28`)}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = `${color}12`)}
+      style={{ background: "rgba(255,255,255,0.03)", border: `1px solid rgba(255,255,255,0.07)` }}
+      onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+      onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.03)")}
     >
       <div className="flex items-center gap-1.5 mb-2">
         <Icon className="w-3 h-3" style={{ color }} />
-        <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: `${color}70` }}>{label}</span>
+        <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.30)" }}>{label}</span>
       </div>
       <div className="text-[20px] font-bold font-mono" style={{ color, textShadow: `0 0 14px ${color}45` }}>{value}</div>
-      {sub && <div className="text-[8px] font-mono mt-1" style={{ color: GA(0.22) }}>{sub}</div>}
+      {sub && <div className="text-[8px] font-mono mt-1" style={{ color: "rgba(255,255,255,0.22)" }}>{sub}</div>}
     </div>
   );
 }
@@ -199,9 +200,9 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 function TrendBadge({ current, previous }: { current: number; previous: number }) {
   if (previous === 0) return null;
   const pct = Math.round(((current - previous) / previous) * 100);
-  if (Math.abs(pct) < 1) return <Minus className="w-3 h-3" style={{ color: GA(0.3) }} />;
+  if (Math.abs(pct) < 1) return <Minus className="w-3 h-3" style={{ color: "rgba(255,255,255,0.30)" }} />;
   return pct > 0
-    ? <span className="flex items-center gap-0.5 text-[9px] font-mono" style={{ color: "#00ff88" }}><TrendingUp className="w-3 h-3" />+{pct}%</span>
+    ? <span className="flex items-center gap-0.5 text-[9px] font-mono" style={{ color: G }}><TrendingUp className="w-3 h-3" />+{pct}%</span>
     : <span className="flex items-center gap-0.5 text-[9px] font-mono" style={{ color: RED }}><TrendingDown className="w-3 h-3" />{pct}%</span>;
 }
 
@@ -305,10 +306,10 @@ export default function Dashboard() {
       <div className="flex items-center justify-center py-24">
         <div className="flex flex-col items-center gap-4">
           <div className="relative w-12 h-12">
-            <div className="absolute inset-0 rounded-full animate-ping" style={{ background: GA(0.06) }} />
-            <div className="absolute inset-2 rounded-full border-2 animate-spin" style={{ borderColor: `${G} transparent transparent transparent` }} />
+            <div className="absolute inset-0 rounded-full animate-ping" style={{ background: `${BLUE}18` }} />
+            <div className="absolute inset-2 rounded-full border-2 animate-spin" style={{ borderColor: `${BLUE} transparent transparent transparent` }} />
           </div>
-          <p className="text-[10px] font-mono uppercase tracking-[0.3em]" style={{ color: GA(0.30) }}>
+          <p className="text-[10px] font-mono uppercase tracking-[0.3em]" style={{ color: "rgba(255,255,255,0.28)" }}>
             &gt;_ Initializing systems...
           </p>
         </div>
@@ -324,15 +325,15 @@ export default function Dashboard() {
         <div>
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center relative"
-              style={{ background: GA(0.08), border: `1px solid ${GA(0.18)}`, boxShadow: `0 0 10px ${GA(0.15)}` }}>
-              <Cpu className="w-4 h-4" style={{ color: G, filter: `drop-shadow(0 0 5px ${G})` }} />
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: `0 0 6px ${G}` }} />
+              style={{ background: `${BLUE}14`, border: `1px solid ${BLUE}30`, boxShadow: `0 0 10px ${BLUE}20` }}>
+              <Cpu className="w-4 h-4" style={{ color: BLUE, filter: `drop-shadow(0 0 5px ${BLUE})` }} />
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse" style={{ background: G, boxShadow: `0 0 6px ${G}` }} />
             </div>
             <h1 className="text-[19px] font-mono font-bold tracking-tight text-white" data-testid="text-dashboard-title">
-              System<span style={{ color: G }}>_</span>Overview
+              System<span style={{ color: BLUE }}>_</span>Overview
             </h1>
           </div>
-          <p className="text-[10px] font-mono mt-1 pl-9 flex items-center gap-2" style={{ color: GA(0.30) }}>
+          <p className="text-[10px] font-mono mt-1 pl-9 flex items-center gap-2" style={{ color: "rgba(255,255,255,0.28)" }}>
             &gt; Realtime operational metrics
             <LiveClock />
           </p>
@@ -340,21 +341,21 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           {data?.role === "superadmin" && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-default"
-              style={{ background: GA(0.05), border: `1px solid ${GA(0.14)}`, boxShadow: `0 0 12px ${GA(0.08)}` }}>
-              <Shield className="w-3 h-3" style={{ color: G }} />
-              <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: GA(0.70) }}>Root Access</span>
+              style={{ background: `${RED}0c`, border: `1px solid ${RED}22`, boxShadow: `0 0 12px ${RED}10` }}>
+              <Shield className="w-3 h-3" style={{ color: RED }} />
+              <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: RED }}>Root Access</span>
             </div>
           )}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(0,255,65,0.04)", border: `1px solid ${GA(0.1)}` }}>
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: `${G}0a`, border: `1px solid ${G}18` }}>
             <Radio className="w-3 h-3 animate-pulse" style={{ color: G }} />
-            <span className="text-[9px] font-mono" style={{ color: GA(0.5) }}>LIVE</span>
+            <span className="text-[9px] font-mono" style={{ color: G }}>LIVE</span>
           </div>
         </div>
       </div>
 
       {/* ── 4 STAT CARDS ── */}
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total_Accounts" value={total} sub={`$${(data?.billingTotal || 0).toFixed(2)} invested`} accent={G} icon={Database} />
+        <StatCard label="Total_Accounts" value={total} sub={`$${(data?.billingTotal || 0).toFixed(2)} invested`} accent={BLUE} icon={Database} />
         <StatCard label="Verified" value={verified} sub={`${successRate}% success rate`} accent={G} icon={CheckCircle2} />
         <StatCard label="Failed" value={failed} sub={`${failRate}% fail rate`} accent={RED} icon={XCircle} />
         <StatCard label="In_Progress" value={pending} sub={pending > 0 ? "Processing..." : "Queue empty"} accent={AMBER} icon={Clock} pulse={pending > 0} />
@@ -364,11 +365,11 @@ export default function Dashboard() {
       <div className="grid gap-3 lg:grid-cols-3">
 
         {/* SUCCESS METRIC */}
-        <div className="rounded-xl p-5" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}`, boxShadow: `inset 0 1px 0 ${GA(0.06)}` }}
+        <div className="rounded-xl p-5 glass-card"
           data-testid="card-success-ring">
           <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="w-3 h-3" style={{ color: GA(0.35) }} />
-            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Success_Metric</span>
+            <BarChart3 className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Success_Metric</span>
           </div>
           <div className="flex flex-col items-center">
             <RingChart value={verified} total={total} />
@@ -389,16 +390,16 @@ export default function Dashboard() {
         </div>
 
         {/* SYSTEM STATUS */}
-        <div className="lg:col-span-2 rounded-xl p-5" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}`, boxShadow: `inset 0 1px 0 ${GA(0.06)}` }}>
+        <div className="lg:col-span-2 rounded-xl p-5 glass-card">
           <div className="flex items-center gap-2 mb-4">
-            <Terminal className="w-3 h-3" style={{ color: GA(0.35) }} />
-            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>System_Status</span>
+            <Terminal className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>System_Status</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <DataCell icon={DollarSign} label="Revenue" value={`$${(data?.billingTotal || 0).toFixed(2)}`} color={G} />
-            <DataCell icon={Users} label="Accounts" value={`${total}`} color={AMBER} />
+            <DataCell icon={Users} label="Accounts" value={`${total}`} color={BLUE} />
             <DataCell icon={CheckCircle2} label="Success" value={`${successRate}%`} color={G} />
-            <DataCell icon={DollarSign} label="Unit_Cost" value={`$${accountPrice.toFixed(2)}`} color={AMBER} />
+            <DataCell icon={DollarSign} label="Unit_Cost" value={`$${accountPrice.toFixed(2)}`} color={PURPLE} />
             {capSolverBalance !== null && (
               <DataCell icon={Zap} label="CapSolver" value={`$${parseFloat(capSolverBalance).toFixed(2)}`} color={AMBER} sub="CAPTCHA solving" />
             )}
@@ -416,11 +417,11 @@ export default function Dashboard() {
       <div className="grid gap-3 lg:grid-cols-3">
 
         {/* 7-DAY ACTIVITY SPARKLINE */}
-        <div className="rounded-xl p-5" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}` }}>
+        <div className="rounded-xl p-5 glass-card">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Calendar className="w-3 h-3" style={{ color: GA(0.35) }} />
-              <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Activity_7D</span>
+              <Calendar className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+              <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Activity_7D</span>
             </div>
             <TrendBadge current={todayCount} previous={yesterdayCount} />
           </div>
@@ -430,41 +431,41 @@ export default function Dashboard() {
           <div className="flex justify-between mt-2">
             {["6d", "5d", "4d", "3d", "2d", "1d", "Today"].map((d, i) => (
               <div key={d} className="flex flex-col items-center gap-0.5">
-                <span className="text-[9px] font-mono font-bold" style={{ color: dailyActivity[i] > 0 ? G : GA(0.2), textShadow: dailyActivity[i] > 0 ? `0 0 8px ${GA(0.5)}` : "none" }}>
+                <span className="text-[9px] font-mono font-bold" style={{ color: dailyActivity[i] > 0 ? G : "rgba(255,255,255,0.15)", textShadow: dailyActivity[i] > 0 ? `0 0 8px ${GA(0.5)}` : "none" }}>
                   {dailyActivity[i]}
                 </span>
-                <span className="text-[7px] font-mono" style={{ color: GA(0.2) }}>{d}</span>
+                <span className="text-[7px] font-mono" style={{ color: "rgba(255,255,255,0.18)" }}>{d}</span>
               </div>
             ))}
           </div>
-          <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${GA(0.07)}` }}>
+          <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
             <div className="flex justify-between">
               <div>
-                <div className="text-[8px] font-mono uppercase tracking-wider mb-1" style={{ color: GA(0.25) }}>Week Total</div>
+                <div className="text-[8px] font-mono uppercase tracking-wider mb-1" style={{ color: "rgba(255,255,255,0.22)" }}>Week Total</div>
                 <div className="text-[16px] font-bold font-mono" style={{ color: G, textShadow: `0 0 12px ${GA(0.5)}` }}>{weekTotal}</div>
               </div>
               <div className="text-right">
-                <div className="text-[8px] font-mono uppercase tracking-wider mb-1" style={{ color: GA(0.25) }}>Avg/Day</div>
-                <div className="text-[16px] font-bold font-mono" style={{ color: AMBER, textShadow: `0 0 12px ${AMBER}50` }}>{(weekTotal / 7).toFixed(1)}</div>
+                <div className="text-[8px] font-mono uppercase tracking-wider mb-1" style={{ color: "rgba(255,255,255,0.22)" }}>Avg/Day</div>
+                <div className="text-[16px] font-bold font-mono" style={{ color: BLUE, textShadow: `0 0 12px ${BLUE}50` }}>{(weekTotal / 7).toFixed(1)}</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* PLATFORM DISTRIBUTION */}
-        <div className="rounded-xl p-5" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}` }}>
+        <div className="rounded-xl p-5 glass-card">
           <div className="flex items-center gap-2 mb-4">
-            <Activity className="w-3 h-3" style={{ color: GA(0.35) }} />
-            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Platform_Dist</span>
+            <Activity className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Platform_Dist</span>
           </div>
           {topPlatforms.length === 0 ? (
-            <div className="flex items-center justify-center h-24" style={{ color: GA(0.2) }}>
+            <div className="flex items-center justify-center h-24" style={{ color: "rgba(255,255,255,0.18)" }}>
               <span className="text-[10px] font-mono">No data</span>
             </div>
           ) : (
             <div className="space-y-2.5">
               {topPlatforms.map(([platform, count], i) => {
-                const colors = [G, AMBER, BLUE, PURPLE, RED];
+                const colors = [BLUE, G, PURPLE, AMBER, RED];
                 const color = colors[i % colors.length];
                 const pct = total > 0 ? (count / total) * 100 : 0;
                 return (
@@ -473,10 +474,10 @@ export default function Dashboard() {
                       <span className="text-[10px] font-mono capitalize" style={{ color: "rgba(255,255,255,0.55)" }}>{platform}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-[9px] font-mono" style={{ color }}>{count}</span>
-                        <span className="text-[8px] font-mono" style={{ color: GA(0.25) }}>{pct.toFixed(0)}%</span>
+                        <span className="text-[8px] font-mono" style={{ color: "rgba(255,255,255,0.22)" }}>{pct.toFixed(0)}%</span>
                       </div>
                     </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: `${color}10` }}>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: `${color}15` }}>
                       <div className="h-full rounded-full transition-all duration-700"
                         style={{ width: `${pct}%`, background: color, boxShadow: `0 0 6px ${color}80` }} />
                     </div>
@@ -488,27 +489,29 @@ export default function Dashboard() {
         </div>
 
         {/* COUNTRY DISTRIBUTION + FREE USAGE */}
-        <div className="rounded-xl p-5 flex flex-col gap-4" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}` }}>
+        <div className="rounded-xl p-5 flex flex-col gap-4 glass-card">
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <Globe className="w-3 h-3" style={{ color: GA(0.35) }} />
-              <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Country_Top5</span>
+              <Globe className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+              <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Country_Top5</span>
             </div>
             {topCountries.length === 0 ? (
-              <div className="flex items-center justify-center h-16" style={{ color: GA(0.2) }}>
+              <div className="flex items-center justify-center h-16" style={{ color: "rgba(255,255,255,0.18)" }}>
                 <span className="text-[10px] font-mono">No data</span>
               </div>
             ) : (
               <div className="space-y-2">
                 {topCountries.map(([country, count], i) => {
                   const pct = total > 0 ? (count / total) * 100 : 0;
+                  const rankColors = [BLUE, G, PURPLE, AMBER, RED];
+                  const rc = rankColors[i % rankColors.length];
                   return (
                     <div key={country} className="flex items-center gap-2">
-                      <span className="text-[9px] font-mono w-5 text-right" style={{ color: GA(0.3) }}>{i + 1}.</span>
+                      <span className="text-[9px] font-mono w-5 text-right" style={{ color: rc }}>{i + 1}.</span>
                       <span className="text-[10px] font-mono flex-1 truncate" style={{ color: "rgba(255,255,255,0.5)" }}>{country}</span>
-                      <span className="text-[9px] font-mono w-6 text-right" style={{ color: G }}>{count}</span>
-                      <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: GA(0.06) }}>
-                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: G, boxShadow: `0 0 4px ${GA(0.5)}` }} />
+                      <span className="text-[9px] font-mono w-6 text-right" style={{ color: rc }}>{count}</span>
+                      <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: `${rc}18` }}>
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: rc, boxShadow: `0 0 4px ${rc}80` }} />
                       </div>
                     </div>
                   );
@@ -518,24 +521,24 @@ export default function Dashboard() {
           </div>
 
           {freeLimit > 0 && (
-            <div style={{ borderTop: `1px solid ${GA(0.07)}`, paddingTop: 12 }}>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 12 }}>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Free_Quota</span>
+                <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Free_Quota</span>
                 <span className="text-[9px] font-mono" style={{ color: freePct > 80 ? RED : freePct > 50 ? AMBER : G }}>
                   {freeUsed} / {freeLimit}
                 </span>
               </div>
-              <div className="h-2 rounded-full overflow-hidden" style={{ background: GA(0.06) }}>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
                 <div className="h-full rounded-full transition-all duration-700"
                   style={{
                     width: `${Math.min(freePct, 100)}%`,
                     background: freePct > 80
                       ? `linear-gradient(90deg, ${AMBER}, ${RED})`
-                      : `linear-gradient(90deg, ${G}, #aaff00)`,
+                      : `linear-gradient(90deg, ${BLUE}, ${G})`,
                     boxShadow: `0 0 8px ${freePct > 80 ? RED : G}60`,
                   }} />
               </div>
-              <div className="text-[8px] font-mono mt-1.5" style={{ color: GA(0.2) }}>{freePct.toFixed(0)}% used</div>
+              <div className="text-[8px] font-mono mt-1.5" style={{ color: "rgba(255,255,255,0.20)" }}>{freePct.toFixed(0)}% used</div>
             </div>
           )}
         </div>
@@ -543,19 +546,19 @@ export default function Dashboard() {
 
       {/* ── PIPELINE DISTRIBUTION ── */}
       {total > 0 && (
-        <div className="rounded-xl p-5" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}`, boxShadow: `inset 0 1px 0 ${GA(0.06)}` }}>
+        <div className="rounded-xl p-5 glass-card">
           <div className="flex items-center gap-2 mb-4">
-            <Activity className="w-3 h-3" style={{ color: GA(0.35) }} />
-            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Pipeline_Distribution</span>
+            <Activity className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+            <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Pipeline_Distribution</span>
           </div>
 
-          <div className="relative h-3 rounded-full overflow-hidden mb-3" style={{ background: GA(0.04), border: `1px solid ${GA(0.08)}` }}>
+          <div className="relative h-3 rounded-full overflow-hidden mb-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
             {[
-              { count: drawOkCount, grad: `linear-gradient(90deg, #00ff88, #00ff41)`, glow: "#00ff41" },
-              { count: verifiedOnlyCount, grad: `linear-gradient(90deg, #00ff41, ${BLUE})`, glow: BLUE },
-              { count: drawRegCount, grad: `linear-gradient(90deg, ${AMBER}, #8b5cf6)`, glow: AMBER },
-              { count: processingCount, grad: `linear-gradient(90deg, #ffcc00, #ff9900)`, glow: "#ffcc00" },
-              { count: failed, grad: `linear-gradient(90deg, ${RED}, #cc0022)`, glow: RED },
+              { count: drawOkCount, grad: `linear-gradient(90deg, ${G}, #52e884)`, glow: G },
+              { count: verifiedOnlyCount, grad: `linear-gradient(90deg, ${BLUE}, #38bdf8)`, glow: BLUE },
+              { count: drawRegCount, grad: `linear-gradient(90deg, ${PURPLE}, #e879f9)`, glow: PURPLE },
+              { count: processingCount, grad: `linear-gradient(90deg, ${AMBER}, #fbbf24)`, glow: AMBER },
+              { count: failed, grad: `linear-gradient(90deg, ${RED}, #f87171)`, glow: RED },
             ].map((seg, i) => seg.count > 0 && (
               <div key={i} className="h-full float-left transition-all duration-700"
                 style={{ width: `${(seg.count / total) * 100}%`, background: seg.grad, boxShadow: `0 0 8px ${seg.glow}60` }} />
@@ -564,10 +567,10 @@ export default function Dashboard() {
 
           <div className="flex items-center gap-5 flex-wrap">
             {[
-              { label: "Draw OK", count: drawOkCount, color: "#00ff88" },
-              { label: "Verified", count: verifiedOnlyCount, color: G },
-              { label: "Draw Reg", count: drawRegCount, color: AMBER },
-              { label: "Active", count: processingCount, color: "#ffcc00" },
+              { label: "Draw OK", count: drawOkCount, color: G },
+              { label: "Verified", count: verifiedOnlyCount, color: BLUE },
+              { label: "Draw Reg", count: drawRegCount, color: PURPLE },
+              { label: "Active", count: processingCount, color: AMBER },
               { label: "Failed", count: failed, color: RED },
             ].filter(s => s.count > 0).map(s => (
               <div key={s.label} className="flex items-center gap-1.5">
@@ -583,27 +586,27 @@ export default function Dashboard() {
 
       {/* ── RECENT OPERATIONS ── */}
       {recentAccounts.length > 0 && (
-        <div className="rounded-xl" style={{ background: "linear-gradient(145deg, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 100%)", border: `1px solid ${GA(0.10)}`, boxShadow: `inset 0 1px 0 ${GA(0.06)}` }}>
-          <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: `1px solid ${GA(0.07)}` }}>
+        <div className="rounded-xl glass-card overflow-hidden">
+          <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
             <div className="flex items-center gap-2">
-              <Clock className="w-3 h-3" style={{ color: GA(0.35) }} />
-              <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: GA(0.30) }}>Recent_Operations</span>
+              <Clock className="w-3 h-3" style={{ color: "rgba(255,255,255,0.25)" }} />
+              <span className="text-[8px] font-mono uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>Recent_Operations</span>
             </div>
             <a href="/admin/accounts" className="flex items-center gap-1 text-[9px] font-mono transition-colors"
-              style={{ color: GA(0.40) }}
-              onMouseEnter={e => (e.currentTarget.style.color = G)}
-              onMouseLeave={e => (e.currentTarget.style.color = GA(0.40))}
+              style={{ color: "rgba(255,255,255,0.35)" }}
+              onMouseEnter={e => (e.currentTarget.style.color = BLUE)}
+              onMouseLeave={e => (e.currentTarget.style.color = "rgba(255,255,255,0.35)")}
               data-testid="link-view-all-accounts">
               View all <ArrowUpRight className="w-3 h-3" />
             </a>
           </div>
-          <div className="divide-y" style={{ borderColor: GA(0.04) }}>
+          <div className="divide-y" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
             {recentAccounts.map((acc) => {
               const statusColor =
-                acc.status === "completed" ? "#00ff88" :
-                acc.status === "verified" ? G :
+                acc.status === "completed" ? G :
+                acc.status === "verified" ? BLUE :
                 acc.status === "failed" ? RED :
-                acc.status === "draw_registering" ? AMBER : "#ffaa00";
+                acc.status === "draw_registering" ? PURPLE : AMBER;
               const statusLabel =
                 acc.status === "completed" ? "DRAW_OK" :
                 acc.status === "verified" ? "VERIFIED" :
@@ -616,7 +619,7 @@ export default function Dashboard() {
                 <div key={acc.id}
                   className="flex items-center justify-between px-5 py-3 group transition-colors duration-100"
                   style={{ background: "transparent" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = GA(0.025))}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
                   onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   data-testid={`row-recent-${acc.id}`}>
                   <div className="flex items-center gap-3">
@@ -627,10 +630,10 @@ export default function Dashboard() {
                         {acc.firstName} {acc.lastName}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] font-mono" style={{ color: GA(0.28) }}>{acc.email}</span>
+                        <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.30)" }}>{acc.email}</span>
                         <button onClick={() => { sounds.click(); copyEmail(acc.email); }}
                           className="opacity-0 group-hover:opacity-100 transition-opacity"
-                          style={{ color: GA(0.30) }}
+                          style={{ color: "rgba(255,255,255,0.35)" }}
                           data-testid={`button-copy-recent-${acc.id}`}>
                           <Copy className="w-2.5 h-2.5" />
                         </button>
@@ -639,18 +642,18 @@ export default function Dashboard() {
                   </div>
                   <div className="flex items-center gap-3">
                     {acc.platform && (
-                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded capitalize" style={{ color: GA(0.35), background: GA(0.05), border: `1px solid ${GA(0.08)}` }}>
+                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded capitalize" style={{ color: "rgba(255,255,255,0.38)", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}>
                         {acc.platform}
                       </span>
                     )}
                     {acc.country && (
-                      <span className="text-[8px] font-mono" style={{ color: GA(0.28) }}>{acc.country}</span>
+                      <span className="text-[8px] font-mono" style={{ color: "rgba(255,255,255,0.28)" }}>{acc.country}</span>
                     )}
                     <span className="text-[8.5px] font-mono px-2 py-1 rounded"
                       style={{ color: statusColor, background: `${statusColor}10`, border: `1px solid ${statusColor}25` }}>
                       {statusLabel}
                     </span>
-                    <span className="text-[9px] font-mono w-14 text-right" style={{ color: GA(0.22) }}>
+                    <span className="text-[9px] font-mono w-14 text-right" style={{ color: "rgba(255,255,255,0.20)" }}>
                       {new Date(acc.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </span>
                   </div>
