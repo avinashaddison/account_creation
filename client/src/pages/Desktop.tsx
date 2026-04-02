@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import {
   LayoutDashboard, Archive, Server, Mail, MailOpen,
@@ -6,64 +6,66 @@ import {
   Layers, Mic2, MessageSquare, Globe, Search, Bell,
   Bookmark, SlidersHorizontal, CreditCard, Receipt,
   Wallet, ShoppingCart, TrendingUp, Users, Settings,
-  Lock, LogOut, User,
+  Lock, LogOut, User, Wifi, Battery,
 } from "lucide-react";
 import { sounds } from "@/lib/sounds";
 import type { AuthUser } from "@/App";
 
-const BLUE   = "#0a84ff";
-const GREEN  = "#30d158";
-const PURPLE = "#bf5af2";
-const AMBER  = "#ff9f0a";
-const RED    = "#ff453a";
-const GREY   = "#8e8e93";
+const SF = "-apple-system, 'Helvetica Neue', BlinkMacSystemFont, sans-serif";
 
-type AppDef = { name: string; href: string; icon: any; color: string };
+type AppDef = {
+  name: string;
+  href: string;
+  icon: any;
+  gradient: string;
+  shadow: string;
+};
+
 type Category = { label: string; apps: AppDef[] };
 
 const CATEGORIES: Category[] = [
   {
     label: "Core System",
     apps: [
-      { name: "Dashboard",      href: "/admin/home",              icon: LayoutDashboard, color: GREEN  },
-      { name: "Account Stock",  href: "/admin/accounts",          icon: Archive,         color: AMBER  },
-      { name: "Create Account", href: "/admin/create-server",     icon: Server,          color: GREEN  },
-      { name: "Email",          href: "/admin/email-workspace",   icon: Mail,            color: BLUE   },
-      { name: "Outlook",        href: "/admin/outlook-workspace", icon: MailOpen,        color: BLUE   },
+      { name: "Dashboard",      href: "/admin/home",              icon: LayoutDashboard, gradient: "linear-gradient(145deg,#34c759,#248a3d)",  shadow: "#248a3d" },
+      { name: "Account Stock",  href: "/admin/accounts",          icon: Archive,         gradient: "linear-gradient(145deg,#ff9f0a,#c93400)",  shadow: "#c93400" },
+      { name: "Create Account", href: "/admin/create-server",     icon: Server,          gradient: "linear-gradient(145deg,#30d158,#1a6b2e)",  shadow: "#1a6b2e" },
+      { name: "Email",          href: "/admin/email-workspace",   icon: Mail,            gradient: "linear-gradient(145deg,#0a84ff,#004fc4)",  shadow: "#004fc4" },
+      { name: "Outlook",        href: "/admin/outlook-workspace", icon: MailOpen,        gradient: "linear-gradient(145deg,#0078d4,#00408a)",  shadow: "#00408a" },
     ],
   },
   {
     label: "Platforms",
     apps: [
-      { name: "LA28",        href: "/admin/la28-create",        icon: Zap,           color: BLUE   },
-      { name: "Ticketmaster",href: "/admin/tm-create",          icon: Ticket,        color: RED    },
-      { name: "UEFA",        href: "/admin/uefa-create",        icon: Shield,        color: BLUE   },
-      { name: "Bruno Mars",  href: "/admin/brunomars-create",   icon: Music,         color: AMBER  },
-      { name: "Replit",      href: "/admin/replit-create",      icon: Terminal,      color: PURPLE },
-      { name: "Lovable",     href: "/admin/lovable-create",     icon: Heart,         color: RED    },
-      { name: "V0",          href: "/admin/v0-create",          icon: Code2,         color: GREY   },
-      { name: "Adobe",       href: "/admin/adobe-create",       icon: Layers,        color: RED    },
-      { name: "ElevenLabs",  href: "/admin/elevenlabs-create",  icon: Mic2,          color: PURPLE },
-      { name: "ChatGPT",     href: "/admin/chatgpt-create",     icon: MessageSquare, color: GREEN  },
-      { name: "ZenRows",     href: "/admin/zenrows-register",   icon: Globe,         color: BLUE   },
+      { name: "LA28",        href: "/admin/la28-create",        icon: Zap,           gradient: "linear-gradient(145deg,#0a84ff,#0050cc)",  shadow: "#0050cc" },
+      { name: "Ticketmaster",href: "/admin/tm-create",          icon: Ticket,        gradient: "linear-gradient(145deg,#ff453a,#900000)",  shadow: "#900000" },
+      { name: "UEFA",        href: "/admin/uefa-create",        icon: Shield,        gradient: "linear-gradient(145deg,#005baa,#003070)",  shadow: "#003070" },
+      { name: "Bruno Mars",  href: "/admin/brunomars-create",   icon: Music,         gradient: "linear-gradient(145deg,#ff9f0a,#d4680d)",  shadow: "#d4680d" },
+      { name: "Replit",      href: "/admin/replit-create",      icon: Terminal,      gradient: "linear-gradient(145deg,#bf5af2,#7b24cc)",  shadow: "#7b24cc" },
+      { name: "Lovable",     href: "/admin/lovable-create",     icon: Heart,         gradient: "linear-gradient(145deg,#ff375f,#b00028)",  shadow: "#b00028" },
+      { name: "V0",          href: "/admin/v0-create",          icon: Code2,         gradient: "linear-gradient(145deg,#636366,#3a3a3c)",  shadow: "#3a3a3c" },
+      { name: "Adobe",       href: "/admin/adobe-create",       icon: Layers,        gradient: "linear-gradient(145deg,#fa0f00,#8c0000)",  shadow: "#8c0000" },
+      { name: "ElevenLabs",  href: "/admin/elevenlabs-create",  icon: Mic2,          gradient: "linear-gradient(145deg,#5e5ce6,#30309e)",  shadow: "#30309e" },
+      { name: "ChatGPT",     href: "/admin/chatgpt-create",     icon: MessageSquare, gradient: "linear-gradient(145deg,#19c37d,#0b7048)",  shadow: "#0b7048" },
+      { name: "ZenRows",     href: "/admin/zenrows-register",   icon: Globe,         gradient: "linear-gradient(145deg,#1d9bf0,#0042a0)",  shadow: "#0042a0" },
     ],
   },
   {
     label: "Ticketmaster Suite",
     apps: [
-      { name: "Event Scanner",   href: "/admin/tm-event-scanner",  icon: Search,            color: RED   },
-      { name: "Live Alerts",     href: "/admin/tm-live-alerts",    icon: Bell,              color: RED   },
-      { name: "Tracked Events",  href: "/admin/tm-tracked-events", icon: Bookmark,          color: RED   },
-      { name: "TM Settings",     href: "/admin/tm-settings",       icon: SlidersHorizontal, color: AMBER },
-      { name: "My Cards",        href: "/admin/my-cards",          icon: CreditCard,        color: AMBER },
+      { name: "Event Scanner",   href: "/admin/tm-event-scanner",  icon: Search,            gradient: "linear-gradient(145deg,#ff3b30,#820000)", shadow: "#820000" },
+      { name: "Live Alerts",     href: "/admin/tm-live-alerts",    icon: Bell,              gradient: "linear-gradient(145deg,#ff453a,#a50000)", shadow: "#a50000" },
+      { name: "Tracked Events",  href: "/admin/tm-tracked-events", icon: Bookmark,          gradient: "linear-gradient(145deg,#ff9500,#bf5100)", shadow: "#bf5100" },
+      { name: "TM Settings",     href: "/admin/tm-settings",       icon: SlidersHorizontal, gradient: "linear-gradient(145deg,#8e8e93,#48484a)", shadow: "#48484a" },
+      { name: "My Cards",        href: "/admin/my-cards",          icon: CreditCard,        gradient: "linear-gradient(145deg,#ff9f0a,#8a5000)", shadow: "#8a5000" },
     ],
   },
   {
     label: "Finance",
     apps: [
-      { name: "Billing",        href: "/admin/billing",        icon: Receipt,     color: AMBER },
-      { name: "Wallet",         href: "/admin/wallet",         icon: Wallet,      color: GREEN },
-      { name: "Checkout Cards", href: "/admin/checkout-cards", icon: ShoppingCart,color: GREEN },
+      { name: "Billing",        href: "/admin/billing",        icon: Receipt,     gradient: "linear-gradient(145deg,#ff9500,#c05000)", shadow: "#c05000" },
+      { name: "Wallet",         href: "/admin/wallet",         icon: Wallet,      gradient: "linear-gradient(145deg,#34c759,#1a7035)", shadow: "#1a7035" },
+      { name: "Checkout Cards", href: "/admin/checkout-cards", icon: ShoppingCart,gradient: "linear-gradient(145deg,#30d158,#1a6b2e)", shadow: "#1a6b2e" },
     ],
   },
 ];
@@ -71,131 +73,147 @@ const CATEGORIES: Category[] = [
 const ADMIN_CATEGORY: Category = {
   label: "Administration",
   apps: [
-    { name: "Earnings",        href: "/admin/earnings",        icon: TrendingUp, color: GREEN },
-    { name: "Manage Admins",   href: "/admin/manage-admins",   icon: Users,      color: RED   },
-    { name: "API Settings",    href: "/admin/settings",        icon: Settings,   color: GREY  },
-    { name: "Private Account", href: "/admin/private-account", icon: Lock,       color: RED   },
+    { name: "Earnings",        href: "/admin/earnings",        icon: TrendingUp, gradient: "linear-gradient(145deg,#30d158,#1a7035)", shadow: "#1a7035" },
+    { name: "Manage Admins",   href: "/admin/manage-admins",   icon: Users,      gradient: "linear-gradient(145deg,#ff453a,#8c0000)", shadow: "#8c0000" },
+    { name: "API Settings",    href: "/admin/settings",        icon: Settings,   gradient: "linear-gradient(145deg,#636366,#3a3a3c)", shadow: "#3a3a3c" },
+    { name: "Private Account", href: "/admin/private-account", icon: Lock,       gradient: "linear-gradient(145deg,#ff453a,#700000)", shadow: "#700000" },
   ],
 };
 
 const DOCK_APPS: AppDef[] = [
-  { name: "Dashboard",   href: "/admin/home",           icon: LayoutDashboard, color: GREEN  },
-  { name: "Accounts",    href: "/admin/accounts",       icon: Archive,         color: AMBER  },
-  { name: "Replit",      href: "/admin/replit-create",  icon: Terminal,        color: PURPLE },
-  { name: "Ticketmaster",href: "/admin/tm-create",      icon: Ticket,          color: RED    },
-  { name: "Wallet",      href: "/admin/wallet",         icon: Wallet,          color: GREEN  },
-  { name: "Email",       href: "/admin/email-workspace",icon: Mail,            color: BLUE   },
-  { name: "Billing",     href: "/admin/billing",        icon: Receipt,         color: AMBER  },
+  { name: "Dashboard",   href: "/admin/home",            icon: LayoutDashboard, gradient: "linear-gradient(145deg,#34c759,#248a3d)", shadow: "#248a3d" },
+  { name: "Accounts",    href: "/admin/accounts",        icon: Archive,         gradient: "linear-gradient(145deg,#ff9f0a,#c93400)", shadow: "#c93400" },
+  { name: "Replit",      href: "/admin/replit-create",   icon: Terminal,        gradient: "linear-gradient(145deg,#bf5af2,#7b24cc)", shadow: "#7b24cc" },
+  { name: "Ticketmaster",href: "/admin/tm-create",       icon: Ticket,          gradient: "linear-gradient(145deg,#ff453a,#900000)", shadow: "#900000" },
+  { name: "Wallet",      href: "/admin/wallet",          icon: Wallet,          gradient: "linear-gradient(145deg,#34c759,#1a7035)", shadow: "#1a7035" },
+  { name: "Email",       href: "/admin/email-workspace", icon: Mail,            gradient: "linear-gradient(145deg,#0a84ff,#004fc4)", shadow: "#004fc4" },
 ];
 
 function AppIcon({ app, onClick }: { app: AppDef; onClick: () => void }) {
+  const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
+
   return (
-    <button
+    <div
+      className="flex flex-col items-center gap-[7px] cursor-pointer select-none"
+      style={{ width: 88 }}
       onClick={onClick}
       onMouseEnter={() => { setHovered(true); sounds.hover(); }}
-      onMouseLeave={() => setHovered(false)}
-      className="flex flex-col items-center gap-2.5 outline-none"
-      style={{ width: 96, padding: "10px 4px", transition: "transform 0.16s cubic-bezier(0.34,1.56,0.64,1)" , transform: hovered ? "scale(1.1) translateY(-5px)" : "scale(1) translateY(0)" }}
+      onMouseLeave={() => { setHovered(false); setPressed(false); }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       data-testid={`app-${app.name.toLowerCase().replace(/ /g, "-")}`}
     >
-      {/* Icon box */}
       <div
-        className="relative w-[72px] h-[72px] rounded-2xl flex items-center justify-center overflow-hidden"
+        className="relative flex items-center justify-center overflow-hidden"
         style={{
-          background: hovered
-            ? `linear-gradient(145deg, ${app.color}38, ${app.color}18)`
-            : `linear-gradient(145deg, ${app.color}26, ${app.color}0e)`,
-          border: `1px solid ${app.color}${hovered ? "65" : "30"}`,
-          boxShadow: hovered
-            ? `0 0 32px ${app.color}35, 0 8px 24px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12)`
-            : `0 2px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)`,
-          transition: "all 0.16s ease",
+          width: 64, height: 64,
+          borderRadius: 15,
+          background: app.gradient,
+          boxShadow: pressed
+            ? `0 2px 8px ${app.shadow}70`
+            : hovered
+              ? `0 10px 30px ${app.shadow}80, 0 4px 12px rgba(0,0,0,0.4)`
+              : `0 6px 20px ${app.shadow}60, 0 2px 6px rgba(0,0,0,0.3)`,
+          transform: pressed
+            ? "scale(0.88)"
+            : hovered
+              ? "scale(1.08) translateY(-3px)"
+              : "scale(1) translateY(0)",
+          transition: pressed
+            ? "transform 0.06s ease, box-shadow 0.06s ease"
+            : "transform 0.28s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s ease",
         }}
       >
-        {/* Gloss overlay */}
+        {/* iOS gloss: top half shine */}
         <div
-          className="absolute inset-0 rounded-2xl pointer-events-none"
-          style={{
-            background: "linear-gradient(145deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 45%, transparent 100%)",
-          }}
+          className="absolute inset-x-0 top-0 h-1/2 pointer-events-none"
+          style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.06) 100%)", borderRadius: "15px 15px 0 0" }}
         />
-        <app.icon
-          className="w-[34px] h-[34px] relative z-10"
-          style={{
-            color: app.color,
-            filter: hovered
-              ? `drop-shadow(0 0 12px ${app.color}) drop-shadow(0 0 4px ${app.color})`
-              : `drop-shadow(0 0 5px ${app.color}90)`,
-            transition: "filter 0.16s ease",
-          }}
-        />
+        {/* Pressed overlay */}
+        {pressed && (
+          <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(0,0,0,0.18)", borderRadius: 15 }} />
+        )}
+        <app.icon className="w-8 h-8 relative z-10" style={{ color: "rgba(255,255,255,0.95)", filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.4))" }} />
       </div>
-      {/* Label */}
+
       <span
-        className="text-[11px] font-mono text-center leading-tight select-none"
+        className="text-center leading-tight"
         style={{
-          color: hovered ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.45)",
-          transition: "color 0.16s ease",
+          fontFamily: SF,
+          fontSize: 11,
+          fontWeight: 500,
+          color: "rgba(255,255,255,0.88)",
+          textShadow: "0 1px 3px rgba(0,0,0,0.8)",
           maxWidth: 80,
+          letterSpacing: -0.1,
         }}
       >
         {app.name}
       </span>
-    </button>
+    </div>
   );
 }
 
 function DockIcon({ app, onClick }: { app: AppDef; onClick: () => void }) {
+  const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
+
   return (
-    <div className="relative flex flex-col items-center">
+    <div className="relative flex flex-col items-center" style={{ width: 60 }}>
       {/* Tooltip */}
       <div
-        className="absolute bottom-full mb-2 px-2 py-1 rounded-lg text-[10px] font-mono whitespace-nowrap pointer-events-none"
+        className="absolute px-2.5 py-1 rounded-xl text-[11px] whitespace-nowrap pointer-events-none"
         style={{
-          background: "rgba(20,20,32,0.95)",
-          border: "1px solid rgba(255,255,255,0.10)",
-          color: "rgba(255,255,255,0.75)",
+          fontFamily: SF, fontWeight: 600,
+          background: "rgba(30,30,30,0.88)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          color: "rgba(255,255,255,0.90)",
+          bottom: "calc(100% + 10px)",
+          backdropFilter: "blur(20px)",
           opacity: hovered ? 1 : 0,
-          transform: hovered ? "translateY(0)" : "translateY(4px)",
-          transition: "all 0.12s ease",
+          transform: hovered ? "translateY(0) scale(1)" : "translateY(4px) scale(0.95)",
+          transition: "all 0.14s cubic-bezier(0.34,1.56,0.64,1)",
         }}
       >
         {app.name}
       </div>
-      <button
+
+      <div
+        className="relative flex items-center justify-center overflow-hidden cursor-pointer"
+        style={{
+          width: 52, height: 52,
+          borderRadius: 12,
+          background: app.gradient,
+          boxShadow: pressed
+            ? `0 2px 6px ${app.shadow}70`
+            : `0 6px 18px ${app.shadow}65, 0 2px 6px rgba(0,0,0,0.3)`,
+          transform: pressed
+            ? "scale(0.88)"
+            : hovered
+              ? "scale(1.14) translateY(-5px)"
+              : "scale(1)",
+          transition: pressed
+            ? "transform 0.06s ease"
+            : "transform 0.28s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s ease",
+        }}
         onClick={onClick}
         onMouseEnter={() => { setHovered(true); sounds.hover(); }}
-        onMouseLeave={() => setHovered(false)}
-        className="outline-none"
-        style={{
-          transition: "transform 0.16s cubic-bezier(0.34,1.56,0.64,1)",
-          transform: hovered ? "scale(1.22) translateY(-4px)" : "scale(1) translateY(0)",
-        }}
+        onMouseLeave={() => { setHovered(false); setPressed(false); }}
+        onMouseDown={() => setPressed(true)}
+        onMouseUp={() => setPressed(false)}
         data-testid={`dock-${app.name.toLowerCase().replace(/ /g, "-")}`}
       >
         <div
-          className="relative w-[44px] h-[44px] rounded-xl flex items-center justify-center overflow-hidden"
-          style={{
-            background: `linear-gradient(145deg, ${app.color}30, ${app.color}12)`,
-            border: `1px solid ${app.color}${hovered ? "60" : "28"}`,
-            boxShadow: hovered
-              ? `0 0 20px ${app.color}40, 0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.14)`
-              : `inset 0 1px 0 rgba(255,255,255,0.06)`,
-            transition: "all 0.16s ease",
-          }}
-        >
-          <div className="absolute inset-0 rounded-xl" style={{ background: "linear-gradient(145deg, rgba(255,255,255,0.12) 0%, transparent 50%)" }} />
-          <app.icon
-            className="w-5 h-5 relative z-10"
-            style={{
-              color: app.color,
-              filter: `drop-shadow(0 0 4px ${app.color}80)`,
-            }}
-          />
-        </div>
-      </button>
+          className="absolute inset-x-0 top-0 h-1/2 pointer-events-none"
+          style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.05) 100%)", borderRadius: "12px 12px 0 0" }}
+        />
+        {pressed && <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(0,0,0,0.18)", borderRadius: 12 }} />}
+        <app.icon className="w-[26px] h-[26px] relative z-10" style={{ color: "rgba(255,255,255,0.95)", filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.35))" }} />
+      </div>
+
+      {/* Active dot */}
+      <div className="w-[4px] h-[4px] rounded-full mt-1.5" style={{ background: "rgba(255,255,255,0.55)" }} />
     </div>
   );
 }
@@ -215,188 +233,105 @@ export default function Desktop({ user, onLogout }: Props) {
     ? [...CATEGORIES, ADMIN_CATEGORY]
     : CATEGORIES;
 
-  const panelName = user.panelName || "Control Panel";
-  const hour      = time.getHours();
-  const greeting  = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const timeStr   = time.toLocaleTimeString("en-US", { hour12: false });
-  const dateStr   = time.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const hour    = time.getHours();
+  const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const timeStr  = time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "#06060e", position: "relative" }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ position: "relative" }}>
 
-      {/* ── Animated background orbs ── */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
-        <div style={{
-          position: "absolute", width: 600, height: 600, borderRadius: "50%",
-          background: `radial-gradient(circle, ${BLUE}18 0%, transparent 70%)`,
-          top: "-10%", left: "-5%", animation: "orb1 20s ease-in-out infinite",
-          filter: "blur(40px)",
+      {/* ── iOS Wallpaper ── */}
+      <div className="absolute inset-0" style={{ zIndex: 0 }}>
+        {/* Base gradient */}
+        <div className="absolute inset-0" style={{
+          background: "linear-gradient(160deg, #0b0b24 0%, #0e1042 25%, #130832 50%, #0a0f3a 75%, #060615 100%)",
         }} />
-        <div style={{
-          position: "absolute", width: 500, height: 500, borderRadius: "50%",
-          background: `radial-gradient(circle, ${PURPLE}14 0%, transparent 70%)`,
-          bottom: "-15%", right: "10%", animation: "orb2 25s ease-in-out infinite",
-          filter: "blur(50px)",
+        {/* Aurora layer 1 */}
+        <div className="absolute inset-0" style={{
+          background: "radial-gradient(ellipse 70% 50% at 20% 10%, rgba(120,50,220,0.45) 0%, transparent 70%)",
+          animation: "aurora1 18s ease-in-out infinite",
         }} />
-        <div style={{
-          position: "absolute", width: 400, height: 400, borderRadius: "50%",
-          background: `radial-gradient(circle, ${GREEN}10 0%, transparent 70%)`,
-          top: "35%", right: "-5%", animation: "orb3 18s ease-in-out infinite",
-          filter: "blur(35px)",
+        {/* Aurora layer 2 */}
+        <div className="absolute inset-0" style={{
+          background: "radial-gradient(ellipse 55% 65% at 80% 90%, rgba(30,80,200,0.40) 0%, transparent 65%)",
+          animation: "aurora2 24s ease-in-out infinite",
+        }} />
+        {/* Aurora layer 3 */}
+        <div className="absolute inset-0" style={{
+          background: "radial-gradient(ellipse 45% 35% at 60% 40%, rgba(80,20,180,0.25) 0%, transparent 60%)",
+          animation: "aurora3 20s ease-in-out infinite",
+        }} />
+        {/* Stars / sparkle dots */}
+        <div className="absolute inset-0" style={{
+          backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.55) 1px, transparent 1px), radial-gradient(circle, rgba(255,255,255,0.30) 1px, transparent 1px)",
+          backgroundSize: "120px 120px, 80px 80px",
+          backgroundPosition: "0 0, 40px 40px",
         }} />
       </div>
 
-      {/* Dot grid */}
-      <div className="absolute inset-0 pointer-events-none" style={{
-        zIndex: 1,
-        backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.032) 1px, transparent 1px)",
-        backgroundSize: "26px 26px",
-      }} />
-
-      {/* Vignette */}
-      <div className="absolute inset-0 pointer-events-none" style={{
-        zIndex: 2,
-        background: "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 50%, rgba(6,6,14,0.55) 100%)",
-      }} />
-
-      {/* ── OS Menu Bar ── */}
-      <header
-        className="relative flex items-center gap-3 px-5 shrink-0"
-        style={{
-          zIndex: 30, height: 44,
-          background: "rgba(6,6,14,0.88)",
-          backdropFilter: "blur(28px)",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          boxShadow: "0 1px 0 rgba(255,255,255,0.04)",
-        }}
+      {/* ── iOS Status Bar ── */}
+      <div
+        className="relative flex items-center justify-between px-7 shrink-0"
+        style={{ zIndex: 20, height: 44 }}
       >
-        {/* Traffic lights */}
-        <div className="flex items-center gap-[7px] shrink-0">
-          <div className="w-[11px] h-[11px] rounded-full" style={{ background: "#ff5f57", boxShadow: "0 0 8px #ff5f5780" }} />
-          <div className="w-[11px] h-[11px] rounded-full" style={{ background: "#febc2e", boxShadow: "0 0 8px #febc2e80" }} />
-          <div className="w-[11px] h-[11px] rounded-full" style={{ background: "#28c840", boxShadow: "0 0 8px #28c84080" }} />
-        </div>
-
-        <div className="w-px h-5 mx-1" style={{ background: "rgba(255,255,255,0.07)" }} />
-
-        <span className="text-[12px] font-mono font-semibold tracking-wide" style={{ color: "rgba(255,255,255,0.62)" }}>
-          {panelName}
+        {/* Time */}
+        <span style={{ fontFamily: SF, fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.95)", letterSpacing: -0.3 }}>
+          {timeStr}
         </span>
 
-        <div className="flex-1" />
-
-        {/* Live dot */}
-        <div className="flex items-center gap-1.5">
-          <div className="w-[7px] h-[7px] rounded-full" style={{ background: GREEN, boxShadow: `0 0 10px ${GREEN}`, animation: "pulse 2s ease-in-out infinite" }} />
-          <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.22)" }}>LIVE</span>
-        </div>
-
-        <div className="w-px h-5 mx-2" style={{ background: "rgba(255,255,255,0.07)" }} />
-
-        {/* Time */}
-        <div className="flex flex-col items-end gap-[1px]">
-          <span className="text-[12px] font-mono tabular-nums font-medium" style={{ color: "rgba(255,255,255,0.65)" }}>{timeStr}</span>
-          <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.22)" }}>{dateStr}</span>
-        </div>
-
-        <div className="w-px h-5 mx-2" style={{ background: "rgba(255,255,255,0.07)" }} />
-
-        {/* User avatar */}
+        {/* Right: status icons */}
         <div className="flex items-center gap-2">
-          <div
-            className="w-[26px] h-[26px] rounded-full flex items-center justify-center"
-            style={{
-              background: `linear-gradient(135deg, ${BLUE}35, ${PURPLE}25)`,
-              border: `1px solid ${BLUE}45`,
-              boxShadow: `0 0 10px ${BLUE}25`,
-            }}
-          >
-            <User className="w-3 h-3" style={{ color: BLUE }} />
-          </div>
-          <div className="flex flex-col gap-0">
-            <span className="text-[11px] font-mono leading-none" style={{ color: "rgba(255,255,255,0.55)" }}>{user.username}</span>
-            <span className="text-[8px] font-mono leading-none mt-0.5 uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.22)" }}>{user.role}</span>
-          </div>
-        </div>
-
-        {/* Logout */}
-        <button
-          onClick={() => { sounds.logout(); onLogout(); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-mono outline-none ml-1"
-          style={{
-            background: "rgba(255,68,58,0.09)", border: "1px solid rgba(255,68,58,0.22)", color: "rgba(255,68,58,0.55)",
-            transition: "all 0.12s ease",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,68,58,0.18)"; e.currentTarget.style.borderColor = "rgba(255,68,58,0.50)"; e.currentTarget.style.color = RED; e.currentTarget.style.boxShadow = `0 0 14px rgba(255,68,58,0.20)`; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,68,58,0.09)"; e.currentTarget.style.borderColor = "rgba(255,68,58,0.22)"; e.currentTarget.style.color = "rgba(255,68,58,0.55)"; e.currentTarget.style.boxShadow = "none"; }}
-          data-testid="button-logout"
-        >
-          <LogOut className="w-3 h-3" />
-          Sign Out
-        </button>
-      </header>
-
-      {/* ── Desktop Content ── */}
-      <main
-        className="relative flex-1 overflow-y-auto px-14 py-8"
-        style={{ zIndex: 10, scrollbarWidth: "none", paddingBottom: 96 }}
-      >
-        {/* Welcome */}
-        <div className="mb-12">
-          <div className="flex items-end gap-4 flex-wrap">
-            <div>
-              <p className="text-[11px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: "rgba(255,255,255,0.22)" }}>
-                {greeting}
-              </p>
-              <h1 className="text-[32px] font-mono font-bold leading-none" style={{ color: "rgba(255,255,255,0.88)" }}>
-                {user.username}
-                <span className="text-[32px]" style={{
-                  background: `linear-gradient(90deg, ${BLUE}, ${PURPLE})`,
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                }}>_</span>
-              </h1>
-            </div>
-          </div>
-
-          {/* Stat chips */}
-          <div className="flex items-center gap-2.5 mt-5 flex-wrap">
-            {[
-              { label: "All systems", value: "OPERATIONAL", color: GREEN },
-              { label: "Role", value: user.role.toUpperCase(), color: BLUE },
-              { label: "Panel", value: panelName, color: PURPLE },
-            ].map((chip) => (
-              <div
-                key={chip.label}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-full"
-                style={{
-                  background: `${chip.color}0e`,
-                  border: `1px solid ${chip.color}28`,
-                }}
-              >
-                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: chip.color, boxShadow: `0 0 6px ${chip.color}` }} />
-                <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.30)" }}>{chip.label}</span>
-                <span className="text-[10px] font-mono font-bold" style={{ color: chip.color }}>{chip.value}</span>
-              </div>
+          {/* Signal bars */}
+          <div className="flex items-end gap-[3px]">
+            {[10, 14, 18, 22].map((h, i) => (
+              <div key={i} style={{ width: 3, height: h, borderRadius: 1.5, background: i < 3 ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.35)" }} />
             ))}
           </div>
+          <Wifi className="w-4 h-4" style={{ color: "rgba(255,255,255,0.90)" }} />
+          {/* Battery */}
+          <div className="relative flex items-center">
+            <div style={{ width: 22, height: 11, border: "1.5px solid rgba(255,255,255,0.75)", borderRadius: 3, padding: "1.5px 1.5px", display: "flex", alignItems: "center" }}>
+              <div style={{ flex: 1, height: "100%", background: "rgba(255,255,255,0.88)", borderRadius: 1.5 }} />
+            </div>
+            <div style={{ width: 2, height: 5, background: "rgba(255,255,255,0.60)", borderRadius: "0 1px 1px 0", marginLeft: 1 }} />
+          </div>
         </div>
+      </div>
 
-        {/* App categories */}
+      {/* ── Greeting ── */}
+      <div className="relative px-8 pt-2 pb-6 shrink-0" style={{ zIndex: 10 }}>
+        <p style={{ fontFamily: SF, fontSize: 13, color: "rgba(255,255,255,0.50)", fontWeight: 400, letterSpacing: 0.2 }}>
+          {greeting},
+        </p>
+        <h1 style={{ fontFamily: SF, fontSize: 28, fontWeight: 700, color: "rgba(255,255,255,0.95)", letterSpacing: -0.5, lineHeight: 1.1 }}>
+          {user.username}
+        </h1>
+      </div>
+
+      {/* ── App Grid ── */}
+      <main
+        className="relative flex-1 overflow-y-auto"
+        style={{ zIndex: 10, paddingBottom: 120, scrollbarWidth: "none" }}
+      >
+        <style>{`main::-webkit-scrollbar{display:none}`}</style>
+
         {categories.map((cat) => (
-          <div key={cat.label} className="mb-12">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-[3px] h-4 rounded-full" style={{ background: "rgba(255,255,255,0.15)" }} />
-              <span className="text-[10px] font-mono font-bold uppercase tracking-[0.28em]" style={{ color: "rgba(255,255,255,0.22)" }}>
+          <div key={cat.label} className="mb-8 px-6">
+            {/* Category label */}
+            <div className="mb-4">
+              <span
+                style={{
+                  fontFamily: SF, fontSize: 12, fontWeight: 700,
+                  textTransform: "uppercase", letterSpacing: 0.8,
+                  color: "rgba(255,255,255,0.35)",
+                }}
+              >
                 {cat.label}
-              </span>
-              <div className="flex-1 h-px" style={{ background: "linear-gradient(90deg, rgba(255,255,255,0.06), transparent)" }} />
-              <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.14)" }}>
-                {cat.apps.length} apps
               </span>
             </div>
 
-            <div className="flex flex-wrap gap-0">
+            {/* Icons */}
+            <div className="flex flex-wrap gap-3">
               {cat.apps.map((app) => (
                 <AppIcon
                   key={app.href}
@@ -409,55 +344,85 @@ export default function Desktop({ user, onLogout }: Props) {
         ))}
       </main>
 
-      {/* ── Bottom Dock ── */}
+      {/* ── iOS Dock ── */}
       <div
-        className="absolute bottom-0 left-0 right-0 flex justify-center pb-4 pt-2"
-        style={{ zIndex: 30 }}
+        className="absolute bottom-0 left-0 right-0 flex justify-center"
+        style={{ zIndex: 30, paddingBottom: 18, paddingTop: 10 }}
       >
         <div
-          className="flex items-end gap-2 px-5 py-3 rounded-2xl"
+          className="flex items-end gap-4 px-6 py-3 rounded-3xl"
           style={{
-            background: "rgba(18,18,28,0.75)",
-            backdropFilter: "blur(32px)",
-            border: "1px solid rgba(255,255,255,0.10)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.07) inset",
+            background: "rgba(255,255,255,0.14)",
+            backdropFilter: "blur(40px) saturate(180%)",
+            border: "1px solid rgba(255,255,255,0.20)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.22)",
           }}
         >
-          {DOCK_APPS.map((app, i) => (
-            <>
-              {i === 2 && (
-                <div key="sep" className="w-px self-stretch mx-1" style={{ background: "rgba(255,255,255,0.10)" }} />
-              )}
+          {DOCK_APPS.flatMap((app, i) => {
+            const items = [];
+            if (i === 3) items.push(
+              <div key="separator" style={{ width: 1, height: 42, background: "rgba(255,255,255,0.18)", alignSelf: "center" }} />
+            );
+            items.push(
               <DockIcon
                 key={app.href}
                 app={app}
                 onClick={() => { sounds.navigate(); navigate(app.href); }}
               />
-            </>
-          ))}
+            );
+            return items;
+          })}
         </div>
       </div>
 
+      {/* User / logout pill */}
+      <div
+        className="absolute top-10 right-4"
+        style={{ zIndex: 30 }}
+      >
+        <button
+          onClick={() => { sounds.logout(); onLogout(); }}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-full outline-none"
+          style={{
+            background: "rgba(255,255,255,0.12)",
+            backdropFilter: "blur(20px)",
+            border: "1px solid rgba(255,255,255,0.20)",
+            color: "rgba(255,255,255,0.70)",
+            fontFamily: SF,
+            fontSize: 12,
+            fontWeight: 500,
+            transition: "all 0.15s ease",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.20)"; e.currentTarget.style.color = "rgba(255,255,255,0.95)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "rgba(255,255,255,0.70)"; }}
+          data-testid="button-logout"
+        >
+          <div
+            className="w-5 h-5 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.18)" }}
+          >
+            <User className="w-3 h-3" />
+          </div>
+          {user.username}
+          <LogOut className="w-3 h-3 opacity-60" />
+        </button>
+      </div>
+
       <style>{`
-        @keyframes orb1 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33%       { transform: translate(40px, -30px) scale(1.06); }
-          66%       { transform: translate(-25px, 40px) scale(0.94); }
+        @keyframes aurora1 {
+          0%,100% { transform: translate(0,0) scale(1); opacity:1; }
+          33%      { transform: translate(60px,-40px) scale(1.1); opacity:0.8; }
+          66%      { transform: translate(-30px,50px) scale(0.9); opacity:1; }
         }
-        @keyframes orb2 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33%       { transform: translate(-35px, 45px) scale(1.04); }
-          66%       { transform: translate(30px, -30px) scale(0.96); }
+        @keyframes aurora2 {
+          0%,100% { transform: translate(0,0) scale(1); opacity:1; }
+          40%      { transform: translate(-50px,30px) scale(1.08); opacity:0.75; }
+          70%      { transform: translate(40px,-40px) scale(0.92); opacity:1; }
         }
-        @keyframes orb3 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50%       { transform: translate(-20px, -40px) scale(1.08); }
+        @keyframes aurora3 {
+          0%,100% { transform: translate(0,0) scale(1); }
+          50%      { transform: translate(-30px,-50px) scale(1.12); }
         }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.4; }
-        }
-        main::-webkit-scrollbar { display: none; }
       `}</style>
     </div>
   );
