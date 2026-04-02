@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { Switch, Route, Redirect, useLocation } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setLogoutCallback } from "./lib/auth";
 import Layout from "@/components/Layout";
-import Desktop from "@/pages/Desktop";
+import Dashboard from "@/pages/Dashboard";
 import AccountStock from "@/pages/AccountStock";
 import Billing from "@/pages/Billing";
 import AutoCreate from "@/pages/AutoCreate";
@@ -53,13 +53,10 @@ export type AuthUser = {
 };
 
 function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; onLogout: () => void; onPanelNameChange: (name: string) => void }) {
-  const [location] = useLocation();
-  if (location === "/admin") {
-    return <Desktop user={user} onLogout={onLogout} />;
-  }
   return (
     <Layout user={user} onLogout={onLogout} onPanelNameChange={onPanelNameChange}>
       <Switch>
+        <Route path="/admin" component={Dashboard} />
         <Route path="/admin/home" component={Home} />
         <Route path="/admin/accounts" component={AccountStock} />
         <Route path="/admin/billing" component={Billing} />
