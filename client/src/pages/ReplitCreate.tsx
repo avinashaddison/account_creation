@@ -90,7 +90,7 @@ export default function ReplitCreate() {
 
   // ── BULK LINKS mode state ──
   const [linksCoupon, setLinksCoupon] = useState("AGENT4BC4974559665");
-  const [linksCount, setLinksCount] = useState(4);
+  const [linksCount, setLinksCount] = useState(1);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
   const [batchCount, setBatchCount] = useState(5);
@@ -864,17 +864,13 @@ export default function ReplitCreate() {
 
               {/* ── AUTO MODE ── */}
               {linksSubMode === "auto" && (() => {
-                // Source candidates: processing first, sold_out fallback (mirrors backend logic)
-                const nextProcessingSource = replitAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing");
-                const nextSoldOutSource = replitAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out");
-                const nextSource = nextProcessingSource || nextSoldOutSource;
-                const usingFallback = !nextProcessingSource && !!nextSoldOutSource;
+                // Source candidates: ONLY sold_out accounts (processing accounts are reserved as targets)
+                const nextSource = replitAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out");
                 const exhausted = !nextSource;
                 const usedCount = replitAccounts.filter(a => a.couponExtracted).length;
-                const processingAvail = replitAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status === "processing").length;
                 const soldOutAvail = replitAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out").length;
-                const totalAvail = processingAvail + soldOutAvail;
-                const processingTargets = replitAccounts.filter(a => !a.couponExtracted && a.status === "processing").length;
+                const totalAvail = soldOutAvail;
+                const processingTargets = replitAccounts.filter(a => a.status === "processing").length;
                 return (
                   <>
                     {/* Queue status */}
@@ -884,11 +880,11 @@ export default function ReplitCreate() {
                         <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>{usedCount} used · {totalAvail} remaining</span>
                       </div>
                       {exhausted ? (
-                        <p className="text-[10px] font-mono" style={{ color: "#ef4444" }}>⚠️ No source accounts available for coupon extraction</p>
+                        <p className="text-[10px] font-mono" style={{ color: "#ef4444" }}>⚠️ No sold_out source accounts available for coupon extraction</p>
                       ) : (
                         <div className="space-y-1">
                           <p className="text-[9px] font-mono" style={{ color: LA(0.4) }}>
-                            Next source (auto-selected){usingFallback ? " — using sold_out fallback" : ""}:
+                            Next source (auto-selected):
                           </p>
                           <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: LA(0.06), border: `1px solid ${LA(0.2)}` }}>
                             <User className="w-3 h-3 flex-shrink-0" style={{ color: LA(0.6) }} />
@@ -896,17 +892,12 @@ export default function ReplitCreate() {
                               <p className="text-[11px] font-mono font-bold truncate" style={{ color: L }}>@{nextSource!.username}</p>
                               <p className="text-[9px] font-mono truncate" style={{ color: LA(0.5) }}>{nextSource!.email}</p>
                             </div>
-                            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded" style={
-                              usingFallback
-                                ? { background: "rgba(99,102,241,0.1)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)" }
-                                : { background: "rgba(251,191,36,0.1)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)" }
-                            }>
-                              {usingFallback ? "sold_out" : "processing"}
+                            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(99,102,241,0.1)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)" }}>
+                              sold_out
                             </span>
                           </div>
                           <div className="flex gap-3 text-[9px] font-mono pt-0.5" style={{ color: LA(0.35) }}>
-                            {processingAvail > 0 && <span><span style={{ color: "#fbbf24" }}>{processingAvail}</span> processing</span>}
-                            {soldOutAvail > 0 && <span><span style={{ color: "#818cf8" }}>{soldOutAvail}</span> sold_out fallback</span>}
+                            {soldOutAvail > 0 && <span><span style={{ color: "#818cf8" }}>{soldOutAvail}</span> sold_out sources</span>}
                             <span><span style={{ color: "rgba(34,197,94,0.8)" }}>{processingTargets}</span> processing targets</span>
                           </div>
                         </div>
@@ -931,7 +922,7 @@ export default function ReplitCreate() {
 
                     <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.03), border: `1px solid ${LA(0.1)}` }}>
                       <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.4) }}>
-                        Picks next source account (processing first, sold_out fallback) → extracts coupon → generates up to 3 checkout links → marks source as used (never re-logs into extracted accounts)
+                        Picks next sold_out account as coupon source → extracts coupon → generates up to 3 checkout links for processing accounts → marks source as used (processing accounts are never used as sources)
                       </p>
                     </div>
 
@@ -956,9 +947,7 @@ export default function ReplitCreate() {
                           ? "extracting coupon & generating links..."
                           : exhausted
                             ? "no_sources_remaining"
-                            : usingFallback
-                              ? `run_auto_coupon · sold_out fallback → up to 3 links`
-                              : `run_auto_coupon · processing → up to 3 links`}
+                            : `run_auto_coupon · sold_out → up to 3 links`}
                       </span>
                     </button>
                   </>

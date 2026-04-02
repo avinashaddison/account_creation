@@ -3695,11 +3695,11 @@ export async function registerRoutes(
         ? await storage.getAllReplitAccounts()
         : await storage.getReplitAccountsByOwner(userId);
 
-      // Auto-pick source: prefer processing accounts, fall back to sold_out accounts.
+      // Auto-pick source: ONLY use sold_out accounts as coupon sources.
+      // Processing accounts are reserved exclusively as checkout-link TARGETS — never steal them as sources.
       // Never re-use an account that already had its coupon extracted or is marked error.
       const sourceAccount =
-        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "processing" && a.status !== "error") ||
-        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out");
+        allAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out" && a.status !== "error");
       if (!sourceAccount) {
         return res.status(400).json({ error: "No available source accounts for coupon extraction — all have been used or none exist" });
       }
@@ -3818,6 +3818,7 @@ export async function registerRoutes(
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
             await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
