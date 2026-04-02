@@ -3747,7 +3747,7 @@ export async function registerRoutes(
           return;
         }
 
-        const { coupon, usedSlots = 0, totalSlots = 4, remainingSlots = 0 } = couponResult;
+        const { coupon, usedSlots = 0, totalSlots = 4, remainingSlots = 0, referralUrl: extractedReferralUrl } = couponResult as any;
 
         // Mark source account as used (regardless of remaining slots — don't re-use it)
         await storage.markReplitCouponExtracted(sourceAccount.id, coupon).catch(() => {});
@@ -3756,6 +3756,7 @@ export async function registerRoutes(
         broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon}`, userId);
         broadcastLog(batchId, jobId, `📊 Slots: ${usedSlots}/${totalSlots} used — ${remainingSlots} remaining`, userId);
         broadcastLog(batchId, jobId, `💾 Coupon saved to account ${sourceAccount.email}`, userId);
+        if (extractedReferralUrl) broadcastLog(batchId, jobId, `🔗 Referral URL: ${String(extractedReferralUrl).substring(0, 80)}...`, userId);
 
         if (remainingSlots <= 0) {
           broadcastLog(batchId, jobId, `⚠️ All ${totalSlots} referral slots are already used — nothing to generate`, userId);
@@ -3797,7 +3798,8 @@ export async function registerRoutes(
             acct.email,
             acct.password,
             coupon,
-            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId),
+            extractedReferralUrl || undefined
           );
 
           // Skip retry for unrecoverable errors (banned, already subscribed, no password, bad creds, login blocked)
@@ -3811,7 +3813,8 @@ export async function registerRoutes(
               acct.email,
               acct.password,
               coupon,
-              (msg) => broadcastLog(batchId, jobId, `  [retry] ${msg}`, userId)
+              (msg) => broadcastLog(batchId, jobId, `  [retry] ${msg}`, userId),
+              extractedReferralUrl || undefined
             );
           }
 

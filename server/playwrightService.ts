@@ -18967,7 +18967,8 @@ export async function generateSingleCheckoutLink(
   email: string,
   password: string,
   couponCode: string,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  referralBaseUrl?: string
 ): Promise<{ success: boolean; stripeUrl?: string; error?: string }> {
   let browser: any = null;
   let linkNativeProxy: { server: string; username: string; password: string } | null = null;
@@ -19418,9 +19419,31 @@ export async function generateSingleCheckoutLink(
     await glSleep(1500); // let session cookies propagate
 
     // ── Navigate to direct checkout URL ──
-    const checkoutUrl = couponCode
-      ? `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26?coupon=${encodeURIComponent(couponCode)}`
-      : `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26`;
+    // Prefer the referralBaseUrl passed in from the source account's own referral page —
+    // it uses whatever price ID Replit is currently serving (e.g. the alias may have changed).
+    // Fall back to the known stable Stripe price ID, then the Feb-26 alias.
+    let checkoutUrl: string;
+    if (referralBaseUrl && referralBaseUrl.includes("stripe-checkout-by-price")) {
+      // Strip any existing coupon param from the referral URL and re-apply cleanly
+      try {
+        const ru = new URL(referralBaseUrl.replace(/&amp;/g, "&"));
+        ru.searchParams.set("coupon", couponCode);
+        // Remove success/cancel redirect params — we just need the Stripe redirect
+        ru.searchParams.delete("success_url");
+        ru.searchParams.delete("cancel_url");
+        ru.searchParams.delete("successRedirectPath");
+        ru.searchParams.delete("cancelRedirectPath");
+        checkoutUrl = ru.toString();
+        log(`🔗 Using extracted referral URL (price: ${ru.pathname.split("/").pop()?.substring(0, 30)})`);
+      } catch {
+        checkoutUrl = `https://replit.com/stripe-checkout-by-price/price_1PsGgmKnqbzFOD8CRhOl4S0u?coupon=${encodeURIComponent(couponCode)}`;
+        log(`⚠️  Referral URL parse failed — falling back to Stripe price ID`);
+      }
+    } else {
+      // Fallback: try the stable Stripe price ID directly
+      checkoutUrl = `https://replit.com/stripe-checkout-by-price/price_1PsGgmKnqbzFOD8CRhOl4S0u?coupon=${encodeURIComponent(couponCode)}`;
+      log(`🔗 Using fallback Stripe price ID for checkout URL`);
+    }
     log(`💰 Navigating to checkout URL...`);
     await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await waitForCf("checkout");
@@ -19519,12 +19542,12 @@ export async function generateSingleCheckoutLink(
       if (retriedUrl.includes("stripe-checkout-error")) {
         let errMsg = "Stripe checkout error";
         try { errMsg = new URL(retriedUrl).searchParams.get("message") || errMsg; } catch {}
-        const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 400)).catch(() => "");
+        const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
         log(`⚠️  Stripe error URL: ${retriedUrl.substring(0, 200)}`);
-        if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 300)}`);
-        const alreadySub = /agent\s*4|core\s*plan|already\s*(subscribed|have\s*a\s*subscription)|subscription\s*already|referral\s*gift/i.test(errBody);
+        if (errBody) log(`⚠️  Stripe error page body: ${errBody.replace(/\n/g, " ").substring(0, 400)}`);
+        const alreadySub = /already\s+(subscribed|have\s+a\s+subscription|has\s+an?\s+active)|subscription\s+already\s+active|you\s+already\s+have\s+(core|replit)/i.test(errBody);
         if (alreadySub) throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
-        throw new Error(`Stripe error: ${errMsg}`);
+        throw new Error(`Stripe error: ${errMsg} | body: ${errBody.replace(/\n/g, " ").substring(0, 150)}`);
       }
       await page.waitForTimeout(1500);
       const retriedStripeUrl = await page.evaluate(() => window.location.href).catch(() => page.url());
@@ -19539,12 +19562,15 @@ export async function generateSingleCheckoutLink(
     if (finalUrl.includes("stripe-checkout-error")) {
       let errMsg = "Stripe checkout error";
       try { errMsg = new URL(finalUrl).searchParams.get("message") || errMsg; } catch {}
-      const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 400)).catch(() => "");
+      const errBody = await page.evaluate(() => document.body?.innerText?.substring(0, 500)).catch(() => "");
       log(`⚠️  Stripe error URL: ${finalUrl.substring(0, 200)}`);
-      if (errBody) log(`⚠️  Stripe error page: ${errBody.replace(/\n/g, " ").substring(0, 300)}`);
-      const alreadySub = /agent\s*4|core\s*plan|already\s*(subscribed|have\s*a\s*subscription)|subscription\s*already|referral\s*gift/i.test(errBody);
+      if (errBody) log(`⚠️  Stripe error page body: ${errBody.replace(/\n/g, " ").substring(0, 400)}`);
+      // Only mark as "already subscribed" if Stripe's error body EXPLICITLY says so —
+      // do NOT match on "referral gift" (that can appear in generic coupon-not-applicable messages)
+      const alreadySub = /already\s+(subscribed|have\s+a\s+subscription|has\s+an?\s+active)|subscription\s+already\s+active|you\s+already\s+have\s+(core|replit)/i.test(errBody);
       if (alreadySub) throw new Error(`Account already has an active Replit Core/Agent subscription — skip this account`);
-      throw new Error(`Stripe error: ${errMsg}`);
+      // Any other Stripe error is transient — throw as generic so auto-retry can attempt again
+      throw new Error(`Stripe error: ${errMsg} | body: ${errBody.replace(/\n/g, " ").substring(0, 150)}`);
     }
     // billing.stripe.com = customer portal (already subscribed), checkout.stripe.com = valid new checkout
     if (finalUrl.includes("billing.stripe.com")) {
