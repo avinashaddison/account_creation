@@ -475,11 +475,17 @@ export class DatabaseStorage implements IStorage {
 
   async bulkUpdateReplitAccountStatus(status: string, ids?: string[], ownerId?: string): Promise<number> {
     let q = db.update(replitAccounts).set({ status });
-    if (ids && ids.length > 0) {
+    if (ids && ids.length > 0 && ownerId) {
+      // Non-superadmin with specific IDs: must own every account in the list
+      q = q.where(and(inArray(replitAccounts.id, ids), eq(replitAccounts.createdBy, ownerId)));
+    } else if (ids && ids.length > 0) {
+      // Superadmin with specific IDs: no ownership constraint
       q = q.where(inArray(replitAccounts.id, ids));
     } else if (ownerId) {
+      // No IDs provided: update all accounts owned by this user
       q = q.where(eq(replitAccounts.createdBy, ownerId));
     }
+    // No ids + no ownerId = superadmin "update all" (unchanged behaviour)
     const rows = await q.returning();
     return rows.length;
   }
