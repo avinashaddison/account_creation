@@ -1637,7 +1637,7 @@ export default function PrivateAccount() {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       credentials: "include",
-                      body: JSON.stringify({ ids: replitBulkCopiedIds.map(Number), status: replitBulkStatusTarget }),
+                      body: JSON.stringify({ ids: replitBulkCopiedIds, status: replitBulkStatusTarget }),
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error || "Failed");

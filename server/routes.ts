@@ -4063,12 +4063,13 @@ export async function registerRoutes(
 
   app.post("/api/replit-accounts/bulk-status", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { status } = req.body;
+      const { status, ids } = req.body;
       if (!status) return res.status(400).json({ error: "status required" });
       const normalizedStatus = (status as string).toLowerCase().replace(/\s+/g, "_");
       const role = req.session.role;
       const ownerId = role === "superadmin" ? undefined : req.session.userId;
-      const count = await storage.bulkUpdateReplitAccountStatus(normalizedStatus, ownerId);
+      const idsArray = Array.isArray(ids) && ids.length > 0 ? ids.map(String) : undefined;
+      const count = await storage.bulkUpdateReplitAccountStatus(normalizedStatus, idsArray, ownerId);
       res.json({ success: true, updated: count });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

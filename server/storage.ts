@@ -67,7 +67,7 @@ export interface IStorage {
   getReplitAccountsByOwner(ownerId: string): Promise<ReplitAccount[]>;
   deleteReplitAccount(id: string): Promise<void>;
   updateReplitAccountStatus(id: string, status: string): Promise<ReplitAccount>;
-  bulkUpdateReplitAccountStatus(status: string, ownerId?: string): Promise<number>;
+  bulkUpdateReplitAccountStatus(status: string, ids?: string[], ownerId?: string): Promise<number>;
   markReplitAccountWarmed(id: string): Promise<ReplitAccount>;
   markReplitCouponExtracted(id: string, couponCode: string): Promise<ReplitAccount>;
   setReplitCheckoutUrl(id: string, checkoutUrl: string): Promise<ReplitAccount>;
@@ -473,11 +473,14 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async bulkUpdateReplitAccountStatus(status: string, ownerId?: string): Promise<number> {
-    const query = ownerId
-      ? db.update(replitAccounts).set({ status }).where(eq(replitAccounts.createdBy, ownerId))
-      : db.update(replitAccounts).set({ status });
-    const rows = await query.returning();
+  async bulkUpdateReplitAccountStatus(status: string, ids?: string[], ownerId?: string): Promise<number> {
+    let q = db.update(replitAccounts).set({ status });
+    if (ids && ids.length > 0) {
+      q = q.where(inArray(replitAccounts.id, ids));
+    } else if (ownerId) {
+      q = q.where(eq(replitAccounts.createdBy, ownerId));
+    }
+    const rows = await q.returning();
     return rows.length;
   }
 
