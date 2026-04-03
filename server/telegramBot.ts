@@ -370,33 +370,42 @@ export function startTelegramBot() {
     });
   });
 
+  // ── Helper: dismiss reply keyboard then run handler ───────────────────────
+  // Telegram's one_time_keyboard doesn't fully hide on desktop; sending
+  // RemoveKeyboard is the only guaranteed way to clear it.
+  async function handleMenu(ctx: any, fn: () => Promise<void>) {
+    const d = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
+    if (d) ctx.telegram.deleteMessage(ctx.chat.id, d.message_id).catch(() => {});
+    await fn();
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // REPLY KEYBOARD handlers (hears)
   // ──────────────────────────────────────────────────────────────────────────
 
-  bot.hears("📊 Statistics", async (ctx) => {
+  bot.hears("📊 Statistics", (ctx) => handleMenu(ctx, async () => {
     const text = await buildStatsText();
     await ctx.reply(text, {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([[Markup.button.callback("🔄 Refresh", "refresh_stats")]]),
     });
-  });
+  }));
 
-  bot.hears("👥 Accounts", async (ctx) => {
+  bot.hears("👥 Accounts", (ctx) => handleMenu(ctx, async () => {
     await ctx.reply("*👥 Accounts* — select a status:", {
       parse_mode: "Markdown",
       ...inlineAccounts(),
     });
-  });
+  }));
 
-  bot.hears("📋 Copy Accounts", async (ctx) => {
+  bot.hears("📋 Copy Accounts", (ctx) => handleMenu(ctx, async () => {
     await ctx.reply("*📋 Copy Accounts* — choose status and count:", {
       parse_mode: "Markdown",
       ...inlineCopy(),
     });
-  });
+  }));
 
-  bot.hears("🔗 Checkout Links", async (ctx) => {
+  bot.hears("🔗 Checkout Links", (ctx) => handleMenu(ctx, async () => {
     const ready = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'processing'`);
     const sources = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'sold_out' AND coupon_extracted = false`);
     await ctx.reply(
@@ -408,12 +417,10 @@ export function startTelegramBot() {
         ]),
       }
     );
-  });
+  }));
 
-  bot.hears("🏗 Create Accounts", async (ctx) => {
-    const uid = ctx.from.id;
-    getState(uid).createFlow = {};
-
+  bot.hears("🏗 Create Accounts", (ctx) => handleMenu(ctx, async () => {
+    getState(ctx.from.id).createFlow = {};
     await ctx.reply(
       `*🏗 Create Accounts*\n\nWhich service?`,
       {
@@ -426,9 +433,9 @@ export function startTelegramBot() {
         ]),
       }
     );
-  });
+  }));
 
-  bot.hears("🔄 Auto-Scan", async (ctx) => {
+  bot.hears("🔄 Auto-Scan", (ctx) => handleMenu(ctx, async () => {
     const uid = ctx.from.id;
     if (runningScans.get(uid) === true) {
       return ctx.reply("A scan is already running. Send /cancel to stop it.");
@@ -446,17 +453,17 @@ export function startTelegramBot() {
         ]),
       }
     );
-  });
+  }));
 
-  bot.hears("🔥 Warm Accounts", async (ctx) => {
+  bot.hears("🔥 Warm Accounts", (ctx) => handleMenu(ctx, async () => {
     const processing = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'processing'`);
     await ctx.reply(
       `*🔥 Warm Accounts*\n\n⏳ Processing accounts: *${processing.rows[0]?.cnt || 0}*\n\nHow many to warm?`,
       { parse_mode: "Markdown", ...inlineWarm() }
     );
-  });
+  }));
 
-  bot.hears("🗑 Purge Banned", async (ctx) => {
+  bot.hears("🗑 Purge Banned", (ctx) => handleMenu(ctx, async () => {
     const processing = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'processing'`);
     await ctx.reply(
       `*🗑 Purge Banned Accounts*\n\nWill scan *${processing.rows[0]?.cnt || 0}* processing accounts and permanently delete any that are banned.\n\n⚠️ Cannot be undone.`,
@@ -467,9 +474,9 @@ export function startTelegramBot() {
         ]),
       }
     );
-  });
+  }));
 
-  bot.hears("⚙️ Settings", async (ctx) => {
+  bot.hears("⚙️ Settings", (ctx) => handleMenu(ctx, async () => {
     const rows = await dbQuery(`SELECT key, value FROM settings WHERE key IN ('residential_proxy_url','capsolver_api_key','zenrows_api_key','fivesim_api_key')`);
     const map: Record<string, string> = {};
     rows.rows.forEach((r: any) => { map[r.key] = r.value; });
@@ -487,12 +494,12 @@ export function startTelegramBot() {
         ]),
       }
     );
-  });
+  }));
 
-  bot.hears("❓ Help", async (ctx) => {
+  bot.hears("❓ Help", (ctx) => handleMenu(ctx, async () => {
     await ctx.reply(
       `*❓ Help*\n\n` +
-      `Use the bottom keyboard to navigate:\n\n` +
+      `Use /menu to open the keyboard, then tap any option:\n\n` +
       `📊 *Statistics* — live account counts\n` +
       `👥 *Accounts* — browse by status\n` +
       `📋 *Copy Accounts* — send credentials to chat\n` +
@@ -505,7 +512,7 @@ export function startTelegramBot() {
       `/cancel — stop a running scan`,
       { parse_mode: "Markdown" }
     );
-  });
+  }));
 
   // ──────────────────────────────────────────────────────────────────────────
   // INLINE KEYBOARD callbacks
