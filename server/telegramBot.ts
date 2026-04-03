@@ -246,17 +246,20 @@ async function showCreateSummary(ctx: any, uid: number) {
   });
 }
 
-// ── DB ────────────────────────────────────────────────────────────────────────
-function makePool() {
-  return new Pool({
-    connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-  });
-}
+// ── DB — persistent pool (never recreate on every query) ─────────────────────
+const pool = new Pool({
+  connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+});
+pool.on("error", (err) => console.error("[Bot] DB pool error:", err.message));
+
 async function dbQuery(sql: string, params: any[] = []) {
-  const pool = makePool();
-  try { return await pool.query(sql, params); }
-  finally { await pool.end(); }
+  const client = await pool.connect();
+  try { return await client.query(sql, params); }
+  finally { client.release(); }
 }
 
 // ── Internal API ──────────────────────────────────────────────────────────────
@@ -612,10 +615,89 @@ async function applyStatus(ctx: any, status: string) {
   await ctx.reply(`✅ *${r.rowCount}* accounts → \`${status}\``, { parse_mode: "Markdown" });
 }
 
+// ── Production helpers ────────────────────────────────────────────────────────
+
+/** Allowed Telegram user IDs — comma-separated in TELEGRAM_ALLOWED_IDS env var.
+ *  If the env var is not set, the bot is open to anyone (dev mode). */
+function getAllowedIds(): Set<number> {
+  const raw = process.env.TELEGRAM_ALLOWED_IDS || "";
+  if (!raw.trim()) return new Set();
+  return new Set(raw.split(",").map((s) => parseInt(s.trim())).filter(Boolean));
+}
+
+/** Truncate a message to Telegram's 4096-char hard limit. */
+function truncate(text: string, limit = 4000): string {
+  return text.length > limit ? text.slice(0, limit - 3) + "…" : text;
+}
+
+/** Safe reply — never throws, truncates, returns sent message or null. */
+async function safeReply(ctx: any, text: string, extra: any = {}) {
+  try {
+    return await ctx.reply(truncate(text), extra);
+  } catch (e: any) {
+    console.error("[Bot] safeReply failed:", e.message);
+    return null;
+  }
+}
+
+/** Safe edit — falls back to a new reply if edit fails. */
+async function safeEdit(ctx: any, text: string, extra: any = {}) {
+  try {
+    return await ctx.editMessageText(truncate(text), extra);
+  } catch {
+    return safeReply(ctx, text, extra);
+  }
+}
+
+/** Per-user rate limiter: key → last action timestamp. */
+const rateLimitMap = new Map<string, number>();
+function isRateLimited(uid: number, action: string, cooldownMs = 2000): boolean {
+  const key = `${uid}:${action}`;
+  const last = rateLimitMap.get(key) || 0;
+  if (Date.now() - last < cooldownMs) return true;
+  rateLimitMap.set(key, Date.now());
+  return false;
+}
+
+/** Clean up stale rate limit entries every 5 minutes. */
+setInterval(() => {
+  const cutoff = Date.now() - 60_000;
+  for (const [k, ts] of rateLimitMap) if (ts < cutoff) rateLimitMap.delete(k);
+}, 300_000);
+
+const botLog = (...args: any[]) => console.log("[Bot]", ...args);
+const botErr = (...args: any[]) => console.error("[Bot]", ...args);
+
 // ─────────────────────────────────────────────────────────────────────────────
 export function startTelegramBot() {
   if (!TOKEN) return;
   const bot = new Telegraf(TOKEN);
+  const ALLOWED = getAllowedIds();
+
+  // ── Global error handler — never crash the process ────────────────────────
+  bot.catch((err: any, ctx: any) => {
+    botErr("Unhandled handler error:", err?.message || err);
+    try {
+      ctx?.answerCbQuery?.("An error occurred. Please try again.").catch(() => {});
+    } catch {}
+  });
+
+  // ── Auth middleware — block unauthorized users ────────────────────────────
+  bot.use(async (ctx, next) => {
+    const uid = ctx.from?.id;
+    if (!uid) return;
+    if (ALLOWED.size > 0 && !ALLOWED.has(uid)) {
+      botLog(`Blocked unauthorized user ${uid} (@${ctx.from?.username || "unknown"})`);
+      await ctx.reply("⛔ Unauthorized.").catch(() => {});
+      return;
+    }
+    return next();
+  });
+
+  // ── Global callback_query answer guard (prevent "query too old" spinners) ─
+  bot.use(async (ctx, next) => {
+    await next();
+  });
 
   // ── Set bot commands (slash-command list) ─────────────────────────────────
   bot.telegram.setMyCommands([
@@ -1487,8 +1569,12 @@ export function startTelegramBot() {
 
   // ── Create flow: confirm ──────────────────────────────────────────────────
   bot.action("create_confirm", async (ctx) => {
-    await ctx.answerCbQuery("Starting...");
     const uid = ctx.from.id;
+    if (isRateLimited(uid, "create_confirm", 10_000)) {
+      await ctx.answerCbQuery("⏳ Please wait before starting another batch.").catch(() => {});
+      return;
+    }
+    await ctx.answerCbQuery("Starting...");
     const flow = getState(uid).createFlow;
     if (!flow?.count || !flow.service) return ctx.reply("Flow lost — start again with 🏗 Create Accounts.");
 
@@ -1549,6 +1635,11 @@ export function startTelegramBot() {
 
   // Checkout
   bot.action("confirm_checkout", async (ctx) => {
+    const uid = ctx.from.id;
+    if (isRateLimited(uid, "confirm_checkout", 15_000)) {
+      await ctx.answerCbQuery("⏳ Please wait before generating more links.").catch(() => {});
+      return;
+    }
     await ctx.answerCbQuery("Starting...");
     const r = await botApi("/api/replit-auto-coupon-links", "POST", {});
     if (!r.ok) {
@@ -1736,12 +1827,33 @@ export function startTelegramBot() {
     }
   });
 
-  // ── Launch ────────────────────────────────────────────────────────────────
-  bot.launch({ dropPendingUpdates: true }).catch((err) => {
-    console.error("[TelegramBot] ❌ Error:", err.message);
-  });
-  console.log("[TelegramBot] ✅ Bot polling started");
+  // ── Launch with auto-retry on transient polling errors ───────────────────
+  async function launch(attempt = 1) {
+    try {
+      await bot.launch({ dropPendingUpdates: true });
+      botLog("✅ Bot polling started" + (ALLOWED.size ? ` (${ALLOWED.size} allowed users)` : " (open access — set TELEGRAM_ALLOWED_IDS to restrict)"));
+    } catch (err: any) {
+      const delay = Math.min(attempt * 5000, 60_000);
+      botErr(`Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
+      setTimeout(() => launch(attempt + 1), delay);
+    }
+  }
+  launch();
 
-  process.once("SIGINT", () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  // ── Graceful shutdown ─────────────────────────────────────────────────────
+  const shutdown = (sig: string) => {
+    botLog(`Received ${sig} — stopping bot gracefully`);
+    bot.stop(sig);
+    pool.end().catch(() => {});
+  };
+  process.once("SIGINT",  () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+  // ── Process-level safety net ──────────────────────────────────────────────
+  process.on("unhandledRejection", (reason: any) => {
+    botErr("Unhandled promise rejection:", reason?.message || reason);
+  });
+  process.on("uncaughtException", (err) => {
+    botErr("Uncaught exception:", err.message);
+  });
 }
