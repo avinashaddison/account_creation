@@ -5468,8 +5468,8 @@ export async function registerRoutes(
       const movies: { title: string; image: string; link: string }[] = [];
       const seen = new Set<string>();
 
-      // Match: <a href="URL"><div class="poster-card">...<img src="IMG" alt="TITLE">
-      const blockRegex = /<a\s+href="(https:\/\/new1\.moviesdrives\.my\/[^"]+)"[^>]*>\s*<div[^>]*class="[^"]*poster-card[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"/g;
+      // Match full poster-card blocks: <a href="URL">...<img src="IMG">...<p class="poster-title">TITLE</p>
+      const blockRegex = /<a\s+href="(https:\/\/new1\.moviesdrives\.my\/[^"]+)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]*>[\s\S]*?<p[^>]*class="[^"]*poster-title[^"]*"[^>]*>([\s\S]*?)<\/p>/g;
       let match;
       while ((match = blockRegex.exec(html)) !== null) {
         const link = match[1];
@@ -5477,26 +5477,15 @@ export async function registerRoutes(
         seen.add(link);
 
         const image = match[2];
-        const rawTitle = match[3]
+        const title = match[3]
+          .replace(/<[^>]+>/g, "")
           .replace(/&#038;/g, "&")
           .replace(/&#8217;/g, "'")
           .replace(/&#8211;/g, "-")
           .replace(/&amp;/g, "&")
-          .replace(/&quot;/g, '"');
-
-        // Clean: strip quality/language brackets and trailing tags
-        let title = rawTitle
-          .replace(/\s*\[.*?\]/g, "")
-          .replace(/\s*\(S\d+\s+EP?\d+[^)]*\)/gi, "")
-          .replace(/\s+\d{3,4}p.*$/i, "")
-          .replace(/\s+(WEB-DL|BluRay|HDTC|WEB-RIP|AMZN)\s*.*$/i, "")
-          .replace(/\s*\|\s*(Complete Web Series|Full Movie)$/i, "")
+          .replace(/&quot;/g, '"')
+          .replace(/&#8230;/g, "...")
           .trim();
-
-        // Fallback: if title is too short use slug-based name
-        if (title.length < 3) {
-          title = rawTitle.split("|")[0].trim();
-        }
 
         movies.push({ title, image, link });
       }
