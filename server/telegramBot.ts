@@ -8,9 +8,16 @@ const BASE_URL = `http://localhost:${SERVER_PORT}`;
 if (!TOKEN) console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — bot disabled");
 
 // ── Per-user state ────────────────────────────────────────────────────────────
+interface CreateFlow {
+  count?: number;
+  couponCode?: string;     // "" = no coupon, undefined = not chosen yet
+  cardId?: string;         // "" = no card, undefined = not chosen yet
+  cardLabel?: string;
+}
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count";
+  createFlow?: CreateFlow;
 }
 const userState = new Map<number, UserState>();
 const runningScans = new Map<number, boolean>();
@@ -18,6 +25,88 @@ const runningScans = new Map<number, boolean>();
 function getState(uid: number): UserState {
   if (!userState.has(uid)) userState.set(uid, {});
   return userState.get(uid)!;
+}
+
+// ── Create flow helpers ───────────────────────────────────────────────────────
+function buildCreateSummary(flow: CreateFlow, availableCount: number): string {
+  const lines: string[] = [];
+  lines.push(`*🏗 Create Accounts — Summary*`);
+  lines.push(``);
+  lines.push(`📊 *Available Outlook emails:* ${availableCount}`);
+  lines.push(`🔢 *Accounts to create:* ${flow.count}`);
+  lines.push(`🎟 *Coupon code:* ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}`);
+  lines.push(`💳 *Card:* ${flow.cardLabel || "_none_"}`);
+  lines.push(``);
+  lines.push(`Ready to start?`);
+  return lines.join("\n");
+}
+
+async function showCouponStep(ctx: any) {
+  await ctx.reply(
+    `*🎟 Coupon Code*\n\nDo you want to apply a coupon during account creation?`,
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("✍️ Enter Coupon Code", "create_enter_coupon")],
+        [Markup.button.callback("⏭ Skip — No Coupon", "create_skip_coupon")],
+        [Markup.button.callback("❌ Cancel", "create_cancel")],
+      ]),
+    }
+  );
+}
+
+async function showCardStep(ctx: any, uid: number) {
+  // Fetch all saved cards
+  const cards = await dbQuery(`SELECT id, cardholder_name, card_number FROM saved_cards ORDER BY created_at DESC LIMIT 10`);
+  const state = getState(uid);
+
+  if (cards.rows.length === 0) {
+    // No cards — skip straight to summary
+    state.createFlow!.cardId = "";
+    state.createFlow!.cardLabel = "none";
+    await showCreateSummary(ctx, uid);
+    return;
+  }
+
+  const cardButtons = cards.rows.map((c: any) => {
+    const masked = `*${c.card_number?.slice(-4) || "????"}`;
+    const label = `💳 ${c.cardholder_name || "Card"} ${masked}`;
+    return [Markup.button.callback(label, `ccard_${c.id}`)];
+  });
+
+  await ctx.reply(
+    `*💳 Select a Card*\n\nChoose a saved card or skip:`,
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        ...cardButtons,
+        [Markup.button.callback("⏭ No Card", "create_skip_card")],
+        [Markup.button.callback("❌ Cancel", "create_cancel")],
+      ]),
+    }
+  );
+}
+
+async function showCreateSummary(ctx: any, uid: number) {
+  const state = getState(uid);
+  const flow = state.createFlow!;
+  const avail = await dbQuery(`
+    SELECT COUNT(*) as cnt FROM private_outlook_accounts po
+    WHERE po.email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)
+  `);
+  const availableCount = parseInt(avail.rows[0]?.cnt || "0");
+
+  await ctx.reply(
+    buildCreateSummary(flow, availableCount),
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Confirm & Create", "create_confirm")],
+        [Markup.button.callback("✏️ Change Count", "create_change_count"), Markup.button.callback("✏️ Change Coupon", "create_change_coupon")],
+        [Markup.button.callback("❌ Cancel", "create_cancel")],
+      ]),
+    }
+  );
 }
 
 // ── DB ────────────────────────────────────────────────────────────────────────
@@ -247,10 +336,31 @@ export function startTelegramBot() {
   });
 
   bot.hears("🏗 Create Accounts", async (ctx) => {
-    await ctx.reply("*🏗 Create Accounts* — how many?", {
-      parse_mode: "Markdown",
-      ...inlineCreate(),
-    });
+    const uid = ctx.from.id;
+    // Check available Outlook emails first
+    const avail = await dbQuery(`
+      SELECT COUNT(*) as cnt FROM private_outlook_accounts po
+      WHERE po.email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)
+    `);
+    const availableCount = parseInt(avail.rows[0]?.cnt || "0");
+
+    // Reset flow
+    getState(uid).createFlow = {};
+
+    await ctx.reply(
+      `*🏗 Create Replit Accounts*\n\n` +
+      `📊 Available Outlook emails: *${availableCount}*\n\n` +
+      `How many accounts do you want to create?`,
+      {
+        parse_mode: "Markdown",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("1", "cn_1"), Markup.button.callback("5", "cn_5"), Markup.button.callback("10", "cn_10")],
+          [Markup.button.callback("20", "cn_20"), Markup.button.callback("30", "cn_30"), Markup.button.callback("50", "cn_50")],
+          [Markup.button.callback("✍️ Custom Number", "cn_custom")],
+          [Markup.button.callback("❌ Cancel", "create_cancel")],
+        ]),
+      }
+    );
   });
 
   bot.hears("🔄 Auto-Scan", async (ctx) => {
@@ -405,29 +515,126 @@ export function startTelegramBot() {
     await ctx.deleteMessage().catch(() => {});
   });
 
-  // Create
-  bot.action(/^create_(\d+)$/, async (ctx) => {
+  // ── Create flow: count selection ─────────────────────────────────────────
+  bot.action(/^cn_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
     const count = parseInt((ctx.match as RegExpMatchArray)[1]);
+    const uid = ctx.from.id;
+    getState(uid).createFlow = { count };
+    await ctx.deleteMessage().catch(() => {});
+    await showCouponStep(ctx);
+  });
+
+  bot.action("cn_custom", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    getState(uid).awaitingText = "create_count";
+    await ctx.editMessageText(`*✍️ Custom Count*\n\nType how many accounts to create:`, { parse_mode: "Markdown" });
+  });
+
+  // ── Create flow: coupon step ──────────────────────────────────────────────
+  bot.action("create_enter_coupon", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    getState(uid).awaitingText = "coupon_code";
+    await ctx.editMessageText(`*🎟 Enter Coupon Code*\n\nType the coupon code now:`, { parse_mode: "Markdown" });
+  });
+
+  bot.action("create_skip_coupon", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    const st = getState(uid);
+    st.createFlow!.couponCode = "";
+    await ctx.deleteMessage().catch(() => {});
+    await showCardStep(ctx, uid);
+  });
+
+  bot.action("create_change_coupon", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.deleteMessage().catch(() => {});
+    await showCouponStep(ctx);
+  });
+
+  bot.action("create_change_count", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    const avail = await dbQuery(`
+      SELECT COUNT(*) as cnt FROM private_outlook_accounts po
+      WHERE po.email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)
+    `);
+    const availableCount = parseInt(avail.rows[0]?.cnt || "0");
     await ctx.editMessageText(
-      `*🏗 Create ${count} account${count > 1 ? "s" : ""}?*\n\nWill use ${count} Outlook email${count > 1 ? "s" : ""} from the pool.`,
+      `*🏗 Change Count*\n\n📊 Available Outlook emails: *${availableCount}*\n\nHow many?`,
       {
         parse_mode: "Markdown",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`✅ Create ${count}`, `confirm_create_${count}`), Markup.button.callback("❌ Cancel", "dismiss")],
+          [Markup.button.callback("1", "cn_1"), Markup.button.callback("5", "cn_5"), Markup.button.callback("10", "cn_10")],
+          [Markup.button.callback("20", "cn_20"), Markup.button.callback("30", "cn_30"), Markup.button.callback("50", "cn_50")],
+          [Markup.button.callback("✍️ Custom", "cn_custom"), Markup.button.callback("❌ Cancel", "create_cancel")],
         ]),
       }
     );
   });
 
-  bot.action(/^confirm_create_(\d+)$/, async (ctx) => {
+  // ── Create flow: card step ────────────────────────────────────────────────
+  bot.action("create_skip_card", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    const st = getState(uid);
+    st.createFlow!.cardId = "";
+    st.createFlow!.cardLabel = "none";
+    await ctx.deleteMessage().catch(() => {});
+    await showCreateSummary(ctx, uid);
+  });
+
+  bot.action(/^ccard_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    const cardId = (ctx.match as RegExpMatchArray)[1];
+    // Look up display label
+    const row = await dbQuery(`SELECT cardholder_name, card_number FROM saved_cards WHERE id = $1`, [cardId]);
+    const c = row.rows[0];
+    const label = c ? `${c.cardholder_name || "Card"} *${c.card_number?.slice(-4) || "????"}` : cardId;
+    const st = getState(uid);
+    st.createFlow!.cardId = cardId;
+    st.createFlow!.cardLabel = label;
+    await ctx.deleteMessage().catch(() => {});
+    await showCreateSummary(ctx, uid);
+  });
+
+  // ── Create flow: confirm ──────────────────────────────────────────────────
+  bot.action("create_confirm", async (ctx) => {
     await ctx.answerCbQuery("Starting...");
-    const count = parseInt((ctx.match as RegExpMatchArray)[1]);
-    const r = await botApi("/api/replit-create/bulk", "POST", { count });
-    const msg = r.ok
-      ? `✅ *Creating ${count} accounts*\n\nBatch: \`${r.data.batchId || "started"}\`\nCheck the panel for live logs.`
-      : `❌ Error: ${r.data?.error || "Unknown"}`;
-    await ctx.editMessageText(msg, { parse_mode: "Markdown" });
+    const uid = ctx.from.id;
+    const flow = getState(uid).createFlow;
+    if (!flow?.count) return ctx.reply("Flow lost — start again with 🏗 Create Accounts.");
+
+    const body: any = { count: flow.count };
+    if (flow.couponCode) body.couponCode = flow.couponCode;
+    if (flow.cardId) body.cardId = flow.cardId;
+
+    const r = await botApi("/api/replit-create/bulk", "POST", body);
+
+    if (r.ok) {
+      await ctx.editMessageText(
+        `✅ *Creating ${flow.count} account${flow.count > 1 ? "s" : ""}!*\n\n` +
+        `🎟 Coupon: ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}\n` +
+        `💳 Card: ${flow.cardLabel || "_none_"}\n\n` +
+        `Batch: \`${r.data.batchId || "started"}\`\nCheck panel for live logs.`,
+        { parse_mode: "Markdown" }
+      );
+    } else {
+      await ctx.editMessageText(`❌ Failed: ${r.data?.error || "Unknown error"}`, { parse_mode: "Markdown" });
+    }
+    getState(uid).createFlow = undefined;
+  });
+
+  bot.action("create_cancel", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    getState(uid).createFlow = undefined;
+    await ctx.deleteMessage().catch(() => {});
+    await ctx.reply("Cancelled.");
   });
 
   // Checkout
@@ -567,6 +774,28 @@ export function startTelegramBot() {
       if (isNaN(count) || count < 1) return ctx.reply("Format: `15 processing`", { parse_mode: "Markdown" });
       st.awaitingText = undefined;
       await doCopy(ctx, status, count);
+      return;
+    }
+
+    if (st.awaitingText === "create_count") {
+      const count = parseInt(text);
+      if (isNaN(count) || count < 1 || count > 200) {
+        return ctx.reply("Please enter a number between 1 and 200.");
+      }
+      if (!st.createFlow) st.createFlow = {};
+      st.createFlow.count = count;
+      st.awaitingText = undefined;
+      await showCouponStep(ctx);
+      return;
+    }
+
+    if (st.awaitingText === "coupon_code") {
+      const code = text.trim();
+      if (!st.createFlow) st.createFlow = {};
+      st.createFlow.couponCode = code;
+      st.awaitingText = undefined;
+      await ctx.reply(`✅ Coupon set: \`${code}\``, { parse_mode: "Markdown" });
+      await showCardStep(ctx, uid);
       return;
     }
   });
