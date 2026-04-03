@@ -19,7 +19,7 @@ interface ServiceConfig {
 }
 const SERVICE_CONFIGS: Record<string, ServiceConfig> = {
   replit:  { label: "Replit",   emoji: "🔵", endpoint: "/api/replit-create/bulk",  outlookTable: "replit_accounts",  hasCard: true, hasCoupon: true },
-  lovable: { label: "Lovable",  emoji: "💜", endpoint: "/api/lovable-create/bulk",                                    hasReferral: true },
+  lovable: { label: "Lovable",  emoji: "💜", endpoint: "/api/lovable-create/bulk", outlookTable: "lovable_accounts",  hasReferral: true },
   v0:      { label: "v0.dev",   emoji: "⚡", endpoint: "/api/v0-create/bulk",      outlookTable: "v0_accounts" },
   adobe:   { label: "Adobe",    emoji: "🅰️", endpoint: "/api/adobe-create/bulk",   outlookTable: "adobe_accounts" },
   chatgpt: { label: "ChatGPT",  emoji: "🤖", endpoint: "/api/chatgpt-create/bulk", outlookTable: "chatgpt_accounts" },
@@ -1181,6 +1181,33 @@ export function startTelegramBot() {
             `⏱   Time:    <b>${time}</b>`,
             { parse_mode: "HTML", ...completionKeyboard }
           ).catch(() => {});
+
+          // Step 2.5: send credential cards for every account created in this batch
+          if (created > 0 && !isNaN(created) && svc.outlookTable) {
+            const acctTable = svc.outlookTable;
+            try {
+              const batchStart = new Date(startTime).toISOString();
+              const newAccounts = (await dbQuery(
+                `SELECT email, password, coupon_code FROM ${acctTable}
+                 WHERE created_at >= $1 AND (error IS NULL OR error = '')
+                 ORDER BY created_at DESC LIMIT $2`,
+                [batchStart, created]
+              )).rows;
+
+              for (const row of newAccounts) {
+                const em = row.email || "";
+                const pw = row.password || "";
+                let card = `${svc.emoji} <b>${esc(svc.label)} Account</b>\n`;
+                card += `📧 <code>${esc(em)}</code>\n`;
+                card += `🔑 <code>${esc(pw)}</code>\n`;
+                if (row.coupon_code) card += `🎟 <code>${esc(row.coupon_code)}</code>\n`;
+                card += `\n📋 <code>${esc(em + ":" + pw)}</code>`;
+                await bot.telegram.sendMessage(chatId, card, { parse_mode: "HTML" }).catch(() => {});
+              }
+            } catch (e: any) {
+              console.error("[Bot] failed to fetch new accounts:", e.message);
+            }
+          }
 
           // Step 3: alert at bottom of chat
           const isCheckout = checkoutLinks.length > 0;
