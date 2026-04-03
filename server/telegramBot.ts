@@ -450,27 +450,101 @@ function inlineApplyStatus() {
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-async function buildStatsText() {
-  const counts = await dbQuery(`SELECT status, COUNT(*) as cnt FROM replit_accounts GROUP BY status ORDER BY cnt DESC`);
-  const total = counts.rows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const [recent, links, coupons] = await Promise.all([
-    dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
-    dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE checkout_url IS NOT NULL AND checkout_url != ''`),
-    dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE coupon_extracted = true AND coupon_code != ''`),
+async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
+  const q = (sql: string, p: any[] = []) => dbQuery(sql, p).then((r: any) => r.rows).catch(() => [] as any[]);
+  const n = (rows: any[], col = "cnt") => parseInt(rows[0]?.[col] || "0");
+
+  // Run all queries in parallel
+  const [
+    replitStatus, replitToday, replitWeek, replitCoupons, replitCheckout,
+    lovableStatus, lovableToday, lovableWeek,
+    v0Status, v0Today,
+    adobeStatus, adobeToday,
+    chatgptStatus, chatgptToday,
+    elevenStatus, elevenToday,
+    outlookTotal, outlookAvail,
+    gmailTotal,
+  ] = await Promise.all([
+    q(`SELECT status, COUNT(*) as cnt FROM replit_accounts GROUP BY status ORDER BY cnt DESC`),
+    q(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE created_at > NOW() - INTERVAL '7 days'`),
+    q(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE coupon_extracted = true AND coupon_code IS NOT NULL AND coupon_code != ''`),
+    q(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE checkout_url IS NOT NULL AND checkout_url != ''`),
+    q(`SELECT status, COUNT(*) as cnt FROM lovable_accounts GROUP BY status ORDER BY cnt DESC`),
+    q(`SELECT COUNT(*) as cnt FROM lovable_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT COUNT(*) as cnt FROM lovable_accounts WHERE created_at > NOW() - INTERVAL '7 days'`),
+    q(`SELECT status, COUNT(*) as cnt FROM v0_accounts GROUP BY status ORDER BY cnt DESC`),
+    q(`SELECT COUNT(*) as cnt FROM v0_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT status, COUNT(*) as cnt FROM adobe_accounts GROUP BY status ORDER BY cnt DESC`),
+    q(`SELECT COUNT(*) as cnt FROM adobe_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT status, COUNT(*) as cnt FROM chatgpt_accounts GROUP BY status ORDER BY cnt DESC`),
+    q(`SELECT COUNT(*) as cnt FROM chatgpt_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT status, COUNT(*) as cnt FROM eleven_labs_accounts GROUP BY status ORDER BY cnt DESC`),
+    q(`SELECT COUNT(*) as cnt FROM eleven_labs_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT COUNT(*) as cnt FROM private_outlook_accounts`),
+    q(`SELECT COUNT(*) as cnt FROM private_outlook_accounts WHERE email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)`),
+    q(`SELECT COUNT(*) as cnt FROM private_gmail_accounts`),
   ]);
 
-  let t = `📊 *Account Statistics*\n\n`;
-  t += `Total: *${total}* accounts\n`;
-  t += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  for (const row of counts.rows) {
-    const pct = total > 0 ? Math.round(parseInt(row.cnt) / total * 100) : 0;
-    t += `${statusEmoji(row.status)} *${row.status}*: ${row.cnt} (${pct}%)\n`;
+  const STAT_EMOJIS: Record<string, string> = {
+    available: "🟢", sold_out: "✅", processing: "⏳", error: "❌",
+    working: "🔗", created: "✨", pending_verification: "📨",
+    active: "🟢", banned: "🚫", suspended: "🔴", verified: "✅",
+  };
+  const se = (s: string) => STAT_EMOJIS[s] ?? "▪️";
+
+  function serviceBlock(
+    emoji: string, label: string,
+    statusRows: any[],
+    extras: string[] = [],
+    todayCnt = 0, weekCnt = -1
+  ): string {
+    const total = statusRows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+    if (total === 0 && todayCnt === 0) return "";
+    let b = `\n${emoji} <b>${label}</b>  <code>${total}</code>\n`;
+    // Status pills
+    const pills = statusRows.map((r: any) => `${se(r.status)} ${r.status.replace(/_/g, " ")}: <b>${r.cnt}</b>`);
+    if (pills.length) b += pills.join("  ·  ") + "\n";
+    if (extras.length) b += extras.join("  ·  ") + "\n";
+    const timeInfo: string[] = [];
+    if (todayCnt > 0) timeInfo.push(`📅 today: <b>${todayCnt}</b>`);
+    if (weekCnt >= 0) timeInfo.push(`📆 week: <b>${weekCnt}</b>`);
+    if (timeInfo.length) b += timeInfo.join("  ·  ") + "\n";
+    return b;
   }
-  t += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  t += `🔗 Checkout links: *${links.rows[0]?.cnt || 0}*\n`;
-  t += `🎟 Coupons extracted: *${coupons.rows[0]?.cnt || 0}*\n`;
-  t += `📅 Created today: *${recent.rows[0]?.cnt || 0}*`;
-  return t;
+
+  const replitTotal = replitStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  const lovableTotal = lovableStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  const v0Total = v0Status.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  const adobeTotal = adobeStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  const chatgptTotal = chatgptStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  const elevenTotal = elevenStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  const grandTotal = replitTotal + lovableTotal + v0Total + adobeTotal + chatgptTotal + elevenTotal;
+
+  const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+  let t = `📊 <b>ACCOUNT TRACKER</b>\n`;
+  t += `<i>Updated ${now}</i>\n`;
+  t += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+  t += serviceBlock("🔵", "REPLIT", replitStatus,
+    [`🎟 coupons: <b>${n(replitCoupons)}</b>`, `🔗 checkout: <b>${n(replitCheckout)}</b>`],
+    n(replitToday), n(replitWeek));
+
+  t += serviceBlock("💜", "LOVABLE", lovableStatus, [], n(lovableToday), n(lovableWeek));
+  t += serviceBlock("⚡", "V0.DEV", v0Status, [], n(v0Today));
+  t += serviceBlock("🅰️", "ADOBE", adobeStatus, [], n(adobeToday));
+  t += serviceBlock("🤖", "CHATGPT", chatgptStatus, [], n(chatgptToday));
+  t += serviceBlock("🎙", "11LABS", elevenStatus, [], n(elevenToday));
+
+  t += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+  t += `📬 <b>OUTLOOK POOL</b>  <code>${n(outlookTotal)}</code> total · <b>${n(outlookAvail)}</b> unused\n`;
+  t += `📩 <b>GMAIL POOL</b>  <code>${n(gmailTotal)}</code> total\n`;
+
+  t += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  t += `🌐 <b>GRAND TOTAL</b>: <code>${grandTotal}</code> accounts across all services`;
+
+  return { text: t, mode: "HTML" };
 }
 
 // ── Copy + apply ──────────────────────────────────────────────────────────────
@@ -593,9 +667,9 @@ export function startTelegramBot() {
 
   // ── /stats ────────────────────────────────────────────────────────────────
   bot.command("stats", async (ctx) => {
-    const text = await buildStatsText();
+    const { text, mode } = await buildStatsText();
     await ctx.reply(text, {
-      parse_mode: "Markdown",
+      parse_mode: mode,
       ...Markup.inlineKeyboard([[Markup.button.callback("🔄 Refresh", "refresh_stats")]]),
     });
   });
@@ -614,9 +688,9 @@ export function startTelegramBot() {
   // ──────────────────────────────────────────────────────────────────────────
 
   bot.hears("📊 Statistics", (ctx) => handleMenu(ctx, async () => {
-    const text = await buildStatsText();
+    const { text, mode } = await buildStatsText();
     await ctx.reply(text, {
-      parse_mode: "Markdown",
+      parse_mode: mode,
       ...Markup.inlineKeyboard([[Markup.button.callback("🔄 Refresh", "refresh_stats")]]),
     });
   }));
@@ -888,12 +962,12 @@ export function startTelegramBot() {
   // ──────────────────────────────────────────────────────────────────────────
 
   bot.action("refresh_stats", async (ctx) => {
-    await ctx.answerCbQuery("Refreshing...");
-    const text = await buildStatsText();
+    await ctx.answerCbQuery("Refreshing...").catch(() => {});
+    const { text, mode } = await buildStatsText();
     await ctx.editMessageText(text, {
-      parse_mode: "Markdown",
+      parse_mode: mode,
       ...Markup.inlineKeyboard([[Markup.button.callback("🔄 Refresh", "refresh_stats")]]),
-    });
+    }).catch(() => {});
   });
 
   bot.action("dismiss", async (ctx) => {
