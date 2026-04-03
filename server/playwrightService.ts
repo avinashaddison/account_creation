@@ -19167,7 +19167,7 @@ export async function generateSingleCheckoutLink(
             log(`  ⏳ Captcha solving in progress... (${elapsed}s elapsed)`);
           }, 12000);
           try {
-            capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 90);
+            capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 150);
           } finally {
             clearInterval(nopeTicker);
           }
@@ -19346,7 +19346,7 @@ export async function generateSingleCheckoutLink(
               const retryStart = Date.now();
               const retryTicker = setInterval(() => log(`  ⏳ Retry captcha solving... (${Math.round((Date.now() - retryStart) / 1000)}s)`), 12000);
               try {
-                retryResult = await solveHCaptchaViaNopeCHA(nopeKey2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 90);
+                retryResult = await solveHCaptchaViaNopeCHA(nopeKey2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 150);
               } finally {
                 clearInterval(retryTicker);
               }
@@ -19454,7 +19454,18 @@ export async function generateSingleCheckoutLink(
       log(`🔗 Using fallback Stripe price ID for checkout URL`);
     }
     log(`💰 Navigating to checkout URL...`);
-    await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Use "commit" so goto resolves as soon as navigation is committed (no need to wait
+    // for full page load — waitForURL below handles detecting the Stripe redirect)
+    await page.goto(checkoutUrl, { waitUntil: "commit", timeout: 90000 })
+      .catch(async (gotoErr: Error) => {
+        log(`  ⚠️ Checkout goto error: ${(gotoErr.message || "").substring(0, 80)} — checking current URL...`);
+        const curUrl = page.url();
+        // If we're already on Stripe it's fine — goto threw but redirect happened
+        if (!curUrl.includes("replit.com/stripe-checkout") && !curUrl.includes("checkout.stripe.com")) {
+          throw gotoErr; // genuine failure
+        }
+        log(`  ✅ Already redirected to Stripe despite goto error — continuing`);
+      });
     await waitForCf("checkout");
 
     // ── Wait for Stripe redirect (or error/verify/session-lost page) ──
@@ -19467,7 +19478,7 @@ export async function generateSingleCheckoutLink(
         u.href.includes("/verify") ||
         u.href.includes("replit.com/login") ||
         u.href.includes("replit.com/signup"),
-      { timeout: 45000 }
+      { timeout: 60000 }
     );
     let finalUrl = page.url();
 
@@ -19520,7 +19531,13 @@ export async function generateSingleCheckoutLink(
       await waitForCf("home-reauth");
 
       // Re-navigate to checkout
-      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.goto(checkoutUrl, { waitUntil: "commit", timeout: 90000 })
+        .catch(async (gotoErr2: Error) => {
+          log(`  ⚠️ Re-auth checkout goto error: ${(gotoErr2.message || "").substring(0, 80)} — checking URL...`);
+          const cur2 = page.url();
+          if (!cur2.includes("checkout.stripe.com")) throw gotoErr2;
+          log(`  ✅ Already on Stripe despite re-auth goto error`);
+        });
       await waitForCf("checkout-reauth");
       await page.waitForURL(
         (u: URL) =>
@@ -19528,7 +19545,7 @@ export async function generateSingleCheckoutLink(
           u.href.includes("billing.stripe.com") ||
           u.href.includes("stripe-checkout-error") ||
           u.href.includes("/verify"),
-        { timeout: 45000 }
+        { timeout: 60000 }
       );
       finalUrl = page.url();
       log(`📍 URL after re-auth checkout: ${finalUrl.substring(0, 100)}`);
