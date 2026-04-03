@@ -1,5 +1,10 @@
 import { Telegraf, Markup } from "telegraf";
 import { Pool } from "pg";
+import {
+  getAvailableDomain, createTempEmail, getAuthToken,
+  fetchMessages, fetchMessageContent, generateRandomUsername,
+  detectProviderFromDomain,
+} from "./mailService";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const SERVER_PORT = process.env.PORT || 5000;
@@ -94,12 +99,23 @@ interface CreateFlow {
   cardLabel?: string;
   referralUrl?: string;    // "" = no referral, used for Lovable
 }
+interface MailSession {
+  email: string;
+  password: string;
+  provider: string;
+  token: string;
+  seenIds: Set<string>;
+  stopped: boolean;
+  statusMsgId: number;
+  chatId: number;
+}
 interface UserState {
   lastCopiedIds?: string[];
   awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url";
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
+  mailSession?: MailSession;
 }
 const userState = new Map<number, UserState>();
 const runningScans = new Map<number, boolean>();
@@ -264,7 +280,8 @@ const MAIN_KEYBOARD = Markup.keyboard([
   ["📋 Copy Accounts", "🔗 Checkout Links"],
   ["🏗 Create Accounts", "🔄 Auto-Scan"],
   ["🔥 Warm Accounts", "🗑 Purge Banned"],
-  ["⚙️ Settings", "❓ Help"],
+  ["📧 Mail Generator", "⚙️ Settings"],
+  ["❓ Help"],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
@@ -691,6 +708,144 @@ export function startTelegramBot() {
       }
     );
   }));
+
+  // ── Mail Generator ────────────────────────────────────────────────────────
+  async function startMailSession(chatId: number, uid: number) {
+    // Stop any existing session for this user
+    const state = getState(uid);
+    if (state.mailSession) state.mailSession.stopped = true;
+
+    // Show loading message
+    const loadMsg = await bot.telegram.sendMessage(chatId,
+      `⏳ <b>Generating temp email...</b>`, { parse_mode: "HTML" }
+    );
+
+    let email: string, password: string, token: string, provider: string;
+    try {
+      const domain = await getAvailableDomain(true);
+      const username = generateRandomUsername();
+      email = `${username}@${domain}`;
+      password = Math.random().toString(36).slice(2, 14) + "A1!";
+      provider = detectProviderFromDomain(domain);
+      await createTempEmail(email, password);
+      token = await getAuthToken(email, password, provider as any);
+    } catch (err: any) {
+      await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+        `❌ <b>Failed to create temp email</b>\n<code>${esc(err.message?.substring(0, 100))}</code>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+      return;
+    }
+
+    const mailKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback("🔄 New Address", "mail_new"), Markup.button.callback("⏹ Stop", "mail_stop")],
+    ]);
+
+    // Edit loading message → inbox status card
+    const statusText = () =>
+      `📧 <b>Temp Inbox Active</b>\n\n` +
+      `<code>${esc(email)}</code>\n` +
+      `📋 <code>${esc(email)}</code>\n\n` +
+      `⏳ <i>Waiting for emails... (auto-expires in 10 min)</i>`;
+
+    await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+      statusText(), { parse_mode: "HTML", ...mailKeyboard }
+    ).catch(() => {});
+
+    const session: MailSession = {
+      email, password, provider, token,
+      seenIds: new Set(),
+      stopped: false,
+      statusMsgId: loadMsg.message_id,
+      chatId,
+    };
+    state.mailSession = session;
+
+    // Poll loop — every 5s for up to 10 minutes (120 polls)
+    let polls = 0;
+    const MAX_POLLS = 120;
+    async function pollInbox() {
+      if (session.stopped || polls++ >= MAX_POLLS) {
+        if (!session.stopped) {
+          await bot.telegram.editMessageText(chatId, session.statusMsgId, undefined,
+            `📧 <b>Inbox Expired</b>\n\n<code>${esc(email)}</code>\n\n<i>Session timed out after 10 minutes.</i>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+        }
+        return;
+      }
+      try {
+        const messages = await fetchMessages(token, provider as any);
+        for (const msg of messages) {
+          const id = msg.id || msg["@id"];
+          if (!id || session.seenIds.has(id)) continue;
+          session.seenIds.add(id);
+
+          // Fetch full body
+          let body = "";
+          try { body = await fetchMessageContent(token, id, provider as any); } catch {}
+
+          // Strip HTML tags and trim
+          const plainBody = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().substring(0, 600);
+          const from = msg.from?.address || msg.from?.name || "unknown";
+          const subject = msg.subject || "(no subject)";
+          const preview = plainBody || "(no text content)";
+
+          await bot.telegram.sendMessage(chatId,
+            `📬 <b>New Email!</b>\n\n` +
+            `📧 <b>Inbox:</b> <code>${esc(email)}</code>\n` +
+            `👤 <b>From:</b> <code>${esc(from)}</code>\n` +
+            `📌 <b>Subject:</b> ${esc(subject)}\n\n` +
+            `<pre>${esc(preview)}</pre>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+
+          // Update status card with received count
+          const count = session.seenIds.size;
+          await bot.telegram.editMessageText(chatId, session.statusMsgId, undefined,
+            `📧 <b>Temp Inbox Active</b>\n\n` +
+            `<code>${esc(email)}</code>\n` +
+            `📋 <code>${esc(email)}</code>\n\n` +
+            `✅ <b>${count}</b> email${count === 1 ? "" : "s"} received so far`,
+            { parse_mode: "HTML", ...mailKeyboard }
+          ).catch(() => {});
+        }
+      } catch {}
+      setTimeout(pollInbox, 5000);
+    }
+    setTimeout(pollInbox, 5000);
+  }
+
+  bot.hears("📧 Mail Generator", (ctx) => handleMenu(ctx, async () => {
+    const uid = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    await startMailSession(chatId, uid);
+  }));
+
+  bot.action("mail_new", async (ctx) => {
+    await ctx.answerCbQuery("Generating new address...").catch(() => {});
+    const uid = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    // Stop old session
+    const state = getState(uid);
+    if (state.mailSession) state.mailSession.stopped = true;
+    await startMailSession(chatId, uid);
+  });
+
+  bot.action("mail_stop", async (ctx) => {
+    await ctx.answerCbQuery("Inbox stopped.").catch(() => {});
+    const uid = ctx.from!.id;
+    const state = getState(uid);
+    const session = state.mailSession;
+    if (session) {
+      session.stopped = true;
+      await bot.telegram.editMessageText(session.chatId, session.statusMsgId, undefined,
+        `📧 <b>Inbox Stopped</b>\n\n<code>${esc(session.email)}</code>\n\n<i>Session ended by user.</i>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+      state.mailSession = undefined;
+    }
+  });
 
   bot.hears("⚙️ Settings", (ctx) => handleMenu(ctx, async () => {
     const rows = await dbQuery(`SELECT key, value FROM settings WHERE key IN ('residential_proxy_url','capsolver_api_key','zenrows_api_key','fivesim_api_key')`);
