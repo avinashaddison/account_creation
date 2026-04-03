@@ -334,46 +334,70 @@ async function inlineCopyTypes() {
   return Markup.inlineKeyboard(rows);
 }
 
-/** Step 2 — count/status options per account type */
-function inlineCopyOptions(acctType: string) {
+/** Step 2 — count/status options per account type (queries DB for real counts) */
+async function inlineCopyOptions(acctType: string) {
   const cfg = ACCOUNT_TYPE_CONFIGS[acctType];
-  const s = cfg?.statuses ?? [];
-  // Build buttons: for each non-all status, offer 5 and 10; then 25 and 50 for the first status; plus Custom
+  if (!cfg) return Markup.inlineKeyboard([[Markup.button.callback("🔙 Back", "show_copy_types")]]);
+
+  // Query actual distinct statuses with counts from the database
+  const dbResult = await dbQuery(
+    `SELECT status, COUNT(*) as cnt FROM ${cfg.table} GROUP BY status ORDER BY cnt DESC`
+  ).catch(() => ({ rows: [] as any[] }));
+
+  // Build a map of status → count from the DB
+  const dbCounts: Record<string, number> = {};
+  for (const row of dbResult.rows) {
+    dbCounts[row.status] = parseInt(row.cnt || "0");
+  }
+
+  // Keep only statuses that actually exist in the DB with at least 1 account
+  // Sort by count DESC so the largest status gets the 4-count treatment
+  const nonAll = cfg.statuses
+    .filter((st) => st.value !== null && (dbCounts[st.value] ?? 0) > 0)
+    .sort((a, b) => (dbCounts[b.value!] ?? 0) - (dbCounts[a.value!] ?? 0));
+
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
-  const nonAll = s.filter((st) => st.value !== null);
 
   if (nonAll.length === 0) {
-    // No statuses — just offer counts
+    // No statuses in DB — just offer counts for "all"
+    const total = Object.values(dbCounts).reduce((a, b) => a + b, 0);
     rows.push([
-      Markup.button.callback("5",  `copy_all_5`),
-      Markup.button.callback("10", `copy_all_10`),
-      Markup.button.callback("25", `copy_all_25`),
+      Markup.button.callback("5",   `copy_all_5`),
+      Markup.button.callback("10",  `copy_all_10`),
+      Markup.button.callback("25",  `copy_all_25`),
     ]);
-    rows.push([
-      Markup.button.callback("50",  `copy_all_50`),
-      Markup.button.callback("100", `copy_all_100`),
-      Markup.button.callback("✍️ Custom…", "copy_custom"),
-    ]);
+    if (total > 25) {
+      rows.push([
+        Markup.button.callback("50",  `copy_all_50`),
+        Markup.button.callback("100", `copy_all_100`),
+      ]);
+    }
   } else {
-    // First status — 4 count options
+    // First status — show 4 count options scaled by available count
     const first = nonAll[0];
-    rows.push([
-      Markup.button.callback(`${first.emoji} 5 ${first.label}`,  `copy_${first.value}_5`),
-      Markup.button.callback(`${first.emoji} 10 ${first.label}`, `copy_${first.value}_10`),
-    ]);
-    rows.push([
-      Markup.button.callback(`${first.emoji} 25 ${first.label}`, `copy_${first.value}_25`),
-      Markup.button.callback(`${first.emoji} 50 ${first.label}`, `copy_${first.value}_50`),
-    ]);
-    // Remaining statuses — 5 and 10 options
-    for (let i = 1; i < nonAll.length; i += 2) {
-      const pair = nonAll.slice(i, i + 2).map((st) =>
-        Markup.button.callback(`${st.emoji} 5 ${st.label}`, `copy_${st.value}_5`)
-      );
+    const firstCnt = dbCounts[first.value!] ?? 0;
+    const firstCounts = [5, 10, 25, 50].filter((n) => n <= firstCnt + 4); // always show at least up to nearest tier
+    const firstRow1 = firstCounts.slice(0, 2).map((n) =>
+      Markup.button.callback(`${first.emoji} ${n} ${first.label}  (${firstCnt})`, `copy_${first.value}_${n}`)
+    );
+    const firstRow2 = firstCounts.slice(2, 4).map((n) =>
+      Markup.button.callback(`${first.emoji} ${n} ${first.label}`, `copy_${first.value}_${n}`)
+    );
+    if (firstRow1.length) rows.push(firstRow1);
+    if (firstRow2.length) rows.push(firstRow2);
+
+    // Remaining statuses — pair them up with 5 and 10 options side by side
+    const rest = nonAll.slice(1);
+    for (let i = 0; i < rest.length; i += 2) {
+      const pair = rest.slice(i, i + 2).map((st) => {
+        const cnt = dbCounts[st.value!] ?? 0;
+        return Markup.button.callback(`${st.emoji} 5 ${st.label}  (${cnt})`, `copy_${st.value}_5`);
+      });
       rows.push(pair);
     }
-    rows.push([Markup.button.callback("✍️ Custom…", "copy_custom")]);
   }
+
+  rows.push([Markup.button.callback("✍️ Custom…", "copy_custom")]);
   rows.push([Markup.button.callback("🔙 Back to Types", "show_copy_types")]);
   return Markup.inlineKeyboard(rows);
 }
@@ -882,12 +906,12 @@ export function startTelegramBot() {
     try {
       await ctx.editMessageText(
         `*${cfg.emoji} Copy ${cfg.label} Accounts* — choose status and count:`,
-        { parse_mode: "Markdown", ...inlineCopyOptions(acctType) }
+        { parse_mode: "Markdown", ...(await inlineCopyOptions(acctType)) }
       );
     } catch {
       await ctx.reply(
         `*${cfg.emoji} Copy ${cfg.label} Accounts* — choose status and count:`,
-        { parse_mode: "Markdown", ...inlineCopyOptions(acctType) }
+        { parse_mode: "Markdown", ...(await inlineCopyOptions(acctType)) }
       );
     }
   });
