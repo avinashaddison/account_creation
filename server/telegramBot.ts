@@ -495,7 +495,6 @@ async function doCopy(ctx: any, status: string, count: number, acctType?: string
     card += `🔑 Password: \`${row.password || "N/A"}\`\n`;
     if (row.credits != null) card += `💰 Credits: ${row.credits || "20"}\n`;
     if (row.coupon_code) card += `🎟 Coupon: \`${row.coupon_code}\`\n`;
-    if (row.checkout_url) card += `🔗 Checkout: ${(row.checkout_url as string).substring(0, 80)}...\n`;
     await ctx.reply(card, { parse_mode: "Markdown" });
   }
 
