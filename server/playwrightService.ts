@@ -5962,7 +5962,7 @@ export async function createOutlookAccount(
     log("Page content preview: " + pagePreview);
 
     if (pagePreview.toLowerCase().includes("host_not_allowed") || pagePreview.toLowerCase().includes("host not allowed") || pagePreview.toLowerCase().includes("access denied") || pagePreview.toLowerCase().includes("blocked")) {
-      log("Proxy blocked this host. Falling back to Webshare residential proxy...");
+      log("Proxy blocked this host. Falling back to nsocks residential proxy...");
       try { await page.close(); } catch {}
       try { await context.close(); } catch {}
       try { if (browser && browser.isConnected && browser.isConnected()) await browser.close(); else if (browser && browser.close) await browser.close(); } catch {}
@@ -5989,7 +5989,7 @@ export async function createOutlookAccount(
             username: cleanUser,
             password: decodeURIComponent(parsed.password),
           };
-          log("Webshare residential proxy configured: " + parsed.hostname);
+          log("nsocks residential proxy configured: " + parsed.hostname);
         } catch {}
       }
       // Add Sec-CH-UA headers matching a real Chrome 131 on Windows 10
@@ -6186,7 +6186,7 @@ export async function createOutlookAccount(
       await optimizePageBandwidth(page, { allowStylesheets: true });
       await page.setDefaultNavigationTimeout(120000);
       await page.setDefaultTimeout(30000);
-      log("Retrying navigation via Webshare residential proxy...");
+      log("Retrying navigation via nsocks residential proxy...");
 
       // Try alternate Microsoft signup URL first — only keep it if PerimeterX is absent
       const standardSignupUrl = "https://signup.live.com/signup?lcid=1033&wa=wsignin1.0&rpsnv=163&id=292841&uiflavor=web&uaid=&mkt=EN-US&lc=1033&lic=1";
@@ -7222,7 +7222,7 @@ export async function registerZenrowsAccount(
 
     if (!restSignupDone) {
 
-    log("Launching browser for proxy registration (Webshare residential proxy mode)...");
+    log("Launching browser for proxy registration (nsocks residential proxy mode)...");
 
     await ensureBrowserInstalled();
     const launchArgs = [
@@ -7233,7 +7233,7 @@ export async function registerZenrowsAccount(
       "--ignore-certificate-errors",
     ];
 
-    // Load Webshare residential proxy
+    // Load nsocks residential proxy
     const rawProxyUrl = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
     const soaxUrl = rawProxyUrl ? rawProxyUrl.replace(/sessionid-[^-@]+/, `sessionid-${Math.random().toString(36).substring(2, 14)}`) : "";
     const soaxCtxOptions: any = {
@@ -7252,9 +7252,9 @@ export async function registerZenrowsAccount(
           username: cleanUser,
           password: decodeURIComponent(parsedSoax.password),
         };
-        log(`Webshare proxy configured: ${parsedSoax.hostname}:${parsedSoax.port} (session=${cleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+        log(`nsocks proxy configured: ${parsedSoax.hostname}:${parsedSoax.port} (session=${cleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
       } catch (proxyErr: any) {
-        log("Warning: could not parse Webshare proxy URL — falling back to no proxy: " + proxyErr.message);
+        log("Warning: could not parse nsocks proxy URL — falling back to no proxy: " + proxyErr.message);
       }
     } else {
       log("Warning: no residential_proxy_url set — launching without proxy");
@@ -7265,7 +7265,7 @@ export async function registerZenrowsAccount(
     localBrowser = dedicatedBrowser;
     context = await dedicatedBrowser.newContext(soaxCtxOptions);
     page = await context.newPage();
-    log(`Browser launched ${soaxUrl ? "with Webshare residential proxy" : "(no proxy — direct)"}`);
+    log(`Browser launched ${soaxUrl ? "with nsocks residential proxy" : "(no proxy — direct)"}`);
 
     await page.setDefaultNavigationTimeout(120000);
     await page.setDefaultTimeout(30000);
@@ -7326,7 +7326,7 @@ export async function registerZenrowsAccount(
         Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         (window as any).chrome = { runtime: {} };
       });
-      log(`Retry browser launched ${soaxUrl ? "with fresh Webshare session" : "(no proxy)"}. Navigating to proxy site...`);
+      log(`Retry browser launched ${soaxUrl ? "with fresh nsocks session" : "(no proxy)"}. Navigating to proxy site...`);
       try {
         await page.goto("https://app.zenrows.com/register", { waitUntil: "domcontentloaded", timeout: 120000 });
         navSuccess = true;
@@ -8732,7 +8732,7 @@ export async function registerZenrowsAccount(
     let zenrowsRegContext = context;
     let zenrowsRegBrowserRef = localBrowser;
 
-    // Use Webshare residential proxy for Outlook login (same as Replit creation — avoids ZenRows CDP issues with Microsoft login)
+    // Use nsocks residential proxy for Outlook login (same as Replit creation — avoids ZenRows CDP issues with Microsoft login)
     let outlookBrowser: any = null;
 
     await ensureBrowserInstalled();
@@ -8759,12 +8759,12 @@ export async function registerZenrowsAccount(
           username: olCleanUser,
           password: decodeURIComponent(olParsed.password),
         };
-        log(`Webshare proxy for Outlook login: ${olParsed.hostname}:${olParsed.port} (session=${olCleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
+        log(`nsocks proxy for Outlook login: ${olParsed.hostname}:${olParsed.port} (session=${olCleanUser.match(/sessionid-([^-]+)/)?.[1] || "?"})`);
       } catch (olProxyErr: any) {
-        log("Warning: could not parse Webshare proxy for Outlook — using direct: " + olProxyErr.message);
+        log("Warning: could not parse nsocks proxy for Outlook — using direct: " + olProxyErr.message);
       }
     } else {
-      log("No Webshare proxy configured — Outlook login will run direct (no proxy)");
+      log("No nsocks proxy configured — Outlook login will run direct (no proxy)");
     }
 
     outlookBrowser = await chromium.launch({ headless: true, args: olLaunchArgs });
@@ -9784,7 +9784,7 @@ export async function createGmailAccount(
           log(`Proxy rejected CONNECT — falling back to direct`);
         } else {
           gmailNativeProxy = { server: `http://${u.hostname}:${u.port}`, username: cleanUsername, password: cleanPassword };
-          log(`Webshare proxy → ${u.hostname}:${u.port}`);
+          log(`nsocks proxy → ${u.hostname}:${u.port}`);
           launchOptions.proxy = gmailNativeProxy;
         }
       } catch (e) {
@@ -10606,7 +10606,7 @@ export async function registerReplitAccount(
     log("Launching stealth browser for Replit...");
     const { chromium } = await import("playwright");
 
-    // ── Webshare residential proxy — unique IP per account to prevent ban ──────────
+    // ── nsocks residential proxy — unique IP per account to prevent ban ──────────
     // Use Playwright native proxy (no ProxyChain) to avoid ERR_TUNNEL_CONNECTION_FAILED
     try {
       const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
@@ -10640,7 +10640,7 @@ export async function registerReplitAccount(
         });
 
         if (!proxyHealthy) {
-          log(`❌ Webshare proxy rejected CONNECT (package may be suspended/expired) — falling back to DIRECT connection`);
+          log(`❌ nsocks proxy rejected CONNECT (package may be suspended/expired) — falling back to DIRECT connection`);
           log(`   ⚠  Check dashboard.soax.com for package-${pUrl.hostname.includes("soax") ? cleanUser.match(/package-(\d+)/)?.[1] || "?" : "?"} status`);
           // replitNativeProxy stays null → browser launches without proxy
         } else {
@@ -10649,12 +10649,12 @@ export async function registerReplitAccount(
             username: cleanUser,
             password: cleanPassword,
           };
-          log(`🌐 Webshare connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          log(`🌐 nsocks connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
         }
         const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
         await resolveProxyIp(rawForIp, log, "WEBSHARE RESIDENTIAL");
       } else {
-        log("⚠️ No Webshare proxy configured — using direct connection (higher ban risk)");
+        log("⚠️ No nsocks proxy configured — using direct connection (higher ban risk)");
       }
     } catch (proxyErr: any) {
       log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
@@ -13084,10 +13084,10 @@ export async function registerLovableAccount(
         const zrUrlRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
         const storedZrUrl = zrUrlRow.rows.length > 0 ? (zrUrlRow.rows[0].value as string) : "";
         let wsEndpoint = storedZrUrl || `wss://browser.zenrows.com?apikey=${zenrowsApiKey}`;
-        // Append Webshare proxy to non-ZenRows CDP endpoints (ZenRows cloud handles proxy internally)
+        // Append nsocks proxy to non-ZenRows CDP endpoints (ZenRows cloud handles proxy internally)
         if (proxyUrl && proxyUrl !== "local" && !wsEndpoint.includes("browser.zenrows.com")) {
           wsEndpoint = buildCDPUrlWithProxy(wsEndpoint, proxyUrl);
-          log(`Using Webshare proxy via CDP endpoint`);
+          log(`Using nsocks proxy via CDP endpoint`);
         }
         log(`Connecting to ZenRows browser: ${wsEndpoint.substring(0, 60)}...`);
         const { chromium: vanillaChromium } = await import("playwright");
@@ -13126,11 +13126,11 @@ export async function registerLovableAccount(
           "Sec-Ch-Ua-Platform": '"Windows"',
         },
       };
-      // Inject Webshare residential proxy into the stealth browser context
+      // Inject nsocks residential proxy into the stealth browser context
       if (proxyUrl && proxyUrl !== "local") {
         const proxyServer = proxyUrl.startsWith("http") ? proxyUrl : `http://${proxyUrl}`;
         contextOpts.proxy = { server: proxyServer };
-        log(`Using Webshare residential proxy for stealth browser`);
+        log(`Using nsocks residential proxy for stealth browser`);
       }
       context = await browser.newContext(contextOpts);
       log("Using stealth headless browser (playwright-extra + StealthPlugin)");
@@ -17453,7 +17453,7 @@ export async function onboardingCheckoutReplitAccount(
     log(`   Coupon : ${couponCode}`);
     log("═".repeat(55));
 
-    // ── Webshare residential proxy — native Playwright proxy (no ProxyChain) ──
+    // ── nsocks residential proxy — native Playwright proxy (no ProxyChain) ──
     try {
       const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
       if (rawProxy) {
@@ -17479,15 +17479,15 @@ export async function onboardingCheckoutReplitAccount(
           req.end();
         });
         if (!proxyHealthy) {
-          log(`❌ Webshare proxy rejected CONNECT — package suspended. Falling back to DIRECT.`);
+          log(`❌ nsocks proxy rejected CONNECT — package suspended. Falling back to DIRECT.`);
         } else {
           checkoutNativeProxy = { server: `http://${pUrl.hostname}:${pUrl.port}`, username: cleanUser, password: cleanPassword };
-          log(`🌐 Webshare connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          log(`🌐 nsocks connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
           const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
           await resolveProxyIp(rawForIp, log, "WEBSHARE CHECKOUT");
         }
       } else {
-        log("⚠️ No Webshare proxy configured — checkout using direct connection (higher ban risk)");
+        log("⚠️ No nsocks proxy configured — checkout using direct connection (higher ban risk)");
       }
     } catch (proxyErr: any) {
       log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
@@ -18980,7 +18980,7 @@ export async function generateSingleCheckoutLink(
       usingZenRows = true;
       log("✅ ZenRows anti-bot browser connected — ban protection active");
     } catch (zrErr: any) {
-      log(`⚠️ ZenRows not available (${(zrErr.message || "").substring(0, 60)}) — falling back to Webshare + stealth browser`);
+      log(`⚠️ ZenRows not available (${(zrErr.message || "").substring(0, 60)}) — falling back to nsocks + stealth browser`);
     }
 
     // ── Randomised fingerprint (used for browser context regardless of browser type) ──
@@ -18992,7 +18992,7 @@ export async function generateSingleCheckoutLink(
     const glCv = GL_CVS[Math.floor(Math.random() * GL_CVS.length)];
 
     if (!usingZenRows) {
-      // ── Webshare residential proxy — native Playwright proxy (no ProxyChain) ──
+      // ── nsocks residential proxy — native Playwright proxy (no ProxyChain) ──
       try {
         const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
         if (rawProxy) {
@@ -19021,10 +19021,10 @@ export async function generateSingleCheckoutLink(
           });
 
           if (!proxyHealthy) {
-            log(`❌ Webshare proxy rejected CONNECT — package may be suspended. Falling back to DIRECT.`);
+            log(`❌ nsocks proxy rejected CONNECT — package may be suspended. Falling back to DIRECT.`);
           } else {
             linkNativeProxy = { server: `http://${pUrl.hostname}:${pUrl.port}`, username: cleanUser, password: cleanPassword };
-            log(`🌐 Webshare connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+            log(`🌐 nsocks connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
             const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
             await resolveProxyIp(rawForIp, log, "WEBSHARE LINK-GEN");
           }
@@ -19047,7 +19047,7 @@ export async function generateSingleCheckoutLink(
       };
       if (linkNativeProxy) glLaunchOptions.proxy = linkNativeProxy;
       browser = await stealthChromium.launch(glLaunchOptions);
-      log("🖥️  Local stealth browser launched" + (linkNativeProxy ? " with Webshare proxy" : " (no proxy)"));
+      log("🖥️  Local stealth browser launched" + (linkNativeProxy ? " with nsocks proxy" : " (no proxy)"));
     }
 
     const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${glCv}.0.0.0 Safari/537.36`;
@@ -19983,7 +19983,7 @@ export async function createElevenLabsAccount(
     // Generate a strong ElevenLabs account password
     const elPassword = "EL@" + Math.random().toString(36).substring(2, 8).toUpperCase() + Math.floor(Math.random() * 900 + 100) + "!";
 
-    // ── Build Webshare proxy agent (used for ALL API calls + browser) ─────────
+    // ── Build nsocks proxy agent (used for ALL API calls + browser) ─────────
     const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`)
       .then(r => r.rows[0]?.value as string || "").catch(() => "");
     const soaxUrl = rawProxy
@@ -19993,10 +19993,10 @@ export async function createElevenLabsAccount(
     if (soaxUrl) {
       try {
         const parsed = new URL(soaxUrl);
-        log(`🌐 Webshare proxy: ${parsed.hostname}:${parsed.port}`);
+        log(`🌐 nsocks proxy: ${parsed.hostname}:${parsed.port}`);
       } catch {}
     } else {
-      log("No Webshare proxy configured — running direct");
+      log("No nsocks proxy configured — running direct");
     }
 
     // ── STEP 2: Solve hCaptcha via CapSolver ──────────────────────────────
@@ -20450,7 +20450,7 @@ export async function registerNanoBananaAccount(
 
     // ZenRows proxy blocks login.microsoftonline.com inside popups (returns host_not_allowed).
     // Strategy: capture the OAuth URL from the popup, close it, then complete the MS login
-    // in a SEPARATE local browser with the Webshare residential proxy.
+    // in a SEPARATE local browser with the nsocks residential proxy.
     // After login, read MSAL tokens from that browser's sessionStorage and inject them
     // into the main ZenRows page so MSAL recognises the user as logged in.
 
@@ -20464,7 +20464,7 @@ export async function registerNanoBananaAccount(
     await popup.close().catch(() => {});
     log("Popup closed — starting MS login in external browser with residential proxy...");
 
-    // 2. Get Webshare residential proxy URL
+    // 2. Get nsocks residential proxy URL
     const rawProxyForMs = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`)
       .then(r => r.rows[0]?.value as string || "").catch(() => "");
     const msSessionId = Math.random().toString(36).substring(2, 14);
@@ -20845,7 +20845,7 @@ export async function registerChatGptAccount(
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
     stealthChromium.use(StealthPlugin());
 
-    // Proxy selection: Apify (primary) → SOAX (fallback) → Webshare (last resort)
+    // Proxy selection: Apify (primary) → SOAX (fallback) → nsocks (last resort)
     let proxyConfig: any = undefined;
     let proxyUrl: string | null = null;
 
@@ -20869,10 +20869,10 @@ export async function registerChatGptAccount(
       } catch {}
     }
 
-    // 3. Last resort: Webshare (datacenter — often blocked by OpenAI)
+    // 3. Last resort: nsocks (datacenter — often blocked by OpenAI)
     if (!proxyUrl) {
       proxyUrl = await getResidentialProxyUrl();
-      if (proxyUrl) log("⚠️ Using Webshare fallback proxy (datacenter IPs, may be blocked by OpenAI)");
+      if (proxyUrl) log("⚠️ Using nsocks fallback proxy (datacenter IPs, may be blocked by OpenAI)");
     }
 
     if (proxyUrl) {
