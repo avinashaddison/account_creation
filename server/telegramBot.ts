@@ -797,9 +797,10 @@ export function startTelegramBot() {
           await new Promise(res => setTimeout(res, 500));
 
           // Step 2: polished completion card (edit the live-log message)
+          const displayTotal = totalCount > 1 ? totalCount : (created + failed) || totalCount;
           await bot.telegram.editMessageText(chatId, msgId, undefined,
             `🎉 <b>Batch Complete!</b>\n\n` +
-            `${svc.emoji} <b>${esc(svc.label)}</b> — ${totalCount} requested\n` +
+            `${svc.emoji} <b>${esc(svc.label)}</b> — ${displayTotal} processed\n` +
             `━━━━━━━━━━━━━━━━━━━━\n` +
             `✅  Created: <b>${created}</b>\n` +
             `❌  Failed:  <b>${failed}</b>\n` +
@@ -904,10 +905,23 @@ export function startTelegramBot() {
   bot.action("confirm_checkout", async (ctx) => {
     await ctx.answerCbQuery("Starting...");
     const r = await botApi("/api/replit-auto-coupon-links", "POST", {});
-    const msg = r.ok
-      ? `✅ *Checkout generation started!*\n\nSource: \`${r.data.sourceEmail || "auto-selected"}\``
-      : `❌ Error: ${r.data?.error || "Unknown"}`;
-    await ctx.editMessageText(msg, { parse_mode: "Markdown" });
+    if (!r.ok) {
+      await ctx.editMessageText(`❌ <b>Error:</b> ${esc(r.data?.error || "Unknown")}`, { parse_mode: "HTML" });
+      return;
+    }
+    const batchId = r.data.batchId as string;
+    const startTime = Date.now();
+    const checkoutSvc: ServiceConfig = { emoji: "🔗", label: "Checkout Links", endpoint: "", outlookTable: "", hasCard: false, hasCoupon: false, hasReferral: false };
+
+    // Switch to live-log view
+    await ctx.editMessageText(
+      `⏳ <b>🔗 Checkout Links</b> — starting up...\n\n<pre>Connecting to batch...</pre>`,
+      { parse_mode: "HTML" }
+    );
+
+    const chatId = ctx.chat!.id;
+    const msgId = ctx.callbackQuery.message!.message_id;
+    await streamBatchLogs(chatId, msgId, batchId, checkoutSvc, 1, startTime);
   });
 
   // Scan

@@ -3868,7 +3868,7 @@ export async function registerRoutes(
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
         }
 
-        broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
+        broadcastLog(batchId, jobId, `🏁 Done — ${generatedLinks.length} created, ${toProcess.length - generatedLinks.length} failed`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {
