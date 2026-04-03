@@ -98,7 +98,8 @@ interface UserState {
   lastCopiedIds?: string[];
   awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url";
   createFlow?: CreateFlow;
-  accountType?: string;    // currently browsing account type
+  accountType?: string;    // currently browsing account type (Accounts section)
+  copyType?: string;       // currently selected type for Copy Accounts
 }
 const userState = new Map<number, UserState>();
 const runningScans = new Map<number, boolean>();
@@ -314,6 +315,70 @@ function inlineAccounts() {
   ]);
 }
 
+/** Step 1 — account type picker for Copy Accounts */
+async function inlineCopyTypes() {
+  const types = Object.entries(ACCOUNT_TYPE_CONFIGS);
+  const counts = await Promise.all(
+    types.map(([, cfg]) =>
+      dbQuery(`SELECT COUNT(*) as cnt FROM ${cfg.table}`).then((r: any) => parseInt(r.rows[0]?.cnt || "0")).catch(() => 0)
+    )
+  );
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  for (let i = 0; i < types.length; i += 2) {
+    const pair = types.slice(i, i + 2).map(([key, cfg], j) => {
+      const cnt = counts[i + j];
+      return Markup.button.callback(`${cfg.emoji} ${cfg.label} (${cnt})`, `ct_${key}`);
+    });
+    rows.push(pair);
+  }
+  return Markup.inlineKeyboard(rows);
+}
+
+/** Step 2 — count/status options per account type */
+function inlineCopyOptions(acctType: string) {
+  const cfg = ACCOUNT_TYPE_CONFIGS[acctType];
+  const s = cfg?.statuses ?? [];
+  // Build buttons: for each non-all status, offer 5 and 10; then 25 and 50 for the first status; plus Custom
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  const nonAll = s.filter((st) => st.value !== null);
+
+  if (nonAll.length === 0) {
+    // No statuses — just offer counts
+    rows.push([
+      Markup.button.callback("5",  `copy_all_5`),
+      Markup.button.callback("10", `copy_all_10`),
+      Markup.button.callback("25", `copy_all_25`),
+    ]);
+    rows.push([
+      Markup.button.callback("50",  `copy_all_50`),
+      Markup.button.callback("100", `copy_all_100`),
+      Markup.button.callback("✍️ Custom…", "copy_custom"),
+    ]);
+  } else {
+    // First status — 4 count options
+    const first = nonAll[0];
+    rows.push([
+      Markup.button.callback(`${first.emoji} 5 ${first.label}`,  `copy_${first.value}_5`),
+      Markup.button.callback(`${first.emoji} 10 ${first.label}`, `copy_${first.value}_10`),
+    ]);
+    rows.push([
+      Markup.button.callback(`${first.emoji} 25 ${first.label}`, `copy_${first.value}_25`),
+      Markup.button.callback(`${first.emoji} 50 ${first.label}`, `copy_${first.value}_50`),
+    ]);
+    // Remaining statuses — 5 and 10 options
+    for (let i = 1; i < nonAll.length; i += 2) {
+      const pair = nonAll.slice(i, i + 2).map((st) =>
+        Markup.button.callback(`${st.emoji} 5 ${st.label}`, `copy_${st.value}_5`)
+      );
+      rows.push(pair);
+    }
+    rows.push([Markup.button.callback("✍️ Custom…", "copy_custom")]);
+  }
+  rows.push([Markup.button.callback("🔙 Back to Types", "show_copy_types")]);
+  return Markup.inlineKeyboard(rows);
+}
+
+/** Legacy replit-only copy inline (kept for backward compat) */
 function inlineCopy() {
   return Markup.inlineKeyboard([
     [Markup.button.callback("⏳ 5 Processing", "copy_processing_5"), Markup.button.callback("⏳ 10 Processing", "copy_processing_10")],
@@ -370,28 +435,49 @@ async function buildStatsText() {
 }
 
 // ── Copy + apply ──────────────────────────────────────────────────────────────
-async function doCopy(ctx: any, status: string, count: number) {
+async function doCopy(ctx: any, status: string, count: number, acctType?: string) {
   const uid = ctx.from?.id;
-  const rows = (await dbQuery(
-    `SELECT id, email, password, credits FROM replit_accounts WHERE status = $1 ORDER BY created_at DESC LIMIT $2`,
-    [status, count]
-  )).rows;
+  // Resolve which table to query
+  const type = acctType || getState(uid).copyType || "replit";
+  const cfg = ACCOUNT_TYPE_CONFIGS[type];
+  const table = cfg?.table || "replit_accounts";
+  const typeEmoji = cfg?.emoji || "🔵";
+  const typeLabel = cfg?.label || "Replit";
+
+  // Build query — "all" status means no WHERE clause on status
+  let rows: any[];
+  const hasStatus = status && status !== "all";
+  if (hasStatus) {
+    rows = (await dbQuery(
+      `SELECT id, email, password${table === "replit_accounts" ? ", credits, coupon_code, checkout_url" : ""} FROM ${table} WHERE status = $1 ORDER BY created_at DESC LIMIT $2`,
+      [status, count]
+    )).rows;
+  } else {
+    rows = (await dbQuery(
+      `SELECT id, email, password${table === "replit_accounts" ? ", credits, coupon_code, checkout_url" : ""} FROM ${table} ORDER BY created_at DESC LIMIT $1`,
+      [count]
+    )).rows;
+  }
 
   if (rows.length === 0) {
-    return ctx.reply(`No ${statusEmoji(status)} ${status} accounts found.`);
+    return ctx.reply(`No ${typeEmoji} ${typeLabel} accounts found${hasStatus ? ` with status *${status.replace(/_/g, " ")}*` : ""}.`, { parse_mode: "Markdown" });
   }
 
   getState(uid).lastCopiedIds = rows.map((r: any) => String(r.id));
 
   for (const row of rows) {
-    await ctx.reply(
-      `Email 📧: \`${row.email}\`\n\nPassword 🔑: \`${row.password || ""}\`\n\nCredits: $${row.credits || "20"} 💰`,
-      { parse_mode: "Markdown" }
-    );
+    let card = `${typeEmoji} *${typeLabel} Account*\n`;
+    card += `📧 Email: \`${row.email || ""}\`\n`;
+    card += `🔑 Password: \`${row.password || "N/A"}\`\n`;
+    if (row.credits != null) card += `💰 Credits: ${row.credits || "20"}\n`;
+    if (row.coupon_code) card += `🎟 Coupon: \`${row.coupon_code}\`\n`;
+    if (row.checkout_url) card += `🔗 Checkout: ${(row.checkout_url as string).substring(0, 80)}...\n`;
+    await ctx.reply(card, { parse_mode: "Markdown" });
   }
 
+  const statusLabel = hasStatus ? ` (${status.replace(/_/g, " ")})` : "";
   await ctx.reply(
-    `✅ *${rows.length}* ${statusEmoji(status)} accounts sent.\n\nApply a status to these accounts?`,
+    `✅ *${rows.length}* ${typeEmoji} ${typeLabel}${statusLabel} accounts sent.\n\nApply a status to these accounts?`,
     { parse_mode: "Markdown", ...inlineApplyStatus() }
   );
 }
@@ -403,7 +489,10 @@ async function applyStatus(ctx: any, status: string) {
     return ctx.answerCbQuery ? ctx.answerCbQuery("No accounts selected.") : ctx.reply("No accounts selected.");
   }
   const ph = ids.map((_: string, i: number) => `$${i + 2}`).join(", ");
-  const r = await dbQuery(`UPDATE replit_accounts SET status = $1 WHERE id IN (${ph}) RETURNING id`, [status, ...ids]);
+  // Use the table for whichever type was last copied; default to replit_accounts
+  const copyType = getState(uid).copyType || "replit";
+  const table = ACCOUNT_TYPE_CONFIGS[copyType]?.table || "replit_accounts";
+  const r = await dbQuery(`UPDATE ${table} SET status = $1 WHERE id IN (${ph}) RETURNING id`, [status, ...ids]);
   getState(uid).lastCopiedIds = undefined;
   if (ctx.answerCbQuery) await ctx.answerCbQuery(`Updated ${r.rowCount} accounts`);
   await ctx.reply(`✅ *${r.rowCount}* accounts → \`${status}\``, { parse_mode: "Markdown" });
@@ -499,9 +588,10 @@ export function startTelegramBot() {
   }));
 
   bot.hears("📋 Copy Accounts", (ctx) => handleMenu(ctx, async () => {
-    await ctx.reply("*📋 Copy Accounts* — choose status and count:", {
+    getState(ctx.from.id).copyType = undefined; // reset
+    await ctx.reply("*📋 Copy Accounts* — select an account type:", {
       parse_mode: "Markdown",
-      ...inlineCopy(),
+      ...(await inlineCopyTypes()),
     });
   }));
 
@@ -763,7 +853,46 @@ export function startTelegramBot() {
     );
   });
 
-  // Copy callbacks
+  // ── Copy Accounts: type → options flow ──────────────────────────────────────
+
+  // Back to type picker for copy
+  bot.action("show_copy_types", async (ctx) => {
+    await ctx.answerCbQuery();
+    getState(ctx.from.id).copyType = undefined;
+    try {
+      await ctx.editMessageText("*📋 Copy Accounts* — select an account type:", {
+        parse_mode: "Markdown",
+        ...(await inlineCopyTypes()),
+      });
+    } catch {
+      await ctx.reply("*📋 Copy Accounts* — select an account type:", {
+        parse_mode: "Markdown",
+        ...(await inlineCopyTypes()),
+      });
+    }
+  });
+
+  // Type selected → show count/status picker
+  bot.action(/^ct_([a-z]+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const acctType = (ctx.match as RegExpMatchArray)[1];
+    const cfg = ACCOUNT_TYPE_CONFIGS[acctType];
+    if (!cfg) return;
+    getState(ctx.from.id).copyType = acctType;
+    try {
+      await ctx.editMessageText(
+        `*${cfg.emoji} Copy ${cfg.label} Accounts* — choose status and count:`,
+        { parse_mode: "Markdown", ...inlineCopyOptions(acctType) }
+      );
+    } catch {
+      await ctx.reply(
+        `*${cfg.emoji} Copy ${cfg.label} Accounts* — choose status and count:`,
+        { parse_mode: "Markdown", ...inlineCopyOptions(acctType) }
+      );
+    }
+  });
+
+  // Copy callbacks — use stored copyType to query the right table
   bot.action(/^copy_(.+)_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery("Copying...");
     await ctx.deleteMessage().catch(() => {});
@@ -774,8 +903,14 @@ export function startTelegramBot() {
   bot.action("copy_custom", async (ctx) => {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
+    const type = getState(uid).copyType || "replit";
+    const cfg = ACCOUNT_TYPE_CONFIGS[type];
     getState(uid).awaitingText = "custom_copy";
-    await ctx.reply(`Send: \`count status\`\nExample: \`15 processing\` or \`5 sold_out\``, { parse_mode: "Markdown" });
+    const statusHints = cfg?.statuses.filter(s => s.value).map(s => s.value).join(", ") || "processing, sold_out";
+    await ctx.reply(
+      `*${cfg?.emoji || "📋"} ${cfg?.label || "Replit"} — Custom Copy*\n\nSend: \`count status\`\nExample: \`15 ${cfg?.statuses.find(s=>s.value)?.value || "processing"}\`\nAvailable statuses: \`${statusHints}\``,
+      { parse_mode: "Markdown" }
+    );
   });
 
   // Apply status
