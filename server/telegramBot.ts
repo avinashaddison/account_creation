@@ -25,6 +25,66 @@ const SERVICE_CONFIGS: Record<string, ServiceConfig> = {
   chatgpt: { label: "ChatGPT",  emoji: "🤖", endpoint: "/api/chatgpt-create/bulk", outlookTable: "chatgpt_accounts" },
 };
 
+// ── Account type browser configs ──────────────────────────────────────────────
+interface AccountTypeConfig {
+  label: string;
+  emoji: string;
+  table: string;
+  statusCol: boolean;          // table has a `status` column
+  extraCols: string[];         // extra columns to show in listing
+  statuses: Array<{ label: string; emoji: string; value: string | null }>; // null = all
+}
+const ACCOUNT_TYPE_CONFIGS: Record<string, AccountTypeConfig> = {
+  outlook: {
+    label: "Outlook", emoji: "📧", table: "private_outlook_accounts", statusCol: true,
+    extraCols: [],
+    statuses: [
+      { label: "All",            emoji: "📋", value: null },
+      { label: "Active",         emoji: "🟢", value: "active" },
+      { label: "Blocked",        emoji: "🚫", value: "proofs_blocked" },
+    ],
+  },
+  replit: {
+    label: "Replit", emoji: "🔵", table: "replit_accounts", statusCol: true,
+    extraCols: ["checkout_url", "coupon_code"],
+    statuses: [
+      { label: "All",        emoji: "📋", value: null },
+      { label: "Processing", emoji: "⏳", value: "processing" },
+      { label: "Sold Out",   emoji: "✅", value: "sold_out" },
+      { label: "Working",    emoji: "🔗", value: "working" },
+      { label: "Available",  emoji: "🟢", value: "available" },
+      { label: "Error",      emoji: "❌", value: "error" },
+    ],
+  },
+  lovable: {
+    label: "Lovable", emoji: "💜", table: "lovable_accounts", statusCol: true,
+    extraCols: ["credits"],
+    statuses: [
+      { label: "All",                 emoji: "📋", value: null },
+      { label: "Created",             emoji: "✅", value: "created" },
+      { label: "Sold Out",            emoji: "🟡", value: "sold_out" },
+      { label: "Pending Verify",      emoji: "⏳", value: "pending_verification" },
+    ],
+  },
+  gmail: {
+    label: "Gmail", emoji: "📩", table: "private_gmail_accounts", statusCol: true,
+    extraCols: [],
+    statuses: [
+      { label: "All",    emoji: "📋", value: null },
+      { label: "Active", emoji: "🟢", value: "active" },
+    ],
+  },
+  adobe: {
+    label: "Adobe", emoji: "🅰️", table: "adobe_accounts", statusCol: true,
+    extraCols: [],
+    statuses: [
+      { label: "All",    emoji: "📋", value: null },
+      { label: "Active", emoji: "🟢", value: "active" },
+      { label: "Error",  emoji: "❌", value: "error" },
+    ],
+  },
+};
+
 // ── Per-user state ────────────────────────────────────────────────────────────
 interface CreateFlow {
   service?: string;
@@ -38,6 +98,7 @@ interface UserState {
   lastCopiedIds?: string[];
   awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url";
   createFlow?: CreateFlow;
+  accountType?: string;    // currently browsing account type
 }
 const userState = new Map<number, UserState>();
 const runningScans = new Map<number, boolean>();
@@ -206,6 +267,45 @@ const MAIN_KEYBOARD = Markup.keyboard([
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
+
+/** Step 1 — account type picker */
+async function inlineAccountTypes() {
+  // Fetch counts for each type so user can see them at a glance
+  const types = Object.entries(ACCOUNT_TYPE_CONFIGS);
+  const counts = await Promise.all(
+    types.map(([, cfg]) =>
+      dbQuery(`SELECT COUNT(*) as cnt FROM ${cfg.table}`).then((r: any) => parseInt(r.rows[0]?.cnt || "0")).catch(() => 0)
+    )
+  );
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  for (let i = 0; i < types.length; i += 2) {
+    const pair = types.slice(i, i + 2).map(([key, cfg], j) => {
+      const cnt = counts[i + j];
+      return Markup.button.callback(`${cfg.emoji} ${cfg.label} (${cnt})`, `at_${key}`);
+    });
+    rows.push(pair);
+  }
+  return Markup.inlineKeyboard(rows);
+}
+
+/** Step 2 — status filter for a given account type */
+function inlineAccountStatus(acctType: string) {
+  const cfg = ACCOUNT_TYPE_CONFIGS[acctType];
+  if (!cfg) return Markup.inlineKeyboard([[Markup.button.callback("🔙 Back", "show_account_types")]]);
+  const statusRows: ReturnType<typeof Markup.button.callback>[][] = [];
+  const statuses = cfg.statuses;
+  for (let i = 0; i < statuses.length; i += 2) {
+    statusRows.push(
+      statuses.slice(i, i + 2).map((s) =>
+        Markup.button.callback(`${s.emoji} ${s.label}`, `as_${acctType}_${s.value ?? "all"}`)
+      )
+    );
+  }
+  statusRows.push([Markup.button.callback("🔙 Back to Types", "show_account_types")]);
+  return Markup.inlineKeyboard(statusRows);
+}
+
+/** Legacy replit-only account list (kept for backward compat with "list_processing" in create completion) */
 function inlineAccounts() {
   return Markup.inlineKeyboard([
     [Markup.button.callback("📋 All", "list_all"), Markup.button.callback("⏳ Processing", "list_processing")],
@@ -392,9 +492,9 @@ export function startTelegramBot() {
   }));
 
   bot.hears("👥 Accounts", (ctx) => handleMenu(ctx, async () => {
-    await ctx.reply("*👥 Accounts* — select a status:", {
+    await ctx.reply("*👥 Accounts* — select an account type:", {
       parse_mode: "Markdown",
-      ...inlineAccounts(),
+      ...(await inlineAccountTypes()),
     });
   }));
 
@@ -560,6 +660,108 @@ export function startTelegramBot() {
       }
     });
   }
+
+  // ── Account type browser (new flow) ────────────────────────────────────────
+
+  // Back button — show type picker again
+  bot.action("show_account_types", async (ctx) => {
+    await ctx.answerCbQuery();
+    try {
+      await ctx.editMessageText("*👥 Accounts* — select an account type:", {
+        parse_mode: "Markdown",
+        ...(await inlineAccountTypes()),
+      });
+    } catch {
+      await ctx.reply("*👥 Accounts* — select an account type:", {
+        parse_mode: "Markdown",
+        ...(await inlineAccountTypes()),
+      });
+    }
+  });
+
+  // Step 1: account type selected → show status filter
+  bot.action(/^at_([a-z]+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const acctType = (ctx.match as RegExpMatchArray)[1];
+    const cfg = ACCOUNT_TYPE_CONFIGS[acctType];
+    if (!cfg) return;
+    getState(ctx.from.id).accountType = acctType;
+    try {
+      await ctx.editMessageText(`*${cfg.emoji} ${cfg.label} Accounts* — select a status:`, {
+        parse_mode: "Markdown",
+        ...inlineAccountStatus(acctType),
+      });
+    } catch {
+      await ctx.reply(`*${cfg.emoji} ${cfg.label} Accounts* — select a status:`, {
+        parse_mode: "Markdown",
+        ...inlineAccountStatus(acctType),
+      });
+    }
+  });
+
+  // Step 2: status selected → list accounts with passwords
+  bot.action(/^as_([a-z]+)_([a-z_]+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Loading...");
+    const m = ctx.match as RegExpMatchArray;
+    const acctType = m[1];
+    const statusKey = m[2];
+    const cfg = ACCOUNT_TYPE_CONFIGS[acctType];
+    if (!cfg) return;
+
+    const status = statusKey === "all" ? null : statusKey.replace(/_/g, "_"); // keep underscores as-is
+
+    // Build query based on type
+    let rows: any[];
+    if (status) {
+      rows = (await dbQuery(
+        `SELECT email, password, status${cfg.extraCols.length ? ", " + cfg.extraCols.join(", ") : ""} FROM ${cfg.table} WHERE status = $1 ORDER BY created_at DESC LIMIT 30`,
+        [status]
+      )).rows;
+    } else {
+      rows = (await dbQuery(
+        `SELECT email, password, status${cfg.extraCols.length ? ", " + cfg.extraCols.join(", ") : ""} FROM ${cfg.table} ORDER BY created_at DESC LIMIT 30`
+      )).rows;
+    }
+
+    const statusLabel = status ? status.replace(/_/g, " ") : "All";
+    const header = `*${cfg.emoji} ${cfg.label} — ${statusLabel}* (${rows.length}${rows.length === 30 ? "+" : ""})\n\n`;
+
+    if (rows.length === 0) {
+      try {
+        await ctx.editMessageText(header + "_No accounts found._", {
+          parse_mode: "Markdown",
+          ...inlineAccountStatus(acctType),
+        });
+      } catch {
+        await ctx.reply(header + "_No accounts found._", {
+          parse_mode: "Markdown",
+          ...inlineAccountStatus(acctType),
+        });
+      }
+      return;
+    }
+
+    // Send individual credential cards (one per account) — each copyable
+    await ctx.deleteMessage().catch(() => {});
+    let sentCount = 0;
+    for (const row of rows) {
+      let card = `${cfg.emoji} *${cfg.label} Account*\n`;
+      card += `📧 Email: \`${row.email || ""}\`\n`;
+      card += `🔑 Password: \`${row.password || "N/A"}\`\n`;
+      if (row.status) card += `📊 Status: \`${row.status}\`\n`;
+      if (row.checkout_url) card += `🔗 Checkout: ${row.checkout_url.substring(0, 60)}...\n`;
+      if (row.coupon_code) card += `🎟 Coupon: \`${row.coupon_code}\`\n`;
+      if (row.credits != null) card += `💰 Credits: ${row.credits}\n`;
+      await ctx.reply(card, { parse_mode: "Markdown" });
+      sentCount++;
+    }
+
+    // Footer with navigation back
+    await ctx.reply(
+      `✅ *${sentCount}* ${cfg.emoji} ${cfg.label} accounts shown.`,
+      { parse_mode: "Markdown", ...inlineAccountStatus(acctType) }
+    );
+  });
 
   // Copy callbacks
   bot.action(/^copy_(.+)_(\d+)$/, async (ctx) => {
