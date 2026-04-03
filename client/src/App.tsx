@@ -38,6 +38,7 @@ import TMEventScanner from "@/pages/TMEventScanner";
 import TMLiveAlerts from "@/pages/TMLiveAlerts";
 import TMTrackedEvents from "@/pages/TMTrackedEvents";
 import TMSettings from "@/pages/TMSettings";
+import MoviesDrive from "@/pages/MoviesDrive";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -80,6 +81,7 @@ function AdminRoutes({ user, onLogout, onPanelNameChange }: { user: AuthUser; on
         <Route path="/admin/tm-live-alerts" component={TMLiveAlerts} />
         <Route path="/admin/tm-tracked-events" component={TMTrackedEvents} />
         <Route path="/admin/tm-settings" component={TMSettings} />
+        <Route path="/admin/movies-drive" component={MoviesDrive} />
         <Route path="/admin/auto-create"><Redirect to="/admin/create-server" /></Route>
         <Route path="/admin/email-server"><Redirect to="/admin/email-workspace" /></Route>
         <Route path="/admin/email-workspace" component={EmailWorkspace} />

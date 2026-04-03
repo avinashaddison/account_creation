@@ -5453,5 +5453,59 @@ export async function registerRoutes(
     }
   });
 
+  // ── MOVIES DRIVE SCRAPER ──
+  app.get("/api/movies-drive", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const response = await fetch("https://new1.moviesdrives.my/", {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.5",
+        },
+      });
+      const html = await response.text();
+
+      const movies: { title: string; image: string; link: string }[] = [];
+      const seen = new Set<string>();
+
+      // Match: <a href="URL"><div class="poster-card">...<img src="IMG" alt="TITLE">
+      const blockRegex = /<a\s+href="(https:\/\/new1\.moviesdrives\.my\/[^"]+)"[^>]*>\s*<div[^>]*class="[^"]*poster-card[^"]*"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]+alt="([^"]+)"/g;
+      let match;
+      while ((match = blockRegex.exec(html)) !== null) {
+        const link = match[1];
+        if (seen.has(link)) continue;
+        seen.add(link);
+
+        const image = match[2];
+        const rawTitle = match[3]
+          .replace(/&#038;/g, "&")
+          .replace(/&#8217;/g, "'")
+          .replace(/&#8211;/g, "-")
+          .replace(/&amp;/g, "&")
+          .replace(/&quot;/g, '"');
+
+        // Clean: strip quality/language brackets and trailing tags
+        let title = rawTitle
+          .replace(/\s*\[.*?\]/g, "")
+          .replace(/\s*\(S\d+\s+EP?\d+[^)]*\)/gi, "")
+          .replace(/\s+\d{3,4}p.*$/i, "")
+          .replace(/\s+(WEB-DL|BluRay|HDTC|WEB-RIP|AMZN)\s*.*$/i, "")
+          .replace(/\s*\|\s*(Complete Web Series|Full Movie)$/i, "")
+          .trim();
+
+        // Fallback: if title is too short use slug-based name
+        if (title.length < 3) {
+          title = rawTitle.split("|")[0].trim();
+        }
+
+        movies.push({ title, image, link });
+      }
+
+      res.json({ movies });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to fetch movies", error: err.message });
+    }
+  });
+
   return httpServer;
 }

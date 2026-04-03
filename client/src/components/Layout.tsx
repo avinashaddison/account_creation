@@ -5,6 +5,7 @@ import {
   Wallet, Server, Pencil, Check, X, TrendingUp, Terminal,
   Settings, Shield, Ticket, Search, Bell, Bookmark,
   SlidersHorizontal, CreditCard, ShoppingCart, ChevronDown, MailOpen,
+  Film,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { sounds } from "@/lib/sounds";
@@ -490,6 +491,9 @@ export default function Layout({ children, user, onLogout, onPanelNameChange }: 
               {nav.slice(7).map(item => <NavItem key={item.href} item={item} location={location} />)}
             </>
           )}
+
+          <SectionHeader label="ExtraMovies" />
+          <NavItem item={{ href: "/admin/movies-drive", label: "MoviesDrive Server", icon: Film, tag: "NET" }} location={location} />
         </nav>
 
         {/* ── USER CARD ── */}
