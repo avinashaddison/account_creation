@@ -196,14 +196,14 @@ function statusEmoji(s: string) {
   return { processing: "⏳", sold_out: "✅", working: "🔗", available: "🟢", error: "❌", banned: "🚫" }[s] ?? "❓";
 }
 
-// ── Persistent bottom keyboard ────────────────────────────────────────────────
+// ── Reply keyboard — shown on /start and after completing actions ──────────────
 const MAIN_KEYBOARD = Markup.keyboard([
   ["📊 Statistics", "👥 Accounts"],
   ["📋 Copy Accounts", "🔗 Checkout Links"],
   ["🏗 Create Accounts", "🔄 Auto-Scan"],
   ["🔥 Warm Accounts", "🗑 Purge Banned"],
   ["⚙️ Settings", "❓ Help"],
-]).resize().persistent();
+]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
 function inlineAccounts() {
