@@ -7,16 +7,36 @@ const BASE_URL = `http://localhost:${SERVER_PORT}`;
 
 if (!TOKEN) console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — bot disabled");
 
+// ── Service configs ───────────────────────────────────────────────────────────
+interface ServiceConfig {
+  label: string;
+  emoji: string;
+  endpoint: string;
+  outlookTable?: string;   // DB table to check used emails
+  hasCard?: boolean;
+  hasCoupon?: boolean;
+  hasReferral?: boolean;
+}
+const SERVICE_CONFIGS: Record<string, ServiceConfig> = {
+  replit:  { label: "Replit",   emoji: "🔵", endpoint: "/api/replit-create/bulk",  outlookTable: "replit_accounts",  hasCard: true, hasCoupon: true },
+  lovable: { label: "Lovable",  emoji: "💜", endpoint: "/api/lovable-create/bulk",                                    hasReferral: true },
+  v0:      { label: "v0.dev",   emoji: "⚡", endpoint: "/api/v0-create/bulk",      outlookTable: "v0_accounts" },
+  adobe:   { label: "Adobe",    emoji: "🅰️", endpoint: "/api/adobe-create/bulk",   outlookTable: "adobe_accounts" },
+  chatgpt: { label: "ChatGPT",  emoji: "🤖", endpoint: "/api/chatgpt-create/bulk", outlookTable: "chatgpt_accounts" },
+};
+
 // ── Per-user state ────────────────────────────────────────────────────────────
 interface CreateFlow {
+  service?: string;
   count?: number;
-  couponCode?: string;     // "" = no coupon, undefined = not chosen yet
-  cardId?: string;         // "" = no card, undefined = not chosen yet
+  couponCode?: string;     // "" = no coupon, undefined = not set yet
+  cardId?: string;         // "" = no card, undefined = not set yet
   cardLabel?: string;
+  referralUrl?: string;    // "" = no referral, used for Lovable
 }
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url";
   createFlow?: CreateFlow;
 }
 const userState = new Map<number, UserState>();
@@ -28,22 +48,38 @@ function getState(uid: number): UserState {
 }
 
 // ── Create flow helpers ───────────────────────────────────────────────────────
-function buildCreateSummary(flow: CreateFlow, availableCount: number): string {
-  const lines: string[] = [];
-  lines.push(`*🏗 Create Accounts — Summary*`);
-  lines.push(``);
-  lines.push(`📊 *Available Outlook emails:* ${availableCount}`);
-  lines.push(`🔢 *Accounts to create:* ${flow.count}`);
-  lines.push(`🎟 *Coupon code:* ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}`);
-  lines.push(`💳 *Card:* ${flow.cardLabel || "_none_"}`);
-  lines.push(``);
-  lines.push(`Ready to start?`);
-  return lines.join("\n");
+async function getAvailableCount(svc: ServiceConfig): Promise<number> {
+  if (!svc.outlookTable) return 0;
+  const r = await dbQuery(
+    `SELECT COUNT(*) as cnt FROM private_outlook_accounts WHERE email NOT IN (SELECT COALESCE(outlook_email,'') FROM ${svc.outlookTable})`
+  );
+  return parseInt(r.rows[0]?.cnt || "0");
+}
+
+async function showCountPicker(ctx: any, uid: number) {
+  const flow = getState(uid).createFlow!;
+  const svc = SERVICE_CONFIGS[flow.service!];
+  const availMsg = svc.outlookTable
+    ? `\n📊 Available Outlook emails: *${await getAvailableCount(svc)}*\n`
+    : "\n";
+
+  await ctx.reply(
+    `*${svc.emoji} Create ${svc.label} Accounts*${availMsg}\nHow many accounts?`,
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("1", "cn_1"), Markup.button.callback("5", "cn_5"), Markup.button.callback("10", "cn_10")],
+        [Markup.button.callback("20", "cn_20"), Markup.button.callback("30", "cn_30"), Markup.button.callback("50", "cn_50")],
+        [Markup.button.callback("✍️ Custom Number", "cn_custom")],
+        [Markup.button.callback("❌ Cancel", "create_cancel")],
+      ]),
+    }
+  );
 }
 
 async function showCouponStep(ctx: any) {
   await ctx.reply(
-    `*🎟 Coupon Code*\n\nDo you want to apply a coupon during account creation?`,
+    `*🎟 Coupon Code*\n\nApply a coupon during account creation?`,
     {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
@@ -56,12 +92,10 @@ async function showCouponStep(ctx: any) {
 }
 
 async function showCardStep(ctx: any, uid: number) {
-  // Fetch all saved cards
   const cards = await dbQuery(`SELECT id, cardholder_name, card_number FROM saved_cards ORDER BY created_at DESC LIMIT 10`);
   const state = getState(uid);
 
   if (cards.rows.length === 0) {
-    // No cards — skip straight to summary
     state.createFlow!.cardId = "";
     state.createFlow!.cardLabel = "none";
     await showCreateSummary(ctx, uid);
@@ -87,26 +121,51 @@ async function showCardStep(ctx: any, uid: number) {
   );
 }
 
-async function showCreateSummary(ctx: any, uid: number) {
-  const state = getState(uid);
-  const flow = state.createFlow!;
-  const avail = await dbQuery(`
-    SELECT COUNT(*) as cnt FROM private_outlook_accounts po
-    WHERE po.email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)
-  `);
-  const availableCount = parseInt(avail.rows[0]?.cnt || "0");
-
+async function showReferralStep(ctx: any) {
   await ctx.reply(
-    buildCreateSummary(flow, availableCount),
+    `*🔗 Referral URL (optional)*\n\nEnter a Lovable referral URL or skip:\n_Must start with_ \`https://lovable.dev/\``,
     {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("✅ Confirm & Create", "create_confirm")],
-        [Markup.button.callback("✏️ Change Count", "create_change_count"), Markup.button.callback("✏️ Change Coupon", "create_change_coupon")],
+        [Markup.button.callback("✍️ Enter Referral URL", "create_enter_referral")],
+        [Markup.button.callback("⏭ Skip", "create_skip_referral")],
         [Markup.button.callback("❌ Cancel", "create_cancel")],
       ]),
     }
   );
+}
+
+async function showCreateSummary(ctx: any, uid: number) {
+  const flow = getState(uid).createFlow!;
+  const svc = SERVICE_CONFIGS[flow.service!];
+  const lines: string[] = [];
+
+  lines.push(`*🏗 Create ${svc.emoji} ${svc.label} Accounts — Summary*\n`);
+  lines.push(`🔢 *Accounts to create:* ${flow.count}`);
+
+  if (svc.outlookTable) {
+    const avail = await getAvailableCount(svc);
+    lines.push(`📊 *Available Outlook emails:* ${avail}`);
+  }
+  if (svc.hasCoupon) {
+    lines.push(`🎟 *Coupon:* ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}`);
+  }
+  if (svc.hasCard) {
+    lines.push(`💳 *Card:* ${flow.cardLabel || "_none_"}`);
+  }
+  if (svc.hasReferral) {
+    lines.push(`🔗 *Referral URL:* ${flow.referralUrl ? `\`${flow.referralUrl.slice(0, 40)}...\`` : "_none_"}`);
+  }
+  lines.push(`\nReady to start?`);
+
+  await ctx.reply(lines.join("\n"), {
+    parse_mode: "Markdown",
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback("✅ Confirm & Create", "create_confirm")],
+      [Markup.button.callback("✏️ Change Count", "create_change_count"), Markup.button.callback("✏️ Back to Services", "create_back_svc")],
+      [Markup.button.callback("❌ Cancel", "create_cancel")],
+    ]),
+  });
 }
 
 // ── DB ────────────────────────────────────────────────────────────────────────
@@ -337,27 +396,17 @@ export function startTelegramBot() {
 
   bot.hears("🏗 Create Accounts", async (ctx) => {
     const uid = ctx.from.id;
-    // Check available Outlook emails first
-    const avail = await dbQuery(`
-      SELECT COUNT(*) as cnt FROM private_outlook_accounts po
-      WHERE po.email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)
-    `);
-    const availableCount = parseInt(avail.rows[0]?.cnt || "0");
-
-    // Reset flow
     getState(uid).createFlow = {};
 
     await ctx.reply(
-      `*🏗 Create Replit Accounts*\n\n` +
-      `📊 Available Outlook emails: *${availableCount}*\n\n` +
-      `How many accounts do you want to create?`,
+      `*🏗 Create Accounts*\n\nWhich service?`,
       {
         parse_mode: "Markdown",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("1", "cn_1"), Markup.button.callback("5", "cn_5"), Markup.button.callback("10", "cn_10")],
-          [Markup.button.callback("20", "cn_20"), Markup.button.callback("30", "cn_30"), Markup.button.callback("50", "cn_50")],
-          [Markup.button.callback("✍️ Custom Number", "cn_custom")],
-          [Markup.button.callback("❌ Cancel", "create_cancel")],
+          [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
+          [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
+          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
+          [Markup.button.callback("❌ Cancel",  "create_cancel")],
         ]),
       }
     );
@@ -515,14 +564,61 @@ export function startTelegramBot() {
     await ctx.deleteMessage().catch(() => {});
   });
 
+  // ── Create flow: service selection ───────────────────────────────────────
+  bot.action(/^cs_(\w+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const svcKey = (ctx.match as RegExpMatchArray)[1];
+    if (!SERVICE_CONFIGS[svcKey]) return ctx.reply("Unknown service.");
+    const uid = ctx.from.id;
+    const st = getState(uid);
+    if (!st.createFlow) st.createFlow = {};
+    st.createFlow.service = svcKey;
+    await ctx.deleteMessage().catch(() => {});
+    await showCountPicker(ctx, uid);
+  });
+
+  bot.action("create_back_svc", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    getState(uid).createFlow = {};
+    await ctx.editMessageText(
+      `*🏗 Create Accounts*\n\nWhich service?`,
+      {
+        parse_mode: "Markdown",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
+          [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
+          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
+          [Markup.button.callback("❌ Cancel",  "create_cancel")],
+        ]),
+      }
+    );
+  });
+
   // ── Create flow: count selection ─────────────────────────────────────────
+  async function afterCountChosen(ctx: any, uid: number) {
+    const flow = getState(uid).createFlow!;
+    const svc = SERVICE_CONFIGS[flow.service!];
+    await ctx.deleteMessage().catch(() => {});
+    if (svc.hasCoupon) {
+      await showCouponStep(ctx);
+    } else if (svc.hasReferral) {
+      await showReferralStep(ctx);
+    } else {
+      // No extra options — skip to summary
+      if (svc.hasCard) { flow.cardId = ""; flow.cardLabel = "none"; }
+      await showCreateSummary(ctx, uid);
+    }
+  }
+
   bot.action(/^cn_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
     const count = parseInt((ctx.match as RegExpMatchArray)[1]);
     const uid = ctx.from.id;
-    getState(uid).createFlow = { count };
-    await ctx.deleteMessage().catch(() => {});
-    await showCouponStep(ctx);
+    const st = getState(uid);
+    if (!st.createFlow) st.createFlow = {};
+    st.createFlow.count = count;
+    await afterCountChosen(ctx, uid);
   });
 
   bot.action("cn_custom", async (ctx) => {
@@ -558,22 +654,27 @@ export function startTelegramBot() {
   bot.action("create_change_count", async (ctx) => {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
-    const avail = await dbQuery(`
-      SELECT COUNT(*) as cnt FROM private_outlook_accounts po
-      WHERE po.email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)
-    `);
-    const availableCount = parseInt(avail.rows[0]?.cnt || "0");
+    await ctx.deleteMessage().catch(() => {});
+    await showCountPicker(ctx, uid);
+  });
+
+  // ── Create flow: referral URL step (Lovable) ──────────────────────────────
+  bot.action("create_enter_referral", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    getState(uid).awaitingText = "referral_url";
     await ctx.editMessageText(
-      `*🏗 Change Count*\n\n📊 Available Outlook emails: *${availableCount}*\n\nHow many?`,
-      {
-        parse_mode: "Markdown",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("1", "cn_1"), Markup.button.callback("5", "cn_5"), Markup.button.callback("10", "cn_10")],
-          [Markup.button.callback("20", "cn_20"), Markup.button.callback("30", "cn_30"), Markup.button.callback("50", "cn_50")],
-          [Markup.button.callback("✍️ Custom", "cn_custom"), Markup.button.callback("❌ Cancel", "create_cancel")],
-        ]),
-      }
+      `*🔗 Enter Referral URL*\n\nType the Lovable referral URL now:\n_(must start with https://lovable.dev/)_`,
+      { parse_mode: "Markdown" }
     );
+  });
+
+  bot.action("create_skip_referral", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    getState(uid).createFlow!.referralUrl = "";
+    await ctx.deleteMessage().catch(() => {});
+    await showCreateSummary(ctx, uid);
   });
 
   // ── Create flow: card step ────────────────────────────────────────────────
@@ -607,20 +708,26 @@ export function startTelegramBot() {
     await ctx.answerCbQuery("Starting...");
     const uid = ctx.from.id;
     const flow = getState(uid).createFlow;
-    if (!flow?.count) return ctx.reply("Flow lost — start again with 🏗 Create Accounts.");
+    if (!flow?.count || !flow.service) return ctx.reply("Flow lost — start again with 🏗 Create Accounts.");
 
+    const svc = SERVICE_CONFIGS[flow.service];
     const body: any = { count: flow.count };
-    if (flow.couponCode) body.couponCode = flow.couponCode;
-    if (flow.cardId) body.cardId = flow.cardId;
+    if (svc.hasCoupon && flow.couponCode) body.couponCode = flow.couponCode;
+    if (svc.hasCard && flow.cardId) body.cardId = flow.cardId;
+    if (svc.hasReferral && flow.referralUrl) body.referralUrl = flow.referralUrl;
 
-    const r = await botApi("/api/replit-create/bulk", "POST", body);
+    const r = await botApi(svc.endpoint, "POST", body);
 
     if (r.ok) {
+      const details: string[] = [];
+      if (svc.hasCoupon) details.push(`🎟 Coupon: ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}`);
+      if (svc.hasCard) details.push(`💳 Card: ${flow.cardLabel || "_none_"}`);
+      if (svc.hasReferral) details.push(`🔗 Referral: ${flow.referralUrl ? `\`${flow.referralUrl.slice(0, 35)}...\`` : "_none_"}`);
+
       await ctx.editMessageText(
-        `✅ *Creating ${flow.count} account${flow.count > 1 ? "s" : ""}!*\n\n` +
-        `🎟 Coupon: ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}\n` +
-        `💳 Card: ${flow.cardLabel || "_none_"}\n\n` +
-        `Batch: \`${r.data.batchId || "started"}\`\nCheck panel for live logs.`,
+        `✅ *Creating ${flow.count} ${svc.emoji} ${svc.label} account${flow.count > 1 ? "s" : ""}!*\n\n` +
+        (details.length ? details.join("\n") + "\n\n" : "") +
+        `Batch: \`${r.data.batchId || "started"}\`\nCheck the panel for live logs.`,
         { parse_mode: "Markdown" }
       );
     } else {
@@ -785,7 +892,7 @@ export function startTelegramBot() {
       if (!st.createFlow) st.createFlow = {};
       st.createFlow.count = count;
       st.awaitingText = undefined;
-      await showCouponStep(ctx);
+      await afterCountChosen(ctx, uid);
       return;
     }
 
@@ -796,6 +903,19 @@ export function startTelegramBot() {
       st.awaitingText = undefined;
       await ctx.reply(`✅ Coupon set: \`${code}\``, { parse_mode: "Markdown" });
       await showCardStep(ctx, uid);
+      return;
+    }
+
+    if (st.awaitingText === "referral_url") {
+      const url = text.trim();
+      if (!url.startsWith("https://lovable.dev/")) {
+        return ctx.reply("URL must start with `https://lovable.dev/` — try again:", { parse_mode: "Markdown" });
+      }
+      if (!st.createFlow) st.createFlow = {};
+      st.createFlow.referralUrl = url;
+      st.awaitingText = undefined;
+      await ctx.reply(`✅ Referral URL set.`, { parse_mode: "Markdown" });
+      await showCreateSummary(ctx, uid);
       return;
     }
   });
