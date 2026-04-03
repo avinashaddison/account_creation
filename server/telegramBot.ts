@@ -279,7 +279,6 @@ const MAIN_KEYBOARD = Markup.keyboard([
   ["📊 Statistics", "👥 Accounts"],
   ["📋 Copy Accounts", "🔗 Checkout Links"],
   ["🏗 Create Accounts", "📧 Mail Generator"],
-  ["❓ Help"],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
