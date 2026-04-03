@@ -3814,36 +3814,41 @@ export async function registerRoutes(
         broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
-        // Step 3: Generate links (with 1 automatic retry on failure)
-        const generatedLinks: { email: string; url: string }[] = [];
-        for (let i = 0; i < toProcess.length; i++) {
-          const acct = toProcess[i];
-          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}${acct.warmedAt ? " ✅ warmed" : " ⚠️ not warmed"}`, userId);
+        // Step 3: Generate links in PARALLEL (all accounts run simultaneously)
+        // Unrecoverable errors skip the retry; login_timeout IS retried (timing fluke)
+        const isUnrecoverable = (e?: string) =>
+          !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha"));
+
+        broadcastLog(batchId, jobId, `⚡ Running ${toProcess.length} account(s) in parallel...`, userId);
+
+        const results = await Promise.all(toProcess.map(async (acct, i) => {
+          const tag = `[${i + 1}/${toProcess.length}]`;
+          broadcastLog(batchId, jobId, `${tag} 🚀 ${acct.email}${acct.warmedAt ? " ✅ warmed" : " ⚠️ not warmed"}`, userId);
 
           let result = await generateSingleCheckoutLink(
             acct.email,
             acct.password,
             coupon,
-            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId),
+            (msg) => broadcastLog(batchId, jobId, `${tag}  ${msg}`, userId),
             extractedReferralUrl || undefined
           );
 
-          // Skip retry for unrecoverable errors (banned, already subscribed, no password, bad creds, login blocked)
-          const isUnrecoverable = (e?: string) =>
-            !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha") || e.includes("login_timeout"));
-
-          // Auto-retry once on failure — but skip retry if error is unrecoverable
           if (!result.success && !isUnrecoverable(result.error)) {
-            broadcastLog(batchId, jobId, `  ↩️  Retrying with fresh proxy session...`, userId);
+            broadcastLog(batchId, jobId, `${tag} ↩️  Retrying with fresh proxy session...`, userId);
             result = await generateSingleCheckoutLink(
               acct.email,
               acct.password,
               coupon,
-              (msg) => broadcastLog(batchId, jobId, `  [retry] ${msg}`, userId),
+              (msg) => broadcastLog(batchId, jobId, `${tag} [retry] ${msg}`, userId),
               extractedReferralUrl || undefined
             );
           }
 
+          return { acct, result };
+        }));
+
+        const generatedLinks: { email: string; url: string }[] = [];
+        for (const { acct, result } of results) {
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
@@ -3853,16 +3858,16 @@ export async function registerRoutes(
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {
               await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
-              broadcastLog(batchId, jobId, `  ⚠️  Already has Core subscription — moved to sold_out, will be skipped as target`, userId);
+              broadcastLog(batchId, jobId, `  ⚠️  Already has Core subscription — moved to sold_out`, userId);
             } else if (result.error?.includes("banned_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
-              broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
+              broadcastLog(batchId, jobId, `  🚫 Account banned — marked as error`, userId);
             } else if (result.error?.includes("no_password_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
-              broadcastLog(batchId, jobId, `  ⚠️  Account has no password (social auth only) — marked as error, will be skipped`, userId);
+              broadcastLog(batchId, jobId, `  ⚠️  No password set (social auth only) — marked as error`, userId);
             } else if (result.error?.includes("bad_credentials")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
-              broadcastLog(batchId, jobId, `  ⚠️  Bad credentials stored for this account — marked as error, will be skipped`, userId);
+              broadcastLog(batchId, jobId, `  ⚠️  Bad credentials — marked as error`, userId);
             }
           }
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
