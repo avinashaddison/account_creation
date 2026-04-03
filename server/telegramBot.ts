@@ -317,26 +317,36 @@ export function startTelegramBot() {
   // ── Set bot commands (slash-command list) ─────────────────────────────────
   bot.telegram.setMyCommands([
     { command: "start", description: "Open main menu" },
-    { command: "menu", description: "Show keyboard menu" },
+    { command: "menu", description: "Open main keyboard" },
     { command: "stats", description: "Account statistics" },
     { command: "cancel", description: "Cancel running scan" },
   ]).catch(() => {});
 
-  // ── /start & /menu ────────────────────────────────────────────────────────
-  const sendWelcome = async (ctx: any) => {
-    // Force-remove any existing keyboard (clears old .persistent() state in Telegram cache)
+  // ── /start ── welcome only, no keyboard (keyboard only shown via /menu) ───
+  bot.start(async (ctx) => {
+    // Dismiss any existing keyboard permanently
     const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
     if (dismiss) {
       await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
     }
-    // Now show welcome with fresh non-persistent one-time keyboard
     await ctx.reply(
-      `👋 *Replit Admin Bot*\n\nTap a button below, or press *Menu* any time to bring the keyboard back.`,
+      `👋 *Replit Admin Bot*\n\nPress the *Menu* button below to open the keyboard.`,
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  // ── /menu ── show keyboard on demand (triggered by tapping Menu button) ───
+  bot.command("menu", async (ctx) => {
+    // Remove any stale keyboard first, then re-show fresh one-time keyboard
+    const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
+    if (dismiss) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
+    }
+    await ctx.reply(
+      `📋 *Main Menu*\n\nChoose an option:`,
       { parse_mode: "Markdown", ...MAIN_KEYBOARD }
     );
-  };
-  bot.start(sendWelcome);
-  bot.command("menu", sendWelcome);
+  });
 
   // ── /cancel ───────────────────────────────────────────────────────────────
   bot.command("cancel", (ctx) => {
