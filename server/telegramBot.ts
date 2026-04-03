@@ -682,13 +682,25 @@ export function startTelegramBot() {
     } catch {}
   });
 
+  // ── /id — always allowed, returns the caller's Telegram user ID ──────────
+  bot.command("id", async (ctx) => {
+    const uid = ctx.from?.id;
+    await ctx.reply(
+      `🪪 <b>Your Telegram ID:</b> <code>${uid}</code>\n\nAdd this to <b>TELEGRAM_ALLOWED_IDS</b> to grant access.`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+  });
+
   // ── Auth middleware — block unauthorized users ────────────────────────────
   bot.use(async (ctx, next) => {
     const uid = ctx.from?.id;
     if (!uid) return;
     if (ALLOWED.size > 0 && !ALLOWED.has(uid)) {
       botLog(`Blocked unauthorized user ${uid} (@${ctx.from?.username || "unknown"})`);
-      await ctx.reply("⛔ Unauthorized.").catch(() => {});
+      await ctx.reply(
+        `⛔ <b>Unauthorized.</b>\n\n🪪 Your ID: <code>${uid}</code>\n<i>Ask the admin to add it to TELEGRAM_ALLOWED_IDS.</i>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
       return;
     }
     return next();
@@ -701,9 +713,10 @@ export function startTelegramBot() {
 
   // ── Set bot commands (slash-command list) ─────────────────────────────────
   bot.telegram.setMyCommands([
-    { command: "start", description: "Open main menu" },
-    { command: "menu", description: "Open main keyboard" },
-    { command: "stats", description: "Account statistics" },
+    { command: "id",     description: "Show your Telegram user ID" },
+    { command: "start",  description: "Open main menu" },
+    { command: "menu",   description: "Open main keyboard" },
+    { command: "stats",  description: "Account statistics" },
     { command: "cancel", description: "Cancel running scan" },
   ]).catch(() => {});
 
