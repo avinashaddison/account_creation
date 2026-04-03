@@ -18,7 +18,7 @@ interface ServiceConfig {
   hasReferral?: boolean;
 }
 const SERVICE_CONFIGS: Record<string, ServiceConfig> = {
-  replit:  { label: "Replit",   emoji: "🔵", endpoint: "/api/replit-create/bulk",  outlookTable: "replit_accounts",  hasCard: true, hasCoupon: true },
+  replit:  { label: "Replit",   emoji: "🔵", endpoint: "/api/replit-create/bulk",  outlookTable: "replit_accounts" },
   lovable: { label: "Lovable",  emoji: "💜", endpoint: "/api/lovable-create/bulk", outlookTable: "lovable_accounts",  hasReferral: true },
   v0:      { label: "v0.dev",   emoji: "⚡", endpoint: "/api/v0-create/bulk",      outlookTable: "v0_accounts" },
   adobe:   { label: "Adobe",    emoji: "🅰️", endpoint: "/api/adobe-create/bulk",   outlookTable: "adobe_accounts" },
