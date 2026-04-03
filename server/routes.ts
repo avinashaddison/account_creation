@@ -78,6 +78,13 @@ function uniqueProxySession(proxyUrl: string): string {
     }
   }
 
+  // nsocks residential proxy — rotate _session-{id} while preserving _life-{n} suffix
+  if (proxyUrl.includes("nsocks.com")) {
+    if (proxyUrl.includes("_session-")) {
+      return proxyUrl.replace(/_session-[^_@:]+/, `_session-${sessionId}`);
+    }
+  }
+
   return proxyUrl;
 }
 
