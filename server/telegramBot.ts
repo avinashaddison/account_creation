@@ -784,10 +784,19 @@ export function startTelegramBot() {
           const created = parseInt(doneLog.match(/(\d+) created/)?.[1] || "0");
           const failed  = parseInt(doneLog.match(/(\d+) failed/)?.[1] || "0");
           const time = elapsed();
+
+          // Use real total (created+failed) — don't use totalCount for checkout (it's 1)
+          const displayTotal = totalCount > 1 ? totalCount : (created + failed) || 1;
+          const successRate = Math.round((created / displayTotal) * 100);
           const bars = created > 0
             ? "█".repeat(Math.min(created, 10)) + (failed > 0 ? "░".repeat(Math.min(failed, 5)) : "")
             : (failed > 0 ? "░".repeat(Math.min(failed, 10)) : "");
-          const successRate = totalCount > 0 ? Math.round((created / totalCount) * 100) : 0;
+
+          // Extract any CHECKOUT_URL|email|url markers from all accumulated lines
+          const checkoutLinks = allLines
+            .filter(l => l.startsWith("CHECKOUT_URL|"))
+            .map(l => { const [, email, url] = l.split("|"); return { email, url }; })
+            .filter(c => c.email && c.url);
 
           // Step 1: flash
           await bot.telegram.editMessageText(chatId, msgId, undefined,
@@ -797,7 +806,6 @@ export function startTelegramBot() {
           await new Promise(res => setTimeout(res, 500));
 
           // Step 2: polished completion card (edit the live-log message)
-          const displayTotal = totalCount > 1 ? totalCount : (created + failed) || totalCount;
           await bot.telegram.editMessageText(chatId, msgId, undefined,
             `🎉 <b>Batch Complete!</b>\n\n` +
             `${svc.emoji} <b>${esc(svc.label)}</b> — ${displayTotal} processed\n` +
@@ -809,19 +817,39 @@ export function startTelegramBot() {
             { parse_mode: "HTML", ...completionKeyboard }
           ).catch(() => {});
 
-          // Step 3: NEW alert at bottom of chat
+          // Step 3: alert at bottom of chat
+          const isCheckout = checkoutLinks.length > 0;
           await bot.telegram.sendMessage(chatId,
-            `🔔 <b>Account creation done!</b>\n\n` +
-            `${svc.emoji} <b>${esc(svc.label)}</b> — ` +
-            `✅ <b>${created}</b> created  ❌ <b>${failed}</b> failed  ⏱ ${time}`,
+            isCheckout
+              ? `🔔 <b>Checkout links ready!</b>\n\n` +
+                `${svc.emoji} <b>${esc(svc.label)}</b> — ` +
+                `✅ <b>${created}</b> generated  ❌ <b>${failed}</b> failed  ⏱ ${time}`
+              : `🔔 <b>Account creation done!</b>\n\n` +
+                `${svc.emoji} <b>${esc(svc.label)}</b> — ` +
+                `✅ <b>${created}</b> created  ❌ <b>${failed}</b> failed  ⏱ ${time}`,
             { parse_mode: "HTML", ...completionKeyboard }
           ).catch(() => {});
+
+          // Step 4: for checkout — send each link as a clean separate message
+          if (checkoutLinks.length > 0) {
+            const linkLines = checkoutLinks
+              .map((c, i) =>
+                `<b>${i + 1}. ${esc(c.email)}</b>\n` +
+                `<a href="${esc(c.url)}">🔗 Open Checkout</a>\n` +
+                `<code>${esc(c.url)}</code>`
+              )
+              .join("\n\n");
+            await bot.telegram.sendMessage(chatId,
+              `🔗 <b>Generated Checkout Links (${checkoutLinks.length})</b>\n\n${linkLines}`,
+              { parse_mode: "HTML", disable_web_page_preview: true }
+            ).catch(() => {});
+          }
 
           return;
         }
 
-        // Rolling live log view — last 15 lines in a <pre> block (safe from any char)
-        const display = allLines.slice(-15).map(esc).join("\n");
+        // Rolling live log view — last 15 lines (skip internal CHECKOUT_URL markers)
+        const display = allLines.filter(l => !l.startsWith("CHECKOUT_URL|")).slice(-15).map(esc).join("\n");
         const time = elapsed();
 
         await bot.telegram.editMessageText(chatId, msgId, undefined,
