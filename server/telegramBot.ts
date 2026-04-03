@@ -278,9 +278,7 @@ function statusEmoji(s: string) {
 const MAIN_KEYBOARD = Markup.keyboard([
   ["📊 Statistics", "👥 Accounts"],
   ["📋 Copy Accounts", "🔗 Checkout Links"],
-  ["🏗 Create Accounts", "🔄 Auto-Scan"],
-  ["🔥 Warm Accounts", "🗑 Purge Banned"],
-  ["📧 Mail Generator", "⚙️ Settings"],
+  ["🏗 Create Accounts", "📧 Mail Generator"],
   ["❓ Help"],
 ]).resize().oneTime();
 
