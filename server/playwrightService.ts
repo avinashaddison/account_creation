@@ -19298,17 +19298,25 @@ export async function generateSingleCheckoutLink(
     if (!currentLoginUrl.includes("replit.com/login") && !currentLoginUrl.includes("replit.com/signup")) {
       log(`✅ Logged in (fast redirect)`);
     } else {
-      // Wait for redirect away from /login — reduced to 25s (was 45s) to fail faster
+      // Wait for redirect away from /login — 45s timeout
       try {
         await page.waitForURL(
           (u: URL) => !u.href.includes("replit.com/login") && !u.href.includes("replit.com/signup"),
-          { timeout: 25000 }
+          { timeout: 45000 }
         );
       } catch {
         const stuckUrl  = page.url();
         const pageTitle = await page.title().catch(() => "");
         const stuckHtml = await page.content().catch(() => "");
         const bodyFull  = await page.evaluate(() => document.body?.innerText?.substring(0, 800)).catch(() => stuckHtml.substring(0, 800));
+
+        // ── CRITICAL: Check if the redirect already happened (late redirect) ──
+        // If we're no longer on /login or /signup, the login succeeded — the timeout
+        // just fired before we could detect the URL change. This is NOT a failure.
+        if (!stuckUrl.includes("replit.com/login") && !stuckUrl.includes("replit.com/signup")) {
+          log(`✅ Logged in (late redirect to ${stuckUrl.substring(0, 60)})`);
+          // Fall through — skip all the error-throwing below
+        } else {
         log(`⚠️  Login stuck — URL: ${stuckUrl.substring(0, 80)}`);
         if (pageTitle) log(`⚠️  Page title: ${pageTitle}`);
         if (bodyFull)  log(`⚠️  Page text : ${bodyFull.replace(/\n/g, " ").substring(0, 400)}`);
@@ -19381,6 +19389,7 @@ export async function generateSingleCheckoutLink(
         } else {
           throw new Error(`Login timed out — page stuck — login_timeout`);
         }
+        } // closes the late-redirect else block
       }
     }
     if (page.url().includes("/login")) throw new Error("Login failed — still on login page after redirect wait");
