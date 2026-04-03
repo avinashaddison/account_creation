@@ -102,6 +102,13 @@ function hashPassword(password: string): string {
 }
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const botToken = req.headers["x-bot-token"];
+  if (botToken && botToken === process.env.TELEGRAM_BOT_TOKEN) {
+    (req as any).session = (req as any).session || {};
+    req.session.userId = "bot";
+    req.session.role = "superadmin";
+    return next();
+  }
   if (req.session && req.session.userId) {
     return next();
   }
@@ -113,6 +120,18 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
     return next();
   }
   return res.status(403).json({ error: "Super admin access required" });
+}
+
+function requireBotAuth(req: Request, res: Response, next: NextFunction) {
+  const token = req.headers["x-bot-token"];
+  if (token && token === process.env.TELEGRAM_BOT_TOKEN) {
+    // Inject a fake superadmin session so downstream route logic works
+    (req as any).session = (req as any).session || {};
+    req.session.userId = "bot";
+    req.session.role = "superadmin";
+    return next();
+  }
+  return res.status(403).json({ error: "Bot auth required" });
 }
 
 function requireServiceAccess(serviceId: string) {
