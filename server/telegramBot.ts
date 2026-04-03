@@ -703,6 +703,100 @@ export function startTelegramBot() {
     await showCreateSummary(ctx, uid);
   });
 
+  // ── Live log streaming ────────────────────────────────────────────────────
+  async function streamBatchLogs(
+    chatId: number, msgId: number,
+    batchId: string, svc: ServiceConfig, totalCount: number, startTime: number
+  ) {
+    let since = 0;
+    let allLines: string[] = [];
+    let pollCount = 0;
+    const MAX_POLLS = 240; // 240 × 3s = 12 min max
+
+    async function elapsed() {
+      const s = Math.round((Date.now() - startTime) / 1000);
+      return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+    }
+
+    async function poll() {
+      try {
+        if (pollCount++ > MAX_POLLS) {
+          await bot.telegram.editMessageText(chatId, msgId, undefined,
+            `⏱ *Timed out* — batch may still be running in the panel.\n\`${batchId}\``,
+            { parse_mode: "Markdown" }
+          ).catch(() => {});
+          return;
+        }
+
+        const r = await botApi(`/api/batch-logs/${batchId}?since=${since}`);
+        if (!r.ok) { setTimeout(poll, 4000); return; }
+
+        const { logs, nextSince, isComplete } = r.data;
+        since = nextSince;
+
+        for (const l of (logs as Array<{message: string}> || [])) {
+          if (l.message && l.message !== "Batch complete") allLines.push(l.message);
+        }
+
+        const done = isComplete || allLines.some(l => l.startsWith("🏁"));
+
+        if (done) {
+          // Parse final counts from the 🏁 line
+          const doneLog = allLines.find(l => l.startsWith("🏁")) || "";
+          const created = parseInt(doneLog.match(/(\d+) created/)?.[1] || "0");
+          const failed  = parseInt(doneLog.match(/(\d+) failed/)?.[1] || "0");
+          const time = await elapsed();
+
+          // Step 1: transitional "calculating" flash
+          await bot.telegram.editMessageText(chatId, msgId, undefined,
+            `⚡ *Finalising results...*`,
+            { parse_mode: "Markdown" }
+          ).catch(() => {});
+
+          await new Promise(r => setTimeout(r, 500));
+
+          // Step 2: polished completion card
+          const bars = created > 0
+            ? "█".repeat(Math.min(created, 10)) + (failed > 0 ? "░".repeat(Math.min(failed, 5)) : "")
+            : "░".repeat(Math.min(failed, 10));
+          const successRate = totalCount > 0 ? Math.round((created / totalCount) * 100) : 0;
+
+          await bot.telegram.editMessageText(chatId, msgId, undefined,
+            `🎉 *Batch Complete!*\n\n` +
+            `${svc.emoji} *${svc.label}* — ${totalCount} requested\n` +
+            `━━━━━━━━━━━━━━━━━━━━\n` +
+            `✅  Created: *${created}*\n` +
+            `❌  Failed:  *${failed}*\n` +
+            `📊  Success: *${successRate}%*  \`${bars}\`\n` +
+            `⏱   Time:    *${time}*`,
+            {
+              parse_mode: "Markdown",
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback("👥 View Accounts", "list_processing"), Markup.button.callback("🏗 Create More", "create_more")],
+              ]),
+            }
+          ).catch(() => {});
+          return;
+        }
+
+        // Show rolling live logs (last 14 lines)
+        const display = allLines.slice(-14);
+        const time = await elapsed();
+        const header = `⏳ *${svc.emoji} ${svc.label} × ${totalCount}* — ⏱ ${time}\n`;
+        const body = display.join("\n").slice(0, 3200);
+
+        await bot.telegram.editMessageText(chatId, msgId, undefined,
+          header + "```\n" + body + "\n```",
+          { parse_mode: "Markdown" }
+        ).catch(() => {});
+
+        setTimeout(poll, 3000);
+      } catch { setTimeout(poll, 4000); }
+    }
+
+    setTimeout(poll, 2000);
+  }
+
   // ── Create flow: confirm ──────────────────────────────────────────────────
   bot.action("create_confirm", async (ctx) => {
     await ctx.answerCbQuery("Starting...");
@@ -717,23 +811,44 @@ export function startTelegramBot() {
     if (svc.hasReferral && flow.referralUrl) body.referralUrl = flow.referralUrl;
 
     const r = await botApi(svc.endpoint, "POST", body);
-
-    if (r.ok) {
-      const details: string[] = [];
-      if (svc.hasCoupon) details.push(`🎟 Coupon: ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}`);
-      if (svc.hasCard) details.push(`💳 Card: ${flow.cardLabel || "_none_"}`);
-      if (svc.hasReferral) details.push(`🔗 Referral: ${flow.referralUrl ? `\`${flow.referralUrl.slice(0, 35)}...\`` : "_none_"}`);
-
-      await ctx.editMessageText(
-        `✅ *Creating ${flow.count} ${svc.emoji} ${svc.label} account${flow.count > 1 ? "s" : ""}!*\n\n` +
-        (details.length ? details.join("\n") + "\n\n" : "") +
-        `Batch: \`${r.data.batchId || "started"}\`\nCheck the panel for live logs.`,
-        { parse_mode: "Markdown" }
-      );
-    } else {
-      await ctx.editMessageText(`❌ Failed: ${r.data?.error || "Unknown error"}`, { parse_mode: "Markdown" });
-    }
     getState(uid).createFlow = undefined;
+
+    if (!r.ok) {
+      await ctx.editMessageText(`❌ Failed: ${r.data?.error || "Unknown error"}`, { parse_mode: "Markdown" });
+      return;
+    }
+
+    const batchId = r.data.batchId as string;
+    const startTime = Date.now();
+
+    // Replace summary message with live log view
+    await ctx.editMessageText(
+      `⏳ *${svc.emoji} ${svc.label} × ${flow.count}* — starting up...\n\`\`\`\nConnecting to batch...\n\`\`\``,
+      { parse_mode: "Markdown" }
+    );
+
+    const chatId = ctx.chat!.id;
+    const msgId = ctx.callbackQuery.message!.message_id;
+    await streamBatchLogs(chatId, msgId, batchId, svc, flow.count, startTime);
+  });
+
+  bot.action("create_more", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.deleteMessage().catch(() => {});
+    const uid = ctx.from.id;
+    getState(uid).createFlow = {};
+    await ctx.reply(
+      `*🏗 Create Accounts*\n\nWhich service?`,
+      {
+        parse_mode: "Markdown",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
+          [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
+          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
+          [Markup.button.callback("❌ Cancel",  "create_cancel")],
+        ]),
+      }
+    );
   });
 
   bot.action("create_cancel", async (ctx) => {
