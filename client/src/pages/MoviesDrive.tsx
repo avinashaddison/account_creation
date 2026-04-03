@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Film, ExternalLink, AlertTriangle } from "lucide-react";
+import { RefreshCw, Film, ExternalLink, AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
 
 type Movie = {
   title: string;
@@ -11,6 +12,9 @@ const RED = "#ff1a1a";
 const RA = (a: number) => `rgba(255,26,26,${a})`;
 
 export default function MoviesDrive() {
+  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+  const [iframeLoading, setIframeLoading] = useState(false);
+
   const { data, isLoading, isError, refetch, isFetching } = useQuery<{ movies: Movie[] }>({
     queryKey: ["/api/movies-drive"],
     staleTime: 5 * 60 * 1000,
@@ -18,6 +22,105 @@ export default function MoviesDrive() {
 
   const movies = data?.movies ?? [];
 
+  function openMovie(movie: Movie) {
+    setSelectedMovie(movie);
+    setIframeLoading(true);
+  }
+
+  function closeMovie() {
+    setSelectedMovie(null);
+    setIframeLoading(false);
+  }
+
+  // ── POST VIEWER ──
+  if (selectedMovie) {
+    return (
+      <div className="flex flex-col" style={{ height: "calc(100vh - 56px)", margin: "-28px" }}>
+        {/* Viewer toolbar */}
+        <div
+          className="flex items-center gap-3 px-5 py-3 shrink-0 flex-wrap gap-y-2"
+          style={{
+            background: "linear-gradient(90deg, #0d0509 0%, #080410 100%)",
+            borderBottom: `1px solid ${RA(0.20)}`,
+          }}
+        >
+          <button
+            onClick={closeMovie}
+            className="flex items-center gap-2 px-3 py-1.5 rounded text-[11px] font-mono font-bold uppercase tracking-widest transition-all"
+            style={{
+              background: RA(0.10),
+              border: `1px solid ${RA(0.30)}`,
+              color: RED,
+              textShadow: `0 0 6px ${RA(0.4)}`,
+            }}
+            data-testid="button-back-movies"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            BACK
+          </button>
+
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Film className="w-3.5 h-3.5 shrink-0" style={{ color: RA(0.60) }} />
+            <p
+              className="text-[11px] font-mono truncate"
+              style={{ color: "rgba(255,255,255,0.50)" }}
+              title={selectedMovie.title}
+            >
+              {selectedMovie.title}
+            </p>
+          </div>
+
+          {iframeLoading && (
+            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" style={{ color: RA(0.50) }} />
+          )}
+
+          <a
+            href={selectedMovie.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase tracking-widest shrink-0"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              color: "rgba(255,255,255,0.40)",
+            }}
+            data-testid="button-open-external"
+          >
+            <ExternalLink className="w-3 h-3" />
+            OPEN SITE
+          </a>
+        </div>
+
+        {/* iframe */}
+        <div className="flex-1 relative">
+          {iframeLoading && (
+            <div
+              className="absolute inset-0 flex items-center justify-center z-10"
+              style={{ background: "#07050a" }}
+            >
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="w-6 h-6 animate-spin" style={{ color: RA(0.50) }} />
+                <p className="text-[10px] font-mono tracking-widest" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  LOADING POST...
+                </p>
+              </div>
+            </div>
+          )}
+          <iframe
+            key={selectedMovie.link}
+            src={selectedMovie.link}
+            title={selectedMovie.title}
+            className="w-full h-full border-0"
+            onLoad={() => setIframeLoading(false)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            data-testid="iframe-movie-post"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ── GRID VIEW ──
   return (
     <div>
       {/* Header */}
@@ -104,12 +207,10 @@ export default function MoviesDrive() {
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {movies.map((movie, idx) => (
-              <a
+              <div
                 key={idx}
-                href={movie.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group block"
+                className="group cursor-pointer"
+                onClick={() => openMovie(movie)}
                 data-testid={`card-movie-${idx}`}
               >
                 <div
@@ -142,7 +243,7 @@ export default function MoviesDrive() {
                         (t.parentElement as HTMLElement).style.justifyContent = "center";
                       }}
                     />
-                    {/* Hover overlay with external link */}
+                    {/* Hover overlay */}
                     <div
                       className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                       style={{ background: "rgba(0,0,0,0.55)" }}
@@ -156,8 +257,8 @@ export default function MoviesDrive() {
                           textShadow: `0 0 6px ${RA(0.5)}`,
                         }}
                       >
-                        <ExternalLink className="w-3 h-3" />
-                        OPEN
+                        <Film className="w-3 h-3" />
+                        VIEW POST
                       </div>
                     </div>
                   </div>
@@ -171,7 +272,7 @@ export default function MoviesDrive() {
                 >
                   {movie.title}
                 </p>
-              </a>
+              </div>
             ))}
           </div>
         </>
