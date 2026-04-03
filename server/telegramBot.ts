@@ -324,8 +324,14 @@ export function startTelegramBot() {
 
   // ── /start & /menu ────────────────────────────────────────────────────────
   const sendWelcome = async (ctx: any) => {
+    // Force-remove any existing keyboard (clears old .persistent() state in Telegram cache)
+    const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
+    if (dismiss) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
+    }
+    // Now show welcome with fresh non-persistent one-time keyboard
     await ctx.reply(
-      `👋 *Replit Admin Bot*\n\nUse the menu below or tap any button to get started.`,
+      `👋 *Replit Admin Bot*\n\nTap a button below, or press *Menu* any time to bring the keyboard back.`,
       { parse_mode: "Markdown", ...MAIN_KEYBOARD }
     );
   };
