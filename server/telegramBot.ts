@@ -490,11 +490,14 @@ async function doCopy(ctx: any, status: string, count: number, acctType?: string
   getState(uid).lastCopiedIds = rows.map((r: any) => String(r.id));
 
   for (const row of rows) {
+    const email = row.email || "";
+    const pass = row.password || "";
     let card = `${typeEmoji} *${typeLabel} Account*\n`;
-    card += `📧 Email: \`${row.email || ""}\`\n`;
-    card += `🔑 Password: \`${row.password || "N/A"}\`\n`;
+    card += `📧 \`${email}\`\n`;
+    card += `🔑 \`${pass}\`\n`;
     if (row.credits != null) card += `💰 Credits: ${row.credits || "20"}\n`;
     if (row.coupon_code) card += `🎟 Coupon: \`${row.coupon_code}\`\n`;
+    card += `\n📋 \`${email}:${pass}\``;
     await ctx.reply(card, { parse_mode: "Markdown" });
   }
 
@@ -858,13 +861,15 @@ export function startTelegramBot() {
     await ctx.deleteMessage().catch(() => {});
     let sentCount = 0;
     for (const row of rows) {
+      const email = row.email || "";
+      const pass = row.password || "";
       let card = `${cfg.emoji} *${cfg.label} Account*\n`;
-      card += `📧 Email: \`${row.email || ""}\`\n`;
-      card += `🔑 Password: \`${row.password || "N/A"}\`\n`;
+      card += `📧 \`${email}\`\n`;
+      card += `🔑 \`${pass}\`\n`;
       if (row.status) card += `📊 Status: \`${row.status}\`\n`;
-      if (row.checkout_url) card += `🔗 Checkout: ${row.checkout_url.substring(0, 60)}...\n`;
       if (row.coupon_code) card += `🎟 Coupon: \`${row.coupon_code}\`\n`;
       if (row.credits != null) card += `💰 Credits: ${row.credits}\n`;
+      card += `\n📋 \`${email}:${pass}\``;
       await ctx.reply(card, { parse_mode: "Markdown" });
       sentCount++;
     }
