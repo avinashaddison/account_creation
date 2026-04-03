@@ -731,62 +731,74 @@ export function startTelegramBot() {
         const r = await botApi(`/api/batch-logs/${batchId}?since=${since}`);
         if (!r.ok) { setTimeout(poll, 4000); return; }
 
-        const { logs, nextSince, isComplete } = r.data;
+        const { logs, nextSince } = r.data;
         since = nextSince;
 
+        let seenBatchComplete = false;
         for (const l of (logs as Array<{message: string}> || [])) {
-          if (l.message && l.message !== "Batch complete") allLines.push(l.message);
+          if (!l.message) continue;
+          if (l.message === "Batch complete") { seenBatchComplete = true; continue; }
+          allLines.push(l.message);
         }
 
-        const done = isComplete || allLines.some(l => l.startsWith("🏁"));
+        // Only mark done when we see the 🏁 summary line — never trust isComplete
+        // alone (empty accounts array makes it true immediately in JS)
+        const hasDoneLine = allLines.some(l => l.startsWith("🏁"));
+        const done = hasDoneLine || seenBatchComplete;
 
         if (done) {
-          // Parse final counts from the 🏁 line
           const doneLog = allLines.find(l => l.startsWith("🏁")) || "";
           const created = parseInt(doneLog.match(/(\d+) created/)?.[1] || "0");
           const failed  = parseInt(doneLog.match(/(\d+) failed/)?.[1] || "0");
           const time = await elapsed();
-
-          // Step 1: transitional "calculating" flash
-          await bot.telegram.editMessageText(chatId, msgId, undefined,
-            `⚡ *Finalising results...*`,
-            { parse_mode: "Markdown" }
-          ).catch(() => {});
-
-          await new Promise(r => setTimeout(r, 500));
-
-          // Step 2: polished completion card
           const bars = created > 0
             ? "█".repeat(Math.min(created, 10)) + (failed > 0 ? "░".repeat(Math.min(failed, 5)) : "")
-            : "░".repeat(Math.min(failed, 10));
+            : (failed > 0 ? "░".repeat(Math.min(failed, 10)) : "");
           const successRate = totalCount > 0 ? Math.round((created / totalCount) * 100) : 0;
 
-          await bot.telegram.editMessageText(chatId, msgId, undefined,
+          const completionCard =
             `🎉 *Batch Complete!*\n\n` +
             `${svc.emoji} *${svc.label}* — ${totalCount} requested\n` +
             `━━━━━━━━━━━━━━━━━━━━\n` +
             `✅  Created: *${created}*\n` +
             `❌  Failed:  *${failed}*\n` +
-            `📊  Success: *${successRate}%*  \`${bars}\`\n` +
-            `⏱   Time:    *${time}*`,
-            {
-              parse_mode: "Markdown",
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback("👥 View Accounts", "list_processing"), Markup.button.callback("🏗 Create More", "create_more")],
-              ]),
-            }
+            `📊  Success: *${successRate}%*  \`${bars || "—"}\`\n` +
+            `⏱   Time:    *${time}*`;
+
+          const completionKeyboard = Markup.inlineKeyboard([
+            [Markup.button.callback("👥 View Accounts", "list_processing"), Markup.button.callback("🏗 Create More", "create_more")],
+          ]);
+
+          // Step 1: flash
+          await bot.telegram.editMessageText(chatId, msgId, undefined,
+            `⚡ *Finalising results...*`, { parse_mode: "Markdown" }
           ).catch(() => {});
+
+          await new Promise(res => setTimeout(res, 500));
+
+          // Step 2: edit live-log message to show card
+          await bot.telegram.editMessageText(chatId, msgId, undefined,
+            completionCard, { parse_mode: "Markdown", ...completionKeyboard }
+          ).catch(() => {});
+
+          // Step 3: also send a NEW alert message so it appears at the bottom
+          await bot.telegram.sendMessage(chatId,
+            `🔔 *Account creation done!*\n\n` +
+            `${svc.emoji} *${svc.label}* — ✅ ${created} created  ❌ ${failed} failed  ⏱ ${time}`,
+            { parse_mode: "Markdown", ...completionKeyboard }
+          ).catch(() => {});
+
           return;
         }
 
-        // Show rolling live logs (last 14 lines)
-        const display = allLines.slice(-14);
+        // Show rolling live logs (last 15 lines, plain text so emojis render)
+        const display = allLines.slice(-15);
         const time = await elapsed();
-        const header = `⏳ *${svc.emoji} ${svc.label} × ${totalCount}* — ⏱ ${time}\n`;
-        const body = display.join("\n").slice(0, 3200);
+        const progress = `⏳ *${svc.emoji} ${svc.label} × ${totalCount}* — ⏱ ${time}`;
+        const body = display.join("\n").slice(0, 3500);
 
         await bot.telegram.editMessageText(chatId, msgId, undefined,
-          header + "```\n" + body + "\n```",
+          `${progress}\n\n${body}`,
           { parse_mode: "Markdown" }
         ).catch(() => {});
 

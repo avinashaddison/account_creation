@@ -2021,7 +2021,7 @@ export async function registerRoutes(
     const filtered = logs.slice(since);
     const accounts = await storage.getAccountsByBatch(batchId);
     const isComplete = logs.some(l => l.message === "Batch complete") ||
-      accounts.every(a => ["verified", "completed", "failed"].includes(a.status));
+      (accounts.length > 0 && accounts.every(a => ["verified", "completed", "failed"].includes(a.status)));
     res.json({
       logs: filtered,
       nextSince: logs.length,
