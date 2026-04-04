@@ -305,10 +305,12 @@ export function startShopBot(token: string) {
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
     const name = ctx.from.first_name || ctx.from.username || "there";
+    const usernameDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "No username";
     await ctx.reply(
       truncate(
         `<b>Welcome to Project Addison v2</b>, ${escHtml(name)}!\n\n` +
-          `Your current balance: <b>${fmt$(balance)}</b>\n\n` +
+          `Your current balance: <b>${fmt$(balance)}</b>\n` +
+          `Your Account ID: ${escHtml(usernameDisplay)} — <code>${uid}</code>\n\n` +
           `Browse and purchase premium accounts instantly using the menu below.`
       ),
       { parse_mode: "HTML", ...SHOP_KEYBOARD }
