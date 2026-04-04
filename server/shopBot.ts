@@ -65,10 +65,19 @@ async function safeEdit(ctx: any, text: string, extra: any = {}) {
 }
 
 // ── Main reply keyboard ────────────────────────────────────────────────────────
+const BTN = {
+  ACCOUNTS:  "[ 🛍  ACCOUNTS ]",
+  BALANCE:   "[ 💰  BALANCE ]",
+  ORDERS:    "[ 📦  MY ORDERS ]",
+  DEPOSIT:   "[ ➕  DEPOSIT ]",
+  IDENTITY:  "[ 🪪  IDENTITY ]",
+  SUPPORT:   "[ 💬  SUPPORT ]",
+} as const;
+
 const SHOP_KEYBOARD = Markup.keyboard([
-  ["🛍 Accounts", "💰 My Balance"],
-  ["📦 My Orders", "➕ Add Funds"],
-  ["🪪 My Account ID", "💬 Support"],
+  [BTN.ACCOUNTS,  BTN.BALANCE],
+  [BTN.ORDERS,    BTN.DEPOSIT],
+  [BTN.IDENTITY,  BTN.SUPPORT],
 ]).resize();
 
 // ── Per-user shop state ────────────────────────────────────────────────────────
@@ -358,7 +367,7 @@ export function startShopBot(token: string) {
     );
   }
 
-  bot.hears("🛍 Accounts", async (ctx) => {
+  bot.hears(BTN.ACCOUNTS, async (ctx) => {
     await showProductList(ctx);
   });
 
@@ -528,7 +537,7 @@ export function startShopBot(token: string) {
   });
 
   // ── My Balance ────────────────────────────────────────────────────────────
-  bot.hears("💰 My Balance", async (ctx) => {
+  bot.hears(BTN.BALANCE, async (ctx) => {
     const uid = ctx.from.id;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
@@ -544,7 +553,7 @@ export function startShopBot(token: string) {
   });
 
   // ── Add Funds ─────────────────────────────────────────────────────────────
-  bot.hears("➕ Add Funds", async (ctx) => {
+  bot.hears(BTN.DEPOSIT, async (ctx) => {
     await safeReply(
       ctx,
       `╔══[ DEPOSIT PORTAL ]══╗\n` +
@@ -558,7 +567,7 @@ export function startShopBot(token: string) {
   });
 
   // ── Support ───────────────────────────────────────────────────────────────
-  bot.hears("💬 Support", async (ctx) => {
+  bot.hears(BTN.SUPPORT, async (ctx) => {
     await safeReply(
       ctx,
       `╔══[ SUPPORT ]══════╗\n` +
@@ -572,7 +581,7 @@ export function startShopBot(token: string) {
   });
 
   // ── My Account ID ─────────────────────────────────────────────────────────
-  bot.hears("🪪 My Account ID", async (ctx) => {
+  bot.hears(BTN.IDENTITY, async (ctx) => {
     const uid = ctx.from.id;
     const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await safeReply(
@@ -587,7 +596,7 @@ export function startShopBot(token: string) {
   });
 
   // ── My Orders ─────────────────────────────────────────────────────────────
-  bot.hears("📦 My Orders", async (ctx) => {
+  bot.hears(BTN.ORDERS, async (ctx) => {
     const uid = ctx.from.id;
     const res = await dbQuery(
       `SELECT id, product_name, amount, created_at FROM shop_orders
