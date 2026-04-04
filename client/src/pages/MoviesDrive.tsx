@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   RefreshCw, Film, ExternalLink, AlertTriangle, ArrowLeft,
-  Loader2, Calendar, Download,
+  Loader2, Calendar, Download, Star, Globe, Clapperboard,
+  Play,
 } from "lucide-react";
 
 type Movie = { title: string; image: string; link: string };
@@ -23,17 +24,106 @@ type PostData = {
   };
 };
 
-const RED = "#ff1a1a";
-const RA = (a: number) => `rgba(255,26,26,${a})`;
+const RED = "#e63232";
+const RA = (a: number) => `rgba(230,50,50,${a})`;
 const DIM = (a: number) => `rgba(255,255,255,${a})`;
+const DARK = (a: number) => `rgba(0,0,0,${a})`;
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-0 text-[12px] font-mono" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <div
+        className="shrink-0 px-3 py-2 font-bold uppercase tracking-wide text-[10px]"
+        style={{ background: "rgba(255,255,255,0.04)", color: DIM(0.45), minWidth: 110 }}
+      >
+        {label}
+      </div>
+      <div className="px-3 py-2" style={{ color: DIM(0.85) }}>{value}</div>
+    </div>
+  );
+}
+
+function DownloadBtn({ label, url, idx }: { label: string; url: string; idx: number }) {
+  const qualityMatch = label.match(/\b(4K|2160p|1080p|720p|480p|360p|HDRip|BluRay|WEB-?DL|HEVC)\b/i);
+  const sizeMatch = label.match(/\b(\d+(?:\.\d+)?\s*(?:GB|MB))\b/i);
+  const quality = qualityMatch ? qualityMatch[0].toUpperCase() : null;
+  const size = sizeMatch ? sizeMatch[0] : null;
+
+  const qualityColor: Record<string, string> = {
+    "4K": "#a78bfa", "2160P": "#a78bfa",
+    "1080P": "#34d399", "BLURAY": "#34d399",
+    "720P": "#60a5fa", "WEB-DL": "#60a5fa",
+    "480P": "#fbbf24", "360P": "#fbbf24",
+    "HDRIP": "#fb923c", "HEVC": "#f472b6",
+  };
+  const qColor = quality ? (qualityColor[quality] || RED) : RED;
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid={`link-download-${idx}`}
+      className="flex items-center gap-3 px-4 py-3 rounded-md w-full"
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.10)",
+        transition: "all 0.15s",
+        textDecoration: "none",
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLAnchorElement).style.borderColor = RA(0.50);
+        (e.currentTarget as HTMLAnchorElement).style.background = RA(0.07);
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLAnchorElement).style.borderColor = "rgba(255,255,255,0.10)";
+        (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.04)";
+      }}
+    >
+      <div
+        className="shrink-0 flex items-center justify-center rounded text-[9px] font-mono font-black tracking-widest"
+        style={{ width: 52, height: 26, background: `${qColor}22`, border: `1px solid ${qColor}66`, color: qColor }}
+      >
+        {quality || "LINK"}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-mono leading-snug truncate" style={{ color: DIM(0.75) }}>
+          {label}
+        </p>
+        {size && (
+          <p className="text-[10px] font-mono mt-0.5" style={{ color: DIM(0.35) }}>{size}</p>
+        )}
+      </div>
+      <Download className="shrink-0 w-3.5 h-3.5" style={{ color: DIM(0.30) }} />
+    </a>
+  );
+}
 
 function PostView({ movie, onBack }: { movie: Movie; onBack: () => void }) {
+  const [imgError, setImgError] = useState(false);
+
   const { data, isLoading, isError } = useQuery<PostData>({
     queryKey: ["/api/movies-drive/post", movie.link],
     queryFn: () =>
       fetch(`/api/movies-drive/post?url=${encodeURIComponent(movie.link)}`).then(r => r.json()),
     staleTime: 10 * 60 * 1000,
   });
+
+  const posterSrc = data?.poster || movie.image;
+  const infoFields = data ? [
+    { label: "IMDB", value: data.info.imdb, icon: <Star className="w-3 h-3" /> },
+    { label: "Name", value: data.info.seriesName },
+    { label: "Season", value: data.info.season },
+    { label: "Year", value: data.info.releasedYear },
+    { label: "Genre", value: data.info.genre, icon: <Clapperboard className="w-3 h-3" /> },
+    { label: "Director", value: data.info.director },
+    { label: "Writer", value: data.info.writer },
+    { label: "Stars", value: data.info.stars },
+    { label: "Language", value: data.info.language, icon: <Globe className="w-3 h-3" /> },
+    { label: "Quality", value: data.info.quality },
+    { label: "Ep. Size", value: data.info.episodeSize },
+    { label: "Format", value: data.info.format },
+  ].filter(f => f.value) : [];
 
   return (
     <div>
@@ -57,14 +147,17 @@ function PostView({ movie, onBack }: { movie: Movie; onBack: () => void }) {
         >
           <ExternalLink className="w-3 h-3" /> OPEN SITE
         </a>
+        {data?.date && (
+          <span className="flex items-center gap-1.5 text-[10px] font-mono ml-auto" style={{ color: DIM(0.30) }}>
+            <Calendar className="w-3 h-3" /> {data.date}
+          </span>
+        )}
       </div>
 
       {isLoading && (
         <div className="flex flex-col items-center py-28 gap-4">
           <Loader2 className="w-7 h-7 animate-spin" style={{ color: RA(0.50) }} />
-          <p className="text-[10px] font-mono tracking-widest" style={{ color: DIM(0.25) }}>
-            LOADING POST...
-          </p>
+          <p className="text-[10px] font-mono tracking-widest" style={{ color: DIM(0.25) }}>LOADING POST...</p>
         </div>
       )}
 
@@ -82,90 +175,73 @@ function PostView({ movie, onBack }: { movie: Movie; onBack: () => void }) {
 
       {data && !isLoading && (
         <div>
+          {/* ── Categories ── */}
+          {data.categories.length > 0 && (
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              {data.categories.map(cat => (
+                <span
+                  key={cat}
+                  className="text-[9px] font-mono font-bold tracking-widest px-2 py-0.5 rounded-sm uppercase"
+                  style={{ background: RA(0.12), border: `1px solid ${RA(0.30)}`, color: RED }}
+                >
+                  {cat}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* ── Title ── */}
-          <h1 className="text-[16px] font-mono font-bold leading-snug mb-3" style={{ color: "#fff" }}>
+          <h1 className="text-[17px] font-mono font-bold leading-snug mb-5" style={{ color: "#ffffff" }}>
             {data.title || movie.title}
           </h1>
 
-          {/* ── Meta ── */}
-          <div className="flex items-center gap-2.5 mb-5 flex-wrap">
-            {data.date && (
-              <span className="flex items-center gap-1.5 text-[10px] font-mono" style={{ color: DIM(0.35) }}>
-                <Calendar className="w-3 h-3" /> {data.date}
-              </span>
-            )}
-            {data.categories.map(cat => (
-              <span
-                key={cat}
-                className="text-[9px] font-mono font-bold tracking-widest px-2 py-0.5 rounded-sm uppercase"
-                style={{ background: RA(0.12), border: `1px solid ${RA(0.30)}`, color: RED }}
-              >
-                {cat}
-              </span>
-            ))}
-          </div>
-
-          {/* ── Divider ── */}
-          <div className="mb-6 h-px" style={{ background: `linear-gradient(90deg, ${RA(0.30)}, transparent)` }} />
-
-          {/* ── Content layout: poster left + info right ── */}
-          <div className="flex gap-7 flex-wrap mb-8">
-            {/* Poster */}
-            {data.poster && (
-              <div className="shrink-0">
-                <img
-                  src={data.poster}
-                  alt={data.title}
-                  className="rounded-md object-cover"
-                  style={{
-                    width: 190,
-                    border: `1px solid ${RA(0.35)}`,
-                    boxShadow: `0 0 30px ${RA(0.12)}`,
-                  }}
-                  data-testid="img-post-poster"
-                />
-              </div>
-            )}
-
-            {/* Info fields */}
-            <div className="flex-1 min-w-[220px] space-y-1.5">
-              {[
-                { label: "IMDB Rating", value: data.info.imdb },
-                { label: "Name", value: data.info.seriesName },
-                { label: "Season", value: data.info.season },
-                { label: "Genre", value: data.info.genre },
-                { label: "Director", value: data.info.director },
-                { label: "Writer", value: data.info.writer },
-                { label: "Stars", value: data.info.stars },
-                { label: "Language", value: data.info.language },
-                { label: "Year", value: data.info.releasedYear },
-                { label: "Quality", value: data.info.quality },
-                { label: "Ep. Size", value: data.info.episodeSize },
-                { label: "Format", value: data.info.format },
-              ]
-                .filter(f => f.value)
-                .map(f => (
-                  <div key={f.label} className="flex gap-2 text-[11px] font-mono">
-                    <span className="shrink-0" style={{ color: DIM(0.35), minWidth: 80 }}>
-                      {f.label}
-                    </span>
-                    <span style={{ color: DIM(0.80) }}>{f.value}</span>
-                  </div>
-                ))}
+          {/* ── Poster + Info Table ── */}
+          <div
+            className="rounded-md overflow-hidden mb-7"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            <div className="flex flex-wrap">
+              {/* Poster */}
+              {posterSrc && !imgError && (
+                <div className="shrink-0" style={{ width: 160 }}>
+                  <img
+                    src={posterSrc}
+                    alt={data.title || movie.title}
+                    className="w-full h-full object-cover"
+                    style={{ minHeight: 200, display: "block" }}
+                    onError={() => setImgError(true)}
+                    data-testid="img-post-poster"
+                  />
+                </div>
+              )}
+              {/* Info rows */}
+              {infoFields.length > 0 && (
+                <div className="flex-1 min-w-[200px] divide-y" style={{ borderLeft: "1px solid rgba(255,255,255,0.06)" }}>
+                  {infoFields.map(f => (
+                    <InfoRow key={f.label} label={f.label} value={f.value} />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
           {/* ── Storyline ── */}
           {data.storyline && (
-            <div className="mb-8">
+            <div className="mb-7">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="h-4 w-1 rounded-full" style={{ background: RED }} />
+                <p className="text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: "#fff" }}>
+                  Storyline
+                </p>
+              </div>
               <p
-                className="text-[10px] font-mono font-bold tracking-widest mb-2 uppercase"
-                style={{ color: RA(0.70) }}
+                className="text-[12px] font-mono leading-relaxed px-4 py-3 rounded-md"
+                style={{
+                  color: DIM(0.65),
+                  background: "rgba(255,255,255,0.025)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                }}
               >
-                Storyline
-              </p>
-              <div className="h-px mb-3" style={{ background: `linear-gradient(90deg, ${RA(0.25)}, transparent)` }} />
-              <p className="text-[12px] font-mono leading-relaxed" style={{ color: DIM(0.65) }}>
                 {data.storyline}
               </p>
             </div>
@@ -173,45 +249,23 @@ function PostView({ movie, onBack }: { movie: Movie; onBack: () => void }) {
 
           {/* ── Download Links ── */}
           {data.downloads.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-2 mb-3">
+            <div className="mb-7">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full" style={{ background: RED }} />
                 <Download className="w-3.5 h-3.5" style={{ color: RED }} />
                 <p className="text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: "#fff" }}>
                   Download Links
                 </p>
+                <span
+                  className="text-[9px] font-mono px-2 py-0.5 rounded"
+                  style={{ background: RA(0.12), border: `1px solid ${RA(0.25)}`, color: RED }}
+                >
+                  {data.downloads.length}
+                </span>
               </div>
-              <div className="h-px mb-4" style={{ background: `linear-gradient(90deg, ${RA(0.25)}, transparent)` }} />
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              <div className="flex flex-col gap-2">
                 {data.downloads.map((dl, i) => (
-                  <a
-                    key={i}
-                    href={dl.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group flex items-center gap-3 px-4 py-3 rounded-md"
-                    style={{
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid rgba(255,255,255,0.09)",
-                      transition: "border-color 0.15s, background 0.15s",
-                    }}
-                    onMouseEnter={e => {
-                      (e.currentTarget as HTMLAnchorElement).style.borderColor = RA(0.40);
-                      (e.currentTarget as HTMLAnchorElement).style.background = RA(0.08);
-                    }}
-                    onMouseLeave={e => {
-                      (e.currentTarget as HTMLAnchorElement).style.borderColor = "rgba(255,255,255,0.09)";
-                      (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.03)";
-                    }}
-                    data-testid={`link-download-${i}`}
-                  >
-                    <Download
-                      className="w-3.5 h-3.5 shrink-0"
-                      style={{ color: RA(0.60) }}
-                    />
-                    <span className="text-[11px] font-mono" style={{ color: DIM(0.70) }}>
-                      {dl.label}
-                    </span>
-                  </a>
+                  <DownloadBtn key={i} label={dl.label} url={dl.url} idx={i} />
                 ))}
               </div>
             </div>
@@ -219,11 +273,14 @@ function PostView({ movie, onBack }: { movie: Movie; onBack: () => void }) {
 
           {/* ── YouTube Trailer ── */}
           {data.youtubeId && (
-            <div className="mb-8">
-              <p className="text-[10px] font-mono font-bold tracking-widest mb-3 uppercase" style={{ color: RA(0.70) }}>
-                Trailer
-              </p>
-              <div className="h-px mb-4" style={{ background: `linear-gradient(90deg, ${RA(0.25)}, transparent)` }} />
+            <div className="mb-7">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full" style={{ background: RED }} />
+                <Play className="w-3.5 h-3.5" style={{ color: RED }} />
+                <p className="text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: "#fff" }}>
+                  Trailer
+                </p>
+              </div>
               <div
                 className="rounded-md overflow-hidden"
                 style={{ border: `1px solid ${RA(0.20)}`, maxWidth: 640, position: "relative", paddingBottom: "56.25%" }}
@@ -243,18 +300,20 @@ function PostView({ movie, onBack }: { movie: Movie; onBack: () => void }) {
 
           {/* ── Screenshots ── */}
           {data.screenshots.length > 0 && (
-            <div className="mb-8">
-              <p className="text-[10px] font-mono font-bold tracking-widest mb-3 uppercase" style={{ color: RA(0.70) }}>
-                Screenshots
-              </p>
-              <div className="h-px mb-4" style={{ background: `linear-gradient(90deg, ${RA(0.25)}, transparent)` }} />
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+            <div className="mb-7">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full" style={{ background: RED }} />
+                <p className="text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: "#fff" }}>
+                  Screenshots
+                </p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {data.screenshots.map((src, i) => (
                   <a key={i} href={src} target="_blank" rel="noopener noreferrer">
                     <img
                       src={src}
                       alt={`Screenshot ${i + 1}`}
-                      className="w-full rounded-sm object-cover"
+                      className="w-full rounded object-cover"
                       style={{ border: "1px solid rgba(255,255,255,0.07)", aspectRatio: "16/9" }}
                       loading="lazy"
                       data-testid={`img-screenshot-${i}`}
