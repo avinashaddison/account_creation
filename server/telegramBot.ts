@@ -114,14 +114,6 @@ interface UserState {
   copyType?: string;       // currently selected type for Copy Accounts
   mailSession?: MailSession;
 }
-const userState = new Map<number, UserState>();
-const runningScans = new Map<number, boolean>();
-
-function getState(uid: number): UserState {
-  if (!userState.has(uid)) userState.set(uid, {});
-  return userState.get(uid)!;
-}
-
 // ── Create flow helpers ───────────────────────────────────────────────────────
 async function getAvailableCount(svc: ServiceConfig): Promise<number> {
   if (!svc.outlookTable) return 0;
@@ -131,8 +123,8 @@ async function getAvailableCount(svc: ServiceConfig): Promise<number> {
   return parseInt(r.rows[0]?.cnt || "0");
 }
 
-async function showCountPicker(ctx: any, uid: number) {
-  const flow = getState(uid).createFlow!;
+async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserState) {
+  const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
   const availMsg = svc.outlookTable
     ? `\n📊 Available Outlook emails: *${await getAvailableCount(svc)}*\n`
@@ -166,14 +158,14 @@ async function showCouponStep(ctx: any) {
   );
 }
 
-async function showCardStep(ctx: any, uid: number) {
+async function showCardStep(ctx: any, uid: number, gs: (n: number) => UserState) {
   const cards = await dbQuery(`SELECT id, cardholder_name, card_number FROM saved_cards ORDER BY created_at DESC LIMIT 10`);
-  const state = getState(uid);
+  const state = gs(uid);
 
   if (cards.rows.length === 0) {
     state.createFlow!.cardId = "";
     state.createFlow!.cardLabel = "none";
-    await showCreateSummary(ctx, uid);
+    await showCreateSummary(ctx, uid, gs);
     return;
   }
 
@@ -210,8 +202,8 @@ async function showReferralStep(ctx: any) {
   );
 }
 
-async function showCreateSummary(ctx: any, uid: number) {
-  const flow = getState(uid).createFlow!;
+async function showCreateSummary(ctx: any, uid: number, gs: (n: number) => UserState) {
+  const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
   const lines: string[] = [];
 
@@ -257,16 +249,6 @@ async function dbQuery(sql: string, params: any[] = []) {
   const client = await pool.connect();
   try { return await client.query(sql, params); }
   finally { client.release(); }
-}
-
-// ── Internal API ──────────────────────────────────────────────────────────────
-async function botApi(path: string, method = "GET", body?: object) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", "x-bot-token": process.env.TELEGRAM_BOT_TOKEN || "" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return { ok: res.ok, data: await res.json().catch(() => ({})) };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -548,10 +530,10 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
 }
 
 // ── Copy + apply ──────────────────────────────────────────────────────────────
-async function doCopy(ctx: any, status: string, count: number, acctType?: string) {
+async function doCopy(ctx: any, status: string, count: number, acctType: string | undefined, gs: (n: number) => UserState) {
   const uid = ctx.from?.id;
   // Resolve which table to query
-  const type = acctType || getState(uid).copyType || "replit";
+  const type = acctType || gs(uid).copyType || "replit";
   const cfg = ACCOUNT_TYPE_CONFIGS[type];
   const table = cfg?.table || "replit_accounts";
   const typeEmoji = cfg?.emoji || "🔵";
@@ -576,7 +558,7 @@ async function doCopy(ctx: any, status: string, count: number, acctType?: string
     return ctx.reply(`No ${typeEmoji} ${typeLabel} accounts found${hasStatus ? ` with status *${status.replace(/_/g, " ")}*` : ""}.`, { parse_mode: "Markdown" });
   }
 
-  getState(uid).lastCopiedIds = rows.map((r: any) => String(r.id));
+  gs(uid).lastCopiedIds = rows.map((r: any) => String(r.id));
 
   for (const row of rows) {
     const email = row.email || "";
@@ -597,18 +579,18 @@ async function doCopy(ctx: any, status: string, count: number, acctType?: string
   );
 }
 
-async function applyStatus(ctx: any, status: string) {
+async function applyStatus(ctx: any, status: string, gs: (n: number) => UserState) {
   const uid = ctx.from?.id || ctx.callbackQuery?.from?.id;
-  const ids = getState(uid).lastCopiedIds;
+  const ids = gs(uid).lastCopiedIds;
   if (!ids?.length) {
     return ctx.answerCbQuery ? ctx.answerCbQuery("No accounts selected.") : ctx.reply("No accounts selected.");
   }
   const ph = ids.map((_: string, i: number) => `$${i + 2}`).join(", ");
   // Use the table for whichever type was last copied; default to replit_accounts
-  const copyType = getState(uid).copyType || "replit";
+  const copyType = gs(uid).copyType || "replit";
   const table = ACCOUNT_TYPE_CONFIGS[copyType]?.table || "replit_accounts";
   const r = await dbQuery(`UPDATE ${table} SET status = $1 WHERE id IN (${ph}) RETURNING id`, [status, ...ids]);
-  getState(uid).lastCopiedIds = undefined;
+  gs(uid).lastCopiedIds = undefined;
   if (ctx.answerCbQuery) await ctx.answerCbQuery(`Updated ${r.rowCount} accounts`);
   await ctx.reply(`✅ *${r.rowCount}* accounts → \`${status}\``, { parse_mode: "Markdown" });
 }
@@ -756,6 +738,24 @@ export function startTelegramBot(config: BotConfig) {
   if (!token) { console.warn(`[TelegramBot:${label}] No token provided — skipping`); return; }
   const bot = new Telegraf(token);
   const ALLOWED = getAllowedIds(allowedIdsEnv);
+
+  // ── Per-bot isolated state ────────────────────────────────────────────────
+  const userState = new Map<number, UserState>();
+  const runningScans = new Map<number, boolean>();
+  function getState(uid: number): UserState {
+    if (!userState.has(uid)) userState.set(uid, {});
+    return userState.get(uid)!;
+  }
+
+  // ── Internal API — authenticated with this bot's own token ───────────────
+  async function botApi(path: string, method = "GET", body?: object) {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", "x-bot-token": token },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { ok: res.ok, data: await res.json().catch(() => ({})) };
+  }
 
   // Register this bot in the multi-bot registry for MoviesDrive broadcast
   const botEntry: BotEntry = { getAllowedIds: () => getAllowedIds(allowedIdsEnv), tg: bot.telegram };
@@ -1440,7 +1440,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery("Copying...");
     await ctx.deleteMessage().catch(() => {});
     const m = ctx.match as RegExpMatchArray;
-    await doCopy(ctx, m[1], parseInt(m[2]));
+    await doCopy(ctx, m[1], parseInt(m[2]), undefined, getState);
   });
 
   bot.action("copy_custom", async (ctx) => {
@@ -1457,10 +1457,10 @@ export function startTelegramBot(config: BotConfig) {
   });
 
   // Apply status
-  bot.action("apply_sold_out", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "sold_out"); await ctx.deleteMessage().catch(() => {}); });
-  bot.action("apply_working", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "working"); await ctx.deleteMessage().catch(() => {}); });
-  bot.action("apply_processing", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "processing"); await ctx.deleteMessage().catch(() => {}); });
-  bot.action("apply_available", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "available"); await ctx.deleteMessage().catch(() => {}); });
+  bot.action("apply_sold_out", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "sold_out", getState); await ctx.deleteMessage().catch(() => {}); });
+  bot.action("apply_working", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "working", getState); await ctx.deleteMessage().catch(() => {}); });
+  bot.action("apply_processing", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "processing", getState); await ctx.deleteMessage().catch(() => {}); });
+  bot.action("apply_available", async (ctx) => { await ctx.answerCbQuery(); await applyStatus(ctx, "available", getState); await ctx.deleteMessage().catch(() => {}); });
   bot.action("apply_dismiss", async (ctx) => {
     await ctx.answerCbQuery();
     getState(ctx.from.id).lastCopiedIds = undefined;
@@ -1477,7 +1477,7 @@ export function startTelegramBot(config: BotConfig) {
     if (!st.createFlow) st.createFlow = {};
     st.createFlow.service = svcKey;
     await ctx.deleteMessage().catch(() => {});
-    await showCountPicker(ctx, uid);
+    await showCountPicker(ctx, uid, getState);
   });
 
   bot.action("create_back_svc", async (ctx) => {
@@ -1510,7 +1510,7 @@ export function startTelegramBot(config: BotConfig) {
     } else {
       // No extra options — skip to summary
       if (svc.hasCard) { flow.cardId = ""; flow.cardLabel = "none"; }
-      await showCreateSummary(ctx, uid);
+      await showCreateSummary(ctx, uid, getState);
     }
   }
 
@@ -1545,7 +1545,7 @@ export function startTelegramBot(config: BotConfig) {
     const st = getState(uid);
     st.createFlow!.couponCode = "";
     await ctx.deleteMessage().catch(() => {});
-    await showCardStep(ctx, uid);
+    await showCardStep(ctx, uid, getState);
   });
 
   bot.action("create_change_coupon", async (ctx) => {
@@ -1558,7 +1558,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
     await ctx.deleteMessage().catch(() => {});
-    await showCountPicker(ctx, uid);
+    await showCountPicker(ctx, uid, getState);
   });
 
   // ── Create flow: referral URL step (Lovable) ──────────────────────────────
@@ -1577,7 +1577,7 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).createFlow!.referralUrl = "";
     await ctx.deleteMessage().catch(() => {});
-    await showCreateSummary(ctx, uid);
+    await showCreateSummary(ctx, uid, getState);
   });
 
   // ── Create flow: card step ────────────────────────────────────────────────
@@ -1588,7 +1588,7 @@ export function startTelegramBot(config: BotConfig) {
     st.createFlow!.cardId = "";
     st.createFlow!.cardLabel = "none";
     await ctx.deleteMessage().catch(() => {});
-    await showCreateSummary(ctx, uid);
+    await showCreateSummary(ctx, uid, getState);
   });
 
   bot.action(/^ccard_(.+)$/, async (ctx) => {
@@ -1603,7 +1603,7 @@ export function startTelegramBot(config: BotConfig) {
     st.createFlow!.cardId = cardId;
     st.createFlow!.cardLabel = label;
     await ctx.deleteMessage().catch(() => {});
-    await showCreateSummary(ctx, uid);
+    await showCreateSummary(ctx, uid, getState);
   });
 
   // ── Live log streaming ────────────────────────────────────────────────────
@@ -2020,7 +2020,7 @@ export function startTelegramBot(config: BotConfig) {
       const status = parts[1] || "processing";
       if (isNaN(count) || count < 1) return ctx.reply("Format: `15 processing`", { parse_mode: "Markdown" });
       st.awaitingText = undefined;
-      await doCopy(ctx, status, count);
+      await doCopy(ctx, status, count, undefined, getState);
       return;
     }
 
@@ -2042,7 +2042,7 @@ export function startTelegramBot(config: BotConfig) {
       st.createFlow.couponCode = code;
       st.awaitingText = undefined;
       await ctx.reply(`✅ Coupon set: \`${code}\``, { parse_mode: "Markdown" });
-      await showCardStep(ctx, uid);
+      await showCardStep(ctx, uid, getState);
       return;
     }
 
@@ -2055,7 +2055,7 @@ export function startTelegramBot(config: BotConfig) {
       st.createFlow.referralUrl = url;
       st.awaitingText = undefined;
       await ctx.reply(`✅ Referral URL set.`, { parse_mode: "Markdown" });
-      await showCreateSummary(ctx, uid);
+      await showCreateSummary(ctx, uid, getState);
       return;
     }
   });

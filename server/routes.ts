@@ -101,9 +101,16 @@ function hashPassword(password: string): string {
   return createHash("sha256").update(password).digest("hex");
 }
 
+function isValidBotToken(token: string | string[] | undefined): boolean {
+  if (!token || typeof token !== "string") return false;
+  const t1 = process.env.TELEGRAM_BOT_TOKEN;
+  const t2 = process.env.TELEGRAM_BOT_TOKEN_2;
+  return !!(( t1 && token === t1) || (t2 && token === t2));
+}
+
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   const botToken = req.headers["x-bot-token"];
-  if (botToken && botToken === process.env.TELEGRAM_BOT_TOKEN) {
+  if (isValidBotToken(botToken)) {
     (req as any).session = (req as any).session || {};
     req.session.userId = "bot";
     req.session.role = "superadmin";
@@ -124,7 +131,7 @@ function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
 
 function requireBotAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.headers["x-bot-token"];
-  if (token && token === process.env.TELEGRAM_BOT_TOKEN) {
+  if (isValidBotToken(token)) {
     // Inject a fake superadmin session so downstream route logic works
     (req as any).session = (req as any).session || {};
     req.session.userId = "bot";
