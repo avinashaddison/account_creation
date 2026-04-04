@@ -368,6 +368,11 @@ export function startShopBot(token: string) {
   // ── /start ────────────────────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const uid = ctx.from.id;
+    // Set menu button for this specific chat so the "/" icon appears immediately
+    bot.telegram.setChatMenuButton({
+      chatId: ctx.chat.id,
+      menuButton: { type: "commands" },
+    }).catch(() => {});
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
     const name = ctx.from.first_name || ctx.from.username || "User";
@@ -763,11 +768,13 @@ export function startShopBot(token: string) {
         { command: "start",   description: "Open the store" },
         { command: "shop",    description: "Browse accounts" },
         { command: "balance", description: "Check my balance" },
-        { command: "id",      description: "My account ID" },
-        { command: "menu",    description: "Show keyboard menu" },
+        { command: "id",      description: "My Telegram ID" },
+        { command: "menu",    description: "Show keyboard" },
       ]);
+      console.log("[ShopBot] Commands registered");
+      // Set default menu button for all new chats globally
       await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
-      console.log("[ShopBot] Commands + Menu button registered");
+      console.log("[ShopBot] Global menu button set (type: commands)");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
     }
