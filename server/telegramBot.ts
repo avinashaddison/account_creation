@@ -980,22 +980,26 @@ export function startTelegramBot(config: BotConfig) {
   // REPLY KEYBOARD handlers (hears)
   // ──────────────────────────────────────────────────────────────────────────
 
-  bot.hears(KB.STATS, (ctx) => handleMenu(ctx, async () => {
+  const handleStats = (ctx: any) => handleMenu(ctx, async () => {
     const { text, mode } = await buildStatsText();
     await ctx.reply(text, {
       parse_mode: mode,
       ...Markup.inlineKeyboard([[Markup.button.callback("🔄 Refresh", "refresh_stats")]]),
     });
-  }));
+  });
+  bot.hears(KB.STATS, handleStats);
+  bot.hears(/^statistics$/i, handleStats);
 
-  bot.hears(KB.ACCOUNTS, (ctx) => handleMenu(ctx, async () => {
+  const handleAccounts = (ctx: any) => handleMenu(ctx, async () => {
     await ctx.reply(
       `╔══[ 🗄 ACCOUNTS ]════════════════════════╗\n` +
       `╚════════════════════════════════════════╝\n\n` +
       `▸ Select a platform to query:`,
       { parse_mode: "HTML", ...(await inlineAccountTypes()) }
     );
-  }));
+  });
+  bot.hears(KB.ACCOUNTS, handleAccounts);
+  bot.hears(/^accounts$/i, handleAccounts);
 
   bot.hears(KB.COPY, (ctx) => handleMenu(ctx, async () => {
     getState(ctx.from.id).copyType = undefined;
