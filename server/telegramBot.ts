@@ -282,6 +282,7 @@ const MAIN_KEYBOARD = Markup.keyboard([
   ["📊 Statistics", "👥 Accounts"],
   ["📋 Copy Accounts", "🔗 Checkout Links"],
   ["🏗 Create Accounts", "📧 Mail Generator"],
+  ["🎬 MoviesDrive"],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
@@ -668,6 +669,71 @@ setInterval(() => {
 const botLog = (...args: any[]) => console.log("[Bot]", ...args);
 const botErr = (...args: any[]) => console.error("[Bot]", ...args);
 
+// ── MoviesDrive monitor state (module-level) ──────────────────────────────────
+const MD_URL = "https://new1.moviesdrives.my/";
+const MD_UA  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const MD_POLL_MS = 3 * 60_000; // 3 minutes
+
+let mdSeenLinks   = new Set<string>();
+let mdLastChecked : Date | null = null;
+let mdNewCountSession = 0;
+let mdMonitorEnabled  = true;
+let mdInterval        : ReturnType<typeof setInterval> | null = null;
+
+type MDMovie = { title: string; image: string; link: string };
+
+async function fetchMDMovies(): Promise<MDMovie[]> {
+  try {
+    const r = await fetch(MD_URL, {
+      headers: { "User-Agent": MD_UA, "Accept": "text/html,*/*" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    const html = await r.text();
+    const movies: MDMovie[] = [];
+    const seen = new Set<string>();
+    const rx = /<a\s+href="(https:\/\/new1\.moviesdrives\.my\/[^"]+)"[^>]*>[\s\S]*?<img[^>]+src="([^"]+)"[^>]*>[\s\S]*?<p[^>]*class="[^"]*poster-title[^"]*"[^>]*>([\s\S]*?)<\/p>/g;
+    let m: RegExpExecArray | null;
+    while ((m = rx.exec(html)) !== null) {
+      const link = m[1];
+      if (seen.has(link)) continue;
+      seen.add(link);
+      const image = m[2];
+      const title = m[3]
+        .replace(/<[^>]+>/g, "").replace(/&#038;/g, "&").replace(/&#8217;/g, "'")
+        .replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+        .replace(/&#8230;/g, "...").trim();
+      movies.push({ title, image, link });
+    }
+    return movies;
+  } catch {
+    return [];
+  }
+}
+
+async function mdBroadcast(movies: MDMovie[], tg: any, allowed: Set<number>) {
+  for (const m of movies) {
+    const caption =
+      `<b>New on MoviesDrive</b>\n\n` +
+      `<b>${escapeHtml(m.title)}</b>\n\n` +
+      `<a href="${m.link}">View Post</a>`;
+    for (const uid of allowed) {
+      try {
+        await tg.sendPhoto(uid, m.image, { caption, parse_mode: "HTML" });
+      } catch {
+        // Fallback to text if photo fails
+        await tg.sendMessage(uid,
+          `<b>New on MoviesDrive</b>\n\n<b>${escapeHtml(m.title)}</b>\n\n<a href="${m.link}">View Post</a>`,
+          { parse_mode: "HTML", disable_web_page_preview: false }
+        ).catch(() => {});
+      }
+    }
+  }
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export function startTelegramBot() {
   if (!TOKEN) return;
@@ -987,6 +1053,110 @@ export function startTelegramBot() {
     const chatId = ctx.chat!.id;
     await startMailSession(chatId, uid);
   }));
+
+  // ── MoviesDrive ────────────────────────────────────────────────────────────
+  bot.hears("🎬 MoviesDrive", (ctx) => handleMenu(ctx, async () => {
+    const lastStr = mdLastChecked
+      ? mdLastChecked.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })
+      : "Never";
+    const statusLine = mdMonitorEnabled
+      ? `<b>Monitor:</b> ON — every 3 min`
+      : `<b>Monitor:</b> OFF`;
+    const text =
+      `<b>MoviesDrive Server</b>\n\n` +
+      `${statusLine}\n` +
+      `<b>Last Checked:</b> ${lastStr}\n` +
+      `<b>New (this session):</b> ${mdNewCountSession}\n` +
+      `<b>Seen total:</b> ${mdSeenLinks.size}\n\n` +
+      `<i>Notifications are sent as photos when new movies appear.</i>`;
+    await ctx.reply(text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("Latest Movies", "md_latest"), Markup.button.callback("Check Now", "md_check_now")],
+        [Markup.button.callback(mdMonitorEnabled ? "Turn OFF Monitor" : "Turn ON Monitor", "md_toggle")],
+        [Markup.button.url("Open Website", "https://new1.moviesdrives.my/")],
+      ]),
+    });
+  }));
+
+  bot.action("md_toggle", async (ctx) => {
+    await ctx.answerCbQuery(mdMonitorEnabled ? "Monitor paused." : "Monitor resumed.").catch(() => {});
+    mdMonitorEnabled = !mdMonitorEnabled;
+    const lastStr = mdLastChecked
+      ? mdLastChecked.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })
+      : "Never";
+    const text =
+      `<b>MoviesDrive Server</b>\n\n` +
+      `<b>Monitor:</b> ${mdMonitorEnabled ? "ON — every 3 min" : "OFF"}\n` +
+      `<b>Last Checked:</b> ${lastStr}\n` +
+      `<b>New (this session):</b> ${mdNewCountSession}\n` +
+      `<b>Seen total:</b> ${mdSeenLinks.size}\n\n` +
+      `<i>Notifications are sent as photos when new movies appear.</i>`;
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("Latest Movies", "md_latest"), Markup.button.callback("Check Now", "md_check_now")],
+        [Markup.button.callback(mdMonitorEnabled ? "Turn OFF Monitor" : "Turn ON Monitor", "md_toggle")],
+        [Markup.button.url("Open Website", "https://new1.moviesdrives.my/")],
+      ]),
+    });
+  });
+
+  bot.action("md_check_now", async (ctx) => {
+    await ctx.answerCbQuery("Checking MoviesDrive...").catch(() => {});
+    const movies = await fetchMDMovies();
+    if (!movies.length) {
+      await safeEdit(ctx, "<b>MoviesDrive</b>\n\nFailed to fetch movies. Site may be down.", { parse_mode: "HTML" });
+      return;
+    }
+    mdLastChecked = new Date();
+    const newMovies = movies.filter(m => !mdSeenLinks.has(m.link));
+    newMovies.forEach(m => mdSeenLinks.add(m.link));
+    if (newMovies.length > 0) {
+      mdNewCountSession += newMovies.length;
+      await mdBroadcast(newMovies, bot.telegram, getAllowedIds());
+    }
+    const lastStr = mdLastChecked.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+    await safeEdit(ctx,
+      `<b>MoviesDrive — Checked</b>\n\n` +
+      `<b>Checked:</b> ${lastStr}\n` +
+      `<b>New found:</b> ${newMovies.length}\n` +
+      `<b>Total on page:</b> ${movies.length}\n\n` +
+      (newMovies.length > 0 ? `Sent ${newMovies.length} notification(s).` : `No new movies since last check.`),
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("Latest Movies", "md_latest"), Markup.button.callback("Check Now", "md_check_now")],
+          [Markup.button.callback(mdMonitorEnabled ? "Turn OFF Monitor" : "Turn ON Monitor", "md_toggle")],
+          [Markup.button.url("Open Website", "https://new1.moviesdrives.my/")],
+        ]),
+      }
+    );
+  });
+
+  bot.action("md_latest", async (ctx) => {
+    await ctx.answerCbQuery("Fetching latest...").catch(() => {});
+    const movies = await fetchMDMovies();
+    if (!movies.length) {
+      await safeEdit(ctx, "<b>MoviesDrive</b>\n\nFailed to fetch movies.", { parse_mode: "HTML" });
+      return;
+    }
+    const top = movies.slice(0, 15);
+    const lines = top.map((m, i) =>
+      `<b>${i + 1}.</b> <a href="${m.link}">${escapeHtml(m.title.length > 80 ? m.title.slice(0, 80) + "…" : m.title)}</a>`
+    );
+    await safeEdit(ctx,
+      `<b>MoviesDrive — Latest ${top.length}</b>\n\n${lines.join("\n\n")}`,
+      {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("Refresh", "md_latest"), Markup.button.callback("Check New", "md_check_now")],
+          [Markup.button.url("Open Website", "https://new1.moviesdrives.my/")],
+        ]),
+      }
+    );
+  });
 
   bot.action("mail_new", async (ctx) => {
     await ctx.answerCbQuery("Generating new address...").catch(() => {});
@@ -1879,9 +2049,38 @@ export function startTelegramBot() {
   }
   launch();
 
+  // ── MoviesDrive monitor startup ───────────────────────────────────────────
+  // Initial fetch: populate seen set without notifying (no spam on restart)
+  fetchMDMovies().then(movies => {
+    mdSeenLinks = new Set(movies.map(m => m.link));
+    mdLastChecked = new Date();
+    botLog(`[MoviesDrive] Monitor ready — ${mdSeenLinks.size} movies indexed`);
+  }).catch(() => botLog("[MoviesDrive] Initial fetch failed — will retry on next poll"));
+
+  // Polling interval
+  if (mdInterval) clearInterval(mdInterval);
+  mdInterval = setInterval(async () => {
+    if (!mdMonitorEnabled) return;
+    try {
+      const movies = await fetchMDMovies();
+      if (!movies.length) return;
+      mdLastChecked = new Date();
+      const newMovies = movies.filter(m => !mdSeenLinks.has(m.link));
+      newMovies.forEach(m => mdSeenLinks.add(m.link));
+      if (newMovies.length > 0) {
+        mdNewCountSession += newMovies.length;
+        botLog(`[MoviesDrive] ${newMovies.length} new movie(s) — notifying ${getAllowedIds().size} user(s)`);
+        await mdBroadcast(newMovies, bot.telegram, getAllowedIds());
+      }
+    } catch (e: any) {
+      botErr("[MoviesDrive] Poll error:", e.message);
+    }
+  }, MD_POLL_MS);
+
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const shutdown = (sig: string) => {
     botLog(`Received ${sig} — stopping bot gracefully`);
+    if (mdInterval) { clearInterval(mdInterval); mdInterval = null; }
     bot.stop(sig);
     pool.end().catch(() => {});
   };
