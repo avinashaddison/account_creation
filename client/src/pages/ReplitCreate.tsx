@@ -96,6 +96,10 @@ export default function ReplitCreate() {
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
   const [batchCount, setBatchCount] = useState(5);
   const [linksPerSource, setLinksPerSource] = useState(2);
+  // New chain links mode
+  const [linksTotal, setLinksTotal] = useState<number>(5);
+  const [linksCustomInput, setLinksCustomInput] = useState("");
+  const [linksCustomMode, setLinksCustomMode] = useState(false);
 
   const [checkoutDelayMinutes, setCheckoutDelayMinutes] = useState(0);
   const [checkoutDelaySaving, setCheckoutDelaySaving] = useState(false);
@@ -415,6 +419,29 @@ export default function ReplitCreate() {
       activeBatchId.current = data.batchId;
       addLog(`🤖 Auto Coupon job started [${data.batchId}]`);
       if (data.sourceEmail) addLog(`👤 Using account: ${data.sourceEmail}`);
+    } catch (err: any) {
+      sounds.error();
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setRunning(false);
+    }
+  };
+
+  const handleChainLinks = async () => {
+    sounds.start();
+    setLogs([]);
+    setRunning(true);
+    setCompletedCount(0);
+    setTotalCount(linksTotal);
+    try {
+      const res = await apiRequest("POST", "/api/replit-chain-links", {
+        totalLinks: linksTotal,
+        successStatus: linksSuccessStatus,
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to start");
+      activeBatchId.current = data.batchId;
+      addLog(`⛓ Chain link job started [${data.batchId}]`);
+      addLog(`🎯 Target: ${linksTotal} link(s) · on success → ${linksSuccessStatus}`);
     } catch (err: any) {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -846,22 +873,54 @@ export default function ReplitCreate() {
           {/* ══ BULK LINKS MODE ══ */}
           {mode === "links" && (
             <>
-              {/* Sub-mode toggle: Auto / Manual */}
-              <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${LA(0.15)}` }}>
-                {(["auto", "manual"] as const).map(sm => (
+              {/* Total links count selector */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                  <Link2 className="w-2.5 h-2.5 inline mr-1" />How Many Checkout Links?
+                </label>
+                <div className="flex gap-2">
+                  {[5, 10].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => { sounds.keypress(); setLinksTotal(n); setLinksCustomMode(false); }}
+                      className="flex-1 rounded-lg py-2.5 text-sm font-mono font-bold transition-all"
+                      style={{
+                        background: !linksCustomMode && linksTotal === n ? LA(0.15) : "rgba(0,0,0,0.4)",
+                        border: `1px solid ${!linksCustomMode && linksTotal === n ? LA(0.55) : LA(0.1)}`,
+                        color: !linksCustomMode && linksTotal === n ? L : LA(0.35),
+                      }}
+                      data-testid={`button-links-total-${n}`}
+                    >{n}</button>
+                  ))}
                   <button
-                    key={sm}
-                    onClick={() => { sounds.keypress(); setLinksSubMode(sm); }}
-                    className="flex-1 py-2 text-[10px] font-mono uppercase tracking-widest font-bold transition-all"
+                    onClick={() => { sounds.keypress(); setLinksCustomMode(true); setLinksCustomInput(String(linksTotal)); }}
+                    className="flex-1 rounded-lg py-2.5 text-[10px] font-mono font-bold transition-all uppercase tracking-widest"
                     style={{
-                      background: linksSubMode === sm ? LA(0.15) : "transparent",
-                      color: linksSubMode === sm ? L : LA(0.35),
-                      borderRight: sm === "auto" ? `1px solid ${LA(0.15)}` : "none",
+                      background: linksCustomMode ? LA(0.15) : "rgba(0,0,0,0.4)",
+                      border: `1px solid ${linksCustomMode ? LA(0.55) : LA(0.1)}`,
+                      color: linksCustomMode ? L : LA(0.35),
                     }}
-                  >
-                    {sm === "auto" ? "🤖 Auto Coupon" : "✍️ Manual"}
-                  </button>
-                ))}
+                    data-testid="button-links-total-custom"
+                  >Custom</button>
+                </div>
+                {linksCustomMode && (
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={linksCustomInput}
+                    onChange={(e) => {
+                      sounds.keypress();
+                      setLinksCustomInput(e.target.value);
+                      const n = parseInt(e.target.value);
+                      if (n >= 1 && n <= 100) setLinksTotal(n);
+                    }}
+                    placeholder="e.g. 15"
+                    className="mt-2 w-full rounded-lg px-3 py-2.5 text-sm font-mono font-bold text-center focus:outline-none"
+                    style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${LA(0.35)}`, color: L }}
+                    data-testid="input-links-total-custom"
+                  />
+                )}
               </div>
 
               {/* ── SUCCESS STATUS PICKER (shared by both modes) ── */}
@@ -891,165 +950,69 @@ export default function ReplitCreate() {
                 </div>
               </div>
 
-              {/* ── AUTO MODE ── */}
-              {linksSubMode === "auto" && (() => {
-                // Source candidates: ONLY sold_out accounts (processing accounts are reserved as targets)
-                const nextSource = replitAccounts.find(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out");
-                const exhausted = !nextSource;
-                const usedCount = replitAccounts.filter(a => a.couponExtracted).length;
-                const soldOutAvail = replitAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out").length;
-                const totalAvail = soldOutAvail;
+              {/* ── Queue info ── */}
+              {(() => {
+                const availCoupons = replitAccounts.filter(a => !a.couponExtracted && a.email && a.password && a.status === "sold_out").length;
                 const processingTargets = replitAccounts.filter(a => a.status === "processing").length;
+                const maxPossible = Math.min(availCoupons * 3, processingTargets);
+                const noResources = availCoupons === 0 || processingTargets === 0;
                 return (
                   <>
-                    {/* Queue status */}
-                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${LA(0.18)}` }}>
+                    <div className="rounded-lg p-3 space-y-2" style={{ background: "rgba(0,0,0,0.45)", border: `1px solid ${LA(0.15)}` }}>
                       <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Coupon Queue</span>
-                        <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>{usedCount} used · {totalAvail} remaining</span>
+                        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.4) }}>Resources</span>
+                        <span className="text-[9px] font-mono" style={{ color: LA(0.35) }}>max ~{maxPossible} links</span>
                       </div>
-                      {exhausted ? (
-                        <p className="text-[10px] font-mono" style={{ color: "#ef4444" }}>⚠️ No sold_out source accounts available for coupon extraction</p>
-                      ) : (
-                        <div className="space-y-1">
-                          <p className="text-[9px] font-mono" style={{ color: LA(0.4) }}>
-                            Next source (auto-selected):
-                          </p>
-                          <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: LA(0.06), border: `1px solid ${LA(0.2)}` }}>
-                            <User className="w-3 h-3 flex-shrink-0" style={{ color: LA(0.6) }} />
-                            <div className="min-w-0">
-                              <p className="text-[11px] font-mono font-bold truncate" style={{ color: L }}>@{nextSource!.username}</p>
-                              <p className="text-[9px] font-mono truncate" style={{ color: LA(0.5) }}>{nextSource!.email}</p>
-                            </div>
-                            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(99,102,241,0.1)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.3)" }}>
-                              sold_out
-                            </span>
-                          </div>
-                          <div className="flex gap-3 text-[9px] font-mono pt-0.5" style={{ color: LA(0.35) }}>
-                            {soldOutAvail > 0 && <span><span style={{ color: "#818cf8" }}>{soldOutAvail}</span> sold_out sources</span>}
-                            <span><span style={{ color: "rgba(34,197,94,0.8)" }}>{processingTargets}</span> processing targets</span>
-                          </div>
+                      <div className="flex gap-4 text-[10px] font-mono">
+                        <div>
+                          <span style={{ color: "#818cf8", fontWeight: 700 }}>{availCoupons}</span>
+                          <span style={{ color: LA(0.4) }}> sold_out coupons</span>
                         </div>
+                        <div>
+                          <span style={{ color: "rgba(34,197,94,0.85)", fontWeight: 700 }}>{processingTargets}</span>
+                          <span style={{ color: LA(0.4) }}> processing targets</span>
+                        </div>
+                      </div>
+                      {noResources && (
+                        <p className="text-[9px] font-mono" style={{ color: "#ef4444" }}>
+                          {availCoupons === 0 ? "⚠️ No sold_out source accounts available" : "⚠️ No processing accounts to generate links for"}
+                        </p>
                       )}
                     </div>
 
-                    {/* Already extracted coupons */}
-                    {usedCount > 0 && (
-                      <div className="rounded-lg p-3 space-y-1.5" style={{ background: LA(0.03), border: `1px solid ${LA(0.1)}` }}>
-                        <p className="text-[9px] font-mono uppercase tracking-widest" style={{ color: LA(0.35) }}>Extracted coupons ({usedCount})</p>
-                        <div className="space-y-1 max-h-28 overflow-y-auto">
-                          {replitAccounts.filter(a => a.couponExtracted).map(a => (
-                            <div key={a.id} className="flex items-center gap-2 text-[9px] font-mono" style={{ color: LA(0.4) }}>
-                              <span className="truncate" style={{ maxWidth: 120 }}>{a.email.split("@")[0]}</span>
-                              <span style={{ color: LA(0.2) }}>→</span>
-                              <span className="font-bold" style={{ color: LA(0.7) }}>{a.couponCode || "?"}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.03), border: `1px solid ${LA(0.1)}` }}>
+                    <div className="rounded-lg p-3" style={{ background: LA(0.03), border: `1px solid ${LA(0.09)}` }}>
                       <p className="text-[9px] font-mono leading-relaxed" style={{ color: LA(0.4) }}>
-                        Picks next sold_out account as coupon source → extracts coupon → generates up to 3 checkout links for processing accounts → marks source as used (processing accounts are never used as sources)
+                        Picks sold_out accounts as coupon sources one by one → each coupon generates up to 3 links for processing accounts → moves to next coupon automatically → each success is sent to bot immediately without waiting for the full batch
                       </p>
                     </div>
 
-                    {/* Single smart run button */}
+                    {/* Generate button */}
                     <button
-                      onClick={handleAutoCouponLinks}
-                      disabled={running || exhausted}
+                      onClick={handleChainLinks}
+                      disabled={running || noResources}
                       className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
                       style={{
-                        background: running ? LA(0.07) : exhausted ? LA(0.03) : `linear-gradient(135deg, ${LA(0.22)}, ${LA(0.08)})`,
-                        border: `1px solid ${running ? LA(0.3) : exhausted ? LA(0.08) : LA(0.7)}`,
-                        color: running ? L : exhausted ? LA(0.2) : L,
-                        textShadow: running || exhausted ? "none" : `0 0 14px ${L}`,
-                        boxShadow: running || exhausted ? "none" : `0 0 25px ${LA(0.12)}`,
-                        cursor: running || exhausted ? "not-allowed" : "pointer",
+                        background: running ? LA(0.07) : noResources ? LA(0.03) : `linear-gradient(135deg, ${LA(0.22)}, ${LA(0.08)})`,
+                        border: `1px solid ${running ? LA(0.3) : noResources ? LA(0.08) : LA(0.7)}`,
+                        color: running ? L : noResources ? LA(0.2) : L,
+                        textShadow: running || noResources ? "none" : `0 0 14px ${L}`,
+                        boxShadow: running || noResources ? "none" : `0 0 28px ${LA(0.12)}`,
+                        cursor: running || noResources ? "not-allowed" : "pointer",
                       }}
-                      data-testid="button-auto-coupon-links"
+                      data-testid="button-generate-chain-links"
                     >
-                      <Hash className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
+                      <Link2 className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
                       <span className="relative z-10">
                         {running
-                          ? "extracting coupon & generating links..."
-                          : exhausted
-                            ? "no_sources_remaining"
-                            : `run_auto_coupon · sold_out → up to 3 links`}
+                          ? `generating links...`
+                          : noResources
+                            ? "no_resources_available"
+                            : `generate_${linksTotal}_checkout_links`}
                       </span>
                     </button>
                   </>
                 );
               })()}
-
-              {/* ── MANUAL MODE ── */}
-              {linksSubMode === "manual" && (
-                <>
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
-                      <Tag className="w-2.5 h-2.5 inline mr-1" />Coupon Code
-                    </label>
-                    <input
-                      value={linksCoupon}
-                      onChange={(e) => { sounds.keypress(); setLinksCoupon(e.target.value); }}
-                      placeholder="AGENT4BC4974559665"
-                      className="w-full rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none"
-                      style={{ background: "rgba(0,0,0,0.5)", border: `1px solid ${linksCoupon ? LA(0.45) : LA(0.15)}`, color: LA(0.9) }}
-                      data-testid="input-links-coupon"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
-                      <Layers className="w-2.5 h-2.5 inline mr-1" />Number of Links
-                    </label>
-                    <div className="flex gap-2">
-                      {[1, 2, 3, 4, 5, 6].map(n => (
-                        <button
-                          key={n}
-                          onClick={() => { sounds.keypress(); setLinksCount(n); }}
-                          className="flex-1 rounded-lg py-2 text-xs font-mono font-bold transition-all"
-                          style={{
-                            background: linksCount === n ? LA(0.15) : "rgba(0,0,0,0.4)",
-                            border: `1px solid ${linksCount === n ? LA(0.55) : LA(0.1)}`,
-                            color: linksCount === n ? L : LA(0.35),
-                          }}
-                        >{n}</button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
-                    <p className="text-[9px] font-mono" style={{ color: LA(0.45) }}>
-                      Picks {linksCount} processing account(s) → generates Stripe checkout URL with coupon
-                    </p>
-                    <p className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
-                      On success: processing → <span style={{ color: { processing: "#f97316", available: "#3b82f6", working: "#22c55e", sold_out: "#818cf8" }[linksSuccessStatus] }}>{linksSuccessStatus}</span>
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={handleBulkLinks}
-                    disabled={running || !linksCoupon.trim()}
-                    className="relative w-full flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-mono font-bold tracking-widest uppercase transition-all duration-200"
-                    style={{
-                      background: running || !linksCoupon.trim() ? LA(0.03) : `linear-gradient(135deg, ${LA(0.18)}, ${LA(0.07)})`,
-                      border: `1px solid ${running || !linksCoupon.trim() ? LA(0.08) : LA(0.55)}`,
-                      color: running || !linksCoupon.trim() ? LA(0.2) : L,
-                      textShadow: running || !linksCoupon.trim() ? "none" : `0 0 14px ${L}`,
-                      boxShadow: running || !linksCoupon.trim() ? "none" : `0 0 25px ${LA(0.08)}`,
-                      cursor: running || !linksCoupon.trim() ? "not-allowed" : "pointer",
-                    }}
-                    data-testid="button-run-links"
-                  >
-                    <Link2 className={`w-4 h-4 relative z-10 ${running ? "animate-pulse" : ""}`} />
-                    <span className="relative z-10">
-                      {running ? `generating ${linksCount} link(s)...` : `generate_checkout_links`}
-                    </span>
-                  </button>
-                </>
-              )}
             </>
           )}
 

@@ -1427,6 +1427,7 @@ export function startTelegramBot() {
     let allLines: string[] = [];
     let pollCount = 0;
     const MAX_POLLS = 240; // 240 × 3s = 12 min max
+    const sentCheckoutUrls = new Set<string>(); // track already-sent checkout links
 
     function elapsed() {
       const s = Math.round((Date.now() - startTime) / 1000);
@@ -1458,6 +1459,23 @@ export function startTelegramBot() {
           if (!l.message) continue;
           if (l.message === "Batch complete") { seenBatchComplete = true; continue; }
           allLines.push(l.message);
+        }
+
+        // ── Real-time checkout URL delivery ──
+        // Send each new CHECKOUT_URL immediately as it appears (don't wait for batch end)
+        const newCheckouts = allLines
+          .filter(l => l.startsWith("CHECKOUT_URL|"))
+          .map(l => { const parts = l.split("|"); return { email: parts[1], url: parts[2] }; })
+          .filter(c => c.email && c.url && !sentCheckoutUrls.has(c.url));
+        for (const c of newCheckouts) {
+          sentCheckoutUrls.add(c.url);
+          await bot.telegram.sendMessage(chatId,
+            `🔗 <b>Checkout Link Ready!</b>\n\n` +
+            `📧 <code>${esc(c.email)}</code>\n` +
+            `<a href="${esc(c.url)}">Open Checkout</a>\n` +
+            `<code>${esc(c.url)}</code>`,
+            { parse_mode: "HTML", disable_web_page_preview: true }
+          ).catch(() => {});
         }
 
         // Only mark done when we see the 🏁 summary line or "Batch complete"
@@ -1543,19 +1561,27 @@ export function startTelegramBot() {
             { parse_mode: "HTML", ...completionKeyboard }
           ).catch(() => {});
 
-          // Step 4: for checkout — send each link as a clean separate message
+          // Step 4: for checkout — only send links not already delivered in real-time
           if (checkoutLinks.length > 0) {
-            const linkLines = checkoutLinks
-              .map((c, i) =>
-                `<b>${i + 1}. ${esc(c.email)}</b>\n` +
-                `<a href="${esc(c.url)}">🔗 Open Checkout</a>\n` +
-                `<code>${esc(c.url)}</code>`
-              )
-              .join("\n\n");
-            await bot.telegram.sendMessage(chatId,
-              `🔗 <b>Generated Checkout Links (${checkoutLinks.length})</b>\n\n${linkLines}`,
-              { parse_mode: "HTML", disable_web_page_preview: true }
-            ).catch(() => {});
+            const unsentLinks = checkoutLinks.filter(c => !sentCheckoutUrls.has(c.url));
+            if (unsentLinks.length > 0) {
+              const linkLines = unsentLinks
+                .map((c, i) =>
+                  `<b>${i + 1}. ${esc(c.email)}</b>\n` +
+                  `<a href="${esc(c.url)}">🔗 Open Checkout</a>\n` +
+                  `<code>${esc(c.url)}</code>`
+                )
+                .join("\n\n");
+              await bot.telegram.sendMessage(chatId,
+                `🔗 <b>Checkout Links (${unsentLinks.length} remaining)</b>\n\n${linkLines}`,
+                { parse_mode: "HTML", disable_web_page_preview: true }
+              ).catch(() => {});
+            } else if (sentCheckoutUrls.size > 0) {
+              await bot.telegram.sendMessage(chatId,
+                `✅ All ${sentCheckoutUrls.size} checkout link(s) already delivered above.`,
+                { parse_mode: "HTML" }
+              ).catch(() => {});
+            }
           }
 
           return;

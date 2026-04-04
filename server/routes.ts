@@ -3889,6 +3889,156 @@ export async function registerRoutes(
     }
   });
 
+  // ── Chain Links: auto-chain multiple coupons until totalLinks reached ──
+  // Each coupon generates up to 3 links; moves to next coupon automatically.
+  // Broadcasts CHECKOUT_URL immediately per success so bot can relay in real-time.
+  app.post("/api/replit-chain-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
+    try {
+      const totalLinks = Math.min(Math.max(parseInt(req.body.totalLinks || "5", 10), 1), 100);
+      const validStatuses = ["processing", "available", "working", "sold_out", "error"];
+      const resolvedStatus = validStatuses.includes(req.body.successStatus) ? req.body.successStatus : "sold_out";
+      const userId = req.session.userId!;
+      const role = req.session.role!;
+
+      const jobId = randomUUID().substring(0, 8);
+      const batchId = `replit-chain-${jobId}`;
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, batchId });
+
+      (async () => {
+        broadcastLog(batchId, jobId, `⛓ Chain Link Job started [${batchId}]`, userId);
+        broadcastLog(batchId, jobId, `🎯 Target: ${totalLinks} link(s) · on success → ${resolvedStatus}`, userId);
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+
+        let generatedTotal = 0;
+        let failedTotal = 0;
+        let couponRound = 0;
+
+        const isUnrecoverable = (e?: string) =>
+          !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha"));
+
+        while (generatedTotal < totalLinks) {
+          // Refresh account list each round so we see updates
+          const allAccounts = role === "superadmin"
+            ? await storage.getAllReplitAccounts()
+            : await storage.getReplitAccountsByOwner(userId);
+
+          // Pick next unused sold_out source
+          const sourceAccount = allAccounts.find(a =>
+            !a.couponExtracted && a.email && a.password && a.status === "sold_out"
+          );
+          if (!sourceAccount) {
+            broadcastLog(batchId, jobId, `⚠️ No more sold_out source accounts — stopping`, userId);
+            break;
+          }
+
+          couponRound++;
+          broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+          broadcastLog(batchId, jobId, `🎟 Round ${couponRound} — source: ${sourceAccount.email}`, userId);
+
+          // Extract coupon
+          const couponResult = await extractCouponFromReplitAccount(
+            sourceAccount.email,
+            sourceAccount.password,
+            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+          );
+
+          if (!couponResult.success || !couponResult.coupon) {
+            const srcErr = couponResult.error || "";
+            const srcErrLower = srcErr.toLowerCase();
+            if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password") || srcErrLower.includes("wrong password") || srcErrLower.includes("invalid username") || srcErrLower.includes("incorrect password")) {
+              await storage.updateReplitAccountStatus(sourceAccount.id, "error").catch(() => {});
+              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+              broadcastLog(batchId, jobId, `  🚫 Source banned/bad-creds — marked error, skipping`, userId);
+            } else if (srcErr.includes("__NO_FEATURE__")) {
+              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+              broadcastLog(batchId, jobId, `  ⚠️ No referral feature — skipping source`, userId);
+            } else if (srcErr.includes("__HAS_FEATURE__")) {
+              broadcastLog(batchId, jobId, `  ⚠️ URL parse failed — skipping to next coupon`, userId);
+              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+            } else {
+              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+              broadcastLog(batchId, jobId, `  ❌ Coupon extraction failed: ${srcErr} — skipping`, userId);
+            }
+            continue;
+          }
+
+          const { coupon, remainingSlots = 0, referralUrl: extractedReferralUrl } = couponResult as any;
+          await storage.markReplitCouponExtracted(sourceAccount.id, coupon).catch(() => {});
+          broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon} (${remainingSlots} slot(s) available)`, userId);
+
+          if (remainingSlots <= 0) {
+            broadcastLog(batchId, jobId, `⚠️ Coupon has no remaining slots — trying next`, userId);
+            continue;
+          }
+
+          // Re-fetch to get latest processing accounts
+          const freshAccounts = role === "superadmin"
+            ? await storage.getAllReplitAccounts()
+            : await storage.getReplitAccountsByOwner(userId);
+
+          const needed = totalLinks - generatedTotal;
+          const maxFromThisCoupon = Math.min(remainingSlots, 3, needed);
+          const candidates = freshAccounts.filter(a =>
+            a.id !== sourceAccount.id && a.email && a.password && a.status === "processing"
+          );
+          const toProcess = candidates.slice(0, maxFromThisCoupon);
+
+          if (toProcess.length === 0) {
+            broadcastLog(batchId, jobId, `❌ No processing accounts left — stopping`, userId);
+            break;
+          }
+
+          broadcastLog(batchId, jobId, `⚡ Generating ${toProcess.length} link(s) in parallel for this coupon...`, userId);
+
+          const results = await Promise.all(toProcess.map(async (acct, i) => {
+            const tag = `[${i + 1}/${toProcess.length}]`;
+            broadcastLog(batchId, jobId, `${tag} 🚀 ${acct.email}${acct.warmedAt ? " ✅" : " ⚠️"}`, userId);
+            let result = await generateSingleCheckoutLink(
+              acct.email, acct.password, coupon,
+              (msg) => broadcastLog(batchId, jobId, `${tag}  ${msg}`, userId),
+              extractedReferralUrl || undefined
+            );
+            if (!result.success && !isUnrecoverable(result.error)) {
+              broadcastLog(batchId, jobId, `${tag} ↩️ Retrying...`, userId);
+              result = await generateSingleCheckoutLink(
+                acct.email, acct.password, coupon,
+                (msg) => broadcastLog(batchId, jobId, `${tag} [retry]  ${msg}`, userId),
+                extractedReferralUrl || undefined
+              );
+            }
+            return { acct, result };
+          }));
+
+          for (const { acct, result } of results) {
+            if (result.success && result.stripeUrl) {
+              generatedTotal++;
+              await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
+              await storage.updateReplitAccountStatus(acct.id, resolvedStatus).catch(() => {});
+              // Broadcast immediately — bot picks this up in real-time per poll
+              broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+              broadcastLog(batchId, jobId, `  ✅ [${generatedTotal}/${totalLinks}] ${acct.email} → ${resolvedStatus}`, userId);
+            } else {
+              failedTotal++;
+              broadcastLog(batchId, jobId, `  ❌ ${acct.email}: ${result.error}`, userId);
+              if (result.error?.includes("already has an active Replit")) {
+                await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
+              } else if (result.error?.includes("banned_account") || result.error?.includes("bad_credentials") || result.error?.includes("no_password_account")) {
+                await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
+              }
+            }
+          }
+        }
+
+        broadcastLog(batchId, jobId, `─`.repeat(50), userId);
+        broadcastLog(batchId, jobId, `🏁 Done — ${generatedTotal} created, ${failedTotal} failed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Parallel batch: N agent accounts run simultaneously, each 1 coupon → 1 checkout link
   app.post("/api/replit-batch-coupon-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
