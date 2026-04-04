@@ -670,11 +670,61 @@ export function startShopBot(token: string) {
     );
   });
 
+  // ── Shortcut commands ─────────────────────────────────────────────────────
+  bot.command("balance", async (ctx) => {
+    const uid = ctx.from.id;
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    const balance = await getBalance(uid);
+    await safeReply(ctx,
+      `╔══[ WALLET STATUS ]══╗\n` +
+      `║  💰  Account Balance  ║\n` +
+      `╚═════════════════════╝\n\n` +
+      `<code>◈ Balance  →  ${fmt$(balance)}</code>\n\n` +
+      `→ To top up: ${escHtml(SUPPORT_CONTACT)}`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  bot.command("shop", async (ctx) => {
+    await showProductList(ctx);
+  });
+
+  bot.command("id", async (ctx) => {
+    const uid = ctx.from.id;
+    const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    await safeReply(ctx,
+      `╔══[ IDENTITY ]══════╗\n` +
+      `║  🪪  Account Info    ║\n` +
+      `╚════════════════════╝\n\n` +
+      `<code>◈ Username  →  ${username}\n` +
+      `◈ User ID   →  ${uid}</code>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Register commands + Menu button in Telegram ────────────────────────────
+  async function registerCommands() {
+    try {
+      await bot.telegram.setMyCommands([
+        { command: "start",   description: "Open the store" },
+        { command: "shop",    description: "Browse accounts" },
+        { command: "balance", description: "Check my balance" },
+        { command: "id",      description: "My account ID" },
+        { command: "menu",    description: "Show keyboard menu" },
+      ]);
+      await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
+      console.log("[ShopBot] Commands + Menu button registered");
+    } catch (e: any) {
+      console.error("[ShopBot] Failed to register commands:", e.message);
+    }
+  }
+
   // ── Launch with retry ─────────────────────────────────────────────────────
   async function launch(attempt = 1) {
     try {
       await bot.launch({ dropPendingUpdates: true });
       console.log("[ShopBot] Polling started (Project Addison v2 — open to all users)");
+      await registerCommands();
     } catch (err: any) {
       const delay = Math.min(attempt * 5000, 60_000);
       console.error(`[ShopBot] Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
