@@ -57,7 +57,7 @@ integrations = ["google-sheet:1.0.0"]
 [userenv.shared]
 LA28_PROXY_URL = "wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222"
 NEON_DATABASE_URL = "postgresql://neondb_owner:npg_qiZSW7d0TJoB@ep-winter-base-an9kkwgp-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-TELEGRAM_BOT_TOKEN = "8763204770:AAFAhhgo-0F06xYLmeRkyG5HtxuyCCt3nJ4"
+TELEGRAM_BOT_TOKEN = "8703832121:AAF4Tjp1Cz90aKXvbGtWs70mQaSoaAbjUGE"
 TELEGRAM_ALLOWED_IDS = "1127734159"
 
 [postMerge]
