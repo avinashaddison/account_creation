@@ -47,6 +47,18 @@ function fmt$(n: number | string) {
   return `$${parseFloat(String(n)).toFixed(2)}`;
 }
 
+// Convert text to mathematical sans-serif bold unicode (renders as a different font in Telegram)
+function toBold(text: string): string {
+  const upper = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭";
+  const lower = "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇";
+  return text.split("").map(c => {
+    const u = c.charCodeAt(0);
+    if (u >= 65 && u <= 90) return upper[u - 65];
+    if (u >= 97 && u <= 122) return lower[u - 97];
+    return c;
+  }).join("");
+}
+
 async function safeReply(ctx: any, text: string, extra: any = {}) {
   try {
     return await ctx.reply(truncate(text), extra);
@@ -354,19 +366,32 @@ export function startShopBot(token: string) {
         { parse_mode: "HTML" }
       );
     }
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = products.map((p) => {
-      const stock = p.stock > 0 ? `${p.stock} in stock` : `OUT OF STOCK`;
-      const label = `◆ ${p.name}  —  ${fmt$(p.price)}  [ ${stock} ]`;
-      return [Markup.button.callback(label, `shop_product_${p.id}`)];
+
+    // Build rich product list in the message body
+    const lines: string[] = [
+      `╔══[ 🛍 LIVE INVENTORY ]══╗\n` +
+      `╚═════════════════════════╝\n`
+    ];
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = products.map((p, i) => {
+      const inStock = p.stock > 0;
+      const statusIcon = inStock ? "⚡" : "🔴";
+      const stockLabel = inStock ? `×${p.stock} left` : `SOLD OUT`;
+      // Rich entry in the message text
+      lines.push(
+        `${statusIcon}  <b>${escHtml(p.name)}</b>\n` +
+        `    <code>Price: ${fmt$(p.price)}  ·  Stock: ${stockLabel}</code>`
+      );
+      // Styled inline button
+      const btnLabel = `${statusIcon}  ${toBold(p.name)}  ·  ${fmt$(p.price)}  ·  ${stockLabel}`;
+      return [Markup.button.callback(btnLabel, `shop_product_${p.id}`)];
     });
-    await safeReply(ctx,
-      `╔══[ INVENTORY ]═══════╗\n` +
-      `║  🛍  Live Stock Feed    ║\n` +
-      `╚══════════════════════╝\n\n` +
-      `▸ Fetching available accounts...\n` +
-      `▸ Select a product below:`,
-      { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) }
-    );
+
+    lines.push(`\n▸ Tap a product to purchase:`);
+
+    await safeReply(ctx, lines.join("\n"), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard(buttons)
+    });
   }
 
   bot.hears(BTN.ACCOUNTS, async (ctx) => {
@@ -399,8 +424,8 @@ export function startShopBot(token: string) {
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("⚡ BUY NOW", `shop_buy_${productId}`)],
-          [Markup.button.callback("← Back", "shop_back_products")],
+          [Markup.button.callback(`⚡  ${toBold("BUY NOW")}  ·  ${fmt$(prod.price)}`, `shop_buy_${productId}`)],
+          [Markup.button.callback("‹ Back to Shop", "shop_back_products")],
         ]),
       }
     );
@@ -412,19 +437,28 @@ export function startShopBot(token: string) {
     if (products.length === 0) {
       return safeEdit(ctx, "No products available right now. Check back soon!");
     }
+    const lines2: string[] = [
+      `╔══[ 🛍 LIVE INVENTORY ]══╗\n` +
+      `╚═════════════════════════╝\n`
+    ];
     const buttons: ReturnType<typeof Markup.button.callback>[][] = products.map((p) => {
-      const stock = p.stock > 0 ? `${p.stock} in stock` : `OUT OF STOCK`;
-      const label = `◆ ${p.name}  —  ${fmt$(p.price)}  [ ${stock} ]`;
-      return [Markup.button.callback(label, `shop_product_${p.id}`)];
+      const inStock = p.stock > 0;
+      const statusIcon = inStock ? "⚡" : "🔴";
+      const stockLabel = inStock ? `×${p.stock} left` : `SOLD OUT`;
+      lines2.push(
+        `${statusIcon}  <b>${escHtml(p.name)}</b>\n` +
+        `    <code>Price: ${fmt$(p.price)}  ·  Stock: ${stockLabel}</code>`
+      );
+      return [Markup.button.callback(
+        `${statusIcon}  ${toBold(p.name)}  ·  ${fmt$(p.price)}  ·  ${stockLabel}`,
+        `shop_product_${p.id}`
+      )];
     });
-    await safeEdit(ctx,
-      `╔══[ INVENTORY ]═══════╗\n` +
-      `║  🛍  Live Stock Feed    ║\n` +
-      `╚══════════════════════╝\n\n` +
-      `▸ Fetching available accounts...\n` +
-      `▸ Select a product below:`,
-      { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) }
-    );
+    lines2.push(`\n▸ Tap a product to purchase:`);
+    await safeEdit(ctx, lines2.join("\n"), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard(buttons)
+    });
   });
 
   // ── Buy flow ──────────────────────────────────────────────────────────────
