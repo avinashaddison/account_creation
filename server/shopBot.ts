@@ -245,6 +245,41 @@ async function purchaseProduct(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+async function ensureShopTables() {
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS shop_customers (
+      telegram_id BIGINT PRIMARY KEY,
+      username TEXT,
+      first_name TEXT,
+      balance NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS shop_products (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT NOT NULL,
+      description TEXT,
+      price NUMERIC(10,2) NOT NULL,
+      account_type TEXT NOT NULL,
+      status_filter TEXT NOT NULL DEFAULT 'available',
+      active BOOLEAN NOT NULL DEFAULT true,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS shop_orders (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      telegram_id BIGINT NOT NULL,
+      product_id VARCHAR NOT NULL,
+      product_name TEXT NOT NULL,
+      account_id VARCHAR,
+      account_email TEXT,
+      account_password TEXT,
+      amount NUMERIC(10,2) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  console.log("[ShopBot] Tables ready");
+}
+
 export function startShopBot(token: string) {
   if (!token) {
     console.warn("[ShopBot] No token provided — shop bot disabled");
@@ -252,6 +287,9 @@ export function startShopBot(token: string) {
   }
 
   const bot = new Telegraf(token);
+
+  // ── Ensure DB tables exist before handling any messages ───────────────────
+  ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
   // ── Global error guard ────────────────────────────────────────────────────
   bot.catch((err: any, ctx: any) => {
