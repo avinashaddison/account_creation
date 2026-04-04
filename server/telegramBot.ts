@@ -11,6 +11,7 @@ const SERVER_PORT = process.env.PORT || 5000;
 const BASE_URL = `http://localhost:${SERVER_PORT}`;
 
 if (!TOKEN) console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — bot disabled");
+else console.log(`[TelegramBot] Token loaded — first 20 chars: ${TOKEN.slice(0, 20)}... length: ${TOKEN.length}`);
 
 // ── Service configs ───────────────────────────────────────────────────────────
 interface ServiceConfig {
