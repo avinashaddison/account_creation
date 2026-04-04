@@ -68,7 +68,7 @@ async function safeEdit(ctx: any, text: string, extra: any = {}) {
 const SHOP_KEYBOARD = Markup.keyboard([
   ["🛍 Accounts", "💰 My Balance"],
   ["📦 My Orders", "➕ Add Funds"],
-  ["🪪 My Telegram ID", "💬 Support"],
+  ["🪪 My Account ID", "💬 Support"],
 ]).resize();
 
 // ── Per-user shop state ────────────────────────────────────────────────────────
@@ -506,13 +506,13 @@ export function startShopBot(token: string) {
     );
   });
 
-  // ── My Telegram ID ────────────────────────────────────────────────────────
-  bot.hears("🪪 My Telegram ID", async (ctx) => {
+  // ── My Account ID ─────────────────────────────────────────────────────────
+  bot.hears("🪪 My Account ID", async (ctx) => {
     const uid = ctx.from.id;
     const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "No username";
     await safeReply(
       ctx,
-      `<b>Your Telegram ID</b>\n\n${escHtml(username)} — <code>${uid}</code>`,
+      `<b>Your Account ID</b>\n\n${escHtml(username)} — <code>${uid}</code>`,
       { parse_mode: "HTML" }
     );
   });
