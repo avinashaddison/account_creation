@@ -5469,88 +5469,118 @@ export async function registerRoutes(
       });
       const html = await response.text();
 
-      // Helper: strip HTML tags
-      const strip = (s: string) =>
-        s.replace(/<[^>]+>/g, "")
-          .replace(/&#038;/g, "&").replace(/&#8217;/g, "'").replace(/&#8211;/g, "-")
-          .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#8230;/g, "...").trim();
+      // ── Helpers ──
+      const decode = (s: string) =>
+        s.replace(/&#038;/g, "&").replace(/&#8217;/g, "'").replace(/&#8211;/g, "-")
+         .replace(/&#8230;/g, "...").replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+         .replace(/&#8220;/g, '"').replace(/&#8221;/g, '"').replace(/&nbsp;/g, " ");
 
-      // Title
+      const strip = (s: string) => decode(s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).trim();
+
+      // Convert <br> to newlines before stripping (for <p><br> format)
+      const stripLines = (s: string) =>
+        decode(s.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(?:div|p|li)>/gi, "\n").replace(/<[^>]+>/g, ""))
+          .split("\n").map(l => l.trim()).filter(Boolean);
+
+      // ── Article HTML ──
+      const articleM = html.match(/<article[^>]*class="[^"]*post-content[^"]*"[^>]*>([\s\S]*?)<\/article>/);
+      const articleHtml = articleM ? articleM[1] : "";
+
+      // ── Title ──
       const titleM = html.match(/<h1[^>]*class="[^"]*post-title[^"]*"[^>]*>([\s\S]*?)<\/h1>/);
       const title = titleM ? strip(titleM[1]) : "";
 
-      // Date
+      // ── Date ──
       const dateM = html.match(/<span[^>]*class="[^"]*post-date[^"]*"[^>]*>[\s\S]*?<\/svg>([\s\S]*?)<\/span>/);
       const date = dateM ? strip(dateM[1]) : "";
 
-      // Categories
+      // ── Categories ──
       const catMatches = html.matchAll(/<a[^>]*class="[^"]*category-tag[^"]*"[^>]*>([\s\S]*?)<\/a>/g);
       const categories = [...catMatches].map(m => strip(m[1]));
 
-      // Poster image (first TMDB or large image in article)
-      const articleM = html.match(/<article[^>]*class="[^"]*post-content[^"]*"[^>]*>([\s\S]*?)<\/article>/);
-      const articleHtml = articleM ? articleM[1] : "";
+      // ── Poster (TMDB) ──
       const posterM = articleHtml.match(/src="(https:\/\/image\.tmdb\.org[^"]+)"/);
       const poster = posterM ? posterM[1] : "";
 
-      const infoSection = articleHtml.match(/Movie\/Film Info:-<\/strong><\/h3>([\s\S]*?)<hr\s*\/>/i);
-      const infoHtml = infoSection ? infoSection[1] : articleHtml;
+      // ── Info section: find block between info heading and next <hr> ──
+      const infoSectionM = articleHtml.match(
+        /(?:Movie\/Film Info|Series Info)[^<]*<\/(?:strong|span|h3|h4|h5)>(?:[^<]*<\/h3>)?([^]*?)<hr\s*\/?>/i
+      );
+      const infoRaw = infoSectionM ? infoSectionM[1] : "";
 
-      const infoLines = (infoHtml.match(/<div[^>]*>([\s\S]*?)<\/div>/g) || [])
-        .map(d => strip(d))
-        .filter(d => d.includes(":"));
+      // Extract lines (handles both <div> and <br> formats)
+      const infoLines = stripLines(infoRaw).filter(l => l.includes(":") || l.includes("Rating"));
 
-      const getInfo = (keyword: string): string => {
-        const line = infoLines.find(l => l.toLowerCase().includes(keyword.toLowerCase()));
-        if (!line) return "";
-        const colonIdx = line.indexOf(":");
-        return colonIdx !== -1 ? line.substring(colonIdx + 1).trim() : "";
+      const getInfo = (keywords: string[]): string => {
+        for (const kw of keywords) {
+          const line = infoLines.find(l => l.toLowerCase().includes(kw.toLowerCase()));
+          if (line) {
+            const colonIdx = line.indexOf(":");
+            if (colonIdx === -1) return "";
+            return line.substring(colonIdx + 1).replace(/^[-–\s]+/, "").trim();
+          }
+        }
+        return "";
       };
 
-      const imdb = getInfo("iMDB") || getInfo("IMDB");
-      const genre = getInfo("Genre");
-      const director = getInfo("Director");
-      const writer = getInfo("Writer");
-      const stars = getInfo("Stars");
-      const language = getInfo("Language");
-      const quality = getInfo("Quality");
-      const format = getInfo("Format");
+      const imdb = getInfo(["imdb", "rating"]);
+      const genre = getInfo(["genre"]);
+      const director = getInfo(["director", "creator"]);
+      const writer = getInfo(["writer"]);
+      const stars = getInfo(["stars", "cast"]);
+      const language = getInfo(["language"]);
+      const quality = getInfo(["quality"]);
+      const format = getInfo(["format"]);
+      const season = getInfo(["season"]);
+      const episodeSize = getInfo(["episode size", "size"]);
+      const releasedYear = getInfo(["released year", "year"]);
+      const seriesName = getInfo(["series name", "movie name"]);
 
-      // Storyline
-      const storylineM = articleHtml.match(/Storyline[^<]*<\/(?:span|h3|h4)>[^<]*<\/h3>\s*<div[^>]*>([\s\S]*?)<\/div>/i)
-        || articleHtml.match(/Storyline[^:]*:-?<\/(?:span|h3|h4)>([\s\S]*?)<hr/i);
+      // ── Storyline ──
+      // Matches: <h3>..Storyline..</h3> followed by <h5> or <div> with text
+      const storylineM =
+        articleHtml.match(/Storyline[^<]*[-–]?<\/(?:h3|h4|h5|span)>\s*<(?:h5|div)[^>]*>([\s\S]*?)<\/(?:h5|div)>/i) ||
+        articleHtml.match(/Storyline[^<]*[-–]?<\/(?:h3|h4|h5|span)>([\s\S]*?)<(?:hr|h3|h4)/i);
       const storyline = storylineM ? strip(storylineM[1]) : "";
 
-      // Screenshots
-      const screenshotSection = articleHtml.match(/Screen-Shots[^<]*<\/(?:span|h3|h4)>([\s\S]*?)<hr/i);
+      // ── Screenshots: all external images after Screenshots heading, before next <hr> ──
       const screenshots: string[] = [];
-      if (screenshotSection) {
-        const imgMatches = screenshotSection[1].matchAll(/src="(https?:\/\/(?!image\.tmdb)[^"]+\.(png|jpg|jpeg|webp))"/gi);
-        for (const m of imgMatches) screenshots.push(m[1]);
-      }
-
-      // Download links: find all <h5> pairs (description + link)
-      type DownloadLink = { label: string; size: string; url: string };
-      const downloads: DownloadLink[] = [];
-      const h5Matches = [...articleHtml.matchAll(/<h5[^>]*>([\s\S]*?)<\/h5>/gi)];
-      for (let i = 0; i < h5Matches.length; i++) {
-        const text = strip(h5Matches[i][1]);
-        const linkM = h5Matches[i][1].match(/href="([^"]+)"/);
-        if (linkM) {
-          // This h5 is a link — pair with previous h5 as label if no link
-          const label = i > 0 ? strip(h5Matches[i - 1][1]) : text;
-          const sizeM = text.match(/\[([^\]]+(?:GB|MB)[^\]]*)\]/i);
-          downloads.push({ label: label.replace(/<[^>]+>/g, ""), size: sizeM ? sizeM[1] : text, url: linkM[1] });
+      const ssM = articleHtml.match(/(?:Screen.?Shot|Screenshot)[^<]*<\/[^>]+>([\s\S]*?)(?:<hr|$)/i);
+      if (ssM) {
+        const imgMs = ssM[1].matchAll(/src="(https?:\/\/(?!image\.tmdb)[^"]+)"/gi);
+        for (const m of imgMs) {
+          const src = m[1];
+          if (!src.includes("wp-content") && !src.includes("t.jpg") && !src.includes("telegram"))
+            screenshots.push(src);
         }
       }
 
-      // YouTube trailer
+      // ── Download links: consecutive h5 pairs (desc h5 → link h5) ──
+      type DownloadLink = { label: string; url: string };
+      const downloads: DownloadLink[] = [];
+      const h5All = [...articleHtml.matchAll(/<h5[^>]*>([\s\S]*?)<\/h5>/gi)];
+      for (let i = 0; i < h5All.length; i++) {
+        const inner = h5All[i][1];
+        const linkM = inner.match(/href="([^"]+)"/);
+        if (linkM && i > 0) {
+          const prevInner = h5All[i - 1][1];
+          const prevHasLink = !!prevInner.match(/href="[^"]+"/);
+          // label = link button text; desc = previous h5 text
+          const buttonText = strip(inner);
+          const descText = prevHasLink ? buttonText : strip(prevInner);
+          downloads.push({ label: buttonText || descText, url: linkM[1] });
+        } else if (linkM) {
+          downloads.push({ label: strip(inner), url: linkM[1] });
+        }
+      }
+
+      // ── YouTube trailer ──
       const youtubeM = articleHtml.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
       const youtubeId = youtubeM ? youtubeM[1] : "";
 
       res.json({
         title, date, categories, poster, storyline, screenshots, downloads, youtubeId,
-        info: { imdb, genre, director, writer, stars, language, quality, format },
+        info: { imdb, genre, director, writer, stars, language, quality, format, season, episodeSize, releasedYear, seriesName },
       });
     } catch (err: any) {
       res.status(500).json({ message: "Failed to fetch post", error: err.message });
