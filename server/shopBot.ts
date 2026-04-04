@@ -483,20 +483,18 @@ export function startShopBot(token: string) {
       });
     }
 
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = res.rows.map((o: any) => {
+    const orderLines: string[] = [`<b>My Orders</b> (last ${res.rows.length})\n`];
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = res.rows.map((o: any, i: number) => {
       const date = new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      const label = `${o.product_name} — ${fmt$(o.amount)} — ${date}`;
-      return [Markup.button.callback(label, `shop_creds_${o.id}`)];
+      orderLines.push(`${i + 1}. <b>${o.product_name}</b> — ${fmt$(o.amount)} — ${date}`);
+      return [Markup.button.callback(`${i + 1}. Show Credentials`, `shop_creds_${o.id}`)];
     });
+    orderLines.push("\nTap below to reveal credentials:");
 
-    await safeReply(
-      ctx,
-      `<b>My Orders</b> (last ${res.rows.length})\n\nTap an order to view credentials:`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard(buttons),
-      }
-    );
+    await safeReply(ctx, orderLines.join("\n"), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard(buttons),
+    });
   });
 
   // ── Show credentials for an order ─────────────────────────────────────────
