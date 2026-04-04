@@ -607,8 +607,28 @@ function getAllowedIds(envKey = "TELEGRAM_ALLOWED_IDS"): Set<number> {
 }
 
 // ── Multi-bot registry — used by MoviesDrive monitor to broadcast across all bots ──
-interface BotEntry { getAllowedIds: () => Set<number>; tg: any }
+interface BotEntry { getAllowedIds: () => Set<number>; tg: any; stop: (sig: string) => void }
 const activeBots: BotEntry[] = [];
+
+// ── Single shared shutdown — registered once, stops all bots and closes pool ─
+let _shutdownRegistered = false;
+function registerShutdown() {
+  if (_shutdownRegistered) return;
+  _shutdownRegistered = true;
+  const doShutdown = (sig: string) => {
+    if (mdInterval) { clearInterval(mdInterval); mdInterval = null; }
+    for (const entry of activeBots) { try { entry.stop(sig); } catch {} }
+    pool.end().catch(() => {});
+  };
+  process.once("SIGINT",  () => doShutdown("SIGINT"));
+  process.once("SIGTERM", () => doShutdown("SIGTERM"));
+  process.on("unhandledRejection", (reason: any) => {
+    console.error("[Bot] Unhandled promise rejection:", reason?.message || reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[Bot] Uncaught exception:", err.message);
+  });
+}
 
 /** Truncate a message to Telegram's 4096-char hard limit. */
 function truncate(text: string, limit = 4000): string {
@@ -757,9 +777,14 @@ export function startTelegramBot(config: BotConfig) {
     return { ok: res.ok, data: await res.json().catch(() => ({})) };
   }
 
-  // Register this bot in the multi-bot registry for MoviesDrive broadcast
-  const botEntry: BotEntry = { getAllowedIds: () => getAllowedIds(allowedIdsEnv), tg: bot.telegram };
+  // Register this bot in the multi-bot registry for MoviesDrive broadcast and shared shutdown
+  const botEntry: BotEntry = {
+    getAllowedIds: () => getAllowedIds(allowedIdsEnv),
+    tg: bot.telegram,
+    stop: (sig: string) => { botLog(`[${label}] Received ${sig} — stopping`); bot.stop(sig); },
+  };
   activeBots.push(botEntry);
+  registerShutdown();
 
   // ── Global error handler — never crash the process ────────────────────────
   bot.catch((err: any, ctx: any) => {
@@ -2104,20 +2129,4 @@ export function startTelegramBot(config: BotConfig) {
     }, MD_POLL_MS);
   }
 
-  // ── Graceful shutdown ─────────────────────────────────────────────────────
-  const shutdown = (sig: string) => {
-    botLog(`[${label}] Received ${sig} — stopping`);
-    bot.stop(sig);
-  };
-  // Use on() (not once()) so each registered bot gets a chance to stop cleanly
-  process.on("SIGINT",  () => { if (mdInterval) { clearInterval(mdInterval); mdInterval = null; } shutdown("SIGINT"); pool.end().catch(() => {}); });
-  process.on("SIGTERM", () => { if (mdInterval) { clearInterval(mdInterval); mdInterval = null; } shutdown("SIGTERM"); pool.end().catch(() => {}); });
-
-  // ── Process-level safety net ──────────────────────────────────────────────
-  process.on("unhandledRejection", (reason: any) => {
-    botErr("Unhandled promise rejection:", reason?.message || reason);
-  });
-  process.on("uncaughtException", (err) => {
-    botErr("Uncaught exception:", err.message);
-  });
 }
