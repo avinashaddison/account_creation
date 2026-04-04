@@ -196,8 +196,20 @@ app.use((req, res, next) => {
 
   await registerRoutes(httpServer, app);
 
-  // Start Telegram bot
-  startTelegramBot();
+  // Start primary Telegram bot
+  const primaryToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (primaryToken) {
+    startTelegramBot({ token: primaryToken, allowedIdsEnv: "TELEGRAM_ALLOWED_IDS", label: "Bot1" });
+  } else {
+    console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — primary bot disabled");
+  }
+
+  // Start secondary Telegram bot (if configured)
+  const secondaryToken = process.env.TELEGRAM_BOT_TOKEN_2;
+  if (secondaryToken) {
+    startTelegramBot({ token: secondaryToken, allowedIdsEnv: "TELEGRAM_ALLOWED_IDS_2", label: "Bot2" });
+    console.log("[TelegramBot] Secondary bot (Bot2) configured and starting...");
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

@@ -6,11 +6,8 @@ import {
   detectProviderFromDomain,
 } from "./mailService";
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const SERVER_PORT = process.env.PORT || 5000;
 const BASE_URL = `http://localhost:${SERVER_PORT}`;
-
-if (!TOKEN) console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — bot disabled");
 
 // ── Service configs ───────────────────────────────────────────────────────────
 interface ServiceConfig {
@@ -266,7 +263,7 @@ async function dbQuery(sql: string, params: any[] = []) {
 async function botApi(path: string, method = "GET", body?: object) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json", "x-bot-token": TOKEN || "" },
+    headers: { "Content-Type": "application/json", "x-bot-token": process.env.TELEGRAM_BOT_TOKEN || "" },
     body: body ? JSON.stringify(body) : undefined,
   });
   return { ok: res.ok, data: await res.json().catch(() => ({})) };
@@ -618,13 +615,18 @@ async function applyStatus(ctx: any, status: string) {
 
 // ── Production helpers ────────────────────────────────────────────────────────
 
-/** Allowed Telegram user IDs — comma-separated in TELEGRAM_ALLOWED_IDS env var.
+/** Allowed Telegram user IDs — comma-separated in the given env var.
+ *  Falls back to TELEGRAM_ALLOWED_IDS if no envKey is provided.
  *  If the env var is not set, the bot is open to anyone (dev mode). */
-function getAllowedIds(): Set<number> {
-  const raw = process.env.TELEGRAM_ALLOWED_IDS || "";
+function getAllowedIds(envKey = "TELEGRAM_ALLOWED_IDS"): Set<number> {
+  const raw = process.env[envKey] || "";
   if (!raw.trim()) return new Set();
   return new Set(raw.split(",").map((s) => parseInt(s.trim())).filter(Boolean));
 }
+
+// ── Multi-bot registry — used by MoviesDrive monitor to broadcast across all bots ──
+interface BotEntry { getAllowedIds: () => Set<number>; tg: any }
+const activeBots: BotEntry[] = [];
 
 /** Truncate a message to Telegram's 4096-char hard limit. */
 function truncate(text: string, limit = 4000): string {
@@ -720,7 +722,6 @@ async function mdBroadcast(movies: MDMovie[], tg: any, allowed: Set<number>) {
       try {
         await tg.sendPhoto(uid, m.image, { caption, parse_mode: "HTML" });
       } catch {
-        // Fallback to text if photo fails
         await tg.sendMessage(uid,
           `<b>New on MoviesDrive</b>\n\n<b>${escapeHtml(m.title)}</b>\n\n<a href="${m.link}">View Post</a>`,
           { parse_mode: "HTML", disable_web_page_preview: false }
@@ -730,15 +731,35 @@ async function mdBroadcast(movies: MDMovie[], tg: any, allowed: Set<number>) {
   }
 }
 
+/** Collect all allowed IDs across all registered bots (union, deduplicated). */
+function getAllBotAllowedIds(): Set<number> {
+  const combined = new Set<number>();
+  for (const entry of activeBots) {
+    for (const uid of entry.getAllowedIds()) combined.add(uid);
+  }
+  return combined;
+}
+
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export function startTelegramBot() {
-  if (!TOKEN) return;
-  const bot = new Telegraf(TOKEN);
-  const ALLOWED = getAllowedIds();
+export interface BotConfig {
+  token: string;
+  allowedIdsEnv?: string;  // env var name for allowed IDs, defaults to TELEGRAM_ALLOWED_IDS
+  label?: string;           // human-readable label for logs, e.g. "Bot1" or "Bot2"
+}
+
+export function startTelegramBot(config: BotConfig) {
+  const { token, allowedIdsEnv = "TELEGRAM_ALLOWED_IDS", label = "Bot" } = config;
+  if (!token) { console.warn(`[TelegramBot:${label}] No token provided — skipping`); return; }
+  const bot = new Telegraf(token);
+  const ALLOWED = getAllowedIds(allowedIdsEnv);
+
+  // Register this bot in the multi-bot registry for MoviesDrive broadcast
+  const botEntry: BotEntry = { getAllowedIds: () => getAllowedIds(allowedIdsEnv), tg: bot.telegram };
+  activeBots.push(botEntry);
 
   // ── Global error handler — never crash the process ────────────────────────
   bot.catch((err: any, ctx: any) => {
@@ -1114,7 +1135,10 @@ export function startTelegramBot() {
     newMovies.forEach(m => mdSeenLinks.add(m.link));
     if (newMovies.length > 0) {
       mdNewCountSession += newMovies.length;
-      await mdBroadcast(newMovies, bot.telegram, getAllowedIds());
+      // Broadcast to all bots' allowed users
+      for (const entry of activeBots) {
+        await mdBroadcast(newMovies, entry.tg, entry.getAllowedIds());
+      }
     }
     const lastStr = mdLastChecked.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
     await safeEdit(ctx,
@@ -2040,52 +2064,54 @@ export function startTelegramBot() {
   async function launch(attempt = 1) {
     try {
       await bot.launch({ dropPendingUpdates: true });
-      botLog("✅ Bot polling started" + (ALLOWED.size ? ` (${ALLOWED.size} allowed users)` : " (open access — set TELEGRAM_ALLOWED_IDS to restrict)"));
+      botLog(`✅ [${label}] polling started` + (ALLOWED.size ? ` (${ALLOWED.size} allowed users from ${allowedIdsEnv})` : " (open access)"));
     } catch (err: any) {
       const delay = Math.min(attempt * 5000, 60_000);
-      botErr(`Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
+      botErr(`[${label}] Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
       setTimeout(() => launch(attempt + 1), delay);
     }
   }
   launch();
 
-  // ── MoviesDrive monitor startup ───────────────────────────────────────────
-  // Initial fetch: populate seen set without notifying (no spam on restart)
-  fetchMDMovies().then(movies => {
-    mdSeenLinks = new Set(movies.map(m => m.link));
-    mdLastChecked = new Date();
-    botLog(`[MoviesDrive] Monitor ready — ${mdSeenLinks.size} movies indexed`);
-  }).catch(() => botLog("[MoviesDrive] Initial fetch failed — will retry on next poll"));
-
-  // Polling interval
-  if (mdInterval) clearInterval(mdInterval);
-  mdInterval = setInterval(async () => {
-    if (!mdMonitorEnabled) return;
-    try {
-      const movies = await fetchMDMovies();
-      if (!movies.length) return;
+  // ── MoviesDrive monitor startup — only start on the first bot ────────────
+  if (!mdInterval) {
+    // Initial fetch: populate seen set without notifying (no spam on restart)
+    fetchMDMovies().then(movies => {
+      mdSeenLinks = new Set(movies.map(m => m.link));
       mdLastChecked = new Date();
-      const newMovies = movies.filter(m => !mdSeenLinks.has(m.link));
-      newMovies.forEach(m => mdSeenLinks.add(m.link));
-      if (newMovies.length > 0) {
-        mdNewCountSession += newMovies.length;
-        botLog(`[MoviesDrive] ${newMovies.length} new movie(s) — notifying ${getAllowedIds().size} user(s)`);
-        await mdBroadcast(newMovies, bot.telegram, getAllowedIds());
+      botLog(`[MoviesDrive] Monitor ready — ${mdSeenLinks.size} movies indexed`);
+    }).catch(() => botLog("[MoviesDrive] Initial fetch failed — will retry on next poll"));
+
+    mdInterval = setInterval(async () => {
+      if (!mdMonitorEnabled) return;
+      try {
+        const movies = await fetchMDMovies();
+        if (!movies.length) return;
+        mdLastChecked = new Date();
+        const newMovies = movies.filter(m => !mdSeenLinks.has(m.link));
+        newMovies.forEach(m => mdSeenLinks.add(m.link));
+        if (newMovies.length > 0) {
+          mdNewCountSession += newMovies.length;
+          const totalUsers = getAllBotAllowedIds().size;
+          botLog(`[MoviesDrive] ${newMovies.length} new movie(s) — notifying across ${activeBots.length} bot(s), ${totalUsers} user(s)`);
+          for (const entry of activeBots) {
+            await mdBroadcast(newMovies, entry.tg, entry.getAllowedIds());
+          }
+        }
+      } catch (e: any) {
+        botErr("[MoviesDrive] Poll error:", e.message);
       }
-    } catch (e: any) {
-      botErr("[MoviesDrive] Poll error:", e.message);
-    }
-  }, MD_POLL_MS);
+    }, MD_POLL_MS);
+  }
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const shutdown = (sig: string) => {
-    botLog(`Received ${sig} — stopping bot gracefully`);
-    if (mdInterval) { clearInterval(mdInterval); mdInterval = null; }
+    botLog(`[${label}] Received ${sig} — stopping`);
     bot.stop(sig);
-    pool.end().catch(() => {});
   };
-  process.once("SIGINT",  () => shutdown("SIGINT"));
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  // Use on() (not once()) so each registered bot gets a chance to stop cleanly
+  process.on("SIGINT",  () => { if (mdInterval) { clearInterval(mdInterval); mdInterval = null; } shutdown("SIGINT"); pool.end().catch(() => {}); });
+  process.on("SIGTERM", () => { if (mdInterval) { clearInterval(mdInterval); mdInterval = null; } shutdown("SIGTERM"); pool.end().catch(() => {}); });
 
   // ── Process-level safety net ──────────────────────────────────────────────
   process.on("unhandledRejection", (reason: any) => {
