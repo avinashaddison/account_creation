@@ -48,13 +48,14 @@ function fmt$(n: number | string) {
 }
 
 // Convert text to mathematical sans-serif bold unicode (renders as a different font in Telegram)
+// Must use [...str] spread to correctly iterate surrogate pairs (non-BMP chars)
 function toBold(text: string): string {
-  const upper = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭";
-  const lower = "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇";
-  return text.split("").map(c => {
+  const upperChars = [..."𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"];
+  const lowerChars = [..."𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇"];
+  return [...text].map(c => {
     const u = c.charCodeAt(0);
-    if (u >= 65 && u <= 90) return upper[u - 65];
-    if (u >= 97 && u <= 122) return lower[u - 97];
+    if (u >= 65 && u <= 90) return upperChars[u - 65];
+    if (u >= 97 && u <= 122) return lowerChars[u - 97];
     return c;
   }).join("");
 }
@@ -78,12 +79,12 @@ async function safeEdit(ctx: any, text: string, extra: any = {}) {
 
 // ── Main reply keyboard ────────────────────────────────────────────────────────
 const BTN = {
-  ACCOUNTS:  "🛍  𝗔𝗖𝗖𝗢𝗨𝗡𝗧𝗦",
-  BALANCE:   "💰  𝗕𝗔𝗟𝗔𝗡𝗖𝗘",
-  ORDERS:    "📦  𝗠𝗬 𝗢𝗥𝗗𝗘𝗥𝗦",
-  DEPOSIT:   "➕  𝗗𝗘𝗣𝗢𝗦𝗜𝗧",
-  IDENTITY:  "🪪  𝗠𝗬 𝗜𝗗",
-  SUPPORT:   "💬  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
+  ACCOUNTS:  "🛍 // ACCOUNTS",
+  BALANCE:   "💰 // BALANCE",
+  ORDERS:    "📦 // MY ORDERS",
+  DEPOSIT:   "➕ // DEPOSIT",
+  IDENTITY:  "🪪 // MY ID",
+  SUPPORT:   "💬 // SUPPORT",
 } as const;
 
 const SHOP_KEYBOARD = Markup.keyboard([
