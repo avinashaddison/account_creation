@@ -66,12 +66,12 @@ async function safeEdit(ctx: any, text: string, extra: any = {}) {
 
 // ── Main reply keyboard ────────────────────────────────────────────────────────
 const BTN = {
-  ACCOUNTS:  "[ 🛍  ACCOUNTS ]",
-  BALANCE:   "[ 💰  BALANCE ]",
-  ORDERS:    "[ 📦  MY ORDERS ]",
-  DEPOSIT:   "[ ➕  DEPOSIT ]",
-  IDENTITY:  "[ 🪪  IDENTITY ]",
-  SUPPORT:   "[ 💬  SUPPORT ]",
+  ACCOUNTS:  "🛍  𝗔𝗖𝗖𝗢𝗨𝗡𝗧𝗦",
+  BALANCE:   "💰  𝗕𝗔𝗟𝗔𝗡𝗖𝗘",
+  ORDERS:    "📦  𝗠𝗬 𝗢𝗥𝗗𝗘𝗥𝗦",
+  DEPOSIT:   "➕  𝗗𝗘𝗣𝗢𝗦𝗜𝗧",
+  IDENTITY:  "🪪  𝗠𝗬 𝗜𝗗",
+  SUPPORT:   "💬  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
 } as const;
 
 const SHOP_KEYBOARD = Markup.keyboard([
