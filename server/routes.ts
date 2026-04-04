@@ -5453,6 +5453,110 @@ export async function registerRoutes(
     }
   });
 
+  // ── MOVIES DRIVE POST SCRAPER ──
+  app.get("/api/movies-drive/post", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const url = req.query.url as string;
+      if (!url || !url.startsWith("https://new1.moviesdrives.my/")) {
+        return res.status(400).json({ message: "Invalid URL" });
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+      const html = await response.text();
+
+      // Helper: strip HTML tags
+      const strip = (s: string) =>
+        s.replace(/<[^>]+>/g, "")
+          .replace(/&#038;/g, "&").replace(/&#8217;/g, "'").replace(/&#8211;/g, "-")
+          .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#8230;/g, "...").trim();
+
+      // Title
+      const titleM = html.match(/<h1[^>]*class="[^"]*post-title[^"]*"[^>]*>([\s\S]*?)<\/h1>/);
+      const title = titleM ? strip(titleM[1]) : "";
+
+      // Date
+      const dateM = html.match(/<span[^>]*class="[^"]*post-date[^"]*"[^>]*>[\s\S]*?<\/svg>([\s\S]*?)<\/span>/);
+      const date = dateM ? strip(dateM[1]) : "";
+
+      // Categories
+      const catMatches = html.matchAll(/<a[^>]*class="[^"]*category-tag[^"]*"[^>]*>([\s\S]*?)<\/a>/g);
+      const categories = [...catMatches].map(m => strip(m[1]));
+
+      // Poster image (first TMDB or large image in article)
+      const articleM = html.match(/<article[^>]*class="[^"]*post-content[^"]*"[^>]*>([\s\S]*?)<\/article>/);
+      const articleHtml = articleM ? articleM[1] : "";
+      const posterM = articleHtml.match(/src="(https:\/\/image\.tmdb\.org[^"]+)"/);
+      const poster = posterM ? posterM[1] : "";
+
+      const infoSection = articleHtml.match(/Movie\/Film Info:-<\/strong><\/h3>([\s\S]*?)<hr\s*\/>/i);
+      const infoHtml = infoSection ? infoSection[1] : articleHtml;
+
+      const infoLines = (infoHtml.match(/<div[^>]*>([\s\S]*?)<\/div>/g) || [])
+        .map(d => strip(d))
+        .filter(d => d.includes(":"));
+
+      const getInfo = (keyword: string): string => {
+        const line = infoLines.find(l => l.toLowerCase().includes(keyword.toLowerCase()));
+        if (!line) return "";
+        const colonIdx = line.indexOf(":");
+        return colonIdx !== -1 ? line.substring(colonIdx + 1).trim() : "";
+      };
+
+      const imdb = getInfo("iMDB") || getInfo("IMDB");
+      const genre = getInfo("Genre");
+      const director = getInfo("Director");
+      const writer = getInfo("Writer");
+      const stars = getInfo("Stars");
+      const language = getInfo("Language");
+      const quality = getInfo("Quality");
+      const format = getInfo("Format");
+
+      // Storyline
+      const storylineM = articleHtml.match(/Storyline[^<]*<\/(?:span|h3|h4)>[^<]*<\/h3>\s*<div[^>]*>([\s\S]*?)<\/div>/i)
+        || articleHtml.match(/Storyline[^:]*:-?<\/(?:span|h3|h4)>([\s\S]*?)<hr/i);
+      const storyline = storylineM ? strip(storylineM[1]) : "";
+
+      // Screenshots
+      const screenshotSection = articleHtml.match(/Screen-Shots[^<]*<\/(?:span|h3|h4)>([\s\S]*?)<hr/i);
+      const screenshots: string[] = [];
+      if (screenshotSection) {
+        const imgMatches = screenshotSection[1].matchAll(/src="(https?:\/\/(?!image\.tmdb)[^"]+\.(png|jpg|jpeg|webp))"/gi);
+        for (const m of imgMatches) screenshots.push(m[1]);
+      }
+
+      // Download links: find all <h5> pairs (description + link)
+      type DownloadLink = { label: string; size: string; url: string };
+      const downloads: DownloadLink[] = [];
+      const h5Matches = [...articleHtml.matchAll(/<h5[^>]*>([\s\S]*?)<\/h5>/gi)];
+      for (let i = 0; i < h5Matches.length; i++) {
+        const text = strip(h5Matches[i][1]);
+        const linkM = h5Matches[i][1].match(/href="([^"]+)"/);
+        if (linkM) {
+          // This h5 is a link — pair with previous h5 as label if no link
+          const label = i > 0 ? strip(h5Matches[i - 1][1]) : text;
+          const sizeM = text.match(/\[([^\]]+(?:GB|MB)[^\]]*)\]/i);
+          downloads.push({ label: label.replace(/<[^>]+>/g, ""), size: sizeM ? sizeM[1] : text, url: linkM[1] });
+        }
+      }
+
+      // YouTube trailer
+      const youtubeM = articleHtml.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
+      const youtubeId = youtubeM ? youtubeM[1] : "";
+
+      res.json({
+        title, date, categories, poster, storyline, screenshots, downloads, youtubeId,
+        info: { imdb, genre, director, writer, stars, language, quality, format },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to fetch post", error: err.message });
+    }
+  });
+
   // ── MOVIES DRIVE SCRAPER ──
   app.get("/api/movies-drive", requireAuth, async (_req: Request, res: Response) => {
     try {
