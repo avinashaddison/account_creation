@@ -5714,8 +5714,8 @@ export async function registerRoutes(
       }
 
       // ── Download links: consecutive h5 pairs (desc h5 → link h5) ──
-      type DownloadLink = { label: string; url: string };
-      const downloads: DownloadLink[] = [];
+      type DownloadLink = { label: string; url: string; directUrl?: string };
+      const rawDownloads: DownloadLink[] = [];
       const h5All = [...articleHtml.matchAll(/<h5[^>]*>([\s\S]*?)<\/h5>/gi)];
       for (let i = 0; i < h5All.length; i++) {
         const inner = h5All[i][1];
@@ -5723,14 +5723,35 @@ export async function registerRoutes(
         if (linkM && i > 0) {
           const prevInner = h5All[i - 1][1];
           const prevHasLink = !!prevInner.match(/href="[^"]+"/);
-          // label = link button text; desc = previous h5 text
           const buttonText = strip(inner);
           const descText = prevHasLink ? buttonText : strip(prevInner);
-          downloads.push({ label: buttonText || descText, url: linkM[1] });
+          rawDownloads.push({ label: buttonText || descText, url: linkM[1] });
         } else if (linkM) {
-          downloads.push({ label: strip(inner), url: linkM[1] });
+          rawDownloads.push({ label: strip(inner), url: linkM[1] });
         }
       }
+
+      // ── Resolve mdrive.lol → hubcloud direct links (parallel) ──
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+      const downloads: DownloadLink[] = await Promise.all(
+        rawDownloads.map(async (dl) => {
+          if (!dl.url.includes("mdrive.lol") && !dl.url.includes("mdrive.today")) return dl;
+          try {
+            const r = await fetch(dl.url, {
+              headers: { "User-Agent": ua, "Accept": "text/html,*/*" },
+              signal: AbortSignal.timeout(8000),
+            });
+            const pageHtml = await r.text();
+            // Extract hubcloud.foo or hubcloud.bar or any hubcloud variant
+            const hcM = pageHtml.match(/href="(https?:\/\/hubcloud\.[^"]+)"/i)
+                     || pageHtml.match(/href="(https?:\/\/gdflix\.[^"]+)"/i)
+                     || pageHtml.match(/href="(https?:\/\/[^"]*hub[^"]*\.[^"]+)"/i);
+            return { ...dl, directUrl: hcM ? hcM[1] : undefined };
+          } catch {
+            return dl;
+          }
+        })
+      );
 
       // ── YouTube trailer ──
       const youtubeM = articleHtml.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
