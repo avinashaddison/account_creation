@@ -304,14 +304,22 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
-    const name = ctx.from.first_name || ctx.from.username || "there";
-    const usernameDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "No username";
+    const name = ctx.from.first_name || ctx.from.username || "User";
+    const usernameDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await ctx.reply(
       truncate(
-        `<b>Welcome to Project Addison v2</b>, ${escHtml(name)}!\n\n` +
-          `Your current balance: <b>${fmt$(balance)}</b>\n` +
-          `Your Account ID: ${escHtml(usernameDisplay)} — <code>${uid}</code>\n\n` +
-          `Browse and purchase premium accounts instantly using the menu below.`
+        `╔══[ PROJECT ADDISON v2 ]══╗\n` +
+        `║   🔐  Digital Access Store   ║\n` +
+        `╚══════════════════════════════╝\n\n` +
+        `▸ Session initialized...\n` +
+        `▸ Identity confirmed ✓\n\n` +
+        `Hello, <b>${escHtml(name)}</b>\n\n` +
+        `<code>◈ Balance   →  ${fmt$(balance)}\n` +
+        `◈ Username  →  ${usernameDisplay}\n` +
+        `◈ User ID   →  ${uid}</code>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `  System online · Use menu below\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
       ),
       { parse_mode: "HTML", ...SHOP_KEYBOARD }
     );
@@ -326,16 +334,28 @@ export function startShopBot(token: string) {
   async function showProductList(ctx: any) {
     const products = await getProductsWithStock();
     if (products.length === 0) {
-      return safeReply(ctx, "No products available right now. Check back soon!");
+      return safeReply(ctx,
+        `╔══[ INVENTORY ]══╗\n` +
+        `║  ⚠ No Stock Found ║\n` +
+        `╚═════════════════╝\n\n` +
+        `▸ No products online at this time.\n` +
+        `→ Check back soon or contact ${escHtml(SUPPORT_CONTACT)}`,
+        { parse_mode: "HTML" }
+      );
     }
     const buttons: ReturnType<typeof Markup.button.callback>[][] = products.map((p) => {
-      const label = `${p.name} — ${fmt$(p.price)} | ${p.stock} in stock`;
+      const stock = p.stock > 0 ? `${p.stock} in stock` : `OUT OF STOCK`;
+      const label = `◆ ${p.name}  —  ${fmt$(p.price)}  [ ${stock} ]`;
       return [Markup.button.callback(label, `shop_product_${p.id}`)];
     });
-    await safeReply(ctx, "<b>Available Accounts</b>\n\nChoose a product to view details:", {
-      parse_mode: "HTML",
-      ...Markup.inlineKeyboard(buttons),
-    });
+    await safeReply(ctx,
+      `╔══[ INVENTORY ]═══════╗\n` +
+      `║  🛍  Live Stock Feed    ║\n` +
+      `╚══════════════════════╝\n\n` +
+      `▸ Fetching available accounts...\n` +
+      `▸ Select a product below:`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) }
+    );
   }
 
   bot.hears("🛍 Accounts", async (ctx) => {
@@ -353,19 +373,23 @@ export function startShopBot(token: string) {
       return safeEdit(ctx, "This product is no longer available.");
     }
 
-    const desc = prod.description ? `\n${escHtml(prod.description)}\n` : "\n";
-    const stockText = prod.stock > 0 ? `<b>${prod.stock}</b> in stock` : "<b>Out of stock</b>";
+    const desc = prod.description ? `${escHtml(prod.description)}\n\n` : "";
+    const stockText = prod.stock > 0 ? `<b>${prod.stock}</b> units available` : `<b>OUT OF STOCK</b>`;
 
     await safeEdit(
       ctx,
-      `<b>${escHtml(prod.name)}</b>\n${desc}\n` +
-        `Price: <b>${fmt$(prod.price)}</b>\n` +
-        `Available: ${stockText}`,
+      `┌──[ PRODUCT SPEC ]────────────────┐\n` +
+      `│  ▸  <b>${escHtml(prod.name)}</b>\n` +
+      `└──────────────────────────────────┘\n\n` +
+      (desc ? `${desc}` : ``) +
+      `<code>◆ Price     →  ${fmt$(prod.price)}\n` +
+      `◆ Stock     →  ${prod.stock > 0 ? `${prod.stock} units` : `OUT OF STOCK`}</code>\n\n` +
+      `▸ Ready to purchase?`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("Buy Now", `shop_buy_${productId}`)],
-          [Markup.button.callback("Back to Products", "shop_back_products")],
+          [Markup.button.callback("⚡ BUY NOW", `shop_buy_${productId}`)],
+          [Markup.button.callback("← Back", "shop_back_products")],
         ]),
       }
     );
@@ -378,13 +402,18 @@ export function startShopBot(token: string) {
       return safeEdit(ctx, "No products available right now. Check back soon!");
     }
     const buttons: ReturnType<typeof Markup.button.callback>[][] = products.map((p) => {
-      const label = `${p.name} — ${fmt$(p.price)} | ${p.stock} in stock`;
+      const stock = p.stock > 0 ? `${p.stock} in stock` : `OUT OF STOCK`;
+      const label = `◆ ${p.name}  —  ${fmt$(p.price)}  [ ${stock} ]`;
       return [Markup.button.callback(label, `shop_product_${p.id}`)];
     });
-    await safeEdit(ctx, "<b>Available Accounts</b>\n\nChoose a product to view details:", {
-      parse_mode: "HTML",
-      ...Markup.inlineKeyboard(buttons),
-    });
+    await safeEdit(ctx,
+      `╔══[ INVENTORY ]═══════╗\n` +
+      `║  🛍  Live Stock Feed    ║\n` +
+      `╚══════════════════════╝\n\n` +
+      `▸ Fetching available accounts...\n` +
+      `▸ Select a product below:`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) }
+    );
   });
 
   // ── Buy flow ──────────────────────────────────────────────────────────────
@@ -408,16 +437,18 @@ export function startShopBot(token: string) {
       const shortfall = (price - balance).toFixed(2);
       return safeEdit(
         ctx,
-        `<b>Insufficient Balance</b>\n\n` +
-          `Product: <b>${escHtml(prod.name)}</b>\n` +
-          `Price: <b>${fmt$(price)}</b>\n` +
-          `Your balance: <b>${fmt$(balance)}</b>\n` +
-          `Shortfall: <b>$${shortfall}</b>\n\n` +
-          `Contact ${escHtml(SUPPORT_CONTACT)} to add funds.`,
+        `╔══[ ACCESS DENIED ]══════╗\n` +
+        `║  ⚠  Insufficient Funds   ║\n` +
+        `╚═════════════════════════╝\n\n` +
+        `<code>◆ Product   →  ${escHtml(prod.name)}\n` +
+        `◆ Required  →  ${fmt$(price)}\n` +
+        `◆ Balance   →  ${fmt$(balance)}\n` +
+        `◆ Shortfall →  $${shortfall}</code>\n\n` +
+        `→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("Back to Products", "shop_back_products")],
+            [Markup.button.callback("← Back to Products", "shop_back_products")],
           ]),
         }
       );
@@ -426,11 +457,15 @@ export function startShopBot(token: string) {
     if (prod.stock === 0) {
       return safeEdit(
         ctx,
-        `<b>${escHtml(prod.name)}</b> is currently out of stock.\n\nPlease check back later.`,
+        `╔══[ UNAVAILABLE ]══╗\n` +
+        `║  ⚠  Out of Stock   ║\n` +
+        `╚═══════════════════╝\n\n` +
+        `▸ <b>${escHtml(prod.name)}</b> has sold out.\n` +
+        `→ Check back soon`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("Back to Products", "shop_back_products")],
+            [Markup.button.callback("← Back to Products", "shop_back_products")],
           ]),
         }
       );
@@ -442,20 +477,32 @@ export function startShopBot(token: string) {
       if (result.reason === "insufficient_funds") {
         return safeEdit(
           ctx,
-          `<b>Insufficient Balance</b>\n\nYou need $${(result.shortfall ?? 0).toFixed(2)} more.\n\nContact ${escHtml(SUPPORT_CONTACT)} to top up.`,
+          `╔══[ ACCESS DENIED ]══════╗\n` +
+          `║  ⚠  Insufficient Funds   ║\n` +
+          `╚═════════════════════════╝\n\n` +
+          `▸ Need <b>$${(result.shortfall ?? 0).toFixed(2)}</b> more.\n` +
+          `→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
           { parse_mode: "HTML" }
         );
       }
       if (result.reason === "out_of_stock") {
         return safeEdit(
           ctx,
-          `<b>Out of Stock</b>\n\n<b>${escHtml(prod.name)}</b> just sold out. Please check back later.`,
+          `╔══[ UNAVAILABLE ]══╗\n` +
+          `║  ⚠  Out of Stock   ║\n` +
+          `╚═══════════════════╝\n\n` +
+          `▸ <b>${escHtml(prod.name)}</b> just sold out.\n` +
+          `→ Check back soon`,
           { parse_mode: "HTML" }
         );
       }
       return safeEdit(
         ctx,
-        `<b>Purchase Failed</b>\n\nSomething went wrong. Please try again or contact ${escHtml(SUPPORT_CONTACT)}.`,
+        `╔══[ ERROR ]══╗\n` +
+        `║  ✖  Failed   ║\n` +
+        `╚═════════════╝\n\n` +
+        `▸ Something went wrong.\n` +
+        `→ Contact ${escHtml(SUPPORT_CONTACT)} for help`,
         { parse_mode: "HTML" }
       );
     }
@@ -463,16 +510,18 @@ export function startShopBot(token: string) {
     // Success — send confirmation with credentials
     await safeEdit(
       ctx,
-      `<b>Purchase Successful!</b>\n\n` +
-        `<b>${escHtml(prod.name)}</b>\n\n` +
-        `<b>Email:</b> <code>${escHtml(result.accountEmail)}</code>\n` +
-        `<b>Password:</b> <code>${escHtml(result.accountPassword)}</code>\n\n` +
-        `Your new balance: <b>${fmt$(result.newBalance)}</b>\n\n` +
-        `<i>Save these credentials now — they will always be accessible via My Orders.</i>`,
+      `╔══[ TRANSACTION CONFIRMED ]══╗\n` +
+      `║  ✅  Purchase Successful!    ║\n` +
+      `╚═════════════════════════════╝\n\n` +
+      `▸ <b>${escHtml(prod.name)}</b>\n\n` +
+      `<code>LOGIN  →  ${escHtml(result.accountEmail)}\n` +
+      `PASS   →  ${escHtml(result.accountPassword)}</code>\n\n` +
+      `<code>◈ New balance  →  ${fmt$(result.newBalance)}</code>\n\n` +
+      `⚠ <i>Credentials saved — access anytime via My Orders</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("Back to Products", "shop_back_products")],
+          [Markup.button.callback("← Back to Products", "shop_back_products")],
         ]),
       }
     );
@@ -485,7 +534,11 @@ export function startShopBot(token: string) {
     const balance = await getBalance(uid);
     await safeReply(
       ctx,
-      `<b>Your Wallet</b>\n\nCurrent balance: <b>${fmt$(balance)}</b>\n\nTo add funds, contact ${escHtml(SUPPORT_CONTACT)}.`,
+      `╔══[ WALLET STATUS ]══╗\n` +
+      `║  💰  Account Balance  ║\n` +
+      `╚═════════════════════╝\n\n` +
+      `<code>◈ Balance  →  ${fmt$(balance)}</code>\n\n` +
+      `→ To top up: ${escHtml(SUPPORT_CONTACT)}`,
       { parse_mode: "HTML" }
     );
   });
@@ -494,7 +547,12 @@ export function startShopBot(token: string) {
   bot.hears("➕ Add Funds", async (ctx) => {
     await safeReply(
       ctx,
-      `<b>Add Funds</b>\n\nTo top up your balance, contact:\n${escHtml(SUPPORT_CONTACT)}\n\nMention your Telegram ID: <code>${ctx.from.id}</code>`,
+      `╔══[ DEPOSIT PORTAL ]══╗\n` +
+      `║  ➕  Fund Your Account ║\n` +
+      `╚══════════════════════╝\n\n` +
+      `<code>◆ Contact  →  ${SUPPORT_CONTACT}\n` +
+      `◆ Your ID  →  ${ctx.from.id}</code>\n\n` +
+      `→ Send your User ID when requesting top-up`,
       { parse_mode: "HTML" }
     );
   });
@@ -503,7 +561,12 @@ export function startShopBot(token: string) {
   bot.hears("💬 Support", async (ctx) => {
     await safeReply(
       ctx,
-      `<b>Support</b>\n\nFor help or issues, contact:\n${escHtml(SUPPORT_CONTACT)}`,
+      `╔══[ SUPPORT ]══════╗\n` +
+      `║  💬  Help Desk      ║\n` +
+      `╚═══════════════════╝\n\n` +
+      `<code>◆ Agent   →  ${SUPPORT_CONTACT}\n` +
+      `◆ Status  →  Online</code>\n\n` +
+      `→ Describe your issue clearly`,
       { parse_mode: "HTML" }
     );
   });
@@ -511,10 +574,14 @@ export function startShopBot(token: string) {
   // ── My Account ID ─────────────────────────────────────────────────────────
   bot.hears("🪪 My Account ID", async (ctx) => {
     const uid = ctx.from.id;
-    const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "No username";
+    const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await safeReply(
       ctx,
-      `<b>Your Account ID</b>\n\n${escHtml(username)} — <code>${uid}</code>`,
+      `╔══[ IDENTITY ]══════╗\n` +
+      `║  🪪  Account Info    ║\n` +
+      `╚════════════════════╝\n\n` +
+      `<code>◈ Username  →  ${username}\n` +
+      `◈ User ID   →  ${uid}</code>`,
       { parse_mode: "HTML" }
     );
   });
@@ -529,18 +596,27 @@ export function startShopBot(token: string) {
     );
 
     if (res.rows.length === 0) {
-      return safeReply(ctx, "You have no orders yet. Browse <b>Accounts</b> to make your first purchase!", {
-        parse_mode: "HTML",
-      });
+      return safeReply(ctx,
+        `╔══[ ORDER HISTORY ]══╗\n` +
+        `║  📦  No Orders Found  ║\n` +
+        `╚═════════════════════╝\n\n` +
+        `▸ No purchases yet.\n` +
+        `→ Browse <b>Accounts</b> to get started`,
+        { parse_mode: "HTML" }
+      );
     }
 
-    const orderLines: string[] = [`<b>My Orders</b> (last ${res.rows.length})\n`];
+    const orderLines: string[] = [
+      `╔══[ ORDER HISTORY ]══════╗\n` +
+      `║  📦  Your Purchases       ║\n` +
+      `╚═════════════════════════╝\n`
+    ];
     const buttons: ReturnType<typeof Markup.button.callback>[][] = res.rows.map((o: any, i: number) => {
       const date = new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      orderLines.push(`${i + 1}. <b>${o.product_name}</b> — ${fmt$(o.amount)} — ${date}`);
-      return [Markup.button.callback(`${i + 1}. Show Credentials`, `shop_creds_${o.id}`)];
+      orderLines.push(`<code>${i + 1}.</code> <b>${escHtml(o.product_name)}</b>  —  ${fmt$(o.amount)}  —  ${date}`);
+      return [Markup.button.callback(`[ ${i + 1} ] Reveal Credentials`, `shop_creds_${o.id}`)];
     });
-    orderLines.push("\nTap below to reveal credentials:");
+    orderLines.push(`\n▸ Tap below to reveal credentials:`);
 
     await safeReply(ctx, orderLines.join("\n"), {
       parse_mode: "HTML",
@@ -571,11 +647,14 @@ export function startShopBot(token: string) {
 
     await safeEdit(
       ctx,
-      `<b>Order: ${escHtml(o.product_name)}</b>\n` +
-        `Date: ${date}\n` +
-        `Amount paid: <b>${fmt$(o.amount)}</b>\n\n` +
-        `<b>Email:</b> <code>${escHtml(o.account_email)}</code>\n` +
-        `<b>Password:</b> <code>${escHtml(o.account_password)}</code>`,
+      `╔══[ CREDENTIALS ]═══════╗\n` +
+      `║  🔑  Access Details      ║\n` +
+      `╚════════════════════════╝\n\n` +
+      `▸ <b>${escHtml(o.product_name)}</b>\n\n` +
+      `<code>◆ Purchased  →  ${date}\n` +
+      `◆ Amount     →  ${fmt$(o.amount)}\n\n` +
+      `LOGIN  →  ${escHtml(o.account_email)}\n` +
+      `PASS   →  ${escHtml(o.account_password)}</code>`,
       { parse_mode: "HTML" }
     );
   });
