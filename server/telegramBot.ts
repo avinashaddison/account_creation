@@ -139,19 +139,22 @@ async function getAvailableCount(svc: ServiceConfig): Promise<number> {
 async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserState) {
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
-  const availMsg = svc.outlookTable
-    ? `\n📊 Available Outlook emails: *${await getAvailableCount(svc)}*\n`
+  const availLine = svc.outlookTable
+    ? `\n<code>◈ Outlook pool  →  ${await getAvailableCount(svc)} available</code>\n`
     : "\n";
 
   await ctx.reply(
-    `*${svc.emoji} Create ${svc.label} Accounts*${availMsg}\nHow many accounts?`,
+    `╔══[ 🏗 CREATE · ${svc.label.toUpperCase()} ]══════════════╗\n` +
+    `╚════════════════════════════════════════╝\n` +
+    availLine +
+    `▸ How many accounts?`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("1", "cn_1"), Markup.button.callback("5", "cn_5"), Markup.button.callback("10", "cn_10")],
         [Markup.button.callback("20", "cn_20"), Markup.button.callback("30", "cn_30"), Markup.button.callback("50", "cn_50")],
-        [Markup.button.callback("✍️ Custom Number", "cn_custom")],
-        [Markup.button.callback("❌ Cancel", "create_cancel")],
+        [Markup.button.callback("✍ Custom", "cn_custom")],
+        [Markup.button.callback("✖ Cancel", "create_cancel")],
       ]),
     }
   );
@@ -159,13 +162,15 @@ async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserSta
 
 async function showCouponStep(ctx: any) {
   await ctx.reply(
-    `*🎟 Coupon Code*\n\nApply a coupon during account creation?`,
+    `╔══[ 🎟 COUPON CODE ]═════════════════════╗\n` +
+    `╚════════════════════════════════════════╝\n\n` +
+    `▸ Apply a coupon during account creation?`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("✍️ Enter Coupon Code", "create_enter_coupon")],
+        [Markup.button.callback("✍ Enter Coupon Code", "create_enter_coupon")],
         [Markup.button.callback("⏭ Skip — No Coupon", "create_skip_coupon")],
-        [Markup.button.callback("❌ Cancel", "create_cancel")],
+        [Markup.button.callback("✖ Cancel", "create_cancel")],
       ]),
     }
   );
@@ -189,13 +194,15 @@ async function showCardStep(ctx: any, uid: number, gs: (n: number) => UserState)
   });
 
   await ctx.reply(
-    `*💳 Select a Card*\n\nChoose a saved card or skip:`,
+    `╔══[ 💳 SELECT CARD ]═════════════════════╗\n` +
+    `╚════════════════════════════════════════╝\n\n` +
+    `▸ Choose a saved card or skip:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       ...Markup.inlineKeyboard([
         ...cardButtons,
         [Markup.button.callback("⏭ No Card", "create_skip_card")],
-        [Markup.button.callback("❌ Cancel", "create_cancel")],
+        [Markup.button.callback("✖ Cancel", "create_cancel")],
       ]),
     }
   );
@@ -203,13 +210,16 @@ async function showCardStep(ctx: any, uid: number, gs: (n: number) => UserState)
 
 async function showReferralStep(ctx: any) {
   await ctx.reply(
-    `*🔗 Referral URL (optional)*\n\nEnter a Lovable referral URL or skip:\n_Must start with_ \`https://lovable.dev/\``,
+    `╔══[ 🔗 REFERRAL URL ]════════════════════╗\n` +
+    `╚════════════════════════════════════════╝\n\n` +
+    `▸ Enter a Lovable referral URL or skip:\n` +
+    `<code>  must start with https://lovable.dev/</code>`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("✍️ Enter Referral URL", "create_enter_referral")],
+        [Markup.button.callback("✍ Enter Referral URL", "create_enter_referral")],
         [Markup.button.callback("⏭ Skip", "create_skip_referral")],
-        [Markup.button.callback("❌ Cancel", "create_cancel")],
+        [Markup.button.callback("✖ Cancel", "create_cancel")],
       ]),
     }
   );
@@ -218,32 +228,33 @@ async function showReferralStep(ctx: any) {
 async function showCreateSummary(ctx: any, uid: number, gs: (n: number) => UserState) {
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
-  const lines: string[] = [];
-
-  lines.push(`*🏗 Create ${svc.emoji} ${svc.label} Accounts — Summary*\n`);
-  lines.push(`🔢 *Accounts to create:* ${flow.count}`);
+  const lines: string[] = [
+    `╔══[ 🏗 JOB SUMMARY ]═════════════════════╗`,
+    `╚════════════════════════════════════════╝\n`,
+    `<b>${svc.emoji} ${svc.label}</b>\n`,
+    `<code>◈ Count     →  ${flow.count} accounts`,
+  ];
 
   if (svc.outlookTable) {
-    const avail = await getAvailableCount(svc);
-    lines.push(`📊 *Available Outlook emails:* ${avail}`);
+    lines.push(`◈ Outlook   →  ${await getAvailableCount(svc)} available`);
   }
   if (svc.hasCoupon) {
-    lines.push(`🎟 *Coupon:* ${flow.couponCode ? `\`${flow.couponCode}\`` : "_none_"}`);
+    lines.push(`◈ Coupon    →  ${flow.couponCode || "none"}`);
   }
   if (svc.hasCard) {
-    lines.push(`💳 *Card:* ${flow.cardLabel || "_none_"}`);
+    lines.push(`◈ Card      →  ${flow.cardLabel || "none"}`);
   }
   if (svc.hasReferral) {
-    lines.push(`🔗 *Referral URL:* ${flow.referralUrl ? `\`${flow.referralUrl.slice(0, 40)}...\`` : "_none_"}`);
+    lines.push(`◈ Referral  →  ${flow.referralUrl ? flow.referralUrl.slice(0, 35) + "…" : "none"}`);
   }
-  lines.push(`\nReady to start?`);
+  lines.push(`</code>\n▸ Confirm and launch job?`);
 
   await ctx.reply(lines.join("\n"), {
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     ...Markup.inlineKeyboard([
-      [Markup.button.callback("✅ Confirm & Create", "create_confirm")],
-      [Markup.button.callback("✏️ Change Count", "create_change_count"), Markup.button.callback("✏️ Back to Services", "create_back_svc")],
-      [Markup.button.callback("❌ Cancel", "create_cancel")],
+      [Markup.button.callback("⚡ Confirm & Create", "create_confirm")],
+      [Markup.button.callback("✏ Change Count", "create_change_count"), Markup.button.callback("✏ Back to Services", "create_back_svc")],
+      [Markup.button.callback("✖ Cancel", "create_cancel")],
     ]),
   });
 }
@@ -270,11 +281,22 @@ function statusEmoji(s: string) {
 }
 
 // ── Reply keyboard — shown on /start and after completing actions ──────────────
+const KB = {
+  STATS:    "⚡ STATS",
+  ACCOUNTS: "🗄 ACCOUNTS",
+  COPY:     "📋 COPY",
+  CHECKOUT: "🔗 CHECKOUT",
+  CREATE:   "🏗 CREATE",
+  MAIL:     "📧 MAIL",
+  MOVIES:   "🎬 MOVIES",
+  SHOP:     "🛒 SHOP",
+} as const;
+
 const MAIN_KEYBOARD = Markup.keyboard([
-  ["📊 Statistics", "👥 Accounts"],
-  ["📋 Copy Accounts", "🔗 Checkout Links"],
-  ["🏗 Create Accounts", "📧 Mail Generator"],
-  ["🎬 MoviesDrive", "🛒 Shop"],
+  [KB.STATS,    KB.ACCOUNTS],
+  [KB.COPY,     KB.CHECKOUT],
+  [KB.CREATE,   KB.MAIL],
+  [KB.MOVIES,   KB.SHOP],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
@@ -518,26 +540,41 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
 
   const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
 
-  let t = `📊 <b>ACCOUNT TRACKER</b>\n`;
-  t += `<i>Updated ${now}</i>\n`;
-  t += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+  function svcLine(emoji: string, label: string, statusRows: any[], todayCnt: number, weekCnt = -1, extras: string[] = []): string {
+    const total = statusRows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+    if (total === 0 && todayCnt === 0) return "";
+    const statusParts = statusRows.map((r: any) => `${se(r.status)} ${r.status.replace(/_/g, " ")}: ${r.cnt}`).join("  ·  ");
+    const timeParts = [
+      todayCnt > 0 ? `+${todayCnt} today` : "",
+      weekCnt >= 0 ? `+${weekCnt} week` : "",
+    ].filter(Boolean).join("  ·  ");
+    let b = `\n${emoji}  <b>${label}</b>  <code>${total}</code>\n`;
+    b += `<code>  ${statusParts || "—"}</code>\n`;
+    if (extras.length) b += `<code>  ${extras.join("  ·  ")}</code>\n`;
+    if (timeParts) b += `<code>  ${timeParts}</code>\n`;
+    return b;
+  }
 
-  t += serviceBlock("🔵", "REPLIT", replitStatus,
-    [`🎟 coupons: <b>${n(replitCoupons)}</b>`, `🔗 checkout: <b>${n(replitCheckout)}</b>`],
-    n(replitToday), n(replitWeek));
+  let t = `╔══[ ⚡ ACCOUNT TRACKER ]═════════════════╗\n`;
+  t += `╚════════════════════════════════════════╝\n`;
+  t += `<code>◈ Snapshot  →  ${now}\n`;
+  t += `◈ Total     →  ${grandTotal} accounts</code>\n`;
 
-  t += serviceBlock("💜", "LOVABLE", lovableStatus, [], n(lovableToday), n(lovableWeek));
-  t += serviceBlock("⚡", "V0.DEV", v0Status, [], n(v0Today));
-  t += serviceBlock("🅰️", "ADOBE", adobeStatus, [], n(adobeToday));
-  t += serviceBlock("🤖", "CHATGPT", chatgptStatus, [], n(chatgptToday));
-  t += serviceBlock("🎙", "11LABS", elevenStatus, [], n(elevenToday));
+  t += `\n─────────────────────────────────────────\n`;
 
-  t += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
-  t += `📬 <b>OUTLOOK POOL</b>  <code>${n(outlookTotal)}</code> total · <b>${n(outlookAvail)}</b> unused\n`;
-  t += `📩 <b>GMAIL POOL</b>  <code>${n(gmailTotal)}</code> total\n`;
+  t += svcLine("🔵", "REPLIT", replitStatus, n(replitToday), n(replitWeek),
+    [`coupons: ${n(replitCoupons)}`, `checkout: ${n(replitCheckout)}`]);
+  t += svcLine("💜", "LOVABLE",  lovableStatus,  n(lovableToday), n(lovableWeek));
+  t += svcLine("⚡", "V0.DEV",   v0Status,       n(v0Today));
+  t += svcLine("🅰️", "ADOBE",   adobeStatus,    n(adobeToday));
+  t += svcLine("🤖", "CHATGPT", chatgptStatus,  n(chatgptToday));
+  t += svcLine("🎙", "11LABS",  elevenStatus,   n(elevenToday));
 
-  t += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-  t += `🌐 <b>GRAND TOTAL</b>: <code>${grandTotal}</code> accounts across all services`;
+  t += `\n─────────────────────────────────────────\n`;
+  t += `\n📬  <b>OUTLOOK POOL</b>\n`;
+  t += `<code>  total: ${n(outlookTotal)}  ·  unused: ${n(outlookAvail)}</code>\n`;
+  t += `\n📩  <b>GMAIL POOL</b>\n`;
+  t += `<code>  total: ${n(gmailTotal)}</code>\n`;
 
   return { text: t, mode: "HTML" };
 }
@@ -811,7 +848,11 @@ export function startTelegramBot(config: BotConfig) {
   bot.command("id", async (ctx) => {
     const uid = ctx.from?.id;
     await ctx.reply(
-      `🪪 <b>Your Telegram ID:</b> <code>${uid}</code>\n\nAdd this to <b>TELEGRAM_ALLOWED_IDS</b> to grant access.`,
+      `╔══[ IDENTITY ]══════════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `<code>◈ Telegram ID  →  ${uid}\n` +
+      `◈ Username     →  @${ctx.from?.username || "—"}</code>\n\n` +
+      `→ Add ID to <b>TELEGRAM_ALLOWED_IDS</b> to grant access.`,
       { parse_mode: "HTML" }
     ).catch(() => {});
   });
@@ -823,7 +864,11 @@ export function startTelegramBot(config: BotConfig) {
     if (ALLOWED.size > 0 && !ALLOWED.has(uid)) {
       botLog(`Blocked unauthorized user ${uid} (@${ctx.from?.username || "unknown"})`);
       await ctx.reply(
-        `⛔ <b>Unauthorized.</b>\n\n🪪 Your ID: <code>${uid}</code>\n<i>Ask the admin to add it to TELEGRAM_ALLOWED_IDS.</i>`,
+        `╔══[ ACCESS DENIED ]═════════════════════╗\n` +
+        `╚════════════════════════════════════════╝\n\n` +
+        `🔴  UNAUTHORIZED\n\n` +
+        `<code>◈ Your ID  →  ${uid}</code>\n\n` +
+        `→ Contact admin to be added to the allowlist.`,
         { parse_mode: "HTML" }
       ).catch(() => {});
       return;
@@ -847,27 +892,34 @@ export function startTelegramBot(config: BotConfig) {
 
   // ── /start ── welcome only, no keyboard (keyboard only shown via /menu) ───
   bot.start(async (ctx) => {
-    // Dismiss any existing keyboard permanently
     const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
     if (dismiss) {
       await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
     }
     await ctx.reply(
-      `👋 *Replit Admin Bot*\n\nPress the *Menu* button below to open the keyboard.`,
-      { parse_mode: "Markdown" }
+      `╔══[ ADDISON PANEL v2 ]══════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ System boot...\n` +
+      `▸ Auth verified ✓\n` +
+      `▸ DB connection established ✓\n\n` +
+      `<code>◈ Operator  →  ${ctx.from.first_name || ctx.from.username || "Admin"}\n` +
+      `◈ User ID   →  ${ctx.from.id}</code>\n\n` +
+      `→ Tap <b>Menu</b> below to open the command panel.`,
+      { parse_mode: "HTML" }
     );
   });
 
   // ── /menu ── show keyboard on demand (triggered by tapping Menu button) ───
   bot.command("menu", async (ctx) => {
-    // Remove any stale keyboard first, then re-show fresh one-time keyboard
     const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
     if (dismiss) {
       await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
     }
     await ctx.reply(
-      `📋 *Main Menu*\n\nChoose an option:`,
-      { parse_mode: "Markdown", ...MAIN_KEYBOARD }
+      `╔══[ COMMAND PANEL ]══════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Select a module:`,
+      { parse_mode: "HTML", ...MAIN_KEYBOARD }
     );
   });
 
@@ -878,9 +930,9 @@ export function startTelegramBot(config: BotConfig) {
     st.awaitingText = undefined;
     if (runningScans.has(uid)) {
       runningScans.set(uid, false);
-      ctx.reply("⛔ Stopping scan after current account...");
+      ctx.reply(`🔴  SCAN ABORT SIGNAL SENT\n<code>◈ Status  →  stopping after current account</code>`, { parse_mode: "HTML" });
     } else {
-      ctx.reply("Cancelled.");
+      ctx.reply(`🔴  OPERATION CANCELLED`, { parse_mode: "HTML" });
     }
   });
 
@@ -906,7 +958,7 @@ export function startTelegramBot(config: BotConfig) {
   // REPLY KEYBOARD handlers (hears)
   // ──────────────────────────────────────────────────────────────────────────
 
-  bot.hears("📊 Statistics", (ctx) => handleMenu(ctx, async () => {
+  bot.hears(KB.STATS, (ctx) => handleMenu(ctx, async () => {
     const { text, mode } = await buildStatsText();
     await ctx.reply(text, {
       parse_mode: mode,
@@ -914,46 +966,56 @@ export function startTelegramBot(config: BotConfig) {
     });
   }));
 
-  bot.hears("👥 Accounts", (ctx) => handleMenu(ctx, async () => {
-    await ctx.reply("*👥 Accounts* — select an account type:", {
-      parse_mode: "Markdown",
-      ...(await inlineAccountTypes()),
-    });
+  bot.hears(KB.ACCOUNTS, (ctx) => handleMenu(ctx, async () => {
+    await ctx.reply(
+      `╔══[ 🗄 ACCOUNTS ]════════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Select a platform to query:`,
+      { parse_mode: "HTML", ...(await inlineAccountTypes()) }
+    );
   }));
 
-  bot.hears("📋 Copy Accounts", (ctx) => handleMenu(ctx, async () => {
-    getState(ctx.from.id).copyType = undefined; // reset
-    await ctx.reply("*📋 Copy Accounts* — select an account type:", {
-      parse_mode: "Markdown",
-      ...(await inlineCopyTypes()),
-    });
+  bot.hears(KB.COPY, (ctx) => handleMenu(ctx, async () => {
+    getState(ctx.from.id).copyType = undefined;
+    await ctx.reply(
+      `╔══[ 📋 COPY ACCOUNTS ]═══════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Select a platform to export:`,
+      { parse_mode: "HTML", ...(await inlineCopyTypes()) }
+    );
   }));
 
-  bot.hears("🔗 Checkout Links", (ctx) => handleMenu(ctx, async () => {
-    const ready = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'processing'`);
+  bot.hears(KB.CHECKOUT, (ctx) => handleMenu(ctx, async () => {
+    const ready   = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'processing'`);
     const sources = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'sold_out' AND coupon_extracted = false`);
     await ctx.reply(
-      `*🔗 Generate Checkout Links*\n\n⏳ Processing (targets): *${ready.rows[0]?.cnt || 0}*\n✅ Source accounts: *${sources.rows[0]?.cnt || 0}*`,
+      `╔══[ 🔗 CHECKOUT LINKS ]══════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `<code>◈ Processing targets  →  ${ready.rows[0]?.cnt || 0}\n` +
+      `◈ Source accounts     →  ${sources.rows[0]?.cnt || 0}</code>\n\n` +
+      `▸ Generate checkout URLs now?`,
       {
-        parse_mode: "Markdown",
+        parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("✅ Generate Now", "confirm_checkout"), Markup.button.callback("❌ Cancel", "dismiss")],
+          [Markup.button.callback("⚡ Generate Now", "confirm_checkout"), Markup.button.callback("✖ Cancel", "dismiss")],
         ]),
       }
     );
   }));
 
-  bot.hears("🏗 Create Accounts", (ctx) => handleMenu(ctx, async () => {
+  bot.hears(KB.CREATE, (ctx) => handleMenu(ctx, async () => {
     getState(ctx.from.id).createFlow = {};
     await ctx.reply(
-      `*🏗 Create Accounts*\n\nWhich service?`,
+      `╔══[ 🏗 CREATE ACCOUNTS ]═════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Select a target platform:`,
       {
-        parse_mode: "Markdown",
+        parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
           [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
           [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
-          [Markup.button.callback("❌ Cancel",  "create_cancel")],
+          [Markup.button.callback("✖ Cancel",   "create_cancel")],
         ]),
       }
     );
@@ -1107,14 +1169,14 @@ export function startTelegramBot(config: BotConfig) {
     setTimeout(pollInbox, 5000);
   }
 
-  bot.hears("📧 Mail Generator", (ctx) => handleMenu(ctx, async () => {
+  bot.hears(KB.MAIL, (ctx) => handleMenu(ctx, async () => {
     const uid = ctx.from!.id;
     const chatId = ctx.chat!.id;
     await startMailSession(chatId, uid);
   }));
 
   // ── MoviesDrive ────────────────────────────────────────────────────────────
-  bot.hears("🎬 MoviesDrive", (ctx) => handleMenu(ctx, async () => {
+  bot.hears(KB.MOVIES, (ctx) => handleMenu(ctx, async () => {
     const lastStr = mdLastChecked
       ? mdLastChecked.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })
       : "Never";
@@ -1245,19 +1307,20 @@ export function startTelegramBot(config: BotConfig) {
     }
   });
 
-  bot.hears("⚙️ Settings", (ctx) => handleMenu(ctx, async () => {
+  bot.hears("⚙ Settings", (ctx) => handleMenu(ctx, async () => {
     const rows = await dbQuery(`SELECT key, value FROM settings WHERE key IN ('residential_proxy_url','capsolver_api_key','zenrows_api_key','fivesim_api_key')`);
     const map: Record<string, string> = {};
     rows.rows.forEach((r: any) => { map[r.key] = r.value; });
-    const mask = (v: string) => v ? `${v.slice(0, 16)}...` : "_not set_";
+    const mask = (v: string) => v ? `${v.slice(0, 16)}…` : "not set";
     await ctx.reply(
-      `*⚙️ Settings*\n\n` +
-      `🌐 *Proxy:*\n\`${mask(map["residential_proxy_url"] || "")}\`\n\n` +
-      `🔑 *Capsolver:* ${mask(map["capsolver_api_key"] || "")}\n` +
-      `🔑 *ZenRows:* ${mask(map["zenrows_api_key"] || "")}\n` +
-      `📱 *5sim:* ${mask(map["fivesim_api_key"] || "")}`,
+      `╔══[ ⚙ SETTINGS ]════════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `<code>◈ Proxy      →  ${mask(map["residential_proxy_url"] || "")}\n` +
+      `◈ Capsolver  →  ${mask(map["capsolver_api_key"] || "")}\n` +
+      `◈ ZenRows    →  ${mask(map["zenrows_api_key"] || "")}\n` +
+      `◈ 5sim       →  ${mask(map["fivesim_api_key"] || "")}</code>`,
       {
-        parse_mode: "Markdown",
+        parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("🌐 Update Proxy", "update_proxy")],
         ]),
@@ -1267,19 +1330,19 @@ export function startTelegramBot(config: BotConfig) {
 
   bot.hears("❓ Help", (ctx) => handleMenu(ctx, async () => {
     await ctx.reply(
-      `*❓ Help*\n\n` +
-      `Use /menu to open the keyboard, then tap any option:\n\n` +
-      `📊 *Statistics* — live account counts\n` +
-      `👥 *Accounts* — browse by status\n` +
-      `📋 *Copy Accounts* — send credentials to chat\n` +
-      `🔗 *Checkout Links* — generate Stripe links\n` +
-      `🏗 *Create Accounts* — create new Replit accounts\n` +
-      `🔄 *Auto-Scan* — extract coupons from accounts\n` +
-      `🔥 *Warm Accounts* — simulate Replit activity\n` +
-      `🗑 *Purge Banned* — remove permanently banned accounts\n` +
-      `⚙️ *Settings* — view/update proxy & API keys\n\n` +
-      `/cancel — stop a running scan`,
-      { parse_mode: "Markdown" }
+      `╔══[ ❓ HELP ]════════════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Use <b>/menu</b> to open the command panel\n\n` +
+      `<code>⚡ STATS     →  live account counts\n` +
+      `🗄 ACCOUNTS  →  browse by status\n` +
+      `📋 COPY      →  export credentials to chat\n` +
+      `🔗 CHECKOUT  →  generate Stripe links\n` +
+      `🏗 CREATE    →  spin up new accounts\n` +
+      `📧 MAIL      →  temporary email generator\n` +
+      `🎬 MOVIES    →  MoviesDrive scraper\n` +
+      `🛒 SHOP      →  shop admin panel</code>\n\n` +
+      `▸ /cancel — abort a running scan`,
+      { parse_mode: "HTML" }
     );
   }));
 
@@ -1566,7 +1629,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
     getState(uid).awaitingText = "create_count";
-    await ctx.editMessageText(`*✍️ Custom Count*\n\nType how many accounts to create:`, { parse_mode: "Markdown" });
+    await ctx.editMessageText(`▸ Type the custom <b>count</b>:`, { parse_mode: "HTML" });
   });
 
   // ── Create flow: coupon step ──────────────────────────────────────────────
@@ -1574,7 +1637,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
     getState(uid).awaitingText = "coupon_code";
-    await ctx.editMessageText(`*🎟 Enter Coupon Code*\n\nType the coupon code now:`, { parse_mode: "Markdown" });
+    await ctx.editMessageText(`▸ Type the <b>coupon code</b>:`, { parse_mode: "HTML" });
   });
 
   bot.action("create_skip_coupon", async (ctx) => {
@@ -1605,8 +1668,8 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).awaitingText = "referral_url";
     await ctx.editMessageText(
-      `*🔗 Enter Referral URL*\n\nType the Lovable referral URL now:\n_(must start with https://lovable.dev/)_`,
-      { parse_mode: "Markdown" }
+      `▸ Type the <b>referral URL</b>:\n<code>  must start with https://lovable.dev/</code>`,
+      { parse_mode: "HTML" }
     );
   });
 
@@ -1859,7 +1922,7 @@ export function startTelegramBot(config: BotConfig) {
     getState(uid).createFlow = undefined;
 
     if (!r.ok) {
-      await ctx.editMessageText(`❌ Failed: ${r.data?.error || "Unknown error"}`, { parse_mode: "Markdown" });
+      await ctx.editMessageText(`🔴  <b>Failed:</b> <code>${r.data?.error || "Unknown error"}</code>`, { parse_mode: "HTML" });
       return;
     }
 
@@ -2016,9 +2079,9 @@ export function startTelegramBot(config: BotConfig) {
     const count = parseInt((ctx.match as RegExpMatchArray)[1]);
     const r = await botApi("/api/replit-warm-accounts", "POST", { count });
     const msg = r.ok
-      ? `✅ *Warming ${count} accounts*\n\nBatch: \`${r.data.batchId || "started"}\``
-      : `❌ Error: ${r.data?.error || "Unknown"}`;
-    await ctx.editMessageText(msg, { parse_mode: "Markdown" });
+      ? `🟢  <b>Warming ${count} accounts</b>\n<code>◈ Batch  →  ${r.data.batchId || "started"}</code>`
+      : `🔴  Error: <code>${r.data?.error || "Unknown"}</code>`;
+    await ctx.editMessageText(msg, { parse_mode: "HTML" });
   });
 
   // Purge
@@ -2026,9 +2089,9 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery("Starting...");
     const r = await botApi("/api/replit-purge-banned", "POST", {});
     const msg = r.ok
-      ? `✅ *Purge started!*\n\nBatch: \`${r.data.batchId || "started"}\``
-      : `❌ Error: ${r.data?.error || "Unknown"}`;
-    await ctx.editMessageText(msg, { parse_mode: "Markdown" });
+      ? `🟢  <b>Purge started</b>\n<code>◈ Batch  →  ${r.data.batchId || "started"}</code>`
+      : `🔴  Error: <code>${r.data?.error || "Unknown"}</code>`;
+    await ctx.editMessageText(msg, { parse_mode: "HTML" });
   });
 
   // Proxy update
@@ -2042,16 +2105,23 @@ export function startTelegramBot(config: BotConfig) {
   const SHOP_ACCOUNT_TYPES = ["replit", "lovable", "v0", "adobe", "chatgpt", "eleven", "outlook", "gmail"];
 
   async function showShopAdminMenu(ctx: any) {
-    const [prodRes, custRes] = await Promise.all([
+    const [prodRes, custRes, orderRes] = await Promise.all([
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_products WHERE active = true`),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`),
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_orders`),
     ]);
     const activeProd = parseInt(prodRes.rows[0]?.cnt ?? "0");
     const totalCust  = parseInt(custRes.rows[0]?.cnt ?? "0");
+    const totalOrds  = parseInt(orderRes.rows[0]?.cnt ?? "0");
     await ctx.reply(
-      `*🛒 Shop Admin*\n\nActive products: *${activeProd}*\nTotal customers: *${totalCust}*`,
+      `╔══[ 🛒 SHOP ADMIN ]══════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `<code>◈ Active products  →  ${activeProd}\n` +
+      `◈ Customers        →  ${totalCust}\n` +
+      `◈ Total orders     →  ${totalOrds}</code>\n\n` +
+      `▸ Select a module:`,
       {
-        parse_mode: "Markdown",
+        parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📦 Products", "shop_admin_products"), Markup.button.callback("➕ Add Product", "shop_admin_add_product")],
           [Markup.button.callback("👥 Customers", "shop_admin_customers"), Markup.button.callback("💰 Top Up", "shop_admin_topup")],
@@ -2060,7 +2130,7 @@ export function startTelegramBot(config: BotConfig) {
     );
   }
 
-  bot.hears("🛒 Shop", (ctx) => handleMenu(ctx, async () => {
+  bot.hears(KB.SHOP, (ctx) => handleMenu(ctx, async () => {
     await showShopAdminMenu(ctx);
   }));
 
@@ -2069,27 +2139,35 @@ export function startTelegramBot(config: BotConfig) {
     await showShopAdminMenu(ctx);
   });
 
+  function buildProductsListMsg(rows: any[]): string {
+    if (rows.length === 0) {
+      return `╔══[ 📦 PRODUCTS ]════════════════════════╗\n` +
+             `╚════════════════════════════════════════╝\n\n` +
+             `<code>◈ No products yet</code>\n\n▸ Use "Add Product" to create one.`;
+    }
+    let t = `╔══[ 📦 PRODUCTS (${rows.length}) ]══════════════════╗\n` +
+            `╚════════════════════════════════════════╝\n\n`;
+    for (const p of rows) {
+      const st = p.active ? "🟢" : "🔴";
+      t += `${st}  <b>${p.name}</b>  <code>$${parseFloat(p.price).toFixed(2)}</code>\n`;
+      t += `<code>   type: ${p.account_type}  ·  filter: ${p.status_filter}</code>\n\n`;
+    }
+    return t.trimEnd();
+  }
+
+  function buildProductsListButtons(rows: any[]) {
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = rows.map((p: any) => [
+      Markup.button.callback(p.active ? `⏸ Off` : `▶ On`, `shop_toggle_${p.id}`),
+      Markup.button.callback(`✏ ${p.name.slice(0, 20)}`, `shop_edit_${p.id}`),
+    ]);
+    buttons.push([Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("↩ Back", "shop_admin_menu")]);
+    return Markup.inlineKeyboard(buttons);
+  }
+
   bot.action("shop_admin_products", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
-    if (res.rows.length === 0) {
-      return safeEdit(ctx,
-        `*📦 Products*\n\nNo products yet. Use "Add Product" to create one.`,
-        { parse_mode: "Markdown", ...Markup.inlineKeyboard([[Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("🔙 Back", "shop_admin_menu")]]) }
-      );
-    }
-    const lines: string[] = [`*📦 Products* (${res.rows.length})\n`];
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
-    for (const p of res.rows) {
-      const status = p.active ? "🟢" : "🔴";
-      lines.push(`${status} *${p.name}* — $${parseFloat(p.price).toFixed(2)}\n  Type: ${p.account_type} | Filter: ${p.status_filter}`);
-      buttons.push([
-        Markup.button.callback(p.active ? `Deactivate` : `Activate`, `shop_toggle_${p.id}`),
-        Markup.button.callback(`✏️ Edit: ${p.name.slice(0, 18)}`, `shop_edit_${p.id}`),
-      ]);
-    }
-    buttons.push([Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("🔙 Back", "shop_admin_menu")]);
-    await safeEdit(ctx, lines.join("\n"), { parse_mode: "Markdown", ...Markup.inlineKeyboard(buttons) });
+    await safeEdit(ctx, buildProductsListMsg(res.rows), { parse_mode: "HTML", ...buildProductsListButtons(res.rows) });
   });
 
   bot.action(/^shop_toggle_(.+)$/, async (ctx) => {
@@ -2099,21 +2177,9 @@ export function startTelegramBot(config: BotConfig) {
     if (!res.rows[0]) return safeEdit(ctx, "Product not found.");
     const newActive = !res.rows[0].active;
     await dbQuery(`UPDATE shop_products SET active = $1 WHERE id = $2`, [newActive, productId]);
-    await ctx.answerCbQuery(`${newActive ? "Activated" : "Deactivated"}: ${res.rows[0].name}`).catch(() => {});
-    // Refresh products list
+    await ctx.answerCbQuery(`${newActive ? "🟢 Activated" : "🔴 Deactivated"}: ${res.rows[0].name}`).catch(() => {});
     const all = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
-    const lines: string[] = [`*📦 Products* (${all.rows.length})\n`];
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
-    for (const p of all.rows) {
-      const st = p.active ? "🟢" : "🔴";
-      lines.push(`${st} *${p.name}* — $${parseFloat(p.price).toFixed(2)}\n  Type: ${p.account_type} | Filter: ${p.status_filter}`);
-      buttons.push([
-        Markup.button.callback(p.active ? `Deactivate` : `Activate`, `shop_toggle_${p.id}`),
-        Markup.button.callback(`✏️ Edit: ${p.name.slice(0, 18)}`, `shop_edit_${p.id}`),
-      ]);
-    }
-    buttons.push([Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("🔙 Back", "shop_admin_menu")]);
-    await safeEdit(ctx, lines.join("\n"), { parse_mode: "Markdown", ...Markup.inlineKeyboard(buttons) });
+    await safeEdit(ctx, buildProductsListMsg(all.rows), { parse_mode: "HTML", ...buildProductsListButtons(all.rows) });
   });
 
   bot.action("shop_admin_add_product", async (ctx) => {
@@ -2121,8 +2187,10 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).shopAdminFlow = { step: "name" };
     await ctx.reply(
-      `*➕ Add Product — Step 1/5*\n\nEnter the product *name*:\n_(e.g. "Replit Core 1 Month")_`,
-      { parse_mode: "Markdown" }
+      `╔══[ ➕ ADD PRODUCT — 1/5 ]════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Enter the product <b>name</b>:\n<code>  e.g. "Replit Core 1 Month"</code>`,
+      { parse_mode: "HTML" }
     );
   });
 
@@ -2133,21 +2201,23 @@ export function startTelegramBot(config: BotConfig) {
     const res = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
     const p = res.rows[0];
     if (!p) return safeEdit(ctx, "Product not found.");
-    const info = `*✏️ Edit Product*\n\n`
-      + `*Name:* ${p.name}\n`
-      + `*Description:* ${p.description || "—"}\n`
-      + `*Price:* $${parseFloat(p.price).toFixed(2)}\n`
-      + `*Account Type:* ${p.account_type}\n`
-      + `*Status Filter:* ${p.status_filter}\n`
-      + `*Active:* ${p.active ? "Yes" : "No"}\n\n`
-      + `Choose a field to edit:`;
+    const info =
+      `╔══[ ✏ EDIT PRODUCT ]═════════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `<b>${p.name}</b>\n` +
+      `<code>◈ Description   →  ${p.description || "—"}\n` +
+      `◈ Price         →  $${parseFloat(p.price).toFixed(2)}\n` +
+      `◈ Account type  →  ${p.account_type}\n` +
+      `◈ Status filter →  ${p.status_filter}\n` +
+      `◈ Active        →  ${p.active ? "Yes" : "No"}</code>\n\n` +
+      `▸ Select a field to edit:`;
     await safeEdit(ctx, info, {
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("Edit Name", `shop_editfield_${productId}_name`), Markup.button.callback("Edit Description", `shop_editfield_${productId}_description`)],
-        [Markup.button.callback("Edit Price", `shop_editfield_${productId}_price`), Markup.button.callback("Edit Account Type", `shop_editfield_${productId}_account_type`)],
-        [Markup.button.callback("Edit Status Filter", `shop_editfield_${productId}_status_filter`)],
-        [Markup.button.callback("🔙 Back to Products", "shop_admin_products")],
+        [Markup.button.callback("Name", `shop_editfield_${productId}_name`), Markup.button.callback("Description", `shop_editfield_${productId}_description`)],
+        [Markup.button.callback("Price", `shop_editfield_${productId}_price`), Markup.button.callback("Account Type", `shop_editfield_${productId}_account_type`)],
+        [Markup.button.callback("Status Filter", `shop_editfield_${productId}_status_filter`)],
+        [Markup.button.callback("↩ Products", "shop_admin_products")],
       ]),
     });
   });
@@ -2165,13 +2235,13 @@ export function startTelegramBot(config: BotConfig) {
     };
     getState(uid).shopAdminFlow = { step: stepMap[field], editProductId: productId };
     const promptMap: Record<string, string> = {
-      name: "Enter the new *name*:",
-      description: "Enter the new *description* (or `-` to clear):",
-      price: "Enter the new *price* in USD (e.g. `1.50`):",
-      account_type: `Enter the new *account type*:\n\`${SHOP_ACCOUNT_TYPES.join(" | ")}\``,
-      status_filter: "Enter the new *status filter* (e.g. `available`, `working`, `created`):",
+      name:          `▸ Enter new <b>name</b>:`,
+      description:   `▸ Enter new <b>description</b> (or <code>-</code> to clear):`,
+      price:         `▸ Enter new <b>price</b> in USD:\n<code>  e.g. 1.50</code>`,
+      account_type:  `▸ Enter new <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+      status_filter: `▸ Enter new <b>status filter</b>:\n<code>  e.g. available | working | created</code>`,
     };
-    await ctx.reply(promptMap[field], { parse_mode: "Markdown" });
+    await ctx.reply(promptMap[field], { parse_mode: "HTML" });
   });
 
   // ── Paginated customer list ───────────────────────────────────────────────
@@ -2180,7 +2250,12 @@ export function startTelegramBot(config: BotConfig) {
     const countRes = await dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`);
     const total = parseInt(countRes.rows[0]?.cnt ?? "0");
     if (total === 0) {
-      return safeEdit(ctx, "*👥 Customers*\n\nNo customers yet.", { parse_mode: "Markdown", ...Markup.inlineKeyboard([[Markup.button.callback("🔙 Back", "shop_admin_menu")]]) });
+      return safeEdit(ctx,
+        `╔══[ 👥 CUSTOMERS ]═══════════════════════╗\n` +
+        `╚════════════════════════════════════════╝\n\n` +
+        `<code>◈ No customers yet</code>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩ Back", "shop_admin_menu")]]) }
+      );
     }
     const res = await dbQuery(
       `SELECT telegram_id, username, first_name, balance FROM shop_customers ORDER BY balance DESC LIMIT $1 OFFSET $2`,
@@ -2188,18 +2263,19 @@ export function startTelegramBot(config: BotConfig) {
     );
     const page = Math.floor(offset / PAGE) + 1;
     const totalPages = Math.ceil(total / PAGE);
-    const lines: string[] = [`*👥 Customers* (${total} total — Page ${page}/${totalPages})\n`];
+    let t = `╔══[ 👥 CUSTOMERS (${total}) — ${page}/${totalPages} ]══╗\n` +
+            `╚════════════════════════════════════════╝\n\n`;
     for (const c of res.rows) {
       const name = c.username ? `@${c.username}` : (c.first_name ?? `ID:${c.telegram_id}`);
-      lines.push(`${name} — Balance: *$${parseFloat(c.balance).toFixed(2)}*`);
+      t += `<code>◈ ${name.padEnd(20)}  $${parseFloat(c.balance).toFixed(2)}</code>\n`;
     }
     const navButtons: ReturnType<typeof Markup.button.callback>[] = [];
-    if (offset > 0) navButtons.push(Markup.button.callback("⬅️ Prev", `shop_customers_page_${offset - PAGE}`));
-    if (offset + PAGE < total) navButtons.push(Markup.button.callback("➡️ Next", `shop_customers_page_${offset + PAGE}`));
+    if (offset > 0) navButtons.push(Markup.button.callback("← Prev", `shop_customers_page_${offset - PAGE}`));
+    if (offset + PAGE < total) navButtons.push(Markup.button.callback("Next →", `shop_customers_page_${offset + PAGE}`));
     const rows: ReturnType<typeof Markup.button.callback>[][] = [];
     if (navButtons.length) rows.push(navButtons);
-    rows.push([Markup.button.callback("💰 Top Up", "shop_admin_topup"), Markup.button.callback("🔙 Back", "shop_admin_menu")]);
-    await safeEdit(ctx, lines.join("\n"), { parse_mode: "Markdown", ...Markup.inlineKeyboard(rows) });
+    rows.push([Markup.button.callback("💰 Top Up", "shop_admin_topup"), Markup.button.callback("↩ Back", "shop_admin_menu")]);
+    await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) });
   }
 
   bot.action("shop_admin_customers", async (ctx) => {
@@ -2218,8 +2294,10 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).shopAdminFlow = { step: "topup_uid" };
     await ctx.reply(
-      `*💰 Top Up Customer Balance*\n\nEnter the customer's *Telegram ID*:`,
-      { parse_mode: "Markdown" }
+      `╔══[ 💰 TOP UP BALANCE ]══════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `▸ Enter the customer's <b>Telegram ID</b>:`,
+      { parse_mode: "HTML" }
     );
   });
 
@@ -2237,8 +2315,10 @@ export function startTelegramBot(config: BotConfig) {
         flow.name = text;
         flow.step = "description";
         return ctx.reply(
-          `*➕ Add Product — Step 2/5*\n\nEnter a short *description* (or send "-" to skip):`,
-          { parse_mode: "Markdown" }
+          `╔══[ ➕ ADD PRODUCT — 2/5 ]════════════════╗\n` +
+          `╚════════════════════════════════════════╝\n\n` +
+          `▸ Enter a short <b>description</b>\n<code>  or send - to skip</code>`,
+          { parse_mode: "HTML" }
         );
       }
 
@@ -2246,21 +2326,25 @@ export function startTelegramBot(config: BotConfig) {
         flow.description = text === "-" ? "" : text;
         flow.step = "price";
         return ctx.reply(
-          `*➕ Add Product — Step 3/5*\n\nEnter the *price* in USD (e.g. \`1.00\`):`,
-          { parse_mode: "Markdown" }
+          `╔══[ ➕ ADD PRODUCT — 3/5 ]════════════════╗\n` +
+          `╚════════════════════════════════════════╝\n\n` +
+          `▸ Enter the <b>price</b> in USD:\n<code>  e.g. 1.00</code>`,
+          { parse_mode: "HTML" }
         );
       }
 
       if (flow.step === "price") {
         const price = parseFloat(text);
         if (isNaN(price) || price <= 0) {
-          return ctx.reply("Invalid price. Enter a positive number like `1.00`:", { parse_mode: "Markdown" });
+          return ctx.reply(`🔴  Invalid price. Enter a positive number like <code>1.00</code>:`, { parse_mode: "HTML" });
         }
         flow.price = price.toFixed(2);
         flow.step = "account_type";
         return ctx.reply(
-          `*➕ Add Product — Step 4/5*\n\nEnter the *account type*:\n\`${SHOP_ACCOUNT_TYPES.join(" | ")}\``,
-          { parse_mode: "Markdown" }
+          `╔══[ ➕ ADD PRODUCT — 4/5 ]════════════════╗\n` +
+          `╚════════════════════════════════════════╝\n\n` +
+          `▸ Enter the <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+          { parse_mode: "HTML" }
         );
       }
 
@@ -2268,21 +2352,24 @@ export function startTelegramBot(config: BotConfig) {
         const at = text.toLowerCase().trim();
         if (!SHOP_ACCOUNT_TYPES.includes(at)) {
           return ctx.reply(
-            `Invalid type. Choose from:\n\`${SHOP_ACCOUNT_TYPES.join(" | ")}\``,
-            { parse_mode: "Markdown" }
+            `🔴  Invalid type. Choose from:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+            { parse_mode: "HTML" }
           );
         }
         flow.accountType = at;
         flow.step = "status_filter";
         return ctx.reply(
-          `*➕ Add Product — Step 5/5*\n\nEnter the *status filter* — accounts with this status will be sold:\n_(e.g. \`available\`, \`working\`, \`created\`)_`,
-          { parse_mode: "Markdown" }
+          `╔══[ ➕ ADD PRODUCT — 5/5 ]════════════════╗\n` +
+          `╚════════════════════════════════════════╝\n\n` +
+          `▸ Enter the <b>status filter</b>:\n` +
+          `<code>  accounts with this status will be sold\n` +
+          `  e.g. available | working | created</code>`,
+          { parse_mode: "HTML" }
         );
       }
 
       if (flow.step === "status_filter") {
         flow.statusFilter = text.toLowerCase().trim();
-        // Save product to DB
         try {
           await dbQuery(
             `INSERT INTO shop_products (name, description, price, account_type, status_filter)
@@ -2291,12 +2378,16 @@ export function startTelegramBot(config: BotConfig) {
           );
           st.shopAdminFlow = undefined;
           return ctx.reply(
-            `✅ *Product added!*\n\n*Name:* ${flow.name}\n*Price:* $${flow.price}\n*Type:* ${flow.accountType}\n*Filter:* ${flow.statusFilter}`,
-            { parse_mode: "Markdown" }
+            `🟢  <b>PRODUCT ADDED</b>\n\n` +
+            `<code>◈ Name    →  ${flow.name}\n` +
+            `◈ Price   →  $${flow.price}\n` +
+            `◈ Type    →  ${flow.accountType}\n` +
+            `◈ Filter  →  ${flow.statusFilter}</code>`,
+            { parse_mode: "HTML" }
           );
         } catch (err: any) {
           st.shopAdminFlow = undefined;
-          return ctx.reply(`❌ Failed to save product: ${err.message}`);
+          return ctx.reply(`🔴  Failed to save product: <code>${err.message}</code>`, { parse_mode: "HTML" });
         }
       }
 
@@ -2305,7 +2396,7 @@ export function startTelegramBot(config: BotConfig) {
         const pid = flow.editProductId!;
         await dbQuery(`UPDATE shop_products SET name = $1 WHERE id = $2`, [text.trim(), pid]);
         st.shopAdminFlow = undefined;
-        return ctx.reply(`✅ *Name updated!*\n\nNew name: *${text.trim()}*`, { parse_mode: "Markdown" });
+        return ctx.reply(`🟢  <b>Name updated</b>  <code>${text.trim()}</code>`, { parse_mode: "HTML" });
       }
 
       if (flow.step === "edit_description") {
@@ -2313,18 +2404,18 @@ export function startTelegramBot(config: BotConfig) {
         const newDesc = text.trim() === "-" ? null : text.trim();
         await dbQuery(`UPDATE shop_products SET description = $1 WHERE id = $2`, [newDesc, pid]);
         st.shopAdminFlow = undefined;
-        return ctx.reply(`✅ *Description updated!*`, { parse_mode: "Markdown" });
+        return ctx.reply(`🟢  <b>Description updated</b>`, { parse_mode: "HTML" });
       }
 
       if (flow.step === "edit_price") {
         const pid = flow.editProductId!;
         const price = parseFloat(text.trim());
         if (isNaN(price) || price <= 0) {
-          return ctx.reply("Invalid price. Enter a positive number like `1.00`:", { parse_mode: "Markdown" });
+          return ctx.reply(`🔴  Invalid price. Enter a positive number like <code>1.00</code>:`, { parse_mode: "HTML" });
         }
         await dbQuery(`UPDATE shop_products SET price = $1 WHERE id = $2`, [price.toFixed(2), pid]);
         st.shopAdminFlow = undefined;
-        return ctx.reply(`✅ *Price updated!*\n\nNew price: *$${price.toFixed(2)}*`, { parse_mode: "Markdown" });
+        return ctx.reply(`🟢  <b>Price updated</b>  <code>$${price.toFixed(2)}</code>`, { parse_mode: "HTML" });
       }
 
       if (flow.step === "edit_account_type") {
@@ -2332,13 +2423,13 @@ export function startTelegramBot(config: BotConfig) {
         const at = text.toLowerCase().trim();
         if (!SHOP_ACCOUNT_TYPES.includes(at)) {
           return ctx.reply(
-            `Invalid type. Choose from:\n\`${SHOP_ACCOUNT_TYPES.join(" | ")}\``,
-            { parse_mode: "Markdown" }
+            `🔴  Invalid type. Choose from:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+            { parse_mode: "HTML" }
           );
         }
         await dbQuery(`UPDATE shop_products SET account_type = $1 WHERE id = $2`, [at, pid]);
         st.shopAdminFlow = undefined;
-        return ctx.reply(`✅ *Account type updated!*\n\nNew type: *${at}*`, { parse_mode: "Markdown" });
+        return ctx.reply(`🟢  <b>Account type updated</b>  <code>${at}</code>`, { parse_mode: "HTML" });
       }
 
       if (flow.step === "edit_status_filter") {
@@ -2346,33 +2437,32 @@ export function startTelegramBot(config: BotConfig) {
         const sf = text.toLowerCase().trim();
         await dbQuery(`UPDATE shop_products SET status_filter = $1 WHERE id = $2`, [sf, pid]);
         st.shopAdminFlow = undefined;
-        return ctx.reply(`✅ *Status filter updated!*\n\nNew filter: *${sf}*`, { parse_mode: "Markdown" });
+        return ctx.reply(`🟢  <b>Status filter updated</b>  <code>${sf}</code>`, { parse_mode: "HTML" });
       }
       // ── End edit product field flows ────────────────────────────────────────
 
       if (flow.step === "topup_uid") {
         const telegramId = parseInt(text.trim());
         if (isNaN(telegramId)) {
-          return ctx.reply("Invalid Telegram ID. Enter a number:");
+          return ctx.reply(`🔴  Invalid Telegram ID. Enter a number:`, { parse_mode: "HTML" });
         }
-        // Check if customer exists
         const custRes = await dbQuery(`SELECT telegram_id, balance FROM shop_customers WHERE telegram_id = $1`, [telegramId]);
         if (!custRes.rows[0]) {
           st.shopAdminFlow = undefined;
-          return ctx.reply(`❌ Customer with ID ${telegramId} not found.`);
+          return ctx.reply(`🔴  Customer <code>${telegramId}</code> not found.`, { parse_mode: "HTML" });
         }
         flow.topupUid = telegramId;
         flow.step = "topup_amount";
         return ctx.reply(
-          `Customer balance: *$${parseFloat(custRes.rows[0].balance).toFixed(2)}*\n\nEnter the *amount to add* (e.g. \`5.00\`):`,
-          { parse_mode: "Markdown" }
+          `<code>◈ Current balance  →  $${parseFloat(custRes.rows[0].balance).toFixed(2)}</code>\n\n▸ Enter the <b>amount to add</b>:\n<code>  e.g. 5.00</code>`,
+          { parse_mode: "HTML" }
         );
       }
 
       if (flow.step === "topup_amount") {
         const amount = parseFloat(text.trim());
         if (isNaN(amount) || amount <= 0) {
-          return ctx.reply("Invalid amount. Enter a positive number like `5.00`:", { parse_mode: "Markdown" });
+          return ctx.reply(`🔴  Invalid amount. Enter a positive number like <code>5.00</code>:`, { parse_mode: "HTML" });
         }
         try {
           await dbQuery(
@@ -2382,12 +2472,15 @@ export function startTelegramBot(config: BotConfig) {
           const after = await dbQuery(`SELECT balance FROM shop_customers WHERE telegram_id = $1`, [flow.topupUid]);
           st.shopAdminFlow = undefined;
           return ctx.reply(
-            `✅ *Balance topped up!*\n\nCustomer: \`${flow.topupUid}\`\nAdded: *$${amount.toFixed(2)}*\nNew balance: *$${parseFloat(after.rows[0]?.balance ?? "0").toFixed(2)}*`,
-            { parse_mode: "Markdown" }
+            `🟢  <b>BALANCE TOPPED UP</b>\n\n` +
+            `<code>◈ Customer    →  ${flow.topupUid}\n` +
+            `◈ Added       →  $${amount.toFixed(2)}\n` +
+            `◈ New balance →  $${parseFloat(after.rows[0]?.balance ?? "0").toFixed(2)}</code>`,
+            { parse_mode: "HTML" }
           );
         } catch (err: any) {
           st.shopAdminFlow = undefined;
-          return ctx.reply(`❌ Top-up failed: ${err.message}`);
+          return ctx.reply(`🔴  Top-up failed: <code>${err.message}</code>`, { parse_mode: "HTML" });
         }
       }
 
