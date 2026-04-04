@@ -327,11 +327,13 @@ export function startShopBot(token: string) {
         `◈ Username  →  ${usernameDisplay}\n` +
         `◈ User ID   →  ${uid}</code>\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `  System online · Use menu below\n` +
+        `  System online · Loading inventory...\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
       ),
       { parse_mode: "HTML", ...SHOP_KEYBOARD }
     );
+    // Auto-fetch and display live product list immediately
+    await showProductList(ctx);
   });
 
   // ── /menu ─────────────────────────────────────────────────────────────────
