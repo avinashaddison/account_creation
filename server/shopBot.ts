@@ -171,9 +171,23 @@ interface ProductWithStock {
   price: string;
   account_type: string;
   status_filter: string;
+  min_credits: number | null;
   active: boolean;
   sort_order: number;
   stock: number;
+}
+
+function stockCountSql(table: string, statusFilter: string, minCredits: number | null): { sql: string; params: any[] } {
+  if (minCredits != null) {
+    return {
+      sql: `SELECT COUNT(*) as cnt FROM ${table} WHERE status = $1 AND credits >= $2`,
+      params: [statusFilter, minCredits],
+    };
+  }
+  return {
+    sql: `SELECT COUNT(*) as cnt FROM ${table} WHERE status = $1`,
+    params: [statusFilter],
+  };
 }
 
 async function getProductsWithStock(): Promise<ProductWithStock[]> {
@@ -185,10 +199,8 @@ async function getProductsWithStock(): Promise<ProductWithStock[]> {
     const table = ACCOUNT_TABLE_MAP[p.account_type];
     let stock = 0;
     if (table) {
-      const sr = await dbQuery(
-        `SELECT COUNT(*) as cnt FROM ${table} WHERE status = $1`,
-        [p.status_filter]
-      ).catch(() => ({ rows: [{ cnt: "0" }] }));
+      const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
+      const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
       stock = parseInt(sr.rows[0]?.cnt ?? "0");
     }
     out.push({ ...p, stock });
@@ -203,10 +215,8 @@ async function getProductById(id: string): Promise<ProductWithStock | null> {
   const table = ACCOUNT_TABLE_MAP[p.account_type];
   let stock = 0;
   if (table) {
-    const sr = await dbQuery(
-      `SELECT COUNT(*) as cnt FROM ${table} WHERE status = $1`,
-      [p.status_filter]
-    ).catch(() => ({ rows: [{ cnt: "0" }] }));
+    const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
+    const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
     stock = parseInt(sr.rows[0]?.cnt ?? "0");
   }
   return { ...p, stock };
@@ -262,11 +272,13 @@ async function purchaseProduct(
       };
     }
 
-    // Get and lock oldest available account
-    const acctRes = await client.query(
-      `SELECT id, email, password FROM ${table} WHERE status = $1 ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [prod.status_filter]
-    );
+    // Get and lock oldest available account (respects min_credits if set)
+    const minCred = prod.min_credits ?? null;
+    const acctSql = minCred != null
+      ? `SELECT id, email, password FROM ${table} WHERE status = $1 AND credits >= $2 ORDER BY credits DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`
+      : `SELECT id, email, password FROM ${table} WHERE status = $1 ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`;
+    const acctParams = minCred != null ? [prod.status_filter, minCred] : [prod.status_filter];
+    const acctRes = await client.query(acctSql, acctParams);
     if (!acctRes.rows[0]) {
       await client.query("ROLLBACK");
       return { success: false, reason: "out_of_stock" };
@@ -327,10 +339,12 @@ async function ensureShopTables() {
       price NUMERIC(10,2) NOT NULL,
       account_type TEXT NOT NULL,
       status_filter TEXT NOT NULL DEFAULT 'available',
+      min_credits INTEGER DEFAULT NULL,
       active BOOLEAN NOT NULL DEFAULT true,
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS min_credits INTEGER DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_orders (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       telegram_id BIGINT NOT NULL,
