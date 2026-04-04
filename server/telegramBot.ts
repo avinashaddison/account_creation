@@ -543,14 +543,36 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
   function svcLine(emoji: string, label: string, statusRows: any[], todayCnt: number, weekCnt = -1, extras: string[] = []): string {
     const total = statusRows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
     if (total === 0 && todayCnt === 0) return "";
-    const statusParts = statusRows.map((r: any) => `${se(r.status)} ${r.status.replace(/_/g, " ")}: ${r.cnt}`).join("  ·  ");
+
+    let b = `\n${emoji}  <b>${label}</b>  <code>${total}</code>\n`;
+
+    // Pair status items 2-per-line so lines stay short on mobile
+    const items = statusRows
+      .filter((r: any) => parseInt(r.cnt) > 0)
+      .map((r: any) => `${se(r.status)} ${r.status.replace(/_/g, " ")}: ${r.cnt}`);
+    if (items.length === 0) {
+      b += `<code>  —</code>\n`;
+    } else {
+      for (let i = 0; i < items.length; i += 2) {
+        const left = items[i];
+        const right = items[i + 1] ? `  ·  ${items[i + 1]}` : "";
+        b += `<code>  ${left}${right}</code>\n`;
+      }
+    }
+
+    // Pair extras 2-per-line too
+    if (extras.length) {
+      for (let i = 0; i < extras.length; i += 2) {
+        const left = extras[i];
+        const right = extras[i + 1] ? `  ·  ${extras[i + 1]}` : "";
+        b += `<code>  ${left}${right}</code>\n`;
+      }
+    }
+
     const timeParts = [
       todayCnt > 0 ? `+${todayCnt} today` : "",
       weekCnt >= 0 ? `+${weekCnt} week` : "",
     ].filter(Boolean).join("  ·  ");
-    let b = `\n${emoji}  <b>${label}</b>  <code>${total}</code>\n`;
-    b += `<code>  ${statusParts || "—"}</code>\n`;
-    if (extras.length) b += `<code>  ${extras.join("  ·  ")}</code>\n`;
     if (timeParts) b += `<code>  ${timeParts}</code>\n`;
     return b;
   }
