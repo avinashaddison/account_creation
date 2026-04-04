@@ -3512,8 +3512,10 @@ export async function registerRoutes(
   // Bulk checkout link generator — picks N available accounts, generates Stripe checkout URLs
   app.post("/api/replit-bulk-checkout-links", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { coupon, count = 4 } = req.body;
+      const { coupon, count = 4, successStatus = "working" } = req.body;
       if (!coupon) return res.status(400).json({ error: "coupon is required" });
+      const validStatuses = ["processing", "available", "working", "sold_out", "error"];
+      const resolvedSuccessStatus = validStatuses.includes(successStatus) ? successStatus : "working";
       const userId = req.session.userId;
       const role = req.session.role;
 
@@ -3539,6 +3541,7 @@ export async function registerRoutes(
         }
         broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) — coupon: ${coupon}`, userId);
         broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+        broadcastLog(batchId, jobId, `📌 On success → status will be set to: ${resolvedSuccessStatus}`, userId);
 
         const generatedLinks: { email: string; url: string }[] = [];
 
@@ -3561,7 +3564,8 @@ export async function registerRoutes(
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
-            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
+            await storage.updateReplitAccountStatus(acct.id, resolvedSuccessStatus).catch(() => {});
+            broadcastLog(batchId, jobId, `  ✅ Status → ${resolvedSuccessStatus}`, userId);
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {
@@ -3716,6 +3720,9 @@ export async function registerRoutes(
     try {
       const userId = req.session.userId!;
       const role = req.session.role!;
+      const { successStatus: autoCouponSuccessStatusBody = "working" } = req.body as { successStatus?: string };
+      const validStatuses = ["processing", "available", "working", "sold_out", "error"];
+      const autoCouponSuccessStatus = validStatuses.includes(autoCouponSuccessStatusBody) ? autoCouponSuccessStatusBody : "working";
 
       const allAccounts = role === "superadmin"
         ? await storage.getAllReplitAccounts()
@@ -3853,7 +3860,8 @@ export async function registerRoutes(
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
             broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
-            await storage.updateReplitAccountStatus(acct.id, "working").catch(() => {});
+            await storage.updateReplitAccountStatus(acct.id, autoCouponSuccessStatus).catch(() => {});
+            broadcastLog(batchId, jobId, `  ✅ Status → ${autoCouponSuccessStatus}`, userId);
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
             if (result.error?.includes("already has an active Replit")) {

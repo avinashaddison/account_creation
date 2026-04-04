@@ -91,6 +91,7 @@ export default function ReplitCreate() {
   // ── BULK LINKS mode state ──
   const [linksCoupon, setLinksCoupon] = useState("AGENT4BC4974559665");
   const [linksCount, setLinksCount] = useState(1);
+  const [linksSuccessStatus, setLinksSuccessStatus] = useState<"processing" | "available" | "working" | "sold_out">("sold_out");
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [linksSubMode, setLinksSubMode] = useState<"manual" | "auto">("auto");
   const [batchCount, setBatchCount] = useState(5);
@@ -374,12 +375,13 @@ export default function ReplitCreate() {
       const res = await apiRequest("POST", "/api/replit-bulk-checkout-links", {
         coupon: linksCoupon.trim(),
         count: linksCount,
+        successStatus: linksSuccessStatus,
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start");
       activeBatchId.current = data.batchId;
       addLog(`🔗 Bulk checkout link job started [${data.batchId}]`);
-      addLog(`🎟️ Coupon: ${linksCoupon.trim()} · Count: ${linksCount}`);
+      addLog(`🎟️ Coupon: ${linksCoupon.trim()} · Count: ${linksCount} · On success → ${linksSuccessStatus}`);
     } catch (err: any) {
       sounds.error();
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -407,7 +409,7 @@ export default function ReplitCreate() {
     setCompletedCount(0);
     setTotalCount(4);
     try {
-      const res = await apiRequest("POST", "/api/replit-auto-coupon-links", {});
+      const res = await apiRequest("POST", "/api/replit-auto-coupon-links", { successStatus: linksSuccessStatus });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed to start");
       activeBatchId.current = data.batchId;
@@ -862,6 +864,33 @@ export default function ReplitCreate() {
                 ))}
               </div>
 
+              {/* ── SUCCESS STATUS PICKER (shared by both modes) ── */}
+              <div>
+                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: LA(0.5) }}>
+                  <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: { processing: "#f97316", available: "#3b82f6", working: "#22c55e", sold_out: "#818cf8" }[linksSuccessStatus] }} />
+                  Status After Successful Link Generation
+                </label>
+                <div className="flex gap-2">
+                  {(["processing", "available", "working", "sold_out"] as const).map(s => {
+                    const colors: Record<string, string> = { processing: "#f97316", available: "#3b82f6", working: "#22c55e", sold_out: "#818cf8" };
+                    const active = linksSuccessStatus === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => { sounds.keypress(); setLinksSuccessStatus(s); }}
+                        className="flex-1 rounded-lg py-2 text-[9px] font-mono font-bold uppercase tracking-widest transition-all"
+                        style={{
+                          background: active ? `${colors[s]}18` : "rgba(0,0,0,0.4)",
+                          border: `1px solid ${active ? colors[s] : LA(0.1)}`,
+                          color: active ? colors[s] : LA(0.3),
+                        }}
+                        data-testid={`button-success-status-${s}`}
+                      >{s}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* ── AUTO MODE ── */}
               {linksSubMode === "auto" && (() => {
                 // Source candidates: ONLY sold_out accounts (processing accounts are reserved as targets)
@@ -993,10 +1022,10 @@ export default function ReplitCreate() {
 
                   <div className="rounded-lg p-3 space-y-1" style={{ background: LA(0.04), border: `1px solid ${LA(0.12)}` }}>
                     <p className="text-[9px] font-mono" style={{ color: LA(0.45) }}>
-                      Picks {linksCount} Account Created account(s) → generates Stripe checkout URL with coupon
+                      Picks {linksCount} processing account(s) → generates Stripe checkout URL with coupon
                     </p>
                     <p className="text-[9px] font-mono" style={{ color: LA(0.3) }}>
-                      Account status: Account Created → <span style={{ color: "#f97316" }}>Working Now</span>
+                      On success: processing → <span style={{ color: { processing: "#f97316", available: "#3b82f6", working: "#22c55e", sold_out: "#818cf8" }[linksSuccessStatus] }}>{linksSuccessStatus}</span>
                     </p>
                   </div>
 
