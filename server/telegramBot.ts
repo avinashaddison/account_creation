@@ -106,6 +106,15 @@ interface MailSession {
   statusMsgId: number;
   chatId: number;
 }
+interface ShopAdminFlow {
+  step?: "name" | "description" | "price" | "account_type" | "status_filter" | "topup_uid" | "topup_amount";
+  name?: string;
+  description?: string;
+  price?: string;
+  accountType?: string;
+  statusFilter?: string;
+  topupUid?: number;
+}
 interface UserState {
   lastCopiedIds?: string[];
   awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url";
@@ -113,6 +122,7 @@ interface UserState {
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
   mailSession?: MailSession;
+  shopAdminFlow?: ShopAdminFlow;
 }
 // ── Create flow helpers ───────────────────────────────────────────────────────
 async function getAvailableCount(svc: ServiceConfig): Promise<number> {
@@ -261,7 +271,7 @@ const MAIN_KEYBOARD = Markup.keyboard([
   ["📊 Statistics", "👥 Accounts"],
   ["📋 Copy Accounts", "🔗 Checkout Links"],
   ["🏗 Create Accounts", "📧 Mail Generator"],
-  ["🎬 MoviesDrive"],
+  ["🎬 MoviesDrive", "🛒 Shop"],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
@@ -2025,11 +2035,240 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.reply(`🌐 *Update Proxy*\n\nSend the new proxy URL now:\n_(e.g. http://user:pass@host:port)_`, { parse_mode: "Markdown" });
   });
 
+  // ── Shop admin helpers ────────────────────────────────────────────────────
+  const SHOP_ACCOUNT_TYPES = ["replit", "lovable", "v0", "adobe", "chatgpt", "eleven", "outlook", "gmail"];
+
+  async function showShopAdminMenu(ctx: any) {
+    const [prodRes, custRes] = await Promise.all([
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_products WHERE active = true`),
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`),
+    ]);
+    const activeProd = parseInt(prodRes.rows[0]?.cnt ?? "0");
+    const totalCust  = parseInt(custRes.rows[0]?.cnt ?? "0");
+    await ctx.reply(
+      `*🛒 Shop Admin*\n\nActive products: *${activeProd}*\nTotal customers: *${totalCust}*`,
+      {
+        parse_mode: "Markdown",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📦 Products", "shop_admin_products"), Markup.button.callback("➕ Add Product", "shop_admin_add_product")],
+          [Markup.button.callback("👥 Customers", "shop_admin_customers"), Markup.button.callback("💰 Top Up", "shop_admin_topup")],
+        ]),
+      }
+    );
+  }
+
+  bot.hears("🛒 Shop", (ctx) => handleMenu(ctx, async () => {
+    await showShopAdminMenu(ctx);
+  }));
+
+  bot.action("shop_admin_menu", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    await showShopAdminMenu(ctx);
+  });
+
+  bot.action("shop_admin_products", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `*📦 Products*\n\nNo products yet. Use "Add Product" to create one.`,
+        { parse_mode: "Markdown", ...Markup.inlineKeyboard([[Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("🔙 Back", "shop_admin_menu")]]) }
+      );
+    }
+    const lines: string[] = [`*📦 Products* (${res.rows.length})\n`];
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const p of res.rows) {
+      const status = p.active ? "🟢 Active" : "🔴 Off";
+      lines.push(`${status} *${p.name}* — $${parseFloat(p.price).toFixed(2)}\n  Type: ${p.account_type} | Filter: ${p.status_filter}`);
+      buttons.push([
+        Markup.button.callback(p.active ? `Deactivate: ${p.name}` : `Activate: ${p.name}`, `shop_toggle_${p.id}`),
+      ]);
+    }
+    buttons.push([Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("🔙 Back", "shop_admin_menu")]);
+    await safeEdit(ctx, lines.join("\n"), { parse_mode: "Markdown", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  bot.action(/^shop_toggle_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const res = await dbQuery(`SELECT active, name FROM shop_products WHERE id = $1`, [productId]);
+    if (!res.rows[0]) return safeEdit(ctx, "Product not found.");
+    const newActive = !res.rows[0].active;
+    await dbQuery(`UPDATE shop_products SET active = $1 WHERE id = $2`, [newActive, productId]);
+    await ctx.answerCbQuery(`${newActive ? "Activated" : "Deactivated"}: ${res.rows[0].name}`).catch(() => {});
+    // Refresh products list
+    const all = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    const lines: string[] = [`*📦 Products* (${all.rows.length})\n`];
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const p of all.rows) {
+      const st = p.active ? "🟢 Active" : "🔴 Off";
+      lines.push(`${st} *${p.name}* — $${parseFloat(p.price).toFixed(2)}\n  Type: ${p.account_type} | Filter: ${p.status_filter}`);
+      buttons.push([Markup.button.callback(p.active ? `Deactivate: ${p.name}` : `Activate: ${p.name}`, `shop_toggle_${p.id}`)]);
+    }
+    buttons.push([Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("🔙 Back", "shop_admin_menu")]);
+    await safeEdit(ctx, lines.join("\n"), { parse_mode: "Markdown", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  bot.action("shop_admin_add_product", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "name" };
+    await ctx.reply(
+      `*➕ Add Product — Step 1/5*\n\nEnter the product *name*:\n_(e.g. "Replit Core 1 Month")_`,
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  bot.action("shop_admin_customers", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(
+      `SELECT telegram_id, username, first_name, balance FROM shop_customers ORDER BY balance DESC LIMIT 15`
+    );
+    if (res.rows.length === 0) {
+      return safeEdit(ctx, "*👥 Customers*\n\nNo customers yet.", { parse_mode: "Markdown", ...Markup.inlineKeyboard([[Markup.button.callback("🔙 Back", "shop_admin_menu")]]) });
+    }
+    const lines: string[] = [`*👥 Customers* (${res.rows.length})\n`];
+    for (const c of res.rows) {
+      const name = c.username ? `@${c.username}` : (c.first_name ?? `ID:${c.telegram_id}`);
+      lines.push(`${name} — Balance: *$${parseFloat(c.balance).toFixed(2)}*`);
+    }
+    await safeEdit(ctx, lines.join("\n"), {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([[Markup.button.callback("💰 Top Up", "shop_admin_topup"), Markup.button.callback("🔙 Back", "shop_admin_menu")]]),
+    });
+  });
+
+  bot.action("shop_admin_topup", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "topup_uid" };
+    await ctx.reply(
+      `*💰 Top Up Customer Balance*\n\nEnter the customer's *Telegram ID*:`,
+      { parse_mode: "Markdown" }
+    );
+  });
+
   // ── Text message handler ──────────────────────────────────────────────────
   bot.on("text", async (ctx) => {
     const uid = ctx.from.id;
     const text = ctx.message.text.trim();
     const st = getState(uid);
+
+    // ── Shop admin multi-step text flows ─────────────────────────────────
+    if (st.shopAdminFlow?.step) {
+      const flow = st.shopAdminFlow;
+
+      if (flow.step === "name") {
+        flow.name = text;
+        flow.step = "description";
+        return ctx.reply(
+          `*➕ Add Product — Step 2/5*\n\nEnter a short *description* (or send "-" to skip):`,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      if (flow.step === "description") {
+        flow.description = text === "-" ? "" : text;
+        flow.step = "price";
+        return ctx.reply(
+          `*➕ Add Product — Step 3/5*\n\nEnter the *price* in USD (e.g. \`1.00\`):`,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      if (flow.step === "price") {
+        const price = parseFloat(text);
+        if (isNaN(price) || price <= 0) {
+          return ctx.reply("Invalid price. Enter a positive number like `1.00`:", { parse_mode: "Markdown" });
+        }
+        flow.price = price.toFixed(2);
+        flow.step = "account_type";
+        return ctx.reply(
+          `*➕ Add Product — Step 4/5*\n\nEnter the *account type*:\n\`${SHOP_ACCOUNT_TYPES.join(" | ")}\``,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      if (flow.step === "account_type") {
+        const at = text.toLowerCase().trim();
+        if (!SHOP_ACCOUNT_TYPES.includes(at)) {
+          return ctx.reply(
+            `Invalid type. Choose from:\n\`${SHOP_ACCOUNT_TYPES.join(" | ")}\``,
+            { parse_mode: "Markdown" }
+          );
+        }
+        flow.accountType = at;
+        flow.step = "status_filter";
+        return ctx.reply(
+          `*➕ Add Product — Step 5/5*\n\nEnter the *status filter* — accounts with this status will be sold:\n_(e.g. \`available\`, \`working\`, \`created\`)_`,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      if (flow.step === "status_filter") {
+        flow.statusFilter = text.toLowerCase().trim();
+        // Save product to DB
+        try {
+          await dbQuery(
+            `INSERT INTO shop_products (name, description, price, account_type, status_filter)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [flow.name, flow.description || null, flow.price, flow.accountType, flow.statusFilter]
+          );
+          st.shopAdminFlow = undefined;
+          return ctx.reply(
+            `✅ *Product added!*\n\n*Name:* ${flow.name}\n*Price:* $${flow.price}\n*Type:* ${flow.accountType}\n*Filter:* ${flow.statusFilter}`,
+            { parse_mode: "Markdown" }
+          );
+        } catch (err: any) {
+          st.shopAdminFlow = undefined;
+          return ctx.reply(`❌ Failed to save product: ${err.message}`);
+        }
+      }
+
+      if (flow.step === "topup_uid") {
+        const telegramId = parseInt(text.trim());
+        if (isNaN(telegramId)) {
+          return ctx.reply("Invalid Telegram ID. Enter a number:");
+        }
+        // Check if customer exists
+        const custRes = await dbQuery(`SELECT telegram_id, balance FROM shop_customers WHERE telegram_id = $1`, [telegramId]);
+        if (!custRes.rows[0]) {
+          st.shopAdminFlow = undefined;
+          return ctx.reply(`❌ Customer with ID ${telegramId} not found.`);
+        }
+        flow.topupUid = telegramId;
+        flow.step = "topup_amount";
+        return ctx.reply(
+          `Customer balance: *$${parseFloat(custRes.rows[0].balance).toFixed(2)}*\n\nEnter the *amount to add* (e.g. \`5.00\`):`,
+          { parse_mode: "Markdown" }
+        );
+      }
+
+      if (flow.step === "topup_amount") {
+        const amount = parseFloat(text.trim());
+        if (isNaN(amount) || amount <= 0) {
+          return ctx.reply("Invalid amount. Enter a positive number like `5.00`:", { parse_mode: "Markdown" });
+        }
+        try {
+          await dbQuery(
+            `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
+            [amount.toFixed(2), flow.topupUid]
+          );
+          const after = await dbQuery(`SELECT balance FROM shop_customers WHERE telegram_id = $1`, [flow.topupUid]);
+          st.shopAdminFlow = undefined;
+          return ctx.reply(
+            `✅ *Balance topped up!*\n\nCustomer: \`${flow.topupUid}\`\nAdded: *$${amount.toFixed(2)}*\nNew balance: *$${parseFloat(after.rows[0]?.balance ?? "0").toFixed(2)}*`,
+            { parse_mode: "Markdown" }
+          );
+        } catch (err: any) {
+          st.shopAdminFlow = undefined;
+          return ctx.reply(`❌ Top-up failed: ${err.message}`);
+        }
+      }
+
+      return;
+    }
+
     if (!st.awaitingText) return;
 
     if (st.awaitingText === "proxy") {

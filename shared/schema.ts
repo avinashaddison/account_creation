@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, numeric, integer, pgEnum, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, numeric, integer, pgEnum, boolean, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -326,3 +326,48 @@ export const chatgptAccounts = pgTable("chatgpt_accounts", {
 export const insertChatGptAccountSchema = createInsertSchema(chatgptAccounts).omit({ id: true, createdAt: true });
 export type ChatGptAccount = typeof chatgptAccounts.$inferSelect;
 export type InsertChatGptAccount = z.infer<typeof insertChatGptAccountSchema>;
+
+// ── Shop Bot (Project Addison v2) ─────────────────────────────────────────────
+
+export const shopCustomers = pgTable("shop_customers", {
+  telegramId: bigint("telegram_id", { mode: "number" }).primaryKey(),
+  username:   text("username"),
+  firstName:  text("first_name"),
+  balance:    numeric("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  createdAt:  timestamp("created_at").notNull().defaultNow(),
+});
+
+export const shopProducts = pgTable("shop_products", {
+  id:           varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name:         text("name").notNull(),
+  description:  text("description"),
+  price:        numeric("price", { precision: 10, scale: 2 }).notNull(),
+  accountType:  text("account_type").notNull(),
+  statusFilter: text("status_filter").notNull().default("available"),
+  active:       boolean("active").notNull().default(true),
+  sortOrder:    integer("sort_order").notNull().default(0),
+  createdAt:    timestamp("created_at").notNull().defaultNow(),
+});
+
+export const shopOrders = pgTable("shop_orders", {
+  id:              varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  telegramId:      bigint("telegram_id", { mode: "number" }).notNull(),
+  productId:       varchar("product_id").notNull(),
+  productName:     text("product_name").notNull(),
+  accountId:       text("account_id").notNull(),
+  accountEmail:    text("account_email").notNull(),
+  accountPassword: text("account_password").notNull(),
+  amount:          numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertShopCustomerSchema = createInsertSchema(shopCustomers).omit({ createdAt: true });
+export const insertShopProductSchema  = createInsertSchema(shopProducts).omit({ id: true, createdAt: true });
+export const insertShopOrderSchema    = createInsertSchema(shopOrders).omit({ id: true, createdAt: true });
+
+export type ShopCustomer      = typeof shopCustomers.$inferSelect;
+export type InsertShopCustomer = z.infer<typeof insertShopCustomerSchema>;
+export type ShopProduct       = typeof shopProducts.$inferSelect;
+export type InsertShopProduct  = z.infer<typeof insertShopProductSchema>;
+export type ShopOrder         = typeof shopOrders.$inferSelect;
+export type InsertShopOrder    = z.infer<typeof insertShopOrderSchema>;

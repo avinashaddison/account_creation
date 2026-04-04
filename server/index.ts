@@ -3,6 +3,7 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { startTelegramBot } from "./telegramBot";
+import { startShopBot } from "./shopBot";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import pg from "pg";
@@ -204,11 +205,11 @@ app.use((req, res, next) => {
     console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — primary bot disabled");
   }
 
-  // Start secondary Telegram bot (if configured)
+  // Start secondary Telegram bot — Project Addison v2 (customer shop bot)
   const secondaryToken = process.env.TELEGRAM_BOT_TOKEN_2;
   if (secondaryToken) {
-    startTelegramBot({ token: secondaryToken, allowedIdsEnv: "TELEGRAM_ALLOWED_IDS_2", label: "Bot2" });
-    console.log("[TelegramBot] Secondary bot (Bot2) configured and starting...");
+    startShopBot(secondaryToken);
+    console.log("[ShopBot] Project Addison v2 shop bot starting...");
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
