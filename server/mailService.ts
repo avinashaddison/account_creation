@@ -789,7 +789,7 @@ function genBizPassword(): string {
   return `Biz@${rand}${num}`;
 }
 
-const BIZ_MAIL_QUOTA_BYTES = 10_485_760; // 10 MB per account — allows thousands on the plan
+const BIZ_MAIL_QUOTA_BYTES = 0; // 0 = no quota limit on Stalwart Mail Server
 
 export async function createBizMailAccount(opts: {
   requestedNum?: number;    // re-create a specific numbered slot
