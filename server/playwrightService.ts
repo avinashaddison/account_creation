@@ -19259,6 +19259,17 @@ export async function generateSingleCheckoutLink(
       throw new Error(`Login blocked by hCaptcha — cannot auto-solve — login_captcha`);
     }
 
+    // ── Check for BANNED before anything else — ban pages say "check your email"
+    //    which would incorrectly trigger email verification handling below ──
+    const isBanned =
+      postBodyLower.includes("you have been banned from replit") ||
+      postBodyLower.includes("banned from replit") ||
+      postBodyLower.includes("your account has been banned") ||
+      postBodyLower.includes("account banned");
+    if (isBanned) {
+      throw new Error(`Account banned — banned_account`);
+    }
+
     let verificationHandled = false;
     const needsVerify =
       postBodyLower.includes("verify your email") ||
