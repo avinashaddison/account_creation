@@ -4311,6 +4311,11 @@ export async function registerRoutes(
       const { status, ids } = req.body;
       if (!status) return res.status(400).json({ error: "status required" });
       const normalizedStatus = (status as string).toLowerCase().replace(/\s+/g, "_");
+      // "generating" is a system-managed transient state — reject explicit user assignment
+      const ALLOWED_STATUSES = ["processing", "available", "working", "sold_out", "error"];
+      if (!ALLOWED_STATUSES.includes(normalizedStatus)) {
+        return res.status(400).json({ error: `Invalid status "${normalizedStatus}". Allowed: ${ALLOWED_STATUSES.join(", ")}` });
+      }
       const role = req.session.role;
       const ownerId = role === "superadmin" ? undefined : req.session.userId;
       const idsArray = Array.isArray(ids) && ids.length > 0 ? ids.map(String) : undefined;
