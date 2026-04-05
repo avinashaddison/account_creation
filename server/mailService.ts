@@ -330,26 +330,54 @@ export async function pollBizMailViaGmail(
 
   const deadline  = Date.now() + maxMinutes * 60 * 1000;
   const seenUids  = new Set<number>();
+  let   uidCursor = 0; // highest UID we've already scanned — only look above this
 
   const processNewMail = async (client: ImapFlow) => {
-    const uids = await client.search({ since }, { uid: true });
-    if (!uids.length) return;
-    const range = uids.slice(-50).join(",");
-    for await (const msg of client.fetch(range, { source: true, envelope: true, internalDate: true }, { uid: true })) {
-      if (seenUids.has(msg.uid)) continue;
-      const rawSrc = msg.source?.toString("utf8") || "";
-      const toLine       = rawSrc.match(/^To:([^\r\n]+)/im)?.[1]           || "";
-      const ccLine       = rawSrc.match(/^Cc:([^\r\n]+)/im)?.[1]           || "";
-      const deliveredTo  = rawSrc.match(/^Delivered-To:([^\r\n]+)/im)?.[1] || "";
-      const allAddresses = `${toLine} ${ccLine} ${deliveredTo}`.toLowerCase();
-      if (!allAddresses.includes(bizEmail.toLowerCase())) { seenUids.add(msg.uid); continue; }
+    // Step 1: find only truly new UIDs (above our cursor, since session start)
+    const criteria: any = { since };
+    if (uidCursor > 0) criteria.uid = `${uidCursor + 1}:*`;
+    const allUids = await client.search(criteria, { uid: true });
+    const newUids = allUids.filter(u => u > uidCursor && !seenUids.has(u));
+    if (!newUids.length) return;
+
+    // Advance cursor immediately so re-entrant calls skip these
+    const topUid = Math.max(...newUids);
+    if (topUid > uidCursor) uidCursor = topUid;
+    newUids.forEach(u => seenUids.add(u));
+
+    // Step 2: fetch only the tiny header block — no body download yet
+    const range = newUids.join(",");
+    const matchingUids: number[] = [];
+    for await (const msg of client.fetch(
+      range,
+      { headers: ["to", "cc", "delivered-to", "from", "subject", "date"], internalDate: true },
+      { uid: true },
+    )) {
+      const hdrs = msg.headers?.toString("utf8") || "";
+      const toLine      = hdrs.match(/^To:([^\r\n]+)/im)?.[1]           || "";
+      const ccLine      = hdrs.match(/^Cc:([^\r\n]+)/im)?.[1]           || "";
+      const delTo       = hdrs.match(/^Delivered-To:([^\r\n]+)/im)?.[1] || "";
+      const combined    = `${toLine} ${ccLine} ${delTo}`.toLowerCase();
+      if (!combined.includes(bizEmail.toLowerCase())) continue;
       const msgDate = msg.internalDate || new Date();
-      if (msgDate < since) { seenUids.add(msg.uid); continue; }
-      seenUids.add(msg.uid);
+      if (msgDate < since) continue;
+      matchingUids.push(msg.uid);
+    }
+
+    if (!matchingUids.length) return;
+
+    // Step 3: fetch full source only for the emails that actually match
+    for await (const msg of client.fetch(
+      matchingUids.join(","),
+      { source: true, envelope: true, internalDate: true },
+      { uid: true },
+    )) {
+      const rawSrc  = msg.source?.toString("utf8") || "";
       const fromAddr = msg.envelope?.from?.[0];
       const from    = fromAddr?.address || fromAddr?.name || "unknown";
       const subject = msg.envelope?.subject || "(no subject)";
       const body    = extractMimeText(rawSrc);
+      const msgDate = msg.internalDate || new Date();
       console.log(`[BizMail] IDLE → new email for ${bizEmail}: from=${from}, subject=${subject}`);
       await onMessage({ uid: msg.uid, from, subject, date: msgDate, body }).catch(() => {});
     }
