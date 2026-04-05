@@ -1808,18 +1808,18 @@ export function startTelegramBot(config: BotConfig) {
           .filter(c => c.email && c.url && !sentCheckoutUrls.has(c.url));
         for (const c of newCheckouts) {
           sentCheckoutUrls.add(c.url);
-          const kbd = c.accountId
-            ? Markup.inlineKeyboard([[
-                Markup.button.callback(`📊 Status: working`, `link_status_${c.accountId}`),
-                Markup.button.callback(`✅ Completed`, `link_done_${c.accountId}`),
-              ]])
-            : undefined;
+          const kbd = Markup.inlineKeyboard([
+            [Markup.button.url(`🔗 Open Checkout Link`, c.url)],
+            ...(c.accountId ? [[
+              Markup.button.callback(`📊 Status: working`, `link_status_${c.accountId}`),
+              Markup.button.callback(`✅ Completed`, `link_done_${c.accountId}`),
+            ]] : []),
+          ]);
           await bot.telegram.sendMessage(chatId,
             `🔗 <b>Checkout Link Ready!</b>\n\n` +
             `📧 <code>${esc(c.email)}</code>\n` +
-            `<a href="${esc(c.url)}">Open Checkout</a>\n` +
             `<code>${esc(c.url)}</code>`,
-            { parse_mode: "HTML", disable_web_page_preview: true, ...(kbd ?? {}) }
+            { parse_mode: "HTML", disable_web_page_preview: true, ...kbd }
           ).catch(() => {});
         }
 
@@ -2084,18 +2084,18 @@ export function startTelegramBot(config: BotConfig) {
         for (const c of newCheckouts) {
           sentUrls.add(c.url);
           found++;
-          const kbd = c.accountId
-            ? Markup.inlineKeyboard([[
-                Markup.button.callback(`📊 Status: working`, `link_status_${c.accountId}`),
-                Markup.button.callback(`✅ Completed`, `link_done_${c.accountId}`),
-              ]])
-            : undefined;
+          const kbd = Markup.inlineKeyboard([
+            [Markup.button.url(`🔗 Open Checkout Link`, c.url)],
+            ...(c.accountId ? [[
+              Markup.button.callback(`📊 Status: working`, `link_status_${c.accountId}`),
+              Markup.button.callback(`✅ Completed`, `link_done_${c.accountId}`),
+            ]] : []),
+          ]);
           await bot.telegram.sendMessage(chatId,
             `🔗 <b>Checkout Link #${found} Ready!</b>\n\n` +
             `📧 <code>${esc(c.email)}</code>\n` +
-            `<a href="${esc(c.url)}">Open Checkout</a>\n` +
             `<code>${esc(c.url)}</code>`,
-            { parse_mode: "HTML", disable_web_page_preview: true, ...(kbd ?? {}) }
+            { parse_mode: "HTML", disable_web_page_preview: true, ...kbd }
           ).catch(() => {});
           // Update status message
           await bot.telegram.editMessageText(chatId, statusMsgId, undefined,
