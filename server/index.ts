@@ -178,6 +178,24 @@ app.use((req, res, next) => {
     console.warn("[Migration] Migration warning:", err.message);
   }
 
+  // Reset any accounts stuck in "generating" from a previous crashed run so
+  // they re-enter the processing pool and are not permanently orphaned.
+  try {
+    const { db: startupDb } = await import("./db");
+    const { replitAccounts: raTable } = await import("@shared/schema");
+    const { eq: eqOp } = await import("drizzle-orm");
+    const rows = await startupDb
+      .update(raTable)
+      .set({ status: "processing" })
+      .where(eqOp(raTable.status, "generating"))
+      .returning();
+    if (rows.length > 0) {
+      console.log(`[Startup] Reset ${rows.length} stuck "generating" account(s) → "processing"`);
+    }
+  } catch (err: any) {
+    console.warn("[Startup] Could not reset stuck generating accounts:", err.message);
+  }
+
   const store = await buildSessionStore();
 
   app.use(

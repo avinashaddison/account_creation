@@ -3546,6 +3546,10 @@ export async function registerRoutes(
           broadcastBatchComplete(batchId, userId);
           return;
         }
+
+        // Atomically claim selected accounts so concurrent jobs cannot pick them up
+        await storage.bulkUpdateReplitAccountStatus("generating", toProcess.map(a => a.id)).catch(() => {});
+
         broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) — coupon: ${coupon}`, userId);
         broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
         broadcastLog(batchId, jobId, `📌 On success → status will be set to: ${resolvedSuccessStatus}`, userId);
@@ -3556,9 +3560,6 @@ export async function registerRoutes(
           const acct = toProcess[i];
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
           broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
-
-          // Mark as processing
-          await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
 
           const result = await generateSingleCheckoutLink(
             acct.email,
@@ -3587,6 +3588,10 @@ export async function registerRoutes(
             } else if (result.error?.includes("bad_credentials")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Bad credentials stored for this account — marked as error, will be skipped`, userId);
+            } else {
+              // Retriable error (timeout, captcha, etc.) — reset so future jobs can pick it up
+              await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
+              broadcastLog(batchId, jobId, `  ↩️  Retriable error — account reset to processing`, userId);
             }
           }
         }
@@ -3817,6 +3822,9 @@ export async function registerRoutes(
           return;
         }
 
+        // Atomically claim selected accounts so concurrent jobs cannot pick them up
+        await storage.bulkUpdateReplitAccountStatus("generating", toProcess.map(a => a.id)).catch(() => {});
+
         // Warn about unwarmed accounts
         const unwarmed = toProcess.filter(a => !a.warmedAt);
         if (unwarmed.length > 0) {
@@ -3883,6 +3891,10 @@ export async function registerRoutes(
             } else if (result.error?.includes("bad_credentials")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Bad credentials — marked as error`, userId);
+            } else {
+              // Retriable error — reset so future jobs can pick it up
+              await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
+              broadcastLog(batchId, jobId, `  ↩️  Retriable error — account reset to processing`, userId);
             }
           }
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
@@ -3996,6 +4008,9 @@ export async function registerRoutes(
             break;
           }
 
+          // Atomically claim selected accounts so concurrent jobs cannot pick them up
+          await storage.bulkUpdateReplitAccountStatus("generating", toProcess.map(a => a.id)).catch(() => {});
+
           broadcastLog(batchId, jobId, `⚡ Generating ${toProcess.length} link(s) in parallel for this coupon...`, userId);
 
           const results = await Promise.all(toProcess.map(async (acct, i) => {
@@ -4032,6 +4047,10 @@ export async function registerRoutes(
                 await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
               } else if (result.error?.includes("banned_account") || result.error?.includes("bad_credentials") || result.error?.includes("no_password_account")) {
                 await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
+              } else {
+                // Retriable error — reset so future jobs can pick it up
+                await storage.updateReplitAccountStatus(acct.id, "processing").catch(() => {});
+                broadcastLog(batchId, jobId, `  ↩️  Retriable error — account reset to processing`, userId);
               }
             }
           }
