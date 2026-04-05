@@ -6,6 +6,7 @@ import {
   detectProviderFromDomain,
   createBizMailAccount, deleteBizMailAccount,
   createBizMailForwarder, listBizMailForwarders,
+  pollBizMailViaGmail, getGmailAddress, type BizMailMessage,
 } from "./mailService";
 
 const SERVER_PORT = process.env.PORT || 5000;
@@ -1270,9 +1271,27 @@ export function startTelegramBot(config: BotConfig) {
       return;
     }
 
+    // Set up Gmail forwarder so incoming mail is captured via Gmail IMAP
+    const gmailAddr = getGmailAddress();
+    let forwardingActive = false;
+    if (gmailAddr) {
+      const fwd = await createBizMailForwarder(
+        email,
+        gmailAddr,
+        true,
+        `BizMail #${accountNum} → Telegram notification`,
+      ).catch(() => ({ success: false }));
+      forwardingActive = fwd.success;
+      console.log(`[BizMail] Forwarder to ${gmailAddr}: ${forwardingActive ? "OK" : "failed"}`);
+    }
+
     const bizKeyboard = Markup.inlineKeyboard([
       [Markup.button.callback("🔄 New Account", "biz_mail_new"), Markup.button.callback("⏹ Stop & Delete", "biz_mail_stop")],
     ]);
+
+    const inboxNote = forwardingActive
+      ? `📬 <i>Inbox monitoring active — you'll be notified of new emails here</i>`
+      : `📭 <i>Inbox monitoring not available — check webmail manually</i>`;
 
     const bizStatusCard =
       `💼 <b>Business Mail — Account #${accountNum}</b>\n\n` +
@@ -1281,7 +1300,7 @@ export function startTelegramBot(config: BotConfig) {
       `🌐 <b>Webmail:</b> <a href="https://mail.mailbux.com/inbox/login">mail.mailbux.com/inbox/login</a>\n` +
       `📮 <b>IMAP:</b> <code>mail.mailbux.com:993 (SSL)</code>\n` +
       `📤 <b>SMTP:</b> <code>mail.mailbux.com:587 (STARTTLS)</code>\n\n` +
-      `<i>✅ Account is live and ready. Use "New Account" to replace it or "Stop" to delete it.</i>`;
+      inboxNote;
 
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
       bizStatusCard, { parse_mode: "HTML", ...bizKeyboard }
@@ -1295,6 +1314,30 @@ export function startTelegramBot(config: BotConfig) {
       receivedCount: 0,
     };
     state.bizMailSession = session;
+
+    // Start Gmail IMAP polling for incoming business mail
+    if (forwardingActive) {
+      const since = new Date();
+      pollBizMailViaGmail(
+        email,
+        since,
+        async (msg: BizMailMessage) => {
+          if (session.stopped) return;
+          session.receivedCount++;
+          await bot.telegram.sendMessage(chatId,
+            `📬 <b>New Business Email!</b>\n\n` +
+            `💼 <b>To:</b> <code>${esc(email)}</code>\n` +
+            `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
+            `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
+            `📅 <b>Date:</b> ${msg.date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
+            `<pre>${esc(msg.body || "(no text content)")}</pre>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+        },
+        () => session.stopped,
+        120,
+      ).catch(() => {});
+    }
   }
 
   bot.action("biz_mail_new", async (ctx) => {

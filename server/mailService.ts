@@ -29,6 +29,8 @@ export function setGmailCredentials(email: string | null, appPassword: string | 
   }
 }
 
+export function getGmailAddress(): string | null { return _gmailAddress; }
+
 export function hasGmailCredentials(): boolean {
   return !!(
     _gmailAddress &&
@@ -263,6 +265,96 @@ export async function pollGmailForElevenLabsLink(
 
   log("[Gmail] Timed out waiting for ElevenLabs verification email");
   return null;
+}
+
+// ── Poll Gmail inbox for forwarded business mail ──────────────────────────────
+// Business mail accounts forward to Gmail via /api/forwarders.
+// We check Gmail IMAP for emails addressed To: accountN@addison.asia.
+export async function pollBizMailViaGmail(
+  bizEmail: string,
+  since: Date,
+  onMessage: (msg: BizMailMessage) => Promise<void>,
+  shouldStop: () => boolean,
+  maxMinutes = 120,
+): Promise<void> {
+  if (!_gmailAddress || !_gmailAppPassword) {
+    console.log("[BizMail] Gmail credentials not configured — cannot poll");
+    return;
+  }
+
+  const deadline = Date.now() + maxMinutes * 60 * 1000;
+  const seenUids  = new Set<number>();
+
+  while (!shouldStop() && Date.now() < deadline) {
+    const client = new ImapFlow({
+      host: "imap.gmail.com",
+      port: 993,
+      secure: true,
+      auth: { user: _gmailAddress, pass: _gmailAppPassword },
+      logger: false,
+    });
+
+    try {
+      await client.connect();
+
+      // Search All Mail so forwarded messages in Promotions/Spam are also found
+      let lock: any = null;
+      for (const box of ["[Gmail]/All Mail", "INBOX"]) {
+        try { lock = await client.getMailboxLock(box); break; } catch {}
+      }
+      if (!lock) { await client.logout(); await new Promise(r => setTimeout(r, 30_000)); continue; }
+
+      try {
+        // Search for emails since session start, then filter by To: header in source
+        const uids = await client.search({ since }, { uid: true });
+        if (uids.length > 0) {
+          const range = uids.slice(-50).join(",");
+          for await (const msg of client.fetch(range, { source: true, envelope: true, internalDate: true }, { uid: true })) {
+            if (seenUids.has(msg.uid)) continue;
+
+            // Check if this email is addressed to our biz email
+            const rawSrc = msg.source?.toString("utf8") || "";
+            const toLine = rawSrc.match(/^To:([^\r\n]+)/im)?.[1] || "";
+            const ccLine = rawSrc.match(/^Cc:([^\r\n]+)/im)?.[1] || "";
+            const deliveredTo = rawSrc.match(/^Delivered-To:([^\r\n]+)/im)?.[1] || "";
+            const allAddresses = `${toLine} ${ccLine} ${deliveredTo}`.toLowerCase();
+
+            if (!allAddresses.includes(bizEmail.toLowerCase())) continue;
+
+            const msgDate = msg.internalDate || new Date();
+            if (msgDate < since) { seenUids.add(msg.uid); continue; }
+
+            seenUids.add(msg.uid);
+
+            const fromAddr = msg.envelope?.from?.[0];
+            const from = fromAddr?.address || `${fromAddr?.name || "unknown"}`;
+            const subject = msg.envelope?.subject || "(no subject)";
+
+            // Extract text body from raw source
+            const bodyMatch = rawSrc.match(/\r?\n\r?\n([\s\S]+)$/);
+            let body = (bodyMatch?.[1] || "")
+              .replace(/=\r?\n/g, "")          // quoted-printable line continuations
+              .replace(/<[^>]+>/g, " ")         // strip HTML tags
+              .replace(/\s+/g, " ")
+              .trim()
+              .substring(0, 800);
+
+            console.log(`[BizMail] Gmail → new email for ${bizEmail}: from=${from}, subject=${subject}`);
+            await onMessage({ uid: msg.uid, from, subject, date: msgDate, body }).catch(() => {});
+          }
+        }
+      } finally {
+        lock.release();
+      }
+    } catch (err: any) {
+      console.log(`[BizMail] Gmail poll error: ${err.message}`);
+    } finally {
+      try { await client.logout(); } catch {}
+    }
+
+    if (!shouldStop()) await new Promise(r => setTimeout(r, 25_000));
+  }
+  console.log(`[BizMail] Gmail polling stopped for ${bizEmail}`);
 }
 
 export function detectProviderFromDomain(domain: string): Provider {
