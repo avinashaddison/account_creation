@@ -1097,126 +1097,136 @@ export async function getMailbuxBearerToken(): Promise<string> {
   return token;
 }
 
-// ── Register an account in the mailbux WEBMAIL system ────────────────────────
-// The mailbux webmail at /inbox has its own auth system separate from Stalwart.
-// We need to register here so users can log in at mail.mailbux.com/inbox/login.
+// ── JMAP-based mailbox access via admin account ───────────────────────────────
+// Stalwart exposes JMAP at my.mailbux.com/jmap. The admin user (user39b9897f)
+// has accountId "bte2". Individual @addison.asia accounts get their email
+// routed to admin by removing the email from their own principal and adding it
+// to admin's principal, then creating a JMAP identity for that address.
 
-// ── Get the Sanctum XSRF-TOKEN for webmail API calls ─────────────────────────
-async function getWebmailXsrf(): Promise<{ xsrfToken: string; cookieStr: string }> {
-  // GET /api/auth/session-status sets XSRF-TOKEN + mailbux_session cookies (Sanctum pattern)
-  const res = await fetch("https://mail.mailbux.com/api/auth/session-status", {
-    method: "GET",
+const JMAP_BASE_URL = "https://my.mailbux.com/jmap";
+const JMAP_ADMIN_ACCOUNT_ID = "bte2";
+const JMAP_INBOX_MAILBOX_ID = "a"; // inbox role mailbox ID for admin
+
+async function jmapAdminCall(methodCalls: any[]): Promise<any> {
+  const adminBasic = Buffer.from(`${MAILBUX_USER}:${MAILBUX_PASS}`).toString("base64");
+  const r = await fetch(`${JMAP_BASE_URL}/`, {
+    method: "POST",
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; AddisonsBot/1.0)",
+      "Authorization": `Basic ${adminBasic}`,
+      "Content-Type": "application/json",
       "Accept": "application/json",
-      "Referer": "https://mail.mailbux.com/inbox/login",
     },
+    body: JSON.stringify({
+      using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+      methodCalls,
+    }),
   });
-  const rawCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
-  const cookieStr = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
-  const xsrfCookie = rawCookies.find((c: string) => c.startsWith("XSRF-TOKEN"));
-  const xsrfEncoded = xsrfCookie ? xsrfCookie.split("=").slice(1).join("=").split(";")[0] : "";
-  const xsrfToken = decodeURIComponent(xsrfEncoded);
-  return { xsrfToken, cookieStr };
+  if (!r.ok) throw new Error(`JMAP call failed: ${r.status}`);
+  return r.json();
+}
+
+// Route a biz mail address to admin JMAP inbox.
+// Removes the email from the individual account principal and adds it to admin,
+// then creates a JMAP identity so admin can send/receive as that address.
+export async function ensureBizMailJmapRouting(bizEmail: string): Promise<void> {
+  try {
+    const adminToken = await getMailbuxBearerToken();
+    const encodedEmail = encodeURIComponent(bizEmail);
+
+    // Step 1: Remove email from individual account's principal
+    await fetch(`https://mail.mailbux.com/api/principal/${encodedEmail}`, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify([{ action: "removeItem", field: "emails", value: bizEmail }]),
+    });
+
+    // Step 2: Add email to admin principal
+    const addRes = await fetch("https://mail.mailbux.com/api/principal/user39b9897f", {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify([{ action: "addItem", field: "emails", value: bizEmail }]),
+    });
+    const addData = await addRes.json() as any;
+    if (addData?.error === "fieldAlreadyExists") {
+      console.log(`[BizMail JMAP] ${bizEmail} already routed to admin`);
+    } else {
+      console.log(`[BizMail JMAP] Routed ${bizEmail} → admin inbox`);
+    }
+
+    // Step 3: Create JMAP identity so admin can receive/filter as that address
+    try {
+      await jmapAdminCall([
+        ["Identity/set", {
+          accountId: JMAP_ADMIN_ACCOUNT_ID,
+          create: {
+            "identity1": { name: bizEmail, email: bizEmail, textSignature: "" },
+          },
+        }, "0"],
+      ]);
+    } catch { /* identity may already exist — ignore */ }
+  } catch (err: any) {
+    console.log(`[BizMail JMAP] ensureBizMailJmapRouting error for ${bizEmail}: ${err.message}`);
+  }
+}
+
+// Set up JMAP routing for all existing biz mail accounts.
+// Call once at startup so all accounts are ready.
+export async function setupAllBizMailJmapRouting(): Promise<void> {
+  try {
+    const adminToken = await getMailbuxBearerToken();
+    const domainRes = await fetch("https://mail.mailbux.com/api/principal/addison.asia", {
+      headers: { "Authorization": `Bearer ${adminToken}`, "Accept": "application/json" },
+    });
+    const domainData = await domainRes.json() as any;
+    const memberCount = domainData?.data?.members || 0;
+    console.log(`[BizMail JMAP] Setting up routing for ${memberCount} @addison.asia accounts`);
+    for (let i = 1; i <= memberCount; i++) {
+      const email = `account${i}@addison.asia`;
+      await ensureBizMailJmapRouting(email);
+    }
+  } catch (err: any) {
+    console.log(`[BizMail JMAP] setupAllBizMailJmapRouting error: ${err.message}`);
+  }
+}
+
+// Search admin JMAP inbox for emails addressed to a specific biz mail account.
+// Returns matching email objects from the JMAP response.
+async function jmapSearchForBizMailEmails(toEmail: string, since: Date): Promise<any[]> {
+  const result = await jmapAdminCall([
+    ["Email/query", {
+      accountId: JMAP_ADMIN_ACCOUNT_ID,
+      limit: 50,
+      sort: [{ property: "receivedAt", isAscending: false }],
+    }, "0"],
+    ["Email/get", {
+      accountId: JMAP_ADMIN_ACCOUNT_ID,
+      "#ids": { resultOf: "0", name: "Email/query", path: "/ids" },
+      properties: ["id", "from", "to", "subject", "receivedAt", "preview", "bodyValues", "textBody"],
+      fetchTextBodyValues: true,
+    }, "1"],
+  ]);
+
+  const emails: any[] = result?.methodResponses?.[1]?.[1]?.list || [];
+  return emails.filter((m: any) => {
+    const toAddresses: string[] = (m.to || []).map((t: any) => (t.email || "").toLowerCase());
+    if (!toAddresses.includes(toEmail.toLowerCase())) return false;
+    const receivedAt = new Date(m.receivedAt || 0);
+    return receivedAt >= since;
+  });
 }
 
 export async function registerBizMailWebmail(email: string, password: string, displayName: string): Promise<boolean> {
-  try {
-    const { xsrfToken, cookieStr } = await getWebmailXsrf();
-
-    const res = await mailbuxHttpPost("https://mail.mailbux.com/api/auth/register", {
-      email,
-      password,
-      name: displayName,
-    }, {
-      "X-XSRF-TOKEN": xsrfToken,
-      "Cookie": cookieStr,
-      "Referer": "https://mail.mailbux.com/inbox/login",
-      "Origin": "https://mail.mailbux.com",
-    });
-
-    let json: any;
-    try { json = JSON.parse(res.body); } catch { json = {}; }
-
-    if (res.status >= 200 && res.status < 300) {
-      console.log(`[BizMail] Webmail account registered: ${email}`);
-      return true;
-    }
-    // Already registered = also fine
-    const msg = (json.message || json.error || json.detail || "").toLowerCase();
-    if (msg.includes("already") || msg.includes("exists") || msg.includes("taken")) {
-      console.log(`[BizMail] Webmail account already exists: ${email}`);
-      return true;
-    }
-    console.log(`[BizMail] Webmail register failed (${res.status}):`, res.body.substring(0, 200));
-    return false;
-  } catch (err: any) {
-    console.log(`[BizMail] registerBizMailWebmail error: ${err.message}`);
-    return false;
-  }
-}
-
-// ── Poll mailbux webmail API for incoming business mail ───────────────────────
-// Uses the webmail's own REST API (/api/auth/login → /api/search)
-
-async function webmailLogin(email: string, password: string): Promise<{ token: string; cookie: string } | null> {
-  try {
-    // Get Sanctum XSRF token first — required for all webmail POST requests
-    const { xsrfToken, cookieStr: sessionCookies } = await getWebmailXsrf();
-
-    const res = await fetch("https://mail.mailbux.com/api/auth/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; AddisonsBot/1.0)",
-        "X-XSRF-TOKEN": xsrfToken,
-        "Cookie": sessionCookies,
-        "Referer": "https://mail.mailbux.com/inbox/login",
-        "Origin": "https://mail.mailbux.com",
-      },
-      body: JSON.stringify({ email, password }),
-    });
-    const rawCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
-    const cookieStr = [...sessionCookies.split("; "), ...rawCookies.map((c: string) => c.split(";")[0])]
-      .filter(Boolean).join("; ");
-    const body = await res.text();
-    let data: any;
-    try { data = JSON.parse(body); } catch { return null; }
-    if (res.status >= 200 && res.status < 300) {
-      const token = data?.access_token || data?.token || data?.data?.access_token || "";
-      console.log(`[BizMail] Webmail login OK for ${email}, token: ${token ? "yes" : "cookie-only"}`);
-      return { token, cookie: cookieStr };
-    }
-    console.log(`[BizMail] Webmail login failed (${res.status}): ${body.substring(0, 100)}`);
-    return null;
-  } catch (err: any) {
-    console.log(`[BizMail] webmailLogin error: ${err.message}`);
-    return null;
-  }
-}
-
-async function webmailSearch(auth: { token: string; cookie: string }, query = "", limit = 50): Promise<any[]> {
-  try {
-    const headers: Record<string, string> = {
-      "Accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (compatible; AddisonsBot/1.0)",
-    };
-    if (auth.cookie) headers["Cookie"] = auth.cookie;
-    if (auth.token) headers["Authorization"] = `Bearer ${auth.token}`;
-    const url = `https://mail.mailbux.com/api/search?q=${encodeURIComponent(query)}&limit=${limit}&folder=INBOX`;
-    const res = await fetch(url, { method: "GET", headers });
-    const body = await res.text();
-    let data: any;
-    try { data = JSON.parse(body); } catch { return []; }
-    // May return { data: [...] } or an array directly
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (Array.isArray(data?.messages)) return data.messages;
-    return [];
-  } catch {
-    return [];
-  }
+  // Route the bizmail address through admin JMAP inbox (no webmail registration needed)
+  await ensureBizMailJmapRouting(email);
+  return true;
 }
 
 export async function pollBizMailInbox(
@@ -1228,53 +1238,36 @@ export async function pollBizMailInbox(
   maxMinutes = 60,
 ): Promise<void> {
   const deadline = Date.now() + maxMinutes * 60 * 1000;
-  const seenIds  = new Set<string | number>();
+  const seenIds  = new Set<string>();
 
-  // Login to webmail
-  let auth = await webmailLogin(email, password);
-  if (!auth) {
-    console.log(`[BizMail] Could not log into webmail for ${email} — skipping poll`);
-    return;
-  }
-
-  let tokenExpiry = Date.now() + 14 * 60 * 1000; // refresh login every 14 min
+  await ensureBizMailJmapRouting(email);
+  console.log(`[BizMail JMAP] Polling inbox for ${email}...`);
 
   while (!shouldStop() && Date.now() < deadline) {
-    // Re-login periodically
-    if (Date.now() > tokenExpiry) {
-      const fresh = await webmailLogin(email, password);
-      if (fresh) { auth = fresh; tokenExpiry = Date.now() + 14 * 60 * 1000; }
-    }
-
     try {
-      const messages = await webmailSearch(auth, "", 50);
+      const messages = await jmapSearchForBizMailEmails(email, since);
       for (const m of messages) {
-        const id   = m.id || m.uid || m.messageId || JSON.stringify(m).slice(0, 30);
-        const date = new Date(m.date || m.receivedAt || m.createdAt || since);
-        if (date < since) continue;
+        const id = m.id as string;
         if (seenIds.has(id)) continue;
         seenIds.add(id);
 
-        const from    = m.from?.address || m.from?.email || m.from || "unknown";
+        const from    = m.from?.[0]?.email || m.from?.[0]?.name || "unknown";
         const subject = m.subject || "(no subject)";
-        const body    = (m.snippet || m.preview || m.body || m.text || m.html || "")
-          .toString()
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .substring(0, 800);
+        const bodyText = Object.values(m.bodyValues || {}).map((v: any) => v.value || "").join(" ");
+        const body = (m.preview || bodyText).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().substring(0, 800);
+        const date = new Date(m.receivedAt || since);
 
-        await onMessage({ uid: typeof id === "number" ? id : 0, from, subject, date, body });
+        await onMessage({ uid: 0, from, subject, date, body });
       }
     } catch (err: any) {
-      console.log(`[BizMail] webmail poll error: ${err.message}`);
+      console.log(`[BizMail JMAP] poll error: ${err.message}`);
     }
 
     await new Promise(r => setTimeout(r, 20_000));
   }
 }
 
-// ── Poll mailbux webmail for an OpenAI/ChatGPT verification email ─────────────
+// ── Poll admin JMAP inbox for an OpenAI/ChatGPT verification email ─────────────
 // Returns { code } (6-digit OTP) or { link } (verify URL), whichever is found first.
 export async function fetchOpenAICodeFromBizMail(
   email: string,
@@ -1285,50 +1278,43 @@ export async function fetchOpenAICodeFromBizMail(
 ): Promise<{ code?: string; link?: string } | null> {
   const deadline = Date.now() + timeoutMs;
 
-  let auth = await webmailLogin(email, password);
-  if (!auth) {
-    log(`[BizMail] Could not log into webmail for ${email}`);
-    return null;
-  }
-  log(`[BizMail] Webmail logged in — polling for OpenAI email...`);
+  // Ensure this biz mail address routes to admin's inbox
+  await ensureBizMailJmapRouting(email);
+  log(`[BizMail JMAP] Routing confirmed for ${email} — polling admin inbox...`);
 
-  const seenIds = new Set<string | number>();
-  let tokenExpiry = Date.now() + 14 * 60 * 1000;
+  const seenIds = new Set<string>();
 
   while (Date.now() < deadline) {
-    if (Date.now() > tokenExpiry) {
-      const fresh = await webmailLogin(email, password);
-      if (fresh) { auth = fresh; tokenExpiry = Date.now() + 14 * 60 * 1000; }
-    }
-
     try {
-      const messages = await webmailSearch(auth, "openai", 30);
+      const messages = await jmapSearchForBizMailEmails(email, since);
+
       for (const m of messages) {
-        const id   = m.id || m.uid || JSON.stringify(m).slice(0, 30);
-        const date = new Date(m.date || m.receivedAt || m.createdAt || since);
-        if (date < since) continue;
+        const id = m.id as string;
         if (seenIds.has(id)) continue;
         seenIds.add(id);
 
-        const from    = (m.from?.address || m.from?.email || m.from || "").toLowerCase();
+        const from    = (m.from?.[0]?.email || m.from?.[0]?.name || "").toLowerCase();
         const subject = (m.subject || "").toLowerCase();
-        const rawBody = (m.snippet || m.preview || m.body || m.text || m.html || "").toString();
+        const bodyText = Object.values(m.bodyValues || {}).map((v: any) => v.value || "").join(" ");
+        const rawBody = m.preview || bodyText;
         const body    = rawBody.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+        const fullText = `${from} ${subject} ${body}`;
 
-        const isOpenAI = from.includes("openai") || from.includes("noreply") ||
+        const isOpenAI =
+          from.includes("openai") || from.includes("noreply") ||
           subject.includes("verify") || subject.includes("confirm") || subject.includes("openai") ||
           body.toLowerCase().includes("openai") || body.toLowerCase().includes("chatgpt");
         if (!isOpenAI) continue;
 
-        log(`[BizMail] Found email from="${from}" sub="${m.subject}"`);
+        log(`[BizMail JMAP] Found email from="${from}" sub="${m.subject}"`);
 
         // Extract 6-digit OTP code
         const codeMatch =
-          body.match(/(?:verification|confirm|one.time)[^\d]*(\d{6})\b/i) ||
-          body.match(/\b(\d{6})\b(?=[^\d]*(?:is your|to verify|code))/i) ||
-          body.match(/\b([0-9]{6})\b/);
+          fullText.match(/(?:verification|confirm|one.time)[^\d]*(\d{6})\b/i) ||
+          fullText.match(/\b(\d{6})\b(?=[^\d]*(?:is your|to verify|code))/i) ||
+          fullText.match(/\b([0-9]{6})\b/);
         if (codeMatch) {
-          log(`[BizMail] ✅ Found OTP: ${codeMatch[1]}`);
+          log(`[BizMail JMAP] ✅ Found OTP: ${codeMatch[1]}`);
           return { code: codeMatch[1] };
         }
 
@@ -1338,23 +1324,23 @@ export async function fetchOpenAICodeFromBizMail(
           body.match(/(https?:\/\/[^\s"<>]*(?:verify|confirm|callback|activate)[^\s"<>]*)/i) ||
           rawBody.match(/href="(https?:\/\/[^"]*openai\.com[^"]*)"/i);
         if (linkMatch) {
-          log(`[BizMail] ✅ Found verify link: ${linkMatch[1].substring(0, 80)}...`);
+          log(`[BizMail JMAP] ✅ Found verify link: ${linkMatch[1].substring(0, 80)}...`);
           return { link: linkMatch[1] };
         }
 
-        log(`[BizMail] Email found but no code/link extracted — continuing poll`);
+        log(`[BizMail JMAP] Email found but no code/link extracted — continuing poll`);
       }
     } catch (err: any) {
-      log(`[BizMail] poll error: ${err.message}`);
+      log(`[BizMail JMAP] poll error: ${err.message}`);
     }
 
     const remaining = Math.round((deadline - Date.now()) / 1000);
     if (remaining > 0) {
-      log(`[BizMail] Waiting... (${remaining}s remaining)`);
+      log(`[BizMail JMAP] Waiting... (${remaining}s remaining)`);
       await new Promise(r => setTimeout(r, 15_000));
     }
   }
 
-  log(`[BizMail] Timed out waiting for OpenAI verification email`);
+  log(`[BizMail JMAP] Timed out waiting for OpenAI verification email to ${email}`);
   return null;
 }
