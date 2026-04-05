@@ -362,6 +362,10 @@ export async function pollBizMailViaGmail(
       secure: true,
       auth: { user: _gmailAddress, pass: _gmailAppPassword },
       logger: false,
+      // idleTimeout controls how often ImapFlow refreshes IDLE (sends DONE+IDLE).
+      // Default is 5 minutes — that's why mail was delayed 5 min.
+      // Set to 10 s so idle() resolves within 10 s of an EXISTS notification.
+      idleTimeout: 10_000,
     });
 
     try {
@@ -374,25 +378,17 @@ export async function pollBizMailViaGmail(
       if (!lock) { await client.logout(); await new Promise(r => setTimeout(r, 10_000)); continue; }
 
       try {
-        // Initial sweep for any emails that arrived since session start
+        // Initial sweep for anything that arrived since session start
         await processNewMail(client);
 
-        // IDLE loop — Gmail pushes EXISTS when new mail lands; each idle()
-        // call runs for up to 9 minutes then re-issues automatically.
+        // IDLE loop — idle() resolves every ~10 s (idleTimeout) so we sweep
+        // for new mail promptly after any EXISTS notification from Gmail.
         while (!shouldStop() && Date.now() < deadline) {
-          let newMailArrived = false;
-          client.once("exists", () => { newMailArrived = true; });
-
-          // idle() blocks until Gmail sends an unsolicited response (EXISTS)
-          // or ~9 min IMAP idle timeout; we cap at 5 min for safety.
           await Promise.race([
             client.idle(),
-            new Promise<void>(r => setTimeout(r, 5 * 60 * 1000)),
+            new Promise<void>(r => setTimeout(r, 15_000)), // safety cap
           ]);
-
-          if (newMailArrived && !shouldStop()) {
-            await processNewMail(client);
-          }
+          if (!shouldStop()) await processNewMail(client);
         }
       } finally {
         lock.release();
