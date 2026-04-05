@@ -609,41 +609,126 @@ function genBizPassword(): string {
 
 export async function createBizMailAccount(): Promise<{ email: string; password: string; accountNum: number }> {
   const password = genBizPassword();
+  const token = await getMailbuxBearerToken();
   for (let n = 1; n <= 999; n++) {
     const email = `account${n}@${MAILBUX_DOMAIN}`;
     const res = await fetch(`${MAILBUX_API}/principal`, {
       method: "POST",
       headers: {
-        "Authorization": mailbuxBasicAuth(),
+        "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json",
+        "Accept": "application/json",
       },
       body: JSON.stringify({
         type: "individual",
+        tenant: MAILBUX_USER,
         name: email,
+        description: `Addison Panel business mail #${n}`,
         secrets: [password],
         emails: [email],
+        quota: 1073741824,
+        roles: ["user"],
       }),
     });
     const json: any = await res.json();
     // Success
     if (json.data && typeof json.data === "number") {
+      console.log(`[BizMail] Created account ${email} (Stalwart ID: ${json.data})`);
       return { email, password, accountNum: n };
     }
     // Already exists — try next slot
-    const detail: string = (json.details || json.error || "").toLowerCase();
+    const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
       continue;
     }
-    throw new Error(json.details || json.error || JSON.stringify(json));
+    throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
   throw new Error("All account slots taken (account1–account999)");
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
-  await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
-    method: "DELETE",
-    headers: { "Authorization": mailbuxBasicAuth() },
-  }).catch(() => {});
+  try {
+    const token = await getMailbuxBearerToken();
+    await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    console.log(`[BizMail] Deleted Stalwart account: ${email}`);
+  } catch (err: any) {
+    console.log(`[BizMail] deleteBizMailAccount error: ${err.message}`);
+  }
+}
+
+// ── Email Forwarders API ──────────────────────────────────────────────────────
+// Uses /api/forwarders — supports external forwarding (e.g. to Gmail)
+
+export interface BizMailForwarder {
+  id: string;
+  fromEmail: string;
+  to: string;
+  keepLocal: boolean;
+  description?: string;
+}
+
+export async function listBizMailForwarders(domain = MAILBUX_DOMAIN): Promise<BizMailForwarder[]> {
+  try {
+    const token = await getMailbuxBearerToken();
+    const res = await fetch(`${MAILBUX_API}/forwarders?domain=${encodeURIComponent(domain)}`, {
+      headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" },
+    });
+    const data: any = await res.json();
+    if (!data?.forwarders) return [];
+    return (data.forwarders as any[]).map(f => ({
+      id: f.id,
+      fromEmail: f.source || f.from_email || f.fromEmail || "",
+      to: f.destination || f.to || "",
+      keepLocal: f.keep_copy ?? f.keepLocal ?? true,
+      description: f.description || "",
+    }));
+  } catch (err: any) {
+    console.log(`[BizMail] listForwarders error: ${err.message}`);
+    return [];
+  }
+}
+
+export async function createBizMailForwarder(
+  fromEmail: string,
+  to: string,
+  keepLocal = true,
+  description = "",
+): Promise<{ success: boolean; id?: string }> {
+  try {
+    const token = await getMailbuxBearerToken();
+    const res = await fetch(`${MAILBUX_API}/forwarders`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ fromEmail, to, keepLocal, description }),
+    });
+    const data: any = await res.json();
+    if (data?.success) {
+      const id = data.id || data.forwarder?.id || "";
+      console.log(`[BizMail] Created forwarder: ${fromEmail} → ${to} (id=${id})`);
+      return { success: true, id };
+    }
+    console.log(`[BizMail] createForwarder failed (${res.status}):`, JSON.stringify(data).substring(0, 100));
+    return { success: false };
+  } catch (err: any) {
+    console.log(`[BizMail] createForwarder error: ${err.message}`);
+    return { success: false };
+  }
+}
+
+export async function deleteBizMailForwarder(forwarderId: string): Promise<void> {
+  try {
+    const token = await getMailbuxBearerToken();
+    await fetch(`${MAILBUX_API}/forwarders/${encodeURIComponent(forwarderId)}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    console.log(`[BizMail] Deleted forwarder: ${forwarderId}`);
+  } catch (err: any) {
+    console.log(`[BizMail] deleteForwarder error: ${err.message}`);
+  }
 }
 
 export interface BizMailMessage {
@@ -812,21 +897,28 @@ export async function registerBizMailWebmail(email: string, password: string, di
 
 async function webmailLogin(email: string, password: string): Promise<{ token: string; cookie: string } | null> {
   try {
+    // Get Sanctum XSRF token first — required for all webmail POST requests
+    const { xsrfToken, cookieStr: sessionCookies } = await getWebmailXsrf();
+
     const res = await fetch("https://mail.mailbux.com/api/auth/login", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "Mozilla/5.0 (compatible; AddisonsBot/1.0)",
+        "X-XSRF-TOKEN": xsrfToken,
+        "Cookie": sessionCookies,
+        "Referer": "https://mail.mailbux.com/inbox/login",
+        "Origin": "https://mail.mailbux.com",
       },
       body: JSON.stringify({ email, password }),
     });
     const rawCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
-    const cookieStr = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
+    const cookieStr = [...sessionCookies.split("; "), ...rawCookies.map((c: string) => c.split(";")[0])]
+      .filter(Boolean).join("; ");
     const body = await res.text();
     let data: any;
     try { data = JSON.parse(body); } catch { return null; }
-    // The webmail may return a token in the body OR rely on session cookies
     if (res.status >= 200 && res.status < 300) {
       const token = data?.access_token || data?.token || data?.data?.access_token || "";
       console.log(`[BizMail] Webmail login OK for ${email}, token: ${token ? "yes" : "cookie-only"}`);

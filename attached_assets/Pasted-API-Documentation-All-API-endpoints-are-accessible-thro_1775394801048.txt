@@ -1,0 +1,369 @@
+API Documentation
+All API endpoints are accessible through this base URL. Authentication is required for most endpoints.
+
+Base URL
+https://mail.mailbux.com/api
+All API endpoints are accessible through this base URL. Authentication is required for most endpoints.
+
+Authentication
+Get a Bearer token using your email and password
+
+How it works: 1. Send your credentials to get an access token → 2. Use the token in all API requests via the Authorization: Bearer TOKEN header
+
+Your API Credentials
+Username
+user39b9897f
+Copy
+Password
+Use the password you logged in with, or contact your administrator
+Use these credentials with the /api/oauth endpoint below to get your Bearer token.
+
+POST
+/api/oauth
+Obtain an access token using your email and password
+
+Show Example
+# Step 1: Get your Bearer token
+curl -X POST "https://mail.mailbux.com/api/oauth" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "grant_type": "password",
+    "username": "user39b9897f",
+    "password": "your-password"
+  }'
+
+# Response:
+# {
+#   "access_token": "eyJhbGciOiJIUzI1NiIs...",
+#   "token_type": "bearer",
+#   "expires_in": 3600
+# }
+
+# Step 2: Use the token in subsequent API calls
+curl "https://mail.mailbux.com/api/principal?types=domain" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+Recommended Workflow
+Follow this order when setting up email accounts:
+
+Add Domain — Create a domain principal first
+Create Email Account — Create an individual principal with an email on that domain
+Add Aliases — Optionally add additional addresses to the account
+Setup Forwarders — Optionally create email forwarding rules
+Note: All entities (domains, accounts, groups) are called "principals" with different type values.
+
+1. Domains
+Domains must be created before email accounts can use them
+
+GET
+/api/principal?types=domain
+List all domains in your tenant
+
+Show Example
+curl "https://mail.mailbux.com/api/principal?types=domain&limit=100" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+POST
+/api/principal
+Create a new domain
+
+Show Example
+curl -X POST "https://mail.mailbux.com/api/principal" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "domain",
+    "name": "example.com"
+  }'
+DELETE
+/api/principal/{domain}
+Delete a domain (will fail if accounts still exist on it)
+
+2. Email Accounts
+Email accounts are principals with type "individual"
+
+GET
+/api/principal?types=individual
+List all email accounts in your tenant
+
+Parameters: page, limit, types, tenant
+POST
+/api/principal
+Create a new email account
+
+Show Example
+curl -X POST "https://mail.mailbux.com/api/principal" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "individual",
+    "tenant": "your_tenant_name",
+    "name": "john@example.com",
+    "description": "John Doe",
+    "secrets": ["SecurePassword123!"],
+    "emails": ["john@example.com"],
+    "quota": 1073741824,
+    "roles": ["user"]
+  }'
+
+# Note: quota is in bytes (1073741824 = 1GB)
+# tenant field is required for quota validation
+type	"individual" for email accounts
+name	Primary email address (login identifier)
+emails	Array of all addresses (primary + aliases)
+secrets	Array with password
+quota	Storage limit in bytes
+GET
+/api/principal/{email}
+Get details of a specific email account
+
+PATCH
+/api/principal/{email}
+Update an email account (password, quota, etc.)
+
+Show Suspend Example
+# Suspend account (disable login)
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{"action": "set", "field": "disabledPermissions", "value": ["authenticate"]}]'
+
+# Unsuspend account (restore login)
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{"action": "set", "field": "disabledPermissions", "value": []}]'
+DELETE
+/api/principal/{email}
+Delete an email account and all its data
+
+3. Aliases
+Aliases are additional email addresses that deliver to an existing account
+
+How aliases work: An alias is simply an extra address in the account's emails array. To add an alias, you PATCH the account and add the new address to the emails array.
+
+PATCH
+/api/principal/{email}
+Add an alias to an existing account
+
+Show Example
+# Add alias "sales@example.com" to john@example.com
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "addItem",
+    "field": "emails",
+    "value": "sales@example.com"
+  }]'
+
+# Remove alias
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "removeItem",
+    "field": "emails",
+    "value": "sales@example.com"
+  }]'
+PATCH
+/api/principal/{email}
+Set up catch-all (receive all unmatched emails)
+
+Show Example
+# Add catch-all for entire domain to john's account
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "addItem",
+    "field": "emails",
+    "value": "@example.com"
+  }]'
+
+# Now any email to *@example.com that doesn't match
+# another account will be delivered to john@example.com
+4. Forwarders
+Forward incoming emails to external addresses
+
+✓ Fully operational: Use your Bearer token from the Authentication step. Forwarders are stored in server-level Sieve scripts.
+
+GET
+/api/forwarders?domain={domain}
+List all forwarders for a specific domain
+
+Show Example
+curl "https://mail.mailbux.com/api/forwarders?domain=example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Response:
+{
+  "forwarders": [
+    {
+      "id": "fwd_abc123",
+      "from": "info@example.com",
+      "to": "external@gmail.com",
+      "description": "Forward to personal",
+      "keepLocal": true
+    }
+  ]
+}
+POST
+/api/forwarders
+Create a new email forwarder
+
+Show Example
+curl -X POST "https://mail.mailbux.com/api/forwarders" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fromEmail": "info@example.com",
+    "to": "external@gmail.com, backup@yahoo.com",
+    "description": "Forward to personal email",
+    "keepLocal": true
+  }'
+
+# keepLocal: true = keep a copy in local mailbox
+# keepLocal: false = forward only (no local copy)
+fromEmail	Source address (must be on your domain)
+to	Destination address(es), comma-separated
+keepLocal	Keep copy in local mailbox (default: true)
+description	Optional note for this forwarder
+DELETE
+/api/forwarders/{id}
+Delete a forwarder (use the ID from the list response)
+
+5. Security
+Two-Factor Authentication (TOTP) and App Passwords for email accounts
+
+How it works: 2FA and app passwords are stored in the account's secrets array. TOTP secrets use the otpauth:// URI format, and app passwords use the $app$ prefix with bcrypt hashes.
+
+GET
+/api/principal/{email}
+Check 2FA and app password status (inspect the secrets array)
+
+Show Example
+curl "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# In the response, check the "secrets" array:
+# - Entries starting with "otpauth://totp/" = TOTP 2FA is enabled
+# - Entries starting with "$app$" = App passwords
+# - Other entries = regular password hashes
+PATCH
+/api/principal/{email}
+Enable TOTP two-factor authentication on an account
+
+Show Example
+# Add a TOTP secret to the account's secrets array
+# The TOTP URI must follow the otpauth:// standard
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "addItem",
+    "field": "secrets",
+    "value": "otpauth://totp/Mailbux:john@example.com?secret=BASE32SECRET&issuer=Mailbux"
+  }]'
+
+# The user must scan the QR code (from the otpauth URI)
+# in an authenticator app like Google Authenticator or Authy
+secret	Base32-encoded random secret key (minimum 20 bytes recommended)
+issuer	Display name in authenticator app (e.g. "Mailbux")
+algorithm	HMAC-SHA1 (default), 30-second time step, 6-digit codes
+PATCH
+/api/principal/{email}
+Disable 2FA (remove TOTP secret from account)
+
+Show Example
+# Remove the TOTP secret from the secrets array
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "removeItem",
+    "field": "secrets",
+    "value": "otpauth://totp/Mailbux:john@example.com?secret=BASE32SECRET&issuer=Mailbux"
+  }]'
+
+# Note: You need the exact TOTP URI value that was originally added
+PATCH
+/api/principal/{email}
+Create an app-specific password (for email clients, IMAP/SMTP)
+
+Show Example
+# App passwords are stored as: $app${base64-encoded-name}${bcrypt-hash}
+# Generate a random password, bcrypt-hash it, and add to secrets
+
+# 1. Generate a random 16-char password
+APP_PASSWORD="abcd efgh ijkl mnop"
+
+# 2. Bcrypt hash it and create the secret entry
+# Format: $app${base64("My iPhone")}${bcrypt(password)}
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "addItem",
+    "field": "secrets",
+    "value": "$app$TXkgaVBob25l$2y$10$hashedpasswordhere"
+  }]'
+
+# The user enters the plain-text app password in their email client
+# instead of their regular password
+Format	$app${base64(name)}${bcrypt(password)}
+Name	Label for the app password (e.g. "My iPhone", "Thunderbird")
+Usage	Use as password in IMAP/SMTP/POP3 email clients with the account email as username
+PATCH
+/api/principal/{email}
+Delete an app password
+
+Show Example
+# Remove a specific app password from the secrets array
+curl -X PATCH "https://mail.mailbux.com/api/principal/john@example.com" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "action": "removeItem",
+    "field": "secrets",
+    "value": "$app$TXkgaVBob25l$2y$10$hashedpasswordhere"
+  }]'
+DKIM & DNS
+POST
+/userapi/dkim
+Create DKIM signature for a domain
+
+Show Example
+curl -X POST "https://mail.mailbux.com/userapi/dkim" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "domain": "example.com",
+    "algorithm": "Ed25519"
+  }'
+GET
+/api/dns/records/{domain}
+Get required DNS records for a domain
+
+Billing & Plan
+GET
+/userapi/account-plan
+Check account plan and features
+
+Parameters: email (query parameter)
+Show Response
+{
+  "success": true,
+  "email": "user@domain.com",
+  "tenant": "tenant_name",
+  "plan": "paid",
+  "whitelabel": true,
+  "reseller": false
+}
+Quick Reference: Regular API Endpoints
+Resource	Endpoint	Methods
+Domains	/api/principal?types=domain	GET, POST, DELETE
+Accounts	/api/principal?types=individual	GET, POST, PATCH, DELETE
+Aliases	/api/principal/{email}	PATCH (emails array)
+Forwarders	/api/forwarders	GET, POST, DELETE
+2FA (TOTP)	/api/principal/{email}	PATCH (secrets array)
+App Passwords	/api/principal/{email}	PATCH (secrets array)
+DKIM	/userapi/dkim	POST
+DNS Records	/api/dns/records/{domain}	GET
