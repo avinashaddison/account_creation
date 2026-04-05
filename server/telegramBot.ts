@@ -1260,9 +1260,9 @@ export function startTelegramBot(config: BotConfig) {
       { parse_mode: "HTML" }
     );
 
-    let email: string, password: string, accountNum: number;
+    let email: string, password: string, accountNum: number, autoDeletedNums: number[];
     try {
-      ({ email, password, accountNum } = await createBizMailAccount(requestedNum));
+      ({ email, password, accountNum, autoDeletedNums } = await createBizMailAccount(requestedNum));
     } catch (err: any) {
       await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
         `❌ <b>Failed to create business mail</b>\n<code>${esc(err.message?.substring(0, 200))}</code>`,
@@ -1272,8 +1272,15 @@ export function startTelegramBot(config: BotConfig) {
     }
 
     // Capacity info
-    const activeCount = (await storage.getAllBizMailAccounts()).filter(a => a.isActive).length;
-    const capacityLine = `📊 <b>Capacity:</b> ${activeCount}/40 accounts used (${40 - activeCount} slots free)`;
+    const allAccts    = await storage.getAllBizMailAccounts();
+    const activeCount = allAccts.filter(a => a.isActive).length;
+    const maxEver     = allAccts.length > 0 ? Math.max(...allAccts.map(a => a.accountNum)) : accountNum;
+    const capacityLine = `📊 <b>Capacity:</b> ${activeCount}/40 active  |  Total ever: account${maxEver}`;
+
+    // Auto-deletion notice (shown when we rotated out old accounts)
+    const autoDelLine = autoDeletedNums.length > 0
+      ? `\n♻️ <i>Auto-removed ${autoDeletedNums.length} oldest accounts to free space: ${autoDeletedNums.map(n => `account${n}`).join(", ")}</i>`
+      : "";
 
     // Set up Gmail forwarder so incoming mail is captured via Gmail IMAP
     const gmailAddr = getGmailAddress();
@@ -1304,7 +1311,7 @@ export function startTelegramBot(config: BotConfig) {
       `🌐 <b>Webmail:</b> <a href="https://mail.mailbux.com/inbox/login">mail.mailbux.com/inbox/login</a>\n` +
       `📮 <b>IMAP:</b> <code>mail.mailbux.com:993 (SSL)</code>\n` +
       `📤 <b>SMTP:</b> <code>mail.mailbux.com:587 (STARTTLS)</code>\n\n` +
-      `${capacityLine}\n\n` +
+      `${capacityLine}${autoDelLine}\n\n` +
       inboxNote;
 
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,

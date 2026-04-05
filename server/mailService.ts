@@ -790,76 +790,89 @@ function genBizPassword(): string {
 }
 
 const BIZ_MAIL_QUOTA_BYTES = 262_144_000; // 250 MB
-const BIZ_MAIL_MAX_ACCOUNTS = 40;         // 10 GB ÷ 250 MB
+const BIZ_MAIL_MAX_ACCOUNTS = 40;  // max simultaneously active (10 GB ÷ 250 MB)
+const BIZ_MAIL_AUTO_DELETE   = 5;   // how many oldest accounts to remove when full
 
 export async function createBizMailAccount(
-  requestedNum?: number, // if set, create this specific slot (re-create after deletion)
-): Promise<{ email: string; password: string; accountNum: number }> {
+  requestedNum?: number, // if set, re-create this specific slot (recovery flow)
+): Promise<{ email: string; password: string; accountNum: number; autoDeletedNums: number[] }> {
   const { storage } = await import("./storage");
   const password = genBizPassword();
   const token = await getMailbuxBearerToken();
 
-  // Build the list of slots to try
-  let slotsToTry: number[];
+  let targetNum: number;
+  const autoDeletedNums: number[] = [];
+
   if (requestedNum !== undefined) {
-    slotsToTry = [requestedNum];
+    // --- Recovery: recreate a specific slot ---
+    targetNum = requestedNum;
   } else {
-    const usedNums = new Set(await storage.getUsedBizMailNums());
-    // Find next unused slot up to the max
-    slotsToTry = [];
-    for (let n = 1; n <= BIZ_MAIL_MAX_ACCOUNTS; n++) {
-      if (!usedNums.has(n)) { slotsToTry.push(n); break; }
-    }
-    if (slotsToTry.length === 0) {
-      throw new Error(`All ${BIZ_MAIL_MAX_ACCOUNTS} business mail slots are in use (10 GB plan limit). Delete an existing account first.`);
-    }
-  }
+    // --- Normal: pick next ever-increasing number ---
+    const allAccounts  = await storage.getAllBizMailAccounts();
+    const activeAccounts = allAccounts.filter(a => a.isActive)
+      .sort((a, b) => a.accountNum - b.accountNum);
 
-  for (const n of slotsToTry) {
-    const email = `account${n}@${MAILBUX_DOMAIN}`;
-    const res = await fetch(`${MAILBUX_API}/principal`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-      },
-      body: JSON.stringify({
-        type: "individual",
-        tenant: MAILBUX_USER,
-        name: email,
-        description: `Addison Panel business mail #${n}`,
-        secrets: [password],
-        emails: [email],
-        quota: BIZ_MAIL_QUOTA_BYTES,
-        roles: ["user"],
-      }),
-    });
-    const json: any = await res.json();
-
-    if (json.data && typeof json.data === "number") {
-      console.log(`[BizMail] Created account ${email} (Stalwart ID: ${json.data})`);
-      // Register in DB (or reactivate if it was previously deleted)
-      const existing = await storage.getBizMailByNum(n);
-      if (existing) {
-        await storage.reactivateBizMailAccount(n, password);
-      } else {
-        await storage.registerBizMailAccount(n, email, password);
+    // If all 40 slots are live, auto-purge the 5 oldest to make room
+    if (activeAccounts.length >= BIZ_MAIL_MAX_ACCOUNTS) {
+      const toDelete = activeAccounts.slice(0, BIZ_MAIL_AUTO_DELETE);
+      console.log(`[BizMail] Capacity full — auto-deleting ${toDelete.length} oldest accounts: ${toDelete.map(a => `account${a.accountNum}`).join(", ")}`);
+      for (const acc of toDelete) {
+        await deleteBizMailAccountByEmail(acc.email).catch(err =>
+          console.warn(`[BizMail] Auto-delete ${acc.email} failed:`, err.message)
+        );
+        await storage.markBizMailDeleted(acc.accountNum).catch(() => {});
+        autoDeletedNums.push(acc.accountNum);
       }
-      return { email, password, accountNum: n };
     }
 
-    const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
-    if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
-      // Slot exists on server but wasn't in DB — still register it and try next
-      continue;
-    }
-    throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
+    // Next number is always max-ever-used + 1 (never reuse old slots)
+    const freshAll  = await storage.getAllBizMailAccounts();
+    const maxNum    = freshAll.length > 0 ? Math.max(...freshAll.map(a => a.accountNum)) : 0;
+    targetNum = maxNum + 1;
   }
-  throw new Error(requestedNum
-    ? `Could not create account${requestedNum}@${MAILBUX_DOMAIN}`
-    : `All ${BIZ_MAIL_MAX_ACCOUNTS} business mail slots are taken`
-  );
+
+  const email = `account${targetNum}@${MAILBUX_DOMAIN}`;
+  const res = await fetch(`${MAILBUX_API}/principal`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    },
+    body: JSON.stringify({
+      type: "individual",
+      tenant: MAILBUX_USER,
+      name: email,
+      description: `Addison Panel business mail #${targetNum}`,
+      secrets: [password],
+      emails: [email],
+      quota: BIZ_MAIL_QUOTA_BYTES,
+      roles: ["user"],
+    }),
+  });
+  const json: any = await res.json();
+
+  if (json.data && typeof json.data === "number") {
+    console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
+    const existing = await storage.getBizMailByNum(targetNum);
+    if (existing) {
+      await storage.reactivateBizMailAccount(targetNum, password);
+    } else {
+      await storage.registerBizMailAccount(targetNum, email, password);
+    }
+    return { email, password, accountNum: targetNum, autoDeletedNums };
+  }
+
+  throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
+}
+
+// Internal helper used by auto-rotation (avoids circular import with deleteBizMailAccount export)
+async function deleteBizMailAccountByEmail(email: string): Promise<void> {
+  const token = await getMailbuxBearerToken();
+  await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` },
+  }).catch(() => {});
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
