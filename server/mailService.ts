@@ -789,46 +789,24 @@ function genBizPassword(): string {
   return `Biz@${rand}${num}`;
 }
 
-const BIZ_MAIL_QUOTA_BYTES = 262_144_000; // 250 MB
-const BIZ_MAIL_MAX_ACCOUNTS = 40;  // max simultaneously active (10 GB ÷ 250 MB)
-const BIZ_MAIL_AUTO_DELETE   = 5;   // how many oldest accounts to remove when full
+const BIZ_MAIL_QUOTA_BYTES = 10_485_760; // 10 MB per account — allows thousands on the plan
 
 export async function createBizMailAccount(
-  requestedNum?: number, // if set, re-create this specific slot (recovery flow)
-): Promise<{ email: string; password: string; accountNum: number; autoDeletedNums: number[] }> {
+  requestedNum?: number, // if set, re-create this specific number (recovery flow)
+): Promise<{ email: string; password: string; accountNum: number }> {
   const { storage } = await import("./storage");
   const password = genBizPassword();
   const token = await getMailbuxBearerToken();
 
   let targetNum: number;
-  const autoDeletedNums: number[] = [];
 
   if (requestedNum !== undefined) {
-    // --- Recovery: recreate a specific slot ---
     targetNum = requestedNum;
   } else {
-    // --- Normal: pick next ever-increasing number ---
-    const allAccounts  = await storage.getAllBizMailAccounts();
-    const activeAccounts = allAccounts.filter(a => a.isActive)
-      .sort((a, b) => a.accountNum - b.accountNum);
-
-    // If all 40 slots are live, auto-purge the 5 oldest to make room
-    if (activeAccounts.length >= BIZ_MAIL_MAX_ACCOUNTS) {
-      const toDelete = activeAccounts.slice(0, BIZ_MAIL_AUTO_DELETE);
-      console.log(`[BizMail] Capacity full — auto-deleting ${toDelete.length} oldest accounts: ${toDelete.map(a => `account${a.accountNum}`).join(", ")}`);
-      for (const acc of toDelete) {
-        await deleteBizMailAccountByEmail(acc.email).catch(err =>
-          console.warn(`[BizMail] Auto-delete ${acc.email} failed:`, err.message)
-        );
-        await storage.markBizMailDeleted(acc.accountNum).catch(() => {});
-        autoDeletedNums.push(acc.accountNum);
-      }
-    }
-
-    // Next number is always max-ever-used + 1 (never reuse old slots)
-    const freshAll  = await storage.getAllBizMailAccounts();
-    const maxNum    = freshAll.length > 0 ? Math.max(...freshAll.map(a => a.accountNum)) : 0;
-    targetNum = maxNum + 1;
+    // Always pick max-ever-used + 1 — numbering goes up forever, no cap
+    const all    = await storage.getAllBizMailAccounts();
+    const maxNum = all.length > 0 ? Math.max(...all.map(a => a.accountNum)) : 0;
+    targetNum    = maxNum + 1;
   }
 
   const email = `account${targetNum}@${MAILBUX_DOMAIN}`;
@@ -860,19 +838,10 @@ export async function createBizMailAccount(
     } else {
       await storage.registerBizMailAccount(targetNum, email, password);
     }
-    return { email, password, accountNum: targetNum, autoDeletedNums };
+    return { email, password, accountNum: targetNum };
   }
 
   throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
-}
-
-// Internal helper used by auto-rotation (avoids circular import with deleteBizMailAccount export)
-async function deleteBizMailAccountByEmail(email: string): Promise<void> {
-  const token = await getMailbuxBearerToken();
-  await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
-    method: "DELETE",
-    headers: { "Authorization": `Bearer ${token}` },
-  }).catch(() => {});
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
