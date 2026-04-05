@@ -120,7 +120,7 @@ interface ShopAdminFlow {
 }
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count";
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
@@ -1014,16 +1014,34 @@ export function startTelegramBot(config: BotConfig) {
   bot.hears(KB.CHECKOUT, (ctx) => handleMenu(ctx, async () => {
     const ready   = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'processing'`);
     const sources = await dbQuery(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE status = 'sold_out' AND coupon_extracted = false`);
+    const processing = parseInt(ready.rows[0]?.cnt || "0");
+    const sourceCnt  = parseInt(sources.rows[0]?.cnt || "0");
+    const maxPossible = Math.min(sourceCnt * 3, processing, 100);
+    getState(ctx.from.id).awaitingText = "checkout_count";
     await ctx.reply(
       `╔══[ 🔗 CHECKOUT LINKS ]══════════════════╗\n` +
       `╚════════════════════════════════════════╝\n\n` +
-      `<code>◈ Processing targets  →  ${ready.rows[0]?.cnt || 0}\n` +
-      `◈ Source accounts     →  ${sources.rows[0]?.cnt || 0}</code>\n\n` +
-      `▸ Generate checkout URLs now?`,
+      `<code>◈ Processing targets  →  ${processing}\n` +
+      `◈ Coupon sources       →  ${sourceCnt}\n` +
+      `◈ Max possible         →  ${maxPossible}</code>\n\n` +
+      `▸ How many checkout links to generate? (1–100)\n` +
+      `  Each referral generates up to 3, sources chain automatically.`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("⚡ Generate Now", "confirm_checkout"), Markup.button.callback("✖ Cancel", "dismiss")],
+          [
+            Markup.button.callback("3",  "chain_co_3"),
+            Markup.button.callback("6",  "chain_co_6"),
+            Markup.button.callback("9",  "chain_co_9"),
+            Markup.button.callback("12", "chain_co_12"),
+          ],
+          [
+            Markup.button.callback("15", "chain_co_15"),
+            Markup.button.callback("30", "chain_co_30"),
+            Markup.button.callback("50", "chain_co_50"),
+            Markup.button.callback("100","chain_co_100"),
+          ],
+          [Markup.button.callback("✖ Cancel", "dismiss")],
         ]),
       }
     );
@@ -1993,6 +2011,41 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.reply("Cancelled.");
   });
 
+  // ── Chain checkout helper (shared by quick-pick buttons + free-text input) ──
+  async function startChainCheckout(ctx: any, count: number) {
+    const uid = ctx.from?.id || ctx.callbackQuery?.from?.id;
+    getState(uid).awaitingText = undefined;
+    if (isRateLimited(uid, "chain_checkout", 5_000)) {
+      await ctx.reply("⏳ Please wait a moment before starting another batch.").catch(() => {});
+      return;
+    }
+    const checkoutSvc: ServiceConfig = {
+      emoji: "🔗", label: `Checkout Links (${count})`, endpoint: "",
+      outlookTable: "", hasCard: false, hasCoupon: false, hasReferral: false,
+    };
+    const r = await botApi("/api/replit-chain-links", "POST", { totalLinks: count, successStatus: "sold_out" });
+    if (!r.ok) {
+      await ctx.reply(`❌ <b>Error:</b> ${esc(r.data?.error || "Unknown")}`, { parse_mode: "HTML" });
+      return;
+    }
+    const batchId = r.data.batchId as string;
+    const startTime = Date.now();
+    const msg = await ctx.reply(
+      `⏳ <b>🔗 Generating ${count} checkout link(s)</b> — starting...\n\n<pre>Connecting to batch...</pre>`,
+      { parse_mode: "HTML" }
+    );
+    await streamBatchLogs(ctx.chat!.id, msg.message_id, batchId, checkoutSvc, count, startTime);
+  }
+
+  // Quick-pick count buttons (3 / 6 / 9 / 12 / 15 / 30 / 50 / 100)
+  for (const n of [3, 6, 9, 12, 15, 30, 50, 100]) {
+    bot.action(`chain_co_${n}`, async (ctx) => {
+      await ctx.answerCbQuery(`Generating ${n} links...`);
+      await ctx.deleteMessage().catch(() => {});
+      await startChainCheckout(ctx, n);
+    });
+  }
+
   // Checkout
   bot.action("confirm_checkout", async (ctx) => {
     const uid = ctx.from.id;
@@ -2564,6 +2617,16 @@ export function startTelegramBot(config: BotConfig) {
       st.awaitingText = undefined;
       await ctx.reply(`✅ Referral URL set.`, { parse_mode: "Markdown" });
       await showCreateSummary(ctx, uid, getState);
+      return;
+    }
+
+    if (st.awaitingText === "checkout_count") {
+      const count = parseInt(text.trim());
+      if (isNaN(count) || count < 1 || count > 100) {
+        return ctx.reply("Please enter a number between 1 and 100.");
+      }
+      st.awaitingText = undefined;
+      await startChainCheckout(ctx, count);
       return;
     }
   });
