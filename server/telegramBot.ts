@@ -1421,7 +1421,7 @@ export function startTelegramBot(config: BotConfig) {
 
   // Recover a specific deleted numbered account by typing "account5"
   bot.hears(/^account(\d+)$/i, async (ctx) => {
-    if (!ALLOWED_IDS.includes(ctx.from!.id)) return;
+    if (!ALLOWED.has(ctx.from!.id)) return;
     const uid    = ctx.from!.id;
     const chatId = ctx.chat!.id;
     const num    = parseInt(ctx.match[1], 10);

@@ -796,77 +796,120 @@ export async function createBizMailAccount(opts: {
   customUsername?: string;  // create/recreate a custom-named account (e.g. "john")
 } = {}): Promise<{ email: string; password: string; accountNum: number | null; isCustom: boolean }> {
   const { storage } = await import("./storage");
-  const password = genBizPassword();
   const token = await getMailbuxBearerToken();
-
-  let email: string;
-  let accountNum: number | null = null;
   const isCustom = !!opts.customUsername;
 
-  if (opts.customUsername) {
-    // Sanitise: lowercase, alphanumeric + dots/hyphens/underscores only
-    const username = opts.customUsername.toLowerCase().replace(/[^a-z0-9._-]/g, "");
-    if (!username) throw new Error("Invalid username — use letters, numbers, dots, hyphens, or underscores only.");
-    email = `${username}@${MAILBUX_DOMAIN}`;
-    accountNum = null;
-  } else if (opts.requestedNum !== undefined) {
-    accountNum = opts.requestedNum;
-    email = `account${accountNum}@${MAILBUX_DOMAIN}`;
-  } else {
-    // Normal auto-increment
+  // ── Fixed paths (recovery / custom) ─────────────────────────────────────
+  if (opts.customUsername || opts.requestedNum !== undefined) {
+    const password = genBizPassword();
+    let email: string;
+    let accountNum: number | null = null;
+
+    if (opts.customUsername) {
+      const username = opts.customUsername.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+      if (!username) throw new Error("Invalid username — use letters, numbers, dots, hyphens, or underscores only.");
+      email = `${username}@${MAILBUX_DOMAIN}`;
+    } else {
+      accountNum = opts.requestedNum!;
+      email = `account${accountNum}@${MAILBUX_DOMAIN}`;
+    }
+
+    const res = await fetch(`${MAILBUX_API}/principal`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({
+        type: "individual",
+        tenant: MAILBUX_USER,
+        name: email,
+        description: isCustom
+          ? `Addison Panel custom mail — ${email}`
+          : `Addison Panel business mail #${accountNum}`,
+        secrets: [password],
+        emails: [email],
+        quota: BIZ_MAIL_QUOTA_BYTES,
+        roles: ["user"],
+      }),
+    });
+    const json: any = await res.json();
+    const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
+
+    if ((json.data && typeof json.data === "number") ||
+        detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
+      if (json.data) console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
+      else           console.log(`[BizMail] ${email} already existed on server — reactivating in DB`);
+      const existing = await storage.getBizMailByEmail(email);
+      if (existing) {
+        await storage.reactivateBizMailAccountByEmail(email, password);
+      } else {
+        await storage.registerBizMailAccount(accountNum, email, password);
+      }
+      return { email, password, accountNum, isCustom };
+    }
+
+    throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
+  }
+
+  // ── Auto-increment: loop past any slots that already exist on the server ─
+  const MAX_SKIP = 50; // safety guard against infinite loops
+  for (let skip = 0; skip < MAX_SKIP; skip++) {
+    const password = genBizPassword();
+
+    // Re-read DB each iteration so we account for slots registered mid-loop
     const all    = await storage.getAllBizMailAccounts();
     const nums   = all.map(a => a.accountNum).filter((n): n is number => n !== null);
     const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
-    accountNum   = maxNum + 1;
-    email        = `account${accountNum}@${MAILBUX_DOMAIN}`;
-  }
+    const accountNum = maxNum + 1;
+    const email = `account${accountNum}@${MAILBUX_DOMAIN}`;
 
-  const res = await fetch(`${MAILBUX_API}/principal`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify({
-      type: "individual",
-      tenant: MAILBUX_USER,
-      name: email,
-      description: isCustom
-        ? `Addison Panel custom mail — ${email}`
-        : `Addison Panel business mail #${accountNum}`,
-      secrets: [password],
-      emails: [email],
-      quota: BIZ_MAIL_QUOTA_BYTES,
-      roles: ["user"],
-    }),
-  });
-  const json: any = await res.json();
+    const res = await fetch(`${MAILBUX_API}/principal`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({
+        type: "individual",
+        tenant: MAILBUX_USER,
+        name: email,
+        description: `Addison Panel business mail #${accountNum}`,
+        secrets: [password],
+        emails: [email],
+        quota: BIZ_MAIL_QUOTA_BYTES,
+        roles: ["user"],
+      }),
+    });
+    const json: any = await res.json();
+    const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
 
-  if (json.data && typeof json.data === "number") {
-    console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
-    const existing = await storage.getBizMailByEmail(email);
-    if (existing) {
-      await storage.reactivateBizMailAccountByEmail(email, password);
-    } else {
+    if (json.data && typeof json.data === "number") {
+      // Fresh account created successfully
+      console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
       await storage.registerBizMailAccount(accountNum, email, password);
+      return { email, password, accountNum, isCustom: false };
     }
-    return { email, password, accountNum, isCustom };
+
+    if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
+      // This slot already exists on the server (leftover from a previous session).
+      // Register it in DB so the counter skips it next iteration, then try next number.
+      console.log(`[BizMail] ${email} already exists on server — skipping to next number`);
+      const existing = await storage.getBizMailByEmail(email);
+      if (!existing) {
+        // Placeholder entry (isActive=false so it's not treated as a live account)
+        await storage.registerBizMailAccount(accountNum, email, "orphaned");
+        await storage.markBizMailDeletedByEmail(email);
+      }
+      continue; // try accountNum + 1
+    }
+
+    throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
 
-  // "already exists" on server but maybe not in DB — reactivate
-  const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
-  if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
-    const existing = await storage.getBizMailByEmail(email);
-    if (existing) {
-      await storage.reactivateBizMailAccountByEmail(email, password);
-    } else {
-      await storage.registerBizMailAccount(accountNum, email, password);
-    }
-    return { email, password, accountNum, isCustom };
-  }
-
-  throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
+  throw new Error("Could not find a free account slot after 50 attempts — server may be at capacity.");
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
