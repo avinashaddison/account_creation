@@ -4,6 +4,8 @@ import {
   getAvailableDomain, createTempEmail, getAuthToken,
   fetchMessages, fetchMessageContent, generateRandomUsername,
   detectProviderFromDomain,
+  createBizMailAccount, deleteBizMailAccount, pollBizMailInbox,
+  type BizMailMessage,
 } from "./mailService";
 
 const SERVER_PORT = process.env.PORT || 5000;
@@ -106,6 +108,16 @@ interface MailSession {
   statusMsgId: number;
   chatId: number;
 }
+interface BizMailSession {
+  email: string;
+  password: string;
+  accountNum: number;
+  stopped: boolean;
+  statusMsgId: number;
+  chatId: number;
+  receivedCount: number;
+}
+
 interface ShopAdminFlow {
   step?: "name" | "description" | "price" | "account_type" | "status_filter"
        | "topup_uid" | "topup_amount"
@@ -125,6 +137,7 @@ interface UserState {
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
   mailSession?: MailSession;
+  bizMailSession?: BizMailSession;
   shopAdminFlow?: ShopAdminFlow;
 }
 // ── Create flow helpers ───────────────────────────────────────────────────────
@@ -1214,10 +1227,140 @@ export function startTelegramBot(config: BotConfig) {
   }
 
   bot.hears(KB.MAIL, (ctx) => handleMenu(ctx, async () => {
-    const uid = ctx.from!.id;
+    await ctx.reply(
+      `📧 <b>MAIL</b>\n\nChoose a mail type:`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📨 Temp Mail", "mail_temp"), Markup.button.callback("💼 Business Mail", "biz_mail_new")],
+        ]),
+      }
+    );
+  }));
+
+  bot.action("mail_temp", async (ctx) => {
+    await ctx.answerCbQuery("Generating temp address...").catch(() => {});
+    const uid    = ctx.from!.id;
     const chatId = ctx.chat!.id;
     await startMailSession(chatId, uid);
-  }));
+  });
+
+  // ── Business Mail ─────────────────────────────────────────────────────────
+  async function startBizMailSession(chatId: number, uid: number) {
+    const state = getState(uid);
+    // Stop any existing biz session
+    if (state.bizMailSession) {
+      state.bizMailSession.stopped = true;
+      await deleteBizMailAccount(state.bizMailSession.email).catch(() => {});
+    }
+
+    const loadMsg = await bot.telegram.sendMessage(chatId,
+      `⏳ <b>Creating business email account...</b>`,
+      { parse_mode: "HTML" }
+    );
+
+    let email: string, password: string, accountNum: number;
+    try {
+      ({ email, password, accountNum } = await createBizMailAccount());
+    } catch (err: any) {
+      await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+        `❌ <b>Failed to create business mail</b>\n<code>${esc(err.message?.substring(0, 120))}</code>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+      return;
+    }
+
+    const since = new Date();
+    const bizKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback("🔄 New Account", "biz_mail_new"), Markup.button.callback("⏹ Stop", "biz_mail_stop")],
+    ]);
+
+    const bizStatusCard = (count: number) =>
+      `💼 <b>Business Mail Active</b>\n\n` +
+      `📧 <code>${esc(email)}</code>\n` +
+      `📋 <code>${esc(email)}</code>\n` +
+      `🔑 Password: <code>${esc(password)}</code>\n\n` +
+      `📥 <b>${count}</b> email${count === 1 ? "" : "s"} received\n` +
+      `⏳ <i>Monitoring inbox in real-time... (1 hour session)</i>`;
+
+    await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+      bizStatusCard(0), { parse_mode: "HTML", ...bizKeyboard }
+    ).catch(() => {});
+
+    const session: BizMailSession = {
+      email, password, accountNum,
+      stopped: false,
+      statusMsgId: loadMsg.message_id,
+      chatId,
+      receivedCount: 0,
+    };
+    state.bizMailSession = session;
+
+    // Start polling in background
+    pollBizMailInbox(
+      email,
+      password,
+      since,
+      async (msg: BizMailMessage) => {
+        if (session.stopped) return;
+        session.receivedCount++;
+        await bot.telegram.sendMessage(chatId,
+          `📬 <b>New Business Email!</b>\n\n` +
+          `💼 <b>Inbox:</b> <code>${esc(email)}</code>\n` +
+          `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
+          `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
+          `📅 <b>Date:</b> ${msg.date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
+          `<pre>${esc(msg.body || "(no text content)")}</pre>`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
+        // Update status card
+        await bot.telegram.editMessageText(chatId, session.statusMsgId, undefined,
+          bizStatusCard(session.receivedCount),
+          { parse_mode: "HTML", ...bizKeyboard }
+        ).catch(() => {});
+      },
+      () => session.stopped,
+      60,
+    ).then(async () => {
+      if (!session.stopped) {
+        session.stopped = true;
+        await bot.telegram.editMessageText(chatId, session.statusMsgId, undefined,
+          `💼 <b>Business Mail Session Expired</b>\n\n` +
+          `<code>${esc(email)}</code>\n\n` +
+          `📥 Total received: <b>${session.receivedCount}</b>\n` +
+          `<i>Session timed out after 1 hour. Account deleted.</i>`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
+        await deleteBizMailAccount(email).catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
+  bot.action("biz_mail_new", async (ctx) => {
+    await ctx.answerCbQuery("Creating business account...").catch(() => {});
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    await startBizMailSession(chatId, uid);
+  });
+
+  bot.action("biz_mail_stop", async (ctx) => {
+    await ctx.answerCbQuery("Stopping session...").catch(() => {});
+    const uid     = ctx.from!.id;
+    const state   = getState(uid);
+    const session = state.bizMailSession;
+    if (session && !session.stopped) {
+      session.stopped = true;
+      await deleteBizMailAccount(session.email).catch(() => {});
+      await bot.telegram.editMessageText(session.chatId, session.statusMsgId, undefined,
+        `💼 <b>Business Mail Stopped</b>\n\n` +
+        `<code>${esc(session.email)}</code>\n\n` +
+        `📥 Total received: <b>${session.receivedCount}</b>\n` +
+        `<i>Session ended by user. Account deleted.</i>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+      state.bizMailSession = undefined;
+    }
+  });
 
   // ── MoviesDrive ────────────────────────────────────────────────────────────
   bot.hears(KB.MOVIES, (ctx) => handleMenu(ctx, async () => {

@@ -588,3 +588,135 @@ export function generateRandomUsername(): string {
   const num = Math.floor(Math.random() * 9999);
   return `${adj}${noun}${num}`;
 }
+
+// ── Business Mail (mailbux.com / addison.asia) ────────────────────────────────
+
+const MAILBUX_API   = "https://mail.mailbux.com/api";
+const MAILBUX_USER  = "user39b9897f";
+const MAILBUX_PASS  = "Tvk*nWnlAmYz&SR%";
+const MAILBUX_DOMAIN = "addison.asia";
+const MAILBUX_IMAP_HOST = "mail.mailbux.com";
+
+function mailbuxBasicAuth(): string {
+  return "Basic " + Buffer.from(`${MAILBUX_USER}:${MAILBUX_PASS}`).toString("base64");
+}
+
+function genBizPassword(): string {
+  const rand = Math.random().toString(36).slice(2, 10).toUpperCase();
+  const num  = Math.floor(Math.random() * 9999);
+  return `Biz@${rand}${num}`;
+}
+
+export async function createBizMailAccount(): Promise<{ email: string; password: string; accountNum: number }> {
+  const password = genBizPassword();
+  for (let n = 1; n <= 999; n++) {
+    const email = `account${n}@${MAILBUX_DOMAIN}`;
+    const res = await fetch(`${MAILBUX_API}/principal`, {
+      method: "POST",
+      headers: {
+        "Authorization": mailbuxBasicAuth(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "individual",
+        name: email,
+        secrets: [password],
+        emails: [email],
+      }),
+    });
+    const json: any = await res.json();
+    // Success
+    if (json.data && typeof json.data === "number") {
+      return { email, password, accountNum: n };
+    }
+    // Already exists — try next slot
+    const detail: string = (json.details || json.error || "").toLowerCase();
+    if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
+      continue;
+    }
+    throw new Error(json.details || json.error || JSON.stringify(json));
+  }
+  throw new Error("All account slots taken (account1–account999)");
+}
+
+export async function deleteBizMailAccount(email: string): Promise<void> {
+  await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+    headers: { "Authorization": mailbuxBasicAuth() },
+  }).catch(() => {});
+}
+
+export interface BizMailMessage {
+  uid: number;
+  from: string;
+  subject: string;
+  date: Date;
+  body: string;
+}
+
+export async function pollBizMailInbox(
+  email: string,
+  password: string,
+  since: Date,
+  onMessage: (msg: BizMailMessage) => Promise<void>,
+  shouldStop: () => boolean,
+  maxMinutes = 60,
+): Promise<void> {
+  const deadline  = Date.now() + maxMinutes * 60 * 1000;
+  const seenUids  = new Set<number>();
+
+  while (!shouldStop() && Date.now() < deadline) {
+    const client = new ImapFlow({
+      host:   MAILBUX_IMAP_HOST,
+      port:   993,
+      secure: true,
+      auth:   { user: email, pass: password },
+      logger: false,
+      tls:    { rejectUnauthorized: false },
+    });
+
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock("INBOX");
+      try {
+        // Inner poll loop — keep connection alive
+        while (!shouldStop() && Date.now() < deadline) {
+          const uids = await client.search({ since }, { uid: true });
+          for (const uid of uids) {
+            if (seenUids.has(uid)) continue;
+            seenUids.add(uid);
+            try {
+              for await (const msg of client.fetch(String(uid), { source: true, envelope: true }, { uid: true })) {
+                const raw     = msg.source?.toString("utf8") ?? "";
+                const from    = msg.envelope?.from?.[0]?.address
+                             || msg.envelope?.from?.[0]?.name
+                             || "unknown";
+                const subject = msg.envelope?.subject || "(no subject)";
+                const date    = msg.envelope?.date   || new Date();
+                // Strip email headers and HTML
+                const body = raw
+                  .replace(/^[\s\S]*?\r?\n\r?\n/, "")
+                  .replace(/<[^>]+>/g, " ")
+                  .replace(/&\w+;/g, " ")
+                  .replace(/\s+/g, " ")
+                  .trim()
+                  .substring(0, 800);
+                await onMessage({ uid, from, subject, date, body });
+              }
+            } catch { /* skip bad message */ }
+          }
+          // Poll every 10 s
+          await new Promise(r => setTimeout(r, 10_000));
+        }
+      } finally {
+        lock.release();
+      }
+    } catch (err: any) {
+      console.log(`[BizMail] IMAP error for ${email}: ${err.message}`);
+      // Wait before reconnecting
+      await new Promise(r => setTimeout(r, 15_000));
+    } finally {
+      try { await client.logout(); } catch {}
+    }
+  }
+}
