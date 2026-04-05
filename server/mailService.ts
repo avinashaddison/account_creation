@@ -267,9 +267,55 @@ export async function pollGmailForElevenLabsLink(
   return null;
 }
 
-// ── Poll Gmail inbox for forwarded business mail ──────────────────────────────
+// ── Extract readable text from raw MIME email source ─────────────────────────
+function extractMimeText(raw: string): string {
+  // Find boundary for multipart messages
+  const boundaryMatch = raw.match(/Content-Type:\s*multipart\/[^;]+;\s*boundary="?([^"\r\n]+)"?/i);
+  if (boundaryMatch) {
+    const boundary = boundaryMatch[1].trim();
+    const parts = raw.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:--)?`));
+    for (const part of parts) {
+      if (/Content-Type:\s*text\/plain/i.test(part)) {
+        const bodyStart = part.indexOf("\r\n\r\n");
+        if (bodyStart === -1) continue;
+        return part.slice(bodyStart + 4)
+          .replace(/=\r?\n/g, "")
+          .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+          .trim()
+          .substring(0, 800);
+      }
+    }
+    // Fallback to first HTML part stripped of tags
+    for (const part of parts) {
+      if (/Content-Type:\s*text\/html/i.test(part)) {
+        const bodyStart = part.indexOf("\r\n\r\n");
+        if (bodyStart === -1) continue;
+        return part.slice(bodyStart + 4)
+          .replace(/=\r?\n/g, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .substring(0, 800);
+      }
+    }
+  }
+
+  // Plain (non-multipart) message — everything after the blank header line
+  const bodyStart = raw.indexOf("\r\n\r\n");
+  if (bodyStart !== -1) {
+    return raw.slice(bodyStart + 4)
+      .replace(/=\r?\n/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .substring(0, 800);
+  }
+  return "";
+}
+
+// ── Gmail IMAP IDLE monitor for forwarded business mail ───────────────────────
+// Uses IMAP IDLE so Gmail pushes new-mail events (~1–2 s after delivery).
 // Business mail accounts forward to Gmail via /api/forwarders.
-// We check Gmail IMAP for emails addressed To: accountN@addison.asia.
 export async function pollBizMailViaGmail(
   bizEmail: string,
   since: Date,
@@ -278,12 +324,36 @@ export async function pollBizMailViaGmail(
   maxMinutes = 120,
 ): Promise<void> {
   if (!_gmailAddress || !_gmailAppPassword) {
-    console.log("[BizMail] Gmail credentials not configured — cannot poll");
+    console.log("[BizMail] Gmail credentials not configured — cannot monitor");
     return;
   }
 
-  const deadline = Date.now() + maxMinutes * 60 * 1000;
+  const deadline  = Date.now() + maxMinutes * 60 * 1000;
   const seenUids  = new Set<number>();
+
+  const processNewMail = async (client: ImapFlow) => {
+    const uids = await client.search({ since }, { uid: true });
+    if (!uids.length) return;
+    const range = uids.slice(-50).join(",");
+    for await (const msg of client.fetch(range, { source: true, envelope: true, internalDate: true }, { uid: true })) {
+      if (seenUids.has(msg.uid)) continue;
+      const rawSrc = msg.source?.toString("utf8") || "";
+      const toLine       = rawSrc.match(/^To:([^\r\n]+)/im)?.[1]           || "";
+      const ccLine       = rawSrc.match(/^Cc:([^\r\n]+)/im)?.[1]           || "";
+      const deliveredTo  = rawSrc.match(/^Delivered-To:([^\r\n]+)/im)?.[1] || "";
+      const allAddresses = `${toLine} ${ccLine} ${deliveredTo}`.toLowerCase();
+      if (!allAddresses.includes(bizEmail.toLowerCase())) { seenUids.add(msg.uid); continue; }
+      const msgDate = msg.internalDate || new Date();
+      if (msgDate < since) { seenUids.add(msg.uid); continue; }
+      seenUids.add(msg.uid);
+      const fromAddr = msg.envelope?.from?.[0];
+      const from    = fromAddr?.address || fromAddr?.name || "unknown";
+      const subject = msg.envelope?.subject || "(no subject)";
+      const body    = extractMimeText(rawSrc);
+      console.log(`[BizMail] IDLE → new email for ${bizEmail}: from=${from}, subject=${subject}`);
+      await onMessage({ uid: msg.uid, from, subject, date: msgDate, body }).catch(() => {});
+    }
+  };
 
   while (!shouldStop() && Date.now() < deadline) {
     const client = new ImapFlow({
@@ -297,64 +367,44 @@ export async function pollBizMailViaGmail(
     try {
       await client.connect();
 
-      // Search All Mail so forwarded messages in Promotions/Spam are also found
       let lock: any = null;
       for (const box of ["[Gmail]/All Mail", "INBOX"]) {
         try { lock = await client.getMailboxLock(box); break; } catch {}
       }
-      if (!lock) { await client.logout(); await new Promise(r => setTimeout(r, 30_000)); continue; }
+      if (!lock) { await client.logout(); await new Promise(r => setTimeout(r, 10_000)); continue; }
 
       try {
-        // Search for emails since session start, then filter by To: header in source
-        const uids = await client.search({ since }, { uid: true });
-        if (uids.length > 0) {
-          const range = uids.slice(-50).join(",");
-          for await (const msg of client.fetch(range, { source: true, envelope: true, internalDate: true }, { uid: true })) {
-            if (seenUids.has(msg.uid)) continue;
+        // Initial sweep for any emails that arrived since session start
+        await processNewMail(client);
 
-            // Check if this email is addressed to our biz email
-            const rawSrc = msg.source?.toString("utf8") || "";
-            const toLine = rawSrc.match(/^To:([^\r\n]+)/im)?.[1] || "";
-            const ccLine = rawSrc.match(/^Cc:([^\r\n]+)/im)?.[1] || "";
-            const deliveredTo = rawSrc.match(/^Delivered-To:([^\r\n]+)/im)?.[1] || "";
-            const allAddresses = `${toLine} ${ccLine} ${deliveredTo}`.toLowerCase();
+        // IDLE loop — Gmail pushes EXISTS when new mail lands; each idle()
+        // call runs for up to 9 minutes then re-issues automatically.
+        while (!shouldStop() && Date.now() < deadline) {
+          let newMailArrived = false;
+          client.once("exists", () => { newMailArrived = true; });
 
-            if (!allAddresses.includes(bizEmail.toLowerCase())) continue;
+          // idle() blocks until Gmail sends an unsolicited response (EXISTS)
+          // or ~9 min IMAP idle timeout; we cap at 5 min for safety.
+          await Promise.race([
+            client.idle(),
+            new Promise<void>(r => setTimeout(r, 5 * 60 * 1000)),
+          ]);
 
-            const msgDate = msg.internalDate || new Date();
-            if (msgDate < since) { seenUids.add(msg.uid); continue; }
-
-            seenUids.add(msg.uid);
-
-            const fromAddr = msg.envelope?.from?.[0];
-            const from = fromAddr?.address || `${fromAddr?.name || "unknown"}`;
-            const subject = msg.envelope?.subject || "(no subject)";
-
-            // Extract text body from raw source
-            const bodyMatch = rawSrc.match(/\r?\n\r?\n([\s\S]+)$/);
-            let body = (bodyMatch?.[1] || "")
-              .replace(/=\r?\n/g, "")          // quoted-printable line continuations
-              .replace(/<[^>]+>/g, " ")         // strip HTML tags
-              .replace(/\s+/g, " ")
-              .trim()
-              .substring(0, 800);
-
-            console.log(`[BizMail] Gmail → new email for ${bizEmail}: from=${from}, subject=${subject}`);
-            await onMessage({ uid: msg.uid, from, subject, date: msgDate, body }).catch(() => {});
+          if (newMailArrived && !shouldStop()) {
+            await processNewMail(client);
           }
         }
       } finally {
         lock.release();
       }
     } catch (err: any) {
-      console.log(`[BizMail] Gmail poll error: ${err.message}`);
+      console.log(`[BizMail] IDLE error: ${err.message} — reconnecting in 5 s`);
+      if (!shouldStop()) await new Promise(r => setTimeout(r, 5_000));
     } finally {
       try { await client.logout(); } catch {}
     }
-
-    if (!shouldStop()) await new Promise(r => setTimeout(r, 25_000));
   }
-  console.log(`[BizMail] Gmail polling stopped for ${bizEmail}`);
+  console.log(`[BizMail] IDLE monitor stopped for ${bizEmail}`);
 }
 
 export function detectProviderFromDomain(domain: string): Provider {
