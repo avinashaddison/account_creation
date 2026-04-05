@@ -789,7 +789,7 @@ function genBizPassword(): string {
   return `Biz@${rand}${num}`;
 }
 
-const BIZ_MAIL_QUOTA_BYTES = 262_144_000; // 250 MB per account
+// Mailbux requires quota >= 1 GB or omit the field (omitting = server default / no limit)
 
 export async function createBizMailAccount(opts: {
   requestedNum?: number;    // re-create a specific numbered slot
@@ -830,7 +830,6 @@ export async function createBizMailAccount(opts: {
           : `Addison Panel business mail #${accountNum}`,
         secrets: [password],
         emails: [email],
-        quota: BIZ_MAIL_QUOTA_BYTES,
         roles: ["user"],
       }),
     });
@@ -879,7 +878,6 @@ export async function createBizMailAccount(opts: {
         description: `Addison Panel business mail #${accountNum}`,
         secrets: [password],
         emails: [email],
-        quota: BIZ_MAIL_QUOTA_BYTES,
         roles: ["user"],
       }),
     });
