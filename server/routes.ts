@@ -3547,19 +3547,30 @@ export async function registerRoutes(
           return;
         }
 
-        // Atomically claim selected accounts so concurrent jobs cannot pick them up
-        await storage.bulkUpdateReplitAccountStatus("generating", toProcess.map(a => a.id)).catch(() => {});
+        // Atomically claim selected accounts so concurrent jobs cannot pick them up.
+        // Only IDs that were still "processing" at update time are returned — any
+        // already claimed by a concurrent job are absent from claimedIds.
+        const claimedIds = await storage.claimReplitAccountsForProcessing(toProcess.map(a => a.id));
+        const claimed = toProcess.filter(a => claimedIds.includes(a.id));
+        if (claimed.length === 0) {
+          broadcastLog(batchId, jobId, `⚠️  All selected accounts were claimed by a concurrent job — nothing to do`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+        if (claimed.length < toProcess.length) {
+          broadcastLog(batchId, jobId, `⚠️  ${toProcess.length - claimed.length} account(s) claimed by concurrent job — continuing with ${claimed.length}`, userId);
+        }
 
-        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length} checkout link(s) — coupon: ${coupon}`, userId);
-        broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+        broadcastLog(batchId, jobId, `🔗 Generating ${claimed.length} checkout link(s) — coupon: ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `📋 Accounts: ${claimed.map(a => a.email).join(", ")}`, userId);
         broadcastLog(batchId, jobId, `📌 On success → status will be set to: ${resolvedSuccessStatus}`, userId);
 
         const generatedLinks: { email: string; url: string }[] = [];
 
-        for (let i = 0; i < toProcess.length; i++) {
-          const acct = toProcess[i];
+        for (let i = 0; i < claimed.length; i++) {
+          const acct = claimed[i];
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
-          broadcastLog(batchId, jobId, `[${i + 1}/${toProcess.length}] 🚀 ${acct.email}`, userId);
+          broadcastLog(batchId, jobId, `[${i + 1}/${claimed.length}] 🚀 ${acct.email}`, userId);
 
           const result = await generateSingleCheckoutLink(
             acct.email,
@@ -3597,7 +3608,7 @@ export async function registerRoutes(
         }
 
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
-        broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${toProcess.length} links generated`, userId);
+        broadcastLog(batchId, jobId, `✅ Done — ${generatedLinks.length}/${claimed.length} links generated`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {
@@ -3822,18 +3833,28 @@ export async function registerRoutes(
           return;
         }
 
-        // Atomically claim selected accounts so concurrent jobs cannot pick them up
-        await storage.bulkUpdateReplitAccountStatus("generating", toProcess.map(a => a.id)).catch(() => {});
+        // Atomically claim selected accounts so concurrent jobs cannot pick them up.
+        // Only accounts still in "processing" state at update time are returned.
+        const claimedIds = await storage.claimReplitAccountsForProcessing(toProcess.map(a => a.id));
+        const claimed = toProcess.filter(a => claimedIds.includes(a.id));
+        if (claimed.length === 0) {
+          broadcastLog(batchId, jobId, `⚠️  All selected accounts were claimed by a concurrent job — nothing to do`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+        if (claimed.length < toProcess.length) {
+          broadcastLog(batchId, jobId, `⚠️  ${toProcess.length - claimed.length} account(s) claimed by concurrent job — continuing with ${claimed.length}`, userId);
+        }
 
         // Warn about unwarmed accounts
-        const unwarmed = toProcess.filter(a => !a.warmedAt);
+        const unwarmed = claimed.filter(a => !a.warmedAt);
         if (unwarmed.length > 0) {
           broadcastLog(batchId, jobId, `⚠️  ${unwarmed.length} account(s) not warmed — ban risk higher`, userId);
         }
 
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
-        broadcastLog(batchId, jobId, `🔗 Generating ${toProcess.length}/${maxLinks} checkout link(s) using coupon ${coupon}`, userId);
-        broadcastLog(batchId, jobId, `📋 Accounts: ${toProcess.map(a => a.email).join(", ")}`, userId);
+        broadcastLog(batchId, jobId, `🔗 Generating ${claimed.length}/${maxLinks} checkout link(s) using coupon ${coupon}`, userId);
+        broadcastLog(batchId, jobId, `📋 Accounts: ${claimed.map(a => a.email).join(", ")}`, userId);
         broadcastLog(batchId, jobId, `─`.repeat(50), userId);
 
         // Step 3: Generate links in PARALLEL (all accounts run simultaneously)
@@ -3841,10 +3862,10 @@ export async function registerRoutes(
         const isUnrecoverable = (e?: string) =>
           !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha"));
 
-        broadcastLog(batchId, jobId, `⚡ Running ${toProcess.length} account(s) in parallel...`, userId);
+        broadcastLog(batchId, jobId, `⚡ Running ${claimed.length} account(s) in parallel...`, userId);
 
-        const results = await Promise.all(toProcess.map(async (acct, i) => {
-          const tag = `[${i + 1}/${toProcess.length}]`;
+        const results = await Promise.all(claimed.map(async (acct, i) => {
+          const tag = `[${i + 1}/${claimed.length}]`;
           broadcastLog(batchId, jobId, `${tag} 🚀 ${acct.email}${acct.warmedAt ? " ✅ warmed" : " ⚠️ not warmed"}`, userId);
 
           let result = await generateSingleCheckoutLink(
@@ -3900,7 +3921,7 @@ export async function registerRoutes(
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
         }
 
-        broadcastLog(batchId, jobId, `🏁 Done — ${generatedLinks.length} created, ${toProcess.length - generatedLinks.length} failed`, userId);
+        broadcastLog(batchId, jobId, `🏁 Done — ${generatedLinks.length} created, ${claimed.length - generatedLinks.length} failed`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) {
@@ -4008,13 +4029,22 @@ export async function registerRoutes(
             break;
           }
 
-          // Atomically claim selected accounts so concurrent jobs cannot pick them up
-          await storage.bulkUpdateReplitAccountStatus("generating", toProcess.map(a => a.id)).catch(() => {});
+          // Atomically claim selected accounts so concurrent jobs cannot pick them up.
+          // Only accounts still in "processing" state at update time are returned.
+          const claimedIds = await storage.claimReplitAccountsForProcessing(toProcess.map(a => a.id));
+          const claimed = toProcess.filter(a => claimedIds.includes(a.id));
+          if (claimed.length === 0) {
+            broadcastLog(batchId, jobId, `⚠️  All selected accounts claimed by concurrent job — skipping this coupon`, userId);
+            continue;
+          }
+          if (claimed.length < toProcess.length) {
+            broadcastLog(batchId, jobId, `⚠️  ${toProcess.length - claimed.length} account(s) claimed by concurrent job — continuing with ${claimed.length}`, userId);
+          }
 
-          broadcastLog(batchId, jobId, `⚡ Generating ${toProcess.length} link(s) in parallel for this coupon...`, userId);
+          broadcastLog(batchId, jobId, `⚡ Generating ${claimed.length} link(s) in parallel for this coupon...`, userId);
 
-          const results = await Promise.all(toProcess.map(async (acct, i) => {
-            const tag = `[${i + 1}/${toProcess.length}]`;
+          const results = await Promise.all(claimed.map(async (acct, i) => {
+            const tag = `[${i + 1}/${claimed.length}]`;
             broadcastLog(batchId, jobId, `${tag} 🚀 ${acct.email}${acct.warmedAt ? " ✅" : " ⚠️"}`, userId);
             let result = await generateSingleCheckoutLink(
               acct.email, acct.password, coupon,

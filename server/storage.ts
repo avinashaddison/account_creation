@@ -473,6 +473,22 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  /**
+   * Atomically claims accounts for processing: sets status "generating" only on accounts
+   * that are still in "processing" state at the moment of the UPDATE. Returns the IDs
+   * that were actually claimed (subset of requested IDs). Any IDs already claimed by a
+   * concurrent job will be absent from the returned array.
+   */
+  async claimReplitAccountsForProcessing(ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const rows = await db
+      .update(replitAccounts)
+      .set({ status: "generating" })
+      .where(and(inArray(replitAccounts.id, ids), eq(replitAccounts.status, "processing")))
+      .returning({ id: replitAccounts.id });
+    return rows.map(r => r.id);
+  }
+
   async bulkUpdateReplitAccountStatus(status: string, ids?: string[], ownerId?: string): Promise<number> {
     let q = db.update(replitAccounts).set({ status });
     if (ids && ids.length > 0 && ownerId) {
