@@ -105,9 +105,12 @@ export interface IStorage {
   getAllBizMailAccounts(): Promise<BizMailAccount[]>;
   getUsedBizMailNums(): Promise<number[]>;
   getBizMailByNum(accountNum: number): Promise<BizMailAccount | undefined>;
-  registerBizMailAccount(accountNum: number, email: string, password: string): Promise<BizMailAccount>;
+  getBizMailByEmail(email: string): Promise<BizMailAccount | undefined>;
+  registerBizMailAccount(accountNum: number | null, email: string, password: string): Promise<BizMailAccount>;
   markBizMailDeleted(accountNum: number): Promise<void>;
+  markBizMailDeletedByEmail(email: string): Promise<void>;
   reactivateBizMailAccount(accountNum: number, password: string): Promise<void>;
+  reactivateBizMailAccountByEmail(email: string, password: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -680,12 +683,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllBizMailAccounts(): Promise<BizMailAccount[]> {
-    return db.select().from(bizMailAccounts).orderBy(bizMailAccounts.accountNum);
+    return db.select().from(bizMailAccounts).orderBy(bizMailAccounts.id);
   }
 
   async getUsedBizMailNums(): Promise<number[]> {
     const rows = await db.select({ accountNum: bizMailAccounts.accountNum }).from(bizMailAccounts);
-    return rows.map(r => r.accountNum);
+    return rows.map(r => r.accountNum).filter((n): n is number => n !== null);
   }
 
   async getBizMailByNum(accountNum: number): Promise<BizMailAccount | undefined> {
@@ -693,7 +696,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async registerBizMailAccount(accountNum: number, email: string, password: string): Promise<BizMailAccount> {
+  async getBizMailByEmail(email: string): Promise<BizMailAccount | undefined> {
+    const [row] = await db.select().from(bizMailAccounts).where(eq(bizMailAccounts.email, email));
+    return row;
+  }
+
+  async registerBizMailAccount(accountNum: number | null, email: string, password: string): Promise<BizMailAccount> {
     const [row] = await db.insert(bizMailAccounts)
       .values({ accountNum, email, password, isActive: true })
       .returning();
@@ -706,10 +714,22 @@ export class DatabaseStorage implements IStorage {
       .where(eq(bizMailAccounts.accountNum, accountNum));
   }
 
+  async markBizMailDeletedByEmail(email: string): Promise<void> {
+    await db.update(bizMailAccounts)
+      .set({ isActive: false, deletedAt: new Date() })
+      .where(eq(bizMailAccounts.email, email));
+  }
+
   async reactivateBizMailAccount(accountNum: number, password: string): Promise<void> {
     await db.update(bizMailAccounts)
       .set({ isActive: true, deletedAt: null, password })
       .where(eq(bizMailAccounts.accountNum, accountNum));
+  }
+
+  async reactivateBizMailAccountByEmail(email: string, password: string): Promise<void> {
+    await db.update(bizMailAccounts)
+      .set({ isActive: true, deletedAt: null, password })
+      .where(eq(bizMailAccounts.email, email));
   }
 }
 

@@ -377,13 +377,13 @@ export type InsertShopOrder    = z.infer<typeof insertShopOrderSchema>;
 // same number is never accidentally reused.  isActive=false means the mailbox
 // was deleted from Stalwart but the slot is still reserved.
 export const bizMailAccounts = pgTable("biz_mail_accounts", {
-  id:        serial("id").primaryKey(),
-  accountNum: integer("account_num").notNull().unique(),
-  email:     text("email").notNull().unique(),
-  password:  text("password").notNull(),
-  isActive:  boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at"),
+  id:         serial("id").primaryKey(),
+  accountNum: integer("account_num").unique(),          // null for custom-named accounts
+  email:      text("email").notNull().unique(),
+  password:   text("password").notNull(),
+  isActive:   boolean("is_active").notNull().default(true),
+  createdAt:  timestamp("created_at").notNull().defaultNow(),
+  deletedAt:  timestamp("deleted_at"),
 });
 
 export const insertBizMailAccountSchema = createInsertSchema(bizMailAccounts).omit({ id: true, createdAt: true, deletedAt: true });

@@ -112,7 +112,8 @@ interface MailSession {
 interface BizMailSession {
   email: string;
   password: string;
-  accountNum: number;
+  accountNum: number | null;
+  isCustom: boolean;
   stopped: boolean;
   statusMsgId: number;
   chatId: number;
@@ -1247,10 +1248,12 @@ export function startTelegramBot(config: BotConfig) {
   });
 
   // ── Business Mail ─────────────────────────────────────────────────────────
-  async function startBizMailSession(chatId: number, uid: number, requestedNum?: number) {
+  async function startBizMailSession(chatId: number, uid: number, opts: {
+    requestedNum?: number;
+    customUsername?: string;
+  } = {}) {
     const { storage } = await import("./storage");
     const state = getState(uid);
-    // Stop any existing biz session (but do NOT delete from mailbux here)
     if (state.bizMailSession) {
       state.bizMailSession.stopped = true;
     }
@@ -1260,9 +1263,9 @@ export function startTelegramBot(config: BotConfig) {
       { parse_mode: "HTML" }
     );
 
-    let email: string, password: string, accountNum: number;
+    let email: string, password: string, accountNum: number | null, isCustom: boolean;
     try {
-      ({ email, password, accountNum } = await createBizMailAccount(requestedNum));
+      ({ email, password, accountNum, isCustom } = await createBizMailAccount(opts));
     } catch (err: any) {
       await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
         `❌ <b>Failed to create business mail</b>\n<code>${esc(err.message?.substring(0, 200))}</code>`,
@@ -1274,32 +1277,35 @@ export function startTelegramBot(config: BotConfig) {
     // Capacity info
     const allAccts    = await storage.getAllBizMailAccounts();
     const activeCount = allAccts.filter(a => a.isActive).length;
-    const capacityLine = `📊 <b>Total created:</b> ${activeCount} accounts (account${accountNum})`;
+    const capacityLine = `📊 <b>Total active:</b> ${activeCount} accounts`;
 
-    // Set up Gmail forwarder so incoming mail is captured via Gmail IMAP
+    // Set up Gmail forwarder
     const gmailAddr = getGmailAddress();
     let forwardingActive = false;
     if (gmailAddr) {
       const fwd = await createBizMailForwarder(
-        email,
-        gmailAddr,
-        true,
-        `BizMail #${accountNum} → Telegram notification`,
+        email, gmailAddr, true,
+        isCustom ? `BizMail custom — ${email}` : `BizMail #${accountNum} → Telegram`,
       ).catch(() => ({ success: false }));
       forwardingActive = fwd.success;
-      console.log(`[BizMail] Forwarder to ${gmailAddr}: ${forwardingActive ? "OK" : "failed"}`);
     }
 
     const bizKeyboard = Markup.inlineKeyboard([
-      [Markup.button.callback("🔄 New Account", "biz_mail_new"), Markup.button.callback("⏹ Stop & Delete", "biz_mail_stop")],
+      [Markup.button.callback("🔄 New Account", "biz_mail_new"),
+       Markup.button.callback("✏️ Custom Name", "biz_mail_custom"),
+       Markup.button.callback("⏹ Stop & Delete", "biz_mail_stop")],
     ]);
 
     const inboxNote = forwardingActive
-      ? `📬 <i>Inbox monitoring active — you'll be notified of new emails here</i>`
-      : `📭 <i>Inbox monitoring not available — check webmail manually</i>`;
+      ? `📬 <i>Inbox monitoring active — new emails will be forwarded here</i>`
+      : `📭 <i>Inbox monitoring inactive — check webmail manually</i>`;
+
+    const title = isCustom
+      ? `💼 <b>Business Mail — Custom: ${esc(email)}</b>`
+      : `💼 <b>Business Mail — Account #${accountNum}</b>`;
 
     const bizStatusCard =
-      `💼 <b>Business Mail — Account #${accountNum}</b>\n\n` +
+      `${title}\n\n` +
       `📧 <b>Email:</b> <code>${esc(email)}</code>\n` +
       `🔑 <b>Password:</b> <code>${esc(password)}</code>\n\n` +
       `🌐 <b>Webmail:</b> <a href="https://mail.mailbux.com/inbox/login">mail.mailbux.com/inbox/login</a>\n` +
@@ -1313,7 +1319,7 @@ export function startTelegramBot(config: BotConfig) {
     ).catch(() => {});
 
     const session: BizMailSession = {
-      email, password, accountNum,
+      email, password, accountNum, isCustom,
       stopped: false,
       statusMsgId: loadMsg.message_id,
       chatId,
@@ -1321,12 +1327,10 @@ export function startTelegramBot(config: BotConfig) {
     };
     state.bizMailSession = session;
 
-    // Start Gmail IMAP polling for incoming business mail
     if (forwardingActive) {
       const since = new Date();
       pollBizMailViaGmail(
-        email,
-        since,
+        email, since,
         async (msg: BizMailMessage) => {
           if (session.stopped) return;
           session.receivedCount++;
@@ -1340,66 +1344,88 @@ export function startTelegramBot(config: BotConfig) {
             { parse_mode: "HTML" }
           ).catch(() => {});
         },
-        () => session.stopped,
-        120,
+        () => session.stopped, 120,
       ).catch(() => {});
     }
   }
 
   bot.action("biz_mail_new", async (ctx) => {
-    await ctx.answerCbQuery("Creating business account...").catch(() => {});
+    await ctx.answerCbQuery("Creating account...").catch(() => {});
+    await startBizMailSession(ctx.chat!.id, ctx.from!.id);
+  });
+
+  // ── Custom username entry ──────────────────────────────────────────────────
+  bot.action("biz_mail_custom", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
     const uid    = ctx.from!.id;
     const chatId = ctx.chat!.id;
-    await startBizMailSession(chatId, uid);
+    getState(uid).awaitingText = "biz_mail_custom_user";
+    await bot.telegram.sendMessage(chatId,
+      `✏️ <b>Enter a custom username</b> for the email\n\n` +
+      `Example: type <code>john</code> to create <code>john@addison.asia</code>\n` +
+      `Or type <code>myshop</code> to get <code>myshop@addison.asia</code>\n\n` +
+      `<i>Allowed: letters, numbers, dots (.), hyphens (-), underscores (_)</i>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
   });
 
   bot.action("biz_mail_stop", async (ctx) => {
     await ctx.answerCbQuery("Stopping session...").catch(() => {});
     const uid     = ctx.from!.id;
-    const chatId  = ctx.chat!.id;
     const state   = getState(uid);
     const session = state.bizMailSession;
     if (session && !session.stopped) {
       session.stopped = true;
-      // Delete from mailbux but KEEP the DB record (slot stays reserved)
       await deleteBizMailAccount(session.email).catch(() => {});
       const { storage } = await import("./storage");
-      await storage.markBizMailDeleted(session.accountNum).catch(() => {});
+      await storage.markBizMailDeletedByEmail(session.email).catch(() => {});
+
+      // Build recover button — custom accounts recover by username, numbered by num
+      const username = session.email.split("@")[0];
       const recoverKeyboard = Markup.inlineKeyboard([
-        [Markup.button.callback(`♻️ Recover account${session.accountNum}`, `biz_recover_${session.accountNum}`),
-         Markup.button.callback("🆕 New Account", "biz_mail_new")],
+        [Markup.button.callback(`♻️ Recover ${username}`, `biz_recover_email_${encodeURIComponent(session.email)}`),
+         Markup.button.callback("🆕 New Account", "biz_mail_new"),
+         Markup.button.callback("✏️ Custom Name", "biz_mail_custom")],
       ]);
+      const recoverHint = session.isCustom
+        ? `Or type <code>${username}</code> in chat to recreate it anytime.`
+        : `Or type <code>account${session.accountNum}</code> in chat to recreate it anytime.`;
+
       await bot.telegram.editMessageText(session.chatId, session.statusMsgId, undefined,
         `💼 <b>Business Mail Stopped</b>\n\n` +
         `📧 <code>${esc(session.email)}</code>\n` +
         `📥 Total received: <b>${session.receivedCount}</b>\n\n` +
-        `<i>Account deleted from server. Slot #${session.accountNum} is reserved in DB — you can recover it anytime.</i>`,
+        `<i>Deleted from server — email address is free to recreate.</i>\n` +
+        recoverHint,
         { parse_mode: "HTML", ...recoverKeyboard }
       ).catch(() => {});
       state.bizMailSession = undefined;
     }
   });
 
-  // Recover a specific deleted account by number
-  bot.action(/^biz_recover_(\d+)$/, async (ctx) => {
-    await ctx.answerCbQuery("Recovering account...").catch(() => {});
-    const uid    = ctx.from!.id;
-    const chatId = ctx.chat!.id;
-    const num    = parseInt(ctx.match[1], 10);
-    await startBizMailSession(chatId, uid, num);
+  // Recover by email (covers both numbered and custom accounts)
+  bot.action(/^biz_recover_email_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Recovering...").catch(() => {});
+    const uid      = ctx.from!.id;
+    const chatId   = ctx.chat!.id;
+    const rawEmail = decodeURIComponent(ctx.match[1]);
+    const username = rawEmail.split("@")[0];
+    // Numbered accounts: "account5" → requestedNum=5; custom: pass as customUsername
+    const numMatch = username.match(/^account(\d+)$/i);
+    if (numMatch) {
+      await startBizMailSession(chatId, uid, { requestedNum: parseInt(numMatch[1], 10) });
+    } else {
+      await startBizMailSession(chatId, uid, { customUsername: username });
+    }
   });
 
-  // Text input: user types "account5" to recover that specific account
+  // Recover a specific deleted numbered account by typing "account5"
   bot.hears(/^account(\d+)$/i, async (ctx) => {
     if (!ALLOWED_IDS.includes(ctx.from!.id)) return;
     const uid    = ctx.from!.id;
     const chatId = ctx.chat!.id;
     const num    = parseInt(ctx.match[1], 10);
-    if (num < 1 || num > 40) {
-      await ctx.reply(`⚠️ Account number must be between 1 and 40.`).catch(() => {});
-      return;
-    }
-    await startBizMailSession(chatId, uid, num);
+    await startBizMailSession(chatId, uid, { requestedNum: num });
   });
 
   // ── MoviesDrive ────────────────────────────────────────────────────────────
@@ -2932,6 +2958,18 @@ export function startTelegramBot(config: BotConfig) {
       }
       st.awaitingText = undefined;
       await startChainCheckout(ctx, count);
+      return;
+    }
+
+    if (st.awaitingText === "biz_mail_custom_user") {
+      st.awaitingText = undefined;
+      // Strip @domain if user typed full email
+      const raw = text.trim().replace(/@.*$/, "").toLowerCase().replace(/[^a-z0-9._-]/g, "");
+      if (!raw) {
+        await ctx.reply("⚠️ Invalid username. Use letters, numbers, dots, hyphens, or underscores only.").catch(() => {});
+        return;
+      }
+      await startBizMailSession(ctx.chat!.id, uid, { customUsername: raw });
       return;
     }
   });

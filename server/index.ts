@@ -182,16 +182,24 @@ app.use((req, res, next) => {
   try {
     const { db: startupDb } = await import("./db");
     const { sql: sqlRaw } = await import("drizzle-orm");
+    // Create table if missing
     await startupDb.execute(sqlRaw`
       CREATE TABLE IF NOT EXISTS biz_mail_accounts (
         id SERIAL PRIMARY KEY,
-        account_num INTEGER NOT NULL UNIQUE,
+        account_num INTEGER UNIQUE,
         email TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
         is_active BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW(),
         deleted_at TIMESTAMP
       )
+    `);
+    // Make account_num nullable if it isn't already (idempotent via DO block)
+    await startupDb.execute(sqlRaw`
+      DO $$ BEGIN
+        ALTER TABLE biz_mail_accounts ALTER COLUMN account_num DROP NOT NULL;
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
     `);
     console.log("[Migration] Ensured biz_mail_accounts table exists");
   } catch (err: any) {
