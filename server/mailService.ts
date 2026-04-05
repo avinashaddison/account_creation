@@ -752,22 +752,36 @@ export async function getMailbuxBearerToken(): Promise<string> {
 // The mailbux webmail at /inbox has its own auth system separate from Stalwart.
 // We need to register here so users can log in at mail.mailbux.com/inbox/login.
 
+// ── Get the Sanctum XSRF-TOKEN for webmail API calls ─────────────────────────
+async function getWebmailXsrf(): Promise<{ xsrfToken: string; cookieStr: string }> {
+  // GET /api/auth/session-status sets XSRF-TOKEN + mailbux_session cookies (Sanctum pattern)
+  const res = await fetch("https://mail.mailbux.com/api/auth/session-status", {
+    method: "GET",
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; AddisonsBot/1.0)",
+      "Accept": "application/json",
+      "Referer": "https://mail.mailbux.com/inbox/login",
+    },
+  });
+  const rawCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
+  const cookieStr = rawCookies.map((c: string) => c.split(";")[0]).join("; ");
+  const xsrfCookie = rawCookies.find((c: string) => c.startsWith("XSRF-TOKEN"));
+  const xsrfEncoded = xsrfCookie ? xsrfCookie.split("=").slice(1).join("=").split(";")[0] : "";
+  const xsrfToken = decodeURIComponent(xsrfEncoded);
+  return { xsrfToken, cookieStr };
+}
+
 export async function registerBizMailWebmail(email: string, password: string, displayName: string): Promise<boolean> {
   try {
-    // Get CSRF from the admin login page (same Laravel app — CSRF is shared)
-    const loginPage = await mailbuxHttpGet("https://mail.mailbux.com/auth/login");
-    const csrfMatch = loginPage.body.match(/name="csrf-token"\s+content="([^"]+)"/);
-    const csrf = csrfMatch?.[1] || "";
-    const sessionCookie = loginPage.rawCookies.map((c: string) => c.split(";")[0]).join("; ");
+    const { xsrfToken, cookieStr } = await getWebmailXsrf();
 
     const res = await mailbuxHttpPost("https://mail.mailbux.com/api/auth/register", {
       email,
       password,
       name: displayName,
     }, {
-      "X-CSRF-TOKEN": csrf,
-      "X-Requested-With": "XMLHttpRequest",
-      "Cookie": sessionCookie,
+      "X-XSRF-TOKEN": xsrfToken,
+      "Cookie": cookieStr,
       "Referer": "https://mail.mailbux.com/inbox/login",
       "Origin": "https://mail.mailbux.com",
     });
@@ -780,7 +794,7 @@ export async function registerBizMailWebmail(email: string, password: string, di
       return true;
     }
     // Already registered = also fine
-    const msg = (json.message || json.error || "").toLowerCase();
+    const msg = (json.message || json.error || json.detail || "").toLowerCase();
     if (msg.includes("already") || msg.includes("exists") || msg.includes("taken")) {
       console.log(`[BizMail] Webmail account already exists: ${email}`);
       return true;
