@@ -1,4 +1,5 @@
 import { ImapFlow } from "imapflow";
+import { chromium } from "playwright";
 
 const PROVIDERS = {
   "mail.tm": "https://api.mail.tm",
@@ -654,6 +655,123 @@ export interface BizMailMessage {
   body: string;
 }
 
+// ── Mailbux webadmin Bearer token (via Playwright headless login) ─────────────
+
+let _cachedMailbuxToken: { token: string; expiry: number } | null = null;
+
+export async function getMailbuxBearerToken(): Promise<string> {
+  // Cache tokens for 30 minutes
+  if (_cachedMailbuxToken && Date.now() < _cachedMailbuxToken.expiry) {
+    return _cachedMailbuxToken.token;
+  }
+
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+  try {
+    const page = await browser.newPage();
+
+    // Intercept API requests to capture Bearer token in-flight
+    let capturedToken: string | null = null;
+    page.on("request", (req) => {
+      const auth = req.headers()["authorization"] || "";
+      if (auth.startsWith("Bearer ")) {
+        capturedToken = auth.slice(7);
+      }
+    });
+
+    await page.goto("https://mail.mailbux.com/", { waitUntil: "networkidle", timeout: 30_000 });
+
+    // Fill login form — try multiple selector variants for Stalwart webadmin
+    const usernameSelectors = [
+      'input[autocomplete="username"]',
+      'input[name="login"]',
+      'input[name="username"]',
+      'input[type="text"]',
+    ];
+    for (const sel of usernameSelectors) {
+      try {
+        await page.fill(sel, MAILBUX_USER, { timeout: 3_000 });
+        break;
+      } catch { /* try next */ }
+    }
+    await page.fill('input[type="password"]', MAILBUX_PASS, { timeout: 10_000 });
+    const submitSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Login")',
+      'button:has-text("Sign in")',
+      'input[type="submit"]',
+    ];
+    for (const sel of submitSelectors) {
+      try {
+        await page.click(sel, { timeout: 3_000 });
+        break;
+      } catch { /* try next */ }
+    }
+    await page.waitForTimeout(5000);
+
+    // After login, navigate to accounts page to trigger an authenticated API request
+    await page.waitForTimeout(2000);
+    try { await page.goto("https://mail.mailbux.com/#/manage/directory/accounts", { waitUntil: "networkidle", timeout: 15_000 }); } catch {}
+    await page.waitForTimeout(2000);
+
+    // Try capturedToken from network intercept first, then fall back to storage
+    let token: string | null = capturedToken;
+    if (!token) {
+      token = await page.evaluate(() => {
+        // Check localStorage for any JWT/access token
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)!;
+          const val = localStorage.getItem(key) || "";
+          if (val.startsWith("eyJ")) return val;
+          if (key.toLowerCase().includes("access") || key.toLowerCase().includes("token")) return val;
+        }
+        // Check sessionStorage
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i)!;
+          const val = sessionStorage.getItem(key) || "";
+          if (val.startsWith("eyJ")) return val;
+        }
+        return null;
+      });
+    }
+
+    if (!token) throw new Error("Could not extract Bearer token from webadmin");
+
+    _cachedMailbuxToken = { token, expiry: Date.now() + 25 * 60 * 1000 };
+    console.log("[BizMail] Got webadmin Bearer token");
+    return token;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+// ── Set Gmail forwarding on a mailbux account via Bearer token ────────────────
+
+export async function setBizMailGmailForward(accountEmail: string, gmailAddress: string): Promise<boolean> {
+  try {
+    const token = await getMailbuxBearerToken();
+    const res = await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(accountEmail)}`, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify([{ action: "addItem", field: "emails", value: gmailAddress }]),
+    });
+    const json: any = await res.json();
+    if (json.data !== undefined && !json.error) {
+      console.log(`[BizMail] Gmail forward set: ${accountEmail} → ${gmailAddress}`);
+      return true;
+    }
+    console.log(`[BizMail] Forward set failed:`, JSON.stringify(json));
+    return false;
+  } catch (err: any) {
+    console.log(`[BizMail] setBizMailGmailForward error: ${err.message}`);
+    return false;
+  }
+}
+
+// ── Poll Gmail IMAP for forwarded business mail ───────────────────────────────
+
 export async function pollBizMailInbox(
   email: string,
   password: string,
@@ -662,59 +780,74 @@ export async function pollBizMailInbox(
   shouldStop: () => boolean,
   maxMinutes = 60,
 ): Promise<void> {
+  if (!_gmailAddress || !_gmailAppPassword) {
+    console.log("[BizMail] No Gmail credentials — cannot poll for forwarded business mail");
+    return;
+  }
+
   const deadline  = Date.now() + maxMinutes * 60 * 1000;
-  const seenUids  = new Set<number>();
+  const seenIds   = new Set<string>();
+
+  // Normalise the business email to match X-Original-To / Delivered-To headers
+  const bizTarget = email.toLowerCase();
 
   while (!shouldStop() && Date.now() < deadline) {
     const client = new ImapFlow({
-      host:   MAILBUX_IMAP_HOST,
+      host:   "imap.gmail.com",
       port:   993,
       secure: true,
-      auth:   { user: email, pass: password },
+      auth:   { user: _gmailAddress, pass: _gmailAppPassword },
       logger: false,
-      tls:    { rejectUnauthorized: false },
     });
 
     try {
       await client.connect();
       const lock = await client.getMailboxLock("INBOX");
       try {
-        // Inner poll loop — keep connection alive
         while (!shouldStop() && Date.now() < deadline) {
-          const uids = await client.search({ since }, { uid: true });
+          const searchResult = await client.search({ since }, { uid: true });
+          const uids = Array.isArray(searchResult) ? searchResult : [];
           for (const uid of uids) {
-            if (seenUids.has(uid)) continue;
-            seenUids.add(uid);
-            try {
-              for await (const msg of client.fetch(String(uid), { source: true, envelope: true }, { uid: true })) {
-                const raw     = msg.source?.toString("utf8") ?? "";
-                const from    = msg.envelope?.from?.[0]?.address
-                             || msg.envelope?.from?.[0]?.name
-                             || "unknown";
-                const subject = msg.envelope?.subject || "(no subject)";
-                const date    = msg.envelope?.date   || new Date();
-                // Strip email headers and HTML
-                const body = raw
-                  .replace(/^[\s\S]*?\r?\n\r?\n/, "")
-                  .replace(/<[^>]+>/g, " ")
-                  .replace(/&\w+;/g, " ")
-                  .replace(/\s+/g, " ")
-                  .trim()
-                  .substring(0, 800);
-                await onMessage({ uid, from, subject, date, body });
-              }
-            } catch { /* skip bad message */ }
+            const uidKey = String(uid);
+            if (seenIds.has(uidKey)) continue;
+
+            // Fetch full message to inspect headers
+            for await (const msg of client.fetch(uidKey, { source: true, envelope: true }, { uid: true })) {
+              const raw = msg.source?.toString("utf8") ?? "";
+
+              // Only process emails that were originally addressed to our business account
+              const origToMatch   = raw.match(/^X-Original-To:\s*(.+)$/mi);
+              const deliveredToMatch = raw.match(/^Delivered-To:\s*(.+)$/mi);
+              const origTo  = (origToMatch?.[1]  || "").toLowerCase().trim();
+              const delivTo = (deliveredToMatch?.[1] || "").toLowerCase().trim();
+
+              if (!origTo.includes(bizTarget) && !delivTo.includes(bizTarget)) continue;
+
+              seenIds.add(uidKey);
+              const from    = msg.envelope?.from?.[0]?.address || msg.envelope?.from?.[0]?.name || "unknown";
+              const subject = msg.envelope?.subject || "(no subject)";
+              const date    = msg.envelope?.date || new Date();
+              const body    = raw
+                .replace(/^[\s\S]*?\r?\n\r?\n/, "")
+                .replace(/<[^>]+>/g, " ")
+                .replace(/&\w+;/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .substring(0, 800);
+              // Use the original from + a synthetic UID for the BizMailMessage
+              const syntheticUid = uid;
+              await onMessage({ uid: syntheticUid, from, subject, date, body });
+            }
           }
-          // Poll every 10 s
-          await new Promise(r => setTimeout(r, 10_000));
+          // Poll every 12 s
+          await new Promise(r => setTimeout(r, 12_000));
         }
       } finally {
         lock.release();
       }
     } catch (err: any) {
-      console.log(`[BizMail] IMAP error for ${email}: ${err.message}`);
-      // Wait before reconnecting
-      await new Promise(r => setTimeout(r, 15_000));
+      console.log(`[BizMail] Gmail poll error: ${err.message}`);
+      await new Promise(r => setTimeout(r, 20_000));
     } finally {
       try { await client.logout(); } catch {}
     }

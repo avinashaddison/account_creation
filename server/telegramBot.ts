@@ -5,6 +5,7 @@ import {
   fetchMessages, fetchMessageContent, generateRandomUsername,
   detectProviderFromDomain,
   createBizMailAccount, deleteBizMailAccount, pollBizMailInbox,
+  setBizMailGmailForward,
   type BizMailMessage,
 } from "./mailService";
 
@@ -1270,18 +1271,35 @@ export function startTelegramBot(config: BotConfig) {
       return;
     }
 
+    // Attempt to configure Gmail forwarding so we can monitor via Gmail IMAP
+    await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+      `⏳ <b>Account created — configuring mail forwarding...</b>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+
+    let forwardOk = false;
+    try {
+      forwardOk = await setBizMailGmailForward(email, "avinashaddison@gmail.com");
+    } catch {
+      forwardOk = false;
+    }
+
     const since = new Date();
     const bizKeyboard = Markup.inlineKeyboard([
       [Markup.button.callback("🔄 New Account", "biz_mail_new"), Markup.button.callback("⏹ Stop", "biz_mail_stop")],
     ]);
 
+    const fwdNote = forwardOk
+      ? `✅ <i>Forwarding active — monitoring via Gmail</i>`
+      : `⚠️ <i>Auto-forward setup failed — limited monitoring</i>`;
+
     const bizStatusCard = (count: number) =>
       `💼 <b>Business Mail Active</b>\n\n` +
       `📧 <code>${esc(email)}</code>\n` +
-      `📋 <code>${esc(email)}</code>\n` +
       `🔑 Password: <code>${esc(password)}</code>\n\n` +
       `📥 <b>${count}</b> email${count === 1 ? "" : "s"} received\n` +
-      `⏳ <i>Monitoring inbox in real-time... (1 hour session)</i>`;
+      fwdNote + `\n` +
+      `⏳ <i>Session active for 1 hour</i>`;
 
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
       bizStatusCard(0), { parse_mode: "HTML", ...bizKeyboard }
