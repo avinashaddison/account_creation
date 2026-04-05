@@ -3957,59 +3957,88 @@ export async function registerRoutes(
         const isUnrecoverable = (e?: string) =>
           !!e && (e.includes("already has an active Replit") || e.includes("banned_account") || e.includes("no_password_account") || e.includes("bad_credentials") || e.includes("login_captcha"));
 
+        // Track which coupon-source accounts have been tried this batch to avoid infinite loops
+        const triedSourceIds = new Set<string>();
+
         while (generatedTotal < totalLinks) {
           // Refresh account list each round so we see updates
           const allAccounts = role === "superadmin"
             ? await storage.getAllReplitAccounts()
             : await storage.getReplitAccountsByOwner(userId);
 
-          // Pick next unused sold_out source
+          // Pick next source account:
+          // Priority 1: sold_out with couponExtracted=false (fresh extraction)
+          // Priority 2: sold_out with a stored non-empty coupon code (reuse without re-login)
           const sourceAccount = allAccounts.find(a =>
-            !a.couponExtracted && a.email && a.password && a.status === "sold_out"
+            !triedSourceIds.has(a.id) &&
+            a.email && a.password && a.status === "sold_out" &&
+            !a.couponExtracted
+          ) || allAccounts.find(a =>
+            !triedSourceIds.has(a.id) &&
+            a.email && a.password && a.status === "sold_out" &&
+            a.couponExtracted && a.couponCode && a.couponCode.length > 5
           );
+
           if (!sourceAccount) {
-            broadcastLog(batchId, jobId, `⚠️ No more sold_out source accounts — stopping`, userId);
+            broadcastLog(batchId, jobId, `⚠️ No more sold_out source accounts with valid coupons — stopping`, userId);
             break;
           }
 
+          triedSourceIds.add(sourceAccount.id);
           couponRound++;
           broadcastLog(batchId, jobId, `─`.repeat(50), userId);
-          broadcastLog(batchId, jobId, `🎟 Round ${couponRound} — source: ${sourceAccount.email}`, userId);
 
-          // Extract coupon
-          const couponResult = await extractCouponFromReplitAccount(
-            sourceAccount.email,
-            sourceAccount.password,
-            (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
-          );
+          let coupon: string;
+          let remainingSlots: number;
+          let extractedReferralUrl: string | undefined;
 
-          if (!couponResult.success || !couponResult.coupon) {
-            const srcErr = couponResult.error || "";
-            const srcErrLower = srcErr.toLowerCase();
-            if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password") || srcErrLower.includes("wrong password") || srcErrLower.includes("invalid username") || srcErrLower.includes("incorrect password")) {
-              await storage.updateReplitAccountStatus(sourceAccount.id, "error").catch(() => {});
-              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
-              broadcastLog(batchId, jobId, `  🚫 Source banned/bad-creds — marked error, skipping`, userId);
-            } else if (srcErr.includes("__NO_FEATURE__")) {
-              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
-              broadcastLog(batchId, jobId, `  ⚠️ No referral feature — skipping source`, userId);
-            } else if (srcErr.includes("__HAS_FEATURE__")) {
-              broadcastLog(batchId, jobId, `  ⚠️ URL parse failed — skipping to next coupon`, userId);
-              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
-            } else {
-              await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
-              broadcastLog(batchId, jobId, `  ❌ Coupon extraction failed: ${srcErr} — skipping`, userId);
+          // If already has a stored coupon, reuse it directly without re-logging in
+          if (sourceAccount.couponExtracted && sourceAccount.couponCode && sourceAccount.couponCode.length > 5) {
+            coupon = sourceAccount.couponCode;
+            remainingSlots = 3; // assume slots available; Replit will reject at use-time if exhausted
+            broadcastLog(batchId, jobId, `🎟 Round ${couponRound} — reusing stored coupon from ${sourceAccount.email}`, userId);
+            broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon} (reused)`, userId);
+          } else {
+            broadcastLog(batchId, jobId, `🎟 Round ${couponRound} — source: ${sourceAccount.email}`, userId);
+
+            // Extract coupon by logging in
+            const couponResult = await extractCouponFromReplitAccount(
+              sourceAccount.email,
+              sourceAccount.password,
+              (msg) => broadcastLog(batchId, jobId, `  ${msg}`, userId)
+            );
+
+            if (!couponResult.success || !couponResult.coupon) {
+              const srcErr = couponResult.error || "";
+              const srcErrLower = srcErr.toLowerCase();
+              if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password") || srcErrLower.includes("wrong password") || srcErrLower.includes("invalid username") || srcErrLower.includes("incorrect password")) {
+                await storage.updateReplitAccountStatus(sourceAccount.id, "error").catch(() => {});
+                await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+                broadcastLog(batchId, jobId, `  🚫 Source banned/bad-creds — marked error, skipping`, userId);
+              } else if (srcErr.includes("__NO_FEATURE__")) {
+                await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+                broadcastLog(batchId, jobId, `  ⚠️ No referral feature — skipping source`, userId);
+              } else if (srcErr.includes("__HAS_FEATURE__")) {
+                broadcastLog(batchId, jobId, `  ⚠️ URL parse failed — skipping to next coupon`, userId);
+                await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+              } else {
+                await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+                broadcastLog(batchId, jobId, `  ❌ Coupon extraction failed: ${srcErr} — skipping`, userId);
+              }
+              continue;
             }
-            continue;
-          }
 
-          const { coupon, remainingSlots = 0, referralUrl: extractedReferralUrl } = couponResult as any;
-          await storage.markReplitCouponExtracted(sourceAccount.id, coupon).catch(() => {});
-          broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon} (${remainingSlots} slot(s) available)`, userId);
+            const extractedData = couponResult as any;
+            coupon = extractedData.coupon;
+            remainingSlots = extractedData.remainingSlots ?? 0;
+            extractedReferralUrl = extractedData.referralUrl;
+            await storage.markReplitCouponExtracted(sourceAccount.id, coupon).catch(() => {});
+            broadcastLog(batchId, jobId, `🎟️ Coupon: ${coupon} (${remainingSlots} slot(s) available)`, userId);
 
-          if (remainingSlots <= 0) {
-            broadcastLog(batchId, jobId, `⚠️ Coupon has no remaining slots — trying next`, userId);
-            continue;
+            if (remainingSlots <= 0) {
+              broadcastLog(batchId, jobId, `⚠️ Coupon has no remaining slots — trying next`, userId);
+              continue;
+            }
           }
 
           // Re-fetch to get latest processing accounts
