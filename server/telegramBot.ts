@@ -5,7 +5,7 @@ import {
   fetchMessages, fetchMessageContent, generateRandomUsername,
   detectProviderFromDomain,
   createBizMailAccount, deleteBizMailAccount, pollBizMailInbox,
-  setBizMailGmailForward,
+  registerBizMailWebmail,
   type BizMailMessage,
 } from "./mailService";
 
@@ -1271,38 +1271,37 @@ export function startTelegramBot(config: BotConfig) {
       return;
     }
 
-    // Attempt to configure Gmail forwarding so we can monitor via Gmail IMAP
+    // Register the account in the mailbux webmail system so users can log in at /inbox/login
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
-      `⏳ <b>Account created — configuring mail forwarding...</b>`,
+      `⏳ <b>Account created — enabling webmail access...</b>`,
       { parse_mode: "HTML" }
     ).catch(() => {});
 
-    let forwardOk = false;
+    let webmailReady = false;
     try {
-      forwardOk = await setBizMailGmailForward(email, "avinashaddison@gmail.com");
+      webmailReady = await registerBizMailWebmail(email, password, `Account ${accountNum}`);
     } catch {
-      forwardOk = false;
+      webmailReady = false;
     }
 
-    const since = new Date();
     const bizKeyboard = Markup.inlineKeyboard([
       [Markup.button.callback("🔄 New Account", "biz_mail_new"), Markup.button.callback("⏹ Stop", "biz_mail_stop")],
     ]);
 
-    const fwdNote = forwardOk
-      ? `✅ <i>Forwarding active — monitoring via Gmail</i>`
-      : `⚠️ <i>Auto-forward setup failed — limited monitoring</i>`;
+    const webmailNote = webmailReady
+      ? `✅ <i>Webmail access enabled — login at mail.mailbux.com/inbox</i>`
+      : `⚠️ <i>Webmail login not yet active — use IMAP/SMTP with the credentials above</i>`;
 
-    const bizStatusCard = (count: number) =>
-      `💼 <b>Business Mail Active</b>\n\n` +
-      `📧 <code>${esc(email)}</code>\n` +
+    const bizStatusCard = () =>
+      `💼 <b>Business Mail Ready</b>\n\n` +
+      `📧 Email: <code>${esc(email)}</code>\n` +
       `🔑 Password: <code>${esc(password)}</code>\n\n` +
-      `📥 <b>${count}</b> email${count === 1 ? "" : "s"} received\n` +
-      fwdNote + `\n` +
-      `⏳ <i>Session active for 1 hour</i>`;
+      `🌐 Webmail: <code>mail.mailbux.com/inbox/login</code>\n` +
+      webmailNote + `\n\n` +
+      `<i>Account is live. Use Stop to delete it.</i>`;
 
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
-      bizStatusCard(0), { parse_mode: "HTML", ...bizKeyboard }
+      bizStatusCard(), { parse_mode: "HTML", ...bizKeyboard }
     ).catch(() => {});
 
     const session: BizMailSession = {
@@ -1314,44 +1313,30 @@ export function startTelegramBot(config: BotConfig) {
     };
     state.bizMailSession = session;
 
-    // Start polling in background
-    pollBizMailInbox(
-      email,
-      password,
-      since,
-      async (msg: BizMailMessage) => {
-        if (session.stopped) return;
-        session.receivedCount++;
-        await bot.telegram.sendMessage(chatId,
-          `📬 <b>New Business Email!</b>\n\n` +
-          `💼 <b>Inbox:</b> <code>${esc(email)}</code>\n` +
-          `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
-          `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
-          `📅 <b>Date:</b> ${msg.date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
-          `<pre>${esc(msg.body || "(no text content)")}</pre>`,
-          { parse_mode: "HTML" }
-        ).catch(() => {});
-        // Update status card
-        await bot.telegram.editMessageText(chatId, session.statusMsgId, undefined,
-          bizStatusCard(session.receivedCount),
-          { parse_mode: "HTML", ...bizKeyboard }
-        ).catch(() => {});
-      },
-      () => session.stopped,
-      60,
-    ).then(async () => {
-      if (!session.stopped) {
-        session.stopped = true;
-        await bot.telegram.editMessageText(chatId, session.statusMsgId, undefined,
-          `💼 <b>Business Mail Session Expired</b>\n\n` +
-          `<code>${esc(email)}</code>\n\n` +
-          `📥 Total received: <b>${session.receivedCount}</b>\n` +
-          `<i>Session timed out after 1 hour. Account deleted.</i>`,
-          { parse_mode: "HTML" }
-        ).catch(() => {});
-        await deleteBizMailAccount(email).catch(() => {});
-      }
-    }).catch(() => {});
+    // Poll for incoming emails via the webmail API (if webmail was registered)
+    if (webmailReady) {
+      const since = new Date();
+      pollBizMailInbox(
+        email,
+        password,
+        since,
+        async (msg: BizMailMessage) => {
+          if (session.stopped) return;
+          session.receivedCount++;
+          await bot.telegram.sendMessage(chatId,
+            `📬 <b>New Business Email!</b>\n\n` +
+            `💼 <b>To:</b> <code>${esc(email)}</code>\n` +
+            `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
+            `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
+            `📅 <b>Date:</b> ${msg.date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
+            `<pre>${esc(msg.body || "(no text content)")}</pre>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+        },
+        () => session.stopped,
+        60,
+      ).catch(() => {});
+    }
   }
 
   bot.action("biz_mail_new", async (ctx) => {
