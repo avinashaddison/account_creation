@@ -1804,16 +1804,22 @@ export function startTelegramBot(config: BotConfig) {
         // Send each new CHECKOUT_URL immediately as it appears (don't wait for batch end)
         const newCheckouts = allLines
           .filter(l => l.startsWith("CHECKOUT_URL|"))
-          .map(l => { const parts = l.split("|"); return { email: parts[1], url: parts[2] }; })
+          .map(l => { const parts = l.split("|"); return { email: parts[1], url: parts[2], accountId: parts[3] || "" }; })
           .filter(c => c.email && c.url && !sentCheckoutUrls.has(c.url));
         for (const c of newCheckouts) {
           sentCheckoutUrls.add(c.url);
+          const kbd = c.accountId
+            ? Markup.inlineKeyboard([[
+                Markup.button.callback(`📊 Status: working`, `link_status_${c.accountId}`),
+                Markup.button.callback(`✅ Completed`, `link_done_${c.accountId}`),
+              ]])
+            : undefined;
           await bot.telegram.sendMessage(chatId,
             `🔗 <b>Checkout Link Ready!</b>\n\n` +
             `📧 <code>${esc(c.email)}</code>\n` +
             `<a href="${esc(c.url)}">Open Checkout</a>\n` +
             `<code>${esc(c.url)}</code>`,
-            { parse_mode: "HTML", disable_web_page_preview: true }
+            { parse_mode: "HTML", disable_web_page_preview: true, ...(kbd ?? {}) }
           ).catch(() => {});
         }
 
@@ -2072,18 +2078,24 @@ export function startTelegramBot(config: BotConfig) {
         // Deliver each new checkout URL instantly as a separate message
         const newCheckouts = allLines
           .filter(l => l.startsWith("CHECKOUT_URL|"))
-          .map(l => { const p = l.split("|"); return { email: p[1], url: p[2] }; })
+          .map(l => { const p = l.split("|"); return { email: p[1], url: p[2], accountId: p[3] || "" }; })
           .filter(c => c.email && c.url && !sentUrls.has(c.url));
 
         for (const c of newCheckouts) {
           sentUrls.add(c.url);
           found++;
+          const kbd = c.accountId
+            ? Markup.inlineKeyboard([[
+                Markup.button.callback(`📊 Status: working`, `link_status_${c.accountId}`),
+                Markup.button.callback(`✅ Completed`, `link_done_${c.accountId}`),
+              ]])
+            : undefined;
           await bot.telegram.sendMessage(chatId,
             `🔗 <b>Checkout Link #${found} Ready!</b>\n\n` +
             `📧 <code>${esc(c.email)}</code>\n` +
             `<a href="${esc(c.url)}">Open Checkout</a>\n` +
             `<code>${esc(c.url)}</code>`,
-            { parse_mode: "HTML", disable_web_page_preview: true }
+            { parse_mode: "HTML", disable_web_page_preview: true, ...(kbd ?? {}) }
           ).catch(() => {});
           // Update status message
           await bot.telegram.editMessageText(chatId, statusMsgId, undefined,
@@ -2118,6 +2130,34 @@ export function startTelegramBot(config: BotConfig) {
 
     setTimeout(checkoutPoll, 2000);
   }
+
+  // ── Checkout link status / completed buttons ──
+  bot.action(/^link_status_(.+)$/, async (ctx) => {
+    const accountId = ctx.match[1];
+    try {
+      const r = await botApi(`/api/replit-accounts/${accountId}`);
+      const status = r.ok ? (r.data?.status ?? "unknown") : "unknown";
+      await ctx.answerCbQuery(`📊 Current status: ${status}`, { show_alert: true });
+    } catch {
+      await ctx.answerCbQuery("Could not fetch status", { show_alert: true });
+    }
+  });
+
+  bot.action(/^link_done_(.+)$/, async (ctx) => {
+    const accountId = ctx.match[1];
+    try {
+      await botApi(`/api/replit-accounts/${accountId}/status`, "PATCH", { status: "available" });
+      await ctx.answerCbQuery("✅ Marked as Completed — status set to available");
+      await ctx.editMessageReplyMarkup(
+        Markup.inlineKeyboard([[
+          Markup.button.callback(`📊 Status: available`, `link_status_${accountId}`),
+          Markup.button.callback(`✓ Completed`, `link_done_${accountId}`),
+        ]]).reply_markup
+      ).catch(() => {});
+    } catch {
+      await ctx.answerCbQuery("Failed to update status").catch(() => {});
+    }
+  });
 
   // Quick-pick count buttons (3 / 6 / 9 / 12 / 15 / 30 / 50 / 100)
   for (const n of [3, 6, 9, 12, 15, 30, 50, 100]) {

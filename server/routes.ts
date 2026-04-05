@@ -3569,7 +3569,7 @@ export async function registerRoutes(
 
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
-            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}|${acct.id}`, userId);
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
             await storage.updateReplitAccountStatus(acct.id, resolvedSuccessStatus).catch(() => {});
             broadcastLog(batchId, jobId, `  ✅ Status → ${resolvedSuccessStatus}`, userId);
@@ -3865,7 +3865,7 @@ export async function registerRoutes(
         for (const { acct, result } of results) {
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
-            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}|${acct.id}`, userId);
             await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
             await storage.updateReplitAccountStatus(acct.id, autoCouponSuccessStatus).catch(() => {});
             broadcastLog(batchId, jobId, `  ✅ Status → ${autoCouponSuccessStatus}`, userId);
@@ -4023,7 +4023,7 @@ export async function registerRoutes(
               await storage.setReplitCheckoutUrl(acct.id, result.stripeUrl).catch(() => {});
               await storage.updateReplitAccountStatus(acct.id, resolvedStatus).catch(() => {});
               // Broadcast immediately — bot picks this up in real-time per poll
-              broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+              broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}|${acct.id}`, userId);
               broadcastLog(batchId, jobId, `  ✅ [${generatedTotal}/${totalLinks}] ${acct.email} → ${resolvedStatus}`, userId);
             } else {
               failedTotal++;
@@ -4179,7 +4179,7 @@ export async function registerRoutes(
               );
             }
             if (result.success && result.stripeUrl) {
-              broadcastLog(batchId, jobId, `CHECKOUT_URL|${target.email}|${result.stripeUrl}`, userId);
+              broadcastLog(batchId, jobId, `CHECKOUT_URL|${target.email}|${result.stripeUrl}|${target.id}`, userId);
               await storage.setReplitCheckoutUrl(target.id, result.stripeUrl).catch(() => {});
               await storage.updateReplitAccountStatus(target.id, "working").catch(() => {});
               broadcastLog(batchId, jobId, `${tag} ✅ Done — link generated for ${target.email}`, userId);
@@ -4267,6 +4267,17 @@ export async function registerRoutes(
       const idsArray = Array.isArray(ids) && ids.length > 0 ? ids.map(String) : undefined;
       const count = await storage.bulkUpdateReplitAccountStatus(normalizedStatus, idsArray, ownerId);
       res.json({ success: true, updated: count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/replit-accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const all = await storage.getAllReplitAccounts();
+      const account = all.find(a => a.id === req.params.id);
+      if (!account) return res.status(404).json({ error: "Not found" });
+      res.json(account);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -4621,7 +4632,7 @@ export async function registerRoutes(
 
           if (result.success && result.stripeUrl) {
             generatedLinks.push({ email: acct.email, url: result.stripeUrl });
-            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}`, userId);
+            broadcastLog(batchId, jobId, `CHECKOUT_URL|${acct.email}|${result.stripeUrl}|${acct.id}`, userId);
           } else {
             broadcastLog(batchId, jobId, `❌ Failed for ${acct.email}: ${result.error}`, userId);
           }
