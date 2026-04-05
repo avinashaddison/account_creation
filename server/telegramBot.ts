@@ -2019,22 +2019,104 @@ export function startTelegramBot(config: BotConfig) {
       await ctx.reply("⏳ Please wait a moment before starting another batch.").catch(() => {});
       return;
     }
-    const checkoutSvc: ServiceConfig = {
-      emoji: "🔗", label: `Checkout Links (${count})`, endpoint: "",
-      outlookTable: "", hasCard: false, hasCoupon: false, hasReferral: false,
-    };
-    const r = await botApi("/api/replit-chain-links", "POST", { totalLinks: count, successStatus: "sold_out" });
+    const r = await botApi("/api/replit-chain-links", "POST", { totalLinks: count, successStatus: "working" });
     if (!r.ok) {
       await ctx.reply(`❌ <b>Error:</b> ${esc(r.data?.error || "Unknown")}`, { parse_mode: "HTML" });
       return;
     }
     const batchId = r.data.batchId as string;
+    const chatId: number = ctx.chat?.id ?? ctx.callbackQuery?.message?.chat?.id;
     const startTime = Date.now();
-    const msg = await ctx.reply(
-      `⏳ <b>🔗 Generating ${count} checkout link(s)</b> — starting...\n\n<pre>Connecting to batch...</pre>`,
+
+    // Send a fixed status message we'll keep editing (not using streamBatchLogs which can time-out)
+    const statusMsg = await bot.telegram.sendMessage(chatId,
+      `⏳ <b>🔗 Checkout Links — 0 / ${count} ready</b>\n<code>Batch started... each link takes ~3–5 min</code>`,
       { parse_mode: "HTML" }
     );
-    await streamBatchLogs(ctx.chat!.id, msg.message_id, batchId, checkoutSvc, count, startTime);
+    const statusMsgId = statusMsg.message_id;
+    const sentUrls = new Set<string>();
+    let allLines: string[] = [];
+    let since = 0;
+    let found = 0;
+    let done = false;
+    // Allow up to 60 min (1200 polls × 3 s) — never cut off mid-batch
+    const MAX_CHECKOUT_POLLS = 1200;
+    let pollCount = 0;
+
+    function elapsed() {
+      const s = Math.round((Date.now() - startTime) / 1000);
+      return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+    }
+
+    async function checkoutPoll() {
+      try {
+        if (pollCount++ > MAX_CHECKOUT_POLLS) {
+          await bot.telegram.editMessageText(chatId, statusMsgId, undefined,
+            `⏱ <b>Session expired</b> — batch still running server-side.\n<code>${esc(batchId)}</code>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+          return;
+        }
+
+        const resp = await botApi(`/api/batch-logs/${batchId}?since=${since}`);
+        if (!resp.ok) { setTimeout(checkoutPoll, 4000); return; }
+
+        const { logs, nextSince } = resp.data;
+        since = nextSince;
+
+        for (const l of (logs as Array<{message: string}> || [])) {
+          if (!l.message) continue;
+          allLines.push(l.message);
+        }
+
+        // Deliver each new checkout URL instantly as a separate message
+        const newCheckouts = allLines
+          .filter(l => l.startsWith("CHECKOUT_URL|"))
+          .map(l => { const p = l.split("|"); return { email: p[1], url: p[2] }; })
+          .filter(c => c.email && c.url && !sentUrls.has(c.url));
+
+        for (const c of newCheckouts) {
+          sentUrls.add(c.url);
+          found++;
+          await bot.telegram.sendMessage(chatId,
+            `🔗 <b>Checkout Link #${found} Ready!</b>\n\n` +
+            `📧 <code>${esc(c.email)}</code>\n` +
+            `<a href="${esc(c.url)}">Open Checkout</a>\n` +
+            `<code>${esc(c.url)}</code>`,
+            { parse_mode: "HTML", disable_web_page_preview: true }
+          ).catch(() => {});
+          // Update status message
+          await bot.telegram.editMessageText(chatId, statusMsgId, undefined,
+            `⏳ <b>🔗 Checkout Links — ${found} / ${count} ready</b> ⏱ ${elapsed()}\n` +
+            `<code>Working... each link takes ~3–5 min via browser</code>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+        }
+
+        // Check for completion
+        done = allLines.some(l => l.startsWith("🏁"));
+        if (done) {
+          const doneLine = allLines.find(l => l.startsWith("🏁")) || "";
+          const created = parseInt(doneLine.match(/(\d+) created/)?.[1] || String(found));
+          const failed  = parseInt(doneLine.match(/(\d+) failed/)?.[1] || "0");
+          await bot.telegram.editMessageText(chatId, statusMsgId, undefined,
+            `🎉 <b>Checkout batch done!</b> ⏱ ${elapsed()}\n\n` +
+            `✅ Generated: <b>${created}</b>\n` +
+            `❌ Failed:    <b>${failed}</b>\n` +
+            `📊 Accounts set to <b>working</b> status`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+          return;
+        }
+
+        setTimeout(checkoutPoll, 3000);
+      } catch (err: any) {
+        console.error("[checkout poll]", err.message);
+        setTimeout(checkoutPoll, 4000);
+      }
+    }
+
+    setTimeout(checkoutPoll, 2000);
   }
 
   // Quick-pick count buttons (3 / 6 / 9 / 12 / 15 / 30 / 50 / 100)
