@@ -178,6 +178,26 @@ app.use((req, res, next) => {
     console.warn("[Migration] Migration warning:", err.message);
   }
 
+  // Ensure biz_mail_accounts table always exists (idempotent bootstrap)
+  try {
+    const { db: startupDb } = await import("./db");
+    const { sql: sqlRaw } = await import("drizzle-orm");
+    await startupDb.execute(sqlRaw`
+      CREATE TABLE IF NOT EXISTS biz_mail_accounts (
+        id SERIAL PRIMARY KEY,
+        account_num INTEGER NOT NULL UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        password TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        deleted_at TIMESTAMP
+      )
+    `);
+    console.log("[Migration] Ensured biz_mail_accounts table exists");
+  } catch (err: any) {
+    console.warn("[Migration] biz_mail_accounts bootstrap warning:", err.message);
+  }
+
   // Reset any accounts stuck in "generating" from a previous crashed run so
   // they re-enter the processing pool and are not permanently orphaned.
   try {
