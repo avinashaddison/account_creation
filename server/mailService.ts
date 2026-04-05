@@ -789,10 +789,33 @@ function genBizPassword(): string {
   return `Biz@${rand}${num}`;
 }
 
-export async function createBizMailAccount(): Promise<{ email: string; password: string; accountNum: number }> {
+const BIZ_MAIL_QUOTA_BYTES = 262_144_000; // 250 MB
+const BIZ_MAIL_MAX_ACCOUNTS = 40;         // 10 GB ÷ 250 MB
+
+export async function createBizMailAccount(
+  requestedNum?: number, // if set, create this specific slot (re-create after deletion)
+): Promise<{ email: string; password: string; accountNum: number }> {
+  const { storage } = await import("./storage");
   const password = genBizPassword();
   const token = await getMailbuxBearerToken();
-  for (let n = 1; n <= 999; n++) {
+
+  // Build the list of slots to try
+  let slotsToTry: number[];
+  if (requestedNum !== undefined) {
+    slotsToTry = [requestedNum];
+  } else {
+    const usedNums = new Set(await storage.getUsedBizMailNums());
+    // Find next unused slot up to the max
+    slotsToTry = [];
+    for (let n = 1; n <= BIZ_MAIL_MAX_ACCOUNTS; n++) {
+      if (!usedNums.has(n)) { slotsToTry.push(n); break; }
+    }
+    if (slotsToTry.length === 0) {
+      throw new Error(`All ${BIZ_MAIL_MAX_ACCOUNTS} business mail slots are in use (10 GB plan limit). Delete an existing account first.`);
+    }
+  }
+
+  for (const n of slotsToTry) {
     const email = `account${n}@${MAILBUX_DOMAIN}`;
     const res = await fetch(`${MAILBUX_API}/principal`, {
       method: "POST",
@@ -808,24 +831,35 @@ export async function createBizMailAccount(): Promise<{ email: string; password:
         description: `Addison Panel business mail #${n}`,
         secrets: [password],
         emails: [email],
-        quota: 1073741824,
+        quota: BIZ_MAIL_QUOTA_BYTES,
         roles: ["user"],
       }),
     });
     const json: any = await res.json();
-    // Success
+
     if (json.data && typeof json.data === "number") {
       console.log(`[BizMail] Created account ${email} (Stalwart ID: ${json.data})`);
+      // Register in DB (or reactivate if it was previously deleted)
+      const existing = await storage.getBizMailByNum(n);
+      if (existing) {
+        await storage.reactivateBizMailAccount(n, password);
+      } else {
+        await storage.registerBizMailAccount(n, email, password);
+      }
       return { email, password, accountNum: n };
     }
-    // Already exists — try next slot
+
     const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
+      // Slot exists on server but wasn't in DB — still register it and try next
       continue;
     }
     throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
-  throw new Error("All account slots taken (account1–account999)");
+  throw new Error(requestedNum
+    ? `Could not create account${requestedNum}@${MAILBUX_DOMAIN}`
+    : `All ${BIZ_MAIL_MAX_ACCOUNTS} business mail slots are taken`
+  );
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {

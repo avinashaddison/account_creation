@@ -133,7 +133,7 @@ interface ShopAdminFlow {
 }
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover";
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
@@ -1247,12 +1247,12 @@ export function startTelegramBot(config: BotConfig) {
   });
 
   // ── Business Mail ─────────────────────────────────────────────────────────
-  async function startBizMailSession(chatId: number, uid: number) {
+  async function startBizMailSession(chatId: number, uid: number, requestedNum?: number) {
+    const { storage } = await import("./storage");
     const state = getState(uid);
-    // Stop any existing biz session and delete old account
+    // Stop any existing biz session (but do NOT delete from mailbux here)
     if (state.bizMailSession) {
       state.bizMailSession.stopped = true;
-      await deleteBizMailAccount(state.bizMailSession.email).catch(() => {});
     }
 
     const loadMsg = await bot.telegram.sendMessage(chatId,
@@ -1262,14 +1262,18 @@ export function startTelegramBot(config: BotConfig) {
 
     let email: string, password: string, accountNum: number;
     try {
-      ({ email, password, accountNum } = await createBizMailAccount());
+      ({ email, password, accountNum } = await createBizMailAccount(requestedNum));
     } catch (err: any) {
       await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
-        `❌ <b>Failed to create business mail</b>\n<code>${esc(err.message?.substring(0, 120))}</code>`,
+        `❌ <b>Failed to create business mail</b>\n<code>${esc(err.message?.substring(0, 200))}</code>`,
         { parse_mode: "HTML" }
       ).catch(() => {});
       return;
     }
+
+    // Capacity info
+    const activeCount = (await storage.getAllBizMailAccounts()).filter(a => a.isActive).length;
+    const capacityLine = `📊 <b>Capacity:</b> ${activeCount}/40 accounts used (${40 - activeCount} slots free)`;
 
     // Set up Gmail forwarder so incoming mail is captured via Gmail IMAP
     const gmailAddr = getGmailAddress();
@@ -1300,6 +1304,7 @@ export function startTelegramBot(config: BotConfig) {
       `🌐 <b>Webmail:</b> <a href="https://mail.mailbux.com/inbox/login">mail.mailbux.com/inbox/login</a>\n` +
       `📮 <b>IMAP:</b> <code>mail.mailbux.com:993 (SSL)</code>\n` +
       `📤 <b>SMTP:</b> <code>mail.mailbux.com:587 (STARTTLS)</code>\n\n` +
+      `${capacityLine}\n\n` +
       inboxNote;
 
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
@@ -1350,20 +1355,50 @@ export function startTelegramBot(config: BotConfig) {
   bot.action("biz_mail_stop", async (ctx) => {
     await ctx.answerCbQuery("Stopping session...").catch(() => {});
     const uid     = ctx.from!.id;
+    const chatId  = ctx.chat!.id;
     const state   = getState(uid);
     const session = state.bizMailSession;
     if (session && !session.stopped) {
       session.stopped = true;
+      // Delete from mailbux but KEEP the DB record (slot stays reserved)
       await deleteBizMailAccount(session.email).catch(() => {});
+      const { storage } = await import("./storage");
+      await storage.markBizMailDeleted(session.accountNum).catch(() => {});
+      const recoverKeyboard = Markup.inlineKeyboard([
+        [Markup.button.callback(`♻️ Recover account${session.accountNum}`, `biz_recover_${session.accountNum}`),
+         Markup.button.callback("🆕 New Account", "biz_mail_new")],
+      ]);
       await bot.telegram.editMessageText(session.chatId, session.statusMsgId, undefined,
         `💼 <b>Business Mail Stopped</b>\n\n` +
-        `<code>${esc(session.email)}</code>\n\n` +
-        `📥 Total received: <b>${session.receivedCount}</b>\n` +
-        `<i>Session ended by user. Account deleted.</i>`,
-        { parse_mode: "HTML" }
+        `📧 <code>${esc(session.email)}</code>\n` +
+        `📥 Total received: <b>${session.receivedCount}</b>\n\n` +
+        `<i>Account deleted from server. Slot #${session.accountNum} is reserved in DB — you can recover it anytime.</i>`,
+        { parse_mode: "HTML", ...recoverKeyboard }
       ).catch(() => {});
       state.bizMailSession = undefined;
     }
+  });
+
+  // Recover a specific deleted account by number
+  bot.action(/^biz_recover_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Recovering account...").catch(() => {});
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const num    = parseInt(ctx.match[1], 10);
+    await startBizMailSession(chatId, uid, num);
+  });
+
+  // Text input: user types "account5" to recover that specific account
+  bot.hears(/^account(\d+)$/i, async (ctx) => {
+    if (!ALLOWED_IDS.includes(ctx.from!.id)) return;
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const num    = parseInt(ctx.match[1], 10);
+    if (num < 1 || num > 40) {
+      await ctx.reply(`⚠️ Account number must be between 1 and 40.`).catch(() => {});
+      return;
+    }
+    await startBizMailSession(chatId, uid, num);
   });
 
   // ── MoviesDrive ────────────────────────────────────────────────────────────

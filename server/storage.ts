@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts, elevenLabsAccounts, chatgptAccounts } from "@shared/schema";
-import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount, ElevenLabsAccount, InsertElevenLabsAccount, ChatGptAccount, InsertChatGptAccount } from "@shared/schema";
+import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts, elevenLabsAccounts, chatgptAccounts, bizMailAccounts } from "@shared/schema";
+import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount, ElevenLabsAccount, InsertElevenLabsAccount, ChatGptAccount, InsertChatGptAccount, BizMailAccount } from "@shared/schema";
 import { eq, desc, sql, count, and, or, inArray } from "drizzle-orm";
 import pg from "pg";
 
@@ -101,6 +101,13 @@ export interface IStorage {
   getAllChatGptAccounts(): Promise<ChatGptAccount[]>;
   getChatGptAccountsByOwner(ownerId: string): Promise<ChatGptAccount[]>;
   deleteChatGptAccount(id: string): Promise<void>;
+  // Biz mail registry
+  getAllBizMailAccounts(): Promise<BizMailAccount[]>;
+  getUsedBizMailNums(): Promise<number[]>;
+  getBizMailByNum(accountNum: number): Promise<BizMailAccount | undefined>;
+  registerBizMailAccount(accountNum: number, email: string, password: string): Promise<BizMailAccount>;
+  markBizMailDeleted(accountNum: number): Promise<void>;
+  reactivateBizMailAccount(accountNum: number, password: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -670,6 +677,39 @@ export class DatabaseStorage implements IStorage {
 
   async deleteChatGptAccount(id: string): Promise<void> {
     await db.delete(chatgptAccounts).where(eq(chatgptAccounts.id, id));
+  }
+
+  async getAllBizMailAccounts(): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts).orderBy(bizMailAccounts.accountNum);
+  }
+
+  async getUsedBizMailNums(): Promise<number[]> {
+    const rows = await db.select({ accountNum: bizMailAccounts.accountNum }).from(bizMailAccounts);
+    return rows.map(r => r.accountNum);
+  }
+
+  async getBizMailByNum(accountNum: number): Promise<BizMailAccount | undefined> {
+    const [row] = await db.select().from(bizMailAccounts).where(eq(bizMailAccounts.accountNum, accountNum));
+    return row;
+  }
+
+  async registerBizMailAccount(accountNum: number, email: string, password: string): Promise<BizMailAccount> {
+    const [row] = await db.insert(bizMailAccounts)
+      .values({ accountNum, email, password, isActive: true })
+      .returning();
+    return row;
+  }
+
+  async markBizMailDeleted(accountNum: number): Promise<void> {
+    await db.update(bizMailAccounts)
+      .set({ isActive: false, deletedAt: new Date() })
+      .where(eq(bizMailAccounts.accountNum, accountNum));
+  }
+
+  async reactivateBizMailAccount(accountNum: number, password: string): Promise<void> {
+    await db.update(bizMailAccounts)
+      .set({ isActive: true, deletedAt: null, password })
+      .where(eq(bizMailAccounts.accountNum, accountNum));
   }
 }
 

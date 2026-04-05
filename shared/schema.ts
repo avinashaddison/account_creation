@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, numeric, integer, pgEnum, boolean, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, numeric, integer, serial, pgEnum, boolean, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -371,3 +371,21 @@ export type ShopProduct       = typeof shopProducts.$inferSelect;
 export type InsertShopProduct  = z.infer<typeof insertShopProductSchema>;
 export type ShopOrder         = typeof shopOrders.$inferSelect;
 export type InsertShopOrder    = z.infer<typeof insertShopOrderSchema>;
+
+// ── Business Mail Account Registry ───────────────────────────────────────────
+// Once a slot (account1, account2, …) is used it is remembered forever so the
+// same number is never accidentally reused.  isActive=false means the mailbox
+// was deleted from Stalwart but the slot is still reserved.
+export const bizMailAccounts = pgTable("biz_mail_accounts", {
+  id:        serial("id").primaryKey(),
+  accountNum: integer("account_num").notNull().unique(),
+  email:     text("email").notNull().unique(),
+  password:  text("password").notNull(),
+  isActive:  boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+export const insertBizMailAccountSchema = createInsertSchema(bizMailAccounts).omit({ id: true, createdAt: true, deletedAt: true });
+export type BizMailAccount       = typeof bizMailAccounts.$inferSelect;
+export type InsertBizMailAccount = z.infer<typeof insertBizMailAccountSchema>;
