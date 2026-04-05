@@ -27,7 +27,8 @@ const SERVICE_CONFIGS: Record<string, ServiceConfig> = {
   lovable: { label: "Lovable",  emoji: "💜", endpoint: "/api/lovable-create/bulk", outlookTable: "lovable_accounts",  hasReferral: true },
   v0:      { label: "v0.dev",   emoji: "⚡", endpoint: "/api/v0-create/bulk",      outlookTable: "v0_accounts" },
   adobe:   { label: "Adobe",    emoji: "🅰️", endpoint: "/api/adobe-create/bulk",   outlookTable: "adobe_accounts" },
-  chatgpt: { label: "ChatGPT",  emoji: "🤖", endpoint: "/api/chatgpt-create/bulk", outlookTable: "chatgpt_accounts" },
+  chatgpt:     { label: "ChatGPT",           emoji: "🤖", endpoint: "/api/chatgpt-create/bulk",     outlookTable: "chatgpt_accounts" },
+  chatgpt_biz: { label: "ChatGPT (BizMail)", emoji: "📧", endpoint: "/api/chatgpt-create-biz/bulk", outlookTable: "chatgpt_accounts" },
 };
 
 // ── Account type browser configs ──────────────────────────────────────────────
@@ -1073,7 +1074,7 @@ export function startTelegramBot(config: BotConfig) {
         ...Markup.inlineKeyboard([
           [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
           [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
-          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
+          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt"), Markup.button.callback("📧 ChatGPT BizMail", "cs_chatgpt_biz")],
           [Markup.button.callback("✖ Cancel",   "create_cancel")],
         ]),
       }
@@ -1845,7 +1846,7 @@ export function startTelegramBot(config: BotConfig) {
         ...Markup.inlineKeyboard([
           [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
           [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
-          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
+          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt"), Markup.button.callback("📧 ChatGPT BizMail", "cs_chatgpt_biz")],
           [Markup.button.callback("❌ Cancel",  "create_cancel")],
         ]),
       }
@@ -2211,7 +2212,7 @@ export function startTelegramBot(config: BotConfig) {
         ...Markup.inlineKeyboard([
           [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
           [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
-          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt")],
+          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt"), Markup.button.callback("📧 ChatGPT BizMail", "cs_chatgpt_biz")],
           [Markup.button.callback("❌ Cancel",  "create_cancel")],
         ]),
       }

@@ -8,7 +8,7 @@ import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
-import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount, registerChatGptAccount, registerNanoBananaAccount } from "./playwrightService";
+import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount, registerChatGptAccount, registerNanoBananaAccount, registerChatGptAccountViaBizMail } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
@@ -5241,6 +5241,116 @@ export async function registerRoutes(
         } catch (err: any) {
           broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
           broadcast({ type: "chatgpt_create_result", createId, batchId, success: false, error: err.message }, userId);
+        }
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── ChatGPT via Business Email (addison.asia) ──────────────────────────────
+  app.post("/api/chatgpt-create-biz/bulk", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { count = 1 } = req.body;
+      const num = Math.max(1, Math.min(50, parseInt(count) || 1));
+      const userId = req.session.userId;
+      const bulkId = randomUUID().substring(0, 8);
+      const batchId = `chatgpt-biz-${bulkId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, bulkId, batchId, count: num, message: `Starting ChatGPT biz-mail creation for ${num} account(s)...` });
+
+      (async () => {
+        broadcastLog(batchId, bulkId, `🚀 Starting ChatGPT BizMail creation — ${num} account(s)`, userId);
+
+        // Load active biz mail accounts
+        const bizMailRows = await db.execute(sql`
+          SELECT id, account_num, email, password
+          FROM biz_mail_accounts
+          WHERE is_active = true AND deleted_at IS NULL
+          ORDER BY account_num ASC
+        `);
+        if (bizMailRows.rows.length === 0) {
+          broadcastLog(batchId, bulkId, `❌ No active biz mail accounts found. Generate them first via 🏢 Biz Mail.`, userId);
+          broadcastBatchComplete(batchId, userId);
+          return;
+        }
+
+        let successCount = 0;
+        let failCount = 0;
+        for (let i = 0; i < num; i++) {
+          const bizAcc = bizMailRows.rows[i % bizMailRows.rows.length] as { id: number; account_num: number; email: string; password: string };
+          broadcastLog(batchId, bulkId, `\n[${i + 1}/${num}] Using biz email: ${bizAcc.email}`, userId);
+
+          try {
+            const result = await registerChatGptAccountViaBizMail(
+              bizAcc.email,
+              bizAcc.password,
+              (msg) => broadcastLog(batchId, bulkId, msg, userId),
+            );
+            if (result.success) {
+              try {
+                await storage.createChatGptAccount({
+                  email: result.email!,
+                  password: result.password!,
+                  firstName: result.firstName!,
+                  lastName: result.lastName!,
+                  outlookEmail: bizAcc.email,
+                  status: "created",
+                  createdBy: userId,
+                });
+                broadcastLog(batchId, bulkId, `✅ [${i + 1}] Saved to DB — ${result.email}`, userId);
+                successCount++;
+              } catch (dbErr: any) {
+                broadcastLog(batchId, bulkId, `⚠️ [${i + 1}] DB save error: ${dbErr.message}`, userId);
+                successCount++;
+              }
+              broadcast({ type: "chatgpt_biz_result", bulkId, batchId, index: i + 1, success: true, email: result.email, firstName: result.firstName, lastName: result.lastName }, userId);
+            } else {
+              broadcastLog(batchId, bulkId, `❌ [${i + 1}] Failed: ${result.error || "Unknown error"}`, userId);
+              failCount++;
+              broadcast({ type: "chatgpt_biz_result", bulkId, batchId, index: i + 1, success: false, error: result.error }, userId);
+            }
+          } catch (err: any) {
+            broadcastLog(batchId, bulkId, `❌ [${i + 1}] Error: ${(err.message || "").substring(0, 150)}`, userId);
+            failCount++;
+          }
+        }
+
+        broadcastLog(batchId, bulkId, `\n📊 Done: ${successCount} created, ${failCount} failed`, userId);
+        broadcastBatchComplete(batchId, userId);
+      })();
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post("/api/chatgpt-create-biz", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { bizEmail, bizPassword } = req.body;
+      if (!bizEmail || !bizPassword) return res.status(400).json({ error: "bizEmail and bizPassword are required" });
+
+      const userId = req.session.userId;
+      const createId = randomUUID().substring(0, 8);
+      const batchId = `chatgpt-biz-${createId}`;
+
+      batchOwners.set(batchId, userId);
+      res.json({ success: true, createId, batchId, message: "ChatGPT biz-mail account creation started" });
+
+      (async () => {
+        broadcastLog(batchId, createId, `Starting ChatGPT biz-mail creation for ${bizEmail}...`, userId);
+        try {
+          const result = await registerChatGptAccountViaBizMail(bizEmail, bizPassword, (msg) => broadcastLog(batchId, createId, msg, userId));
+          if (result.success) {
+            try {
+              await storage.createChatGptAccount({ email: result.email!, password: result.password!, firstName: result.firstName!, lastName: result.lastName!, outlookEmail: bizEmail, status: "created", createdBy: userId });
+              broadcastLog(batchId, createId, `✅ Account saved to database`, userId);
+            } catch (dbErr: any) { broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId); }
+            broadcast({ type: "chatgpt_biz_result", createId, batchId, success: true, email: result.email, firstName: result.firstName, lastName: result.lastName }, userId);
+          } else {
+            broadcastLog(batchId, createId, `❌ Failed: ${result.error || "Unknown error"}`, userId);
+            broadcast({ type: "chatgpt_biz_result", createId, batchId, success: false, error: result.error }, userId);
+          }
+        } catch (err: any) {
+          broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
+          broadcast({ type: "chatgpt_biz_result", createId, batchId, success: false, error: err.message }, userId);
         }
         broadcastBatchComplete(batchId, userId);
       })();

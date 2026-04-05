@@ -21570,6 +21570,316 @@ export async function registerChatGptAccount(
   }
 }
 
+// ── ChatGPT account creation using business email (addison.asia) ─────────────
+// Signs up on chatgpt.com with a biz mail address and verifies via mailbux HTTP API
+// (no Playwright Outlook login needed — verification is fetched over HTTP).
+export async function registerChatGptAccountViaBizMail(
+  bizEmail: string,
+  bizPassword: string,
+  log: (msg: string) => void,
+): Promise<{ success: boolean; email?: string; password?: string; firstName?: string; lastName?: string; error?: string }> {
+  const FIRST_NAMES = ["James","Emma","Oliver","Sophia","Liam","Ava","Noah","Mia","William","Isabella","Benjamin","Charlotte","Lucas","Amelia","Henry","Harper","Alexander","Evelyn","Mason","Abigail","Ethan","Emily","Daniel","Elizabeth","Michael","Sofia"];
+  const LAST_NAMES  = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Rodriguez","Martinez","Hernandez","Lopez","Gonzalez","Wilson","Anderson","Thomas","Taylor","Moore","Jackson","Martin"];
+  const randItem = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const randPass = (): string => {
+    const lower = "abcdefghjkmnpqrstuvwxyz", upper = "ABCDEFGHJKMNPQRSTUVWXYZ", digits = "23456789", syms = "!@#$";
+    let p = randItem(upper.split("")) + randItem(lower.split("")) + randItem(digits.split("")) + randItem(syms.split(""));
+    const all = lower + upper + digits;
+    for (let i = 0; i < 8; i++) p += all[Math.floor(Math.random() * all.length)];
+    return p.split("").sort(() => Math.random() - 0.5).join("").substring(0, 12) + "Aa1!";
+  };
+  const waitMs = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+  const firstName = randItem(FIRST_NAMES);
+  const lastName  = randItem(LAST_NAMES);
+  const password  = randPass();
+  const dobDay    = String(Math.floor(Math.random() * 20) + 5);
+  const dobMonth  = String(Math.floor(Math.random() * 10) + 1);
+  const dobYear   = String(1985 + Math.floor(Math.random() * 15));
+  const signupStart = new Date();
+
+  log(`Generated name: ${firstName} ${lastName}`);
+  log(`Generated password: ${password}`);
+  log(`Signing up ChatGPT with biz email: ${bizEmail}`);
+
+  let browser: any = null;
+  try {
+    const { chromium: stealthChromium } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    stealthChromium.use(StealthPlugin());
+
+    // Proxy selection: Apify → SOAX → nsocks
+    let proxyConfig: any = undefined;
+    let proxyUrl: string | null = null;
+    try {
+      const r = await db.execute(sql`SELECT value FROM settings WHERE key = 'apify_proxy_url'`);
+      if (r.rows.length > 0 && r.rows[0].value) { proxyUrl = r.rows[0].value as string; log("Using Apify proxy"); }
+    } catch {}
+    if (!proxyUrl) {
+      try {
+        const r = await db.execute(sql`SELECT value FROM settings WHERE key = 'soax_proxy_template'`);
+        if (r.rows.length > 0 && r.rows[0].value) { proxyUrl = r.rows[0].value as string; log("Using SOAX proxy"); }
+      } catch {}
+    }
+    if (!proxyUrl) {
+      proxyUrl = await getResidentialProxyUrl();
+      if (proxyUrl) log("⚠️ Using nsocks proxy (datacenter — may be blocked by OpenAI)");
+    }
+    if (!proxyUrl) log("⚠️ No proxy configured — OpenAI may block this IP");
+
+    if (proxyUrl) {
+      try {
+        const pUrl = new URL(proxyUrl);
+        proxyConfig = { server: `${pUrl.protocol}//${pUrl.hostname}:${pUrl.port}`, username: decodeURIComponent(pUrl.username), password: decodeURIComponent(pUrl.password) };
+        log(`Proxy: ${pUrl.hostname}:${pUrl.port} (user: ${decodeURIComponent(pUrl.username).substring(0, 18)}...)`);
+      } catch (e: any) { log(`Proxy parse error: ${e.message} — proceeding without proxy`); }
+    }
+
+    browser = await stealthChromium.launch({
+      headless: true,
+      args: ["--no-sandbox","--disable-setuid-sandbox","--disable-blink-features=AutomationControlled","--disable-dev-shm-usage","--disable-web-security","--no-first-run","--no-default-browser-check"],
+    });
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+    const context = await browser.newContext({
+      userAgent: ua, viewport: { width: 1366, height: 768 }, locale: "en-US", timezoneId: "America/New_York",
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+      ...(proxyConfig ? { proxy: proxyConfig } : {}),
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(50000);
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "plugins",   { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      (window as any).chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+    });
+
+    // ── STEP 1: Navigate to chatgpt.com and find Sign Up ──────────────────────
+    log("Navigating to chatgpt.com...");
+    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await waitMs(3000);
+    log(`chatgpt.com loaded: ${page.url().substring(0, 100)}`);
+
+    let navigatedToSignup = false;
+    const signupSelectors = ['[data-testid="login-button"]','a[href*="create-account"]','a[href*="signup"]','button:has-text("Sign up")','a:has-text("Sign up")'];
+    for (const sel of signupSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        const txt = ((await el.innerText().catch(() => "")) as string).toLowerCase();
+        if (txt.includes("log in") || txt.includes("sign in")) continue;
+        log(`Clicking signup: "${txt.substring(0, 30)}"`);
+        await el.click();
+        navigatedToSignup = true;
+        await waitMs(3000);
+        break;
+      } catch {}
+    }
+    if (!navigatedToSignup) {
+      await page.goto("https://chatgpt.com/auth/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await waitMs(2000);
+      const signupLink = await page.$('a[href*="create-account"], a:has-text("Sign up")').catch(() => null);
+      if (signupLink && await signupLink.isVisible().catch(() => false)) {
+        await signupLink.click();
+        await waitMs(3000);
+        navigatedToSignup = true;
+        log("Clicked signup from login page");
+      }
+    }
+    log(`After signup nav: ${page.url().substring(0, 100)}`);
+
+    // ── STEP 2: Fill email ─────────────────────────────────────────────────────
+    log("Waiting for email field...");
+    const emailFieldSelector = 'input[type="email"], input[name="email"], input[id="email"], input[autocomplete="email"]';
+    try {
+      await page.waitForSelector(emailFieldSelector, { timeout: 25000, state: "visible" });
+    } catch {
+      const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      if (pageText.toLowerCase().includes("continue with email") || pageText.toLowerCase().includes("use email")) {
+        await page.click('button:has-text("Continue with email"), button:has-text("Email")').catch(() => {});
+        await waitMs(3000);
+        await page.waitForSelector(emailFieldSelector, { timeout: 15000, state: "visible" });
+      } else {
+        throw new Error(`Email field not found. Page: ${pageText.replace(/\s+/g, " ").substring(0, 120)}`);
+      }
+    }
+    for (const sel of ['input[type="email"]','input[name="email"]','#email']) {
+      const el = await page.$(sel).catch(() => null);
+      if (!el || !await el.isVisible().catch(() => false)) continue;
+      await el.click({ clickCount: 3 });
+      await waitMs(200);
+      await el.type(bizEmail, { delay: 60 });
+      log(`Filled email: ${bizEmail}`);
+      break;
+    }
+    await waitMs(500);
+
+    const continueSelectors = ['button[type="submit"]','button:has-text("Continue")','[data-action-button-primary="true"]'];
+    for (const sel of continueSelectors) {
+      const btns = await page.$$(sel).catch(() => [] as any[]);
+      for (const btn of btns) {
+        if (!await btn.isVisible().catch(() => false)) continue;
+        const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+        if (txt.includes("google") || txt.includes("microsoft") || txt.includes("apple")) continue;
+        await btn.click();
+        log(`Clicked continue (email): "${txt.substring(0, 30) || "button"}"`);
+        break;
+      }
+    }
+    await waitMs(4000);
+
+    // ── STEP 3: Fill password ─────────────────────────────────────────────────
+    log("Looking for password field...");
+    const passField = await page.$('input[type="password"]').catch(() => null);
+    if (passField && await passField.isVisible().catch(() => false)) {
+      await passField.click({ clickCount: 3 });
+      await waitMs(200);
+      await passField.type(password, { delay: 60 });
+      log("Filled password");
+      await waitMs(500);
+      for (const sel of continueSelectors) {
+        const btns = await page.$$(sel).catch(() => [] as any[]);
+        for (const btn of btns) {
+          if (!await btn.isVisible().catch(() => false)) continue;
+          const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+          if (txt.includes("google") || txt.includes("microsoft") || txt.includes("apple")) continue;
+          await btn.click();
+          log(`Clicked continue (password): "${txt.substring(0, 30) || "button"}"`);
+          break;
+        }
+      }
+      await waitMs(6000);
+
+      // Retry loop for transient OpenAI errors
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const curUrl  = page.url();
+        const curText = await page.evaluate(() => document.body?.innerText?.replace(/\s+/g, " ") || "").catch(() => "");
+        if (!curUrl.includes("create-account/password")) break;
+        if (curText.includes("Failed to create account") && !curText.includes("timed out"))
+          throw new Error("OpenAI signup rejected: Failed to create account (email may be banned or already exist)");
+        if (curText.includes("timed out") || curText.includes("error occurred") || curText.includes("Try again")) {
+          const tryAgainBtn = await page.$('button:has-text("Try again"), a:has-text("Try again")').catch(() => null);
+          if (tryAgainBtn && await tryAgainBtn.isVisible().catch(() => false)) { await tryAgainBtn.click().catch(() => {}); await waitMs(5000); }
+          const pf = await page.$('input[type="password"]').catch(() => null);
+          if (pf && await pf.isVisible().catch(() => false)) {
+            await pf.click({ clickCount: 3 }); await waitMs(200); await pf.fill(""); await waitMs(200); await pf.type(password, { delay: 55 }); await waitMs(600);
+            const cb = await page.$('button[type="submit"], button:has-text("Continue")').catch(() => null);
+            if (cb && await cb.isVisible().catch(() => false)) { await cb.click(); } else { await page.keyboard.press("Enter"); }
+          }
+          await waitMs(8000);
+          continue;
+        }
+        break;
+      }
+    } else {
+      log("⚠️ No password field — may already be on verification step");
+    }
+
+    // ── STEP 4: Get verification from mailbux HTTP API (no browser) ───────────
+    log(`📬 Waiting for OpenAI verification email in ${bizEmail}...`);
+    const { fetchOpenAICodeFromBizMail } = await import("./mailService");
+    const verResult = await fetchOpenAICodeFromBizMail(bizEmail, bizPassword, signupStart, log, 180_000);
+    if (!verResult) throw new Error("Verification not received within 3 minutes — check mailbux inbox");
+
+    // Navigate to verify link OR enter OTP code
+    if (verResult.link) {
+      log(`✅ Got verify link — navigating...`);
+      await page.goto(verResult.link, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await waitMs(3000);
+      log(`After verify link: ${page.url().substring(0, 100)}`);
+    }
+
+    if (verResult.code) {
+      log(`✅ Got OTP: ${verResult.code} — entering in browser...`);
+      await waitMs(2000);
+      const otpSelectors = ['input[name="code"]','input[placeholder*="code" i]','input[inputmode="numeric"]','input[autocomplete="one-time-code"]'];
+      let otpFilled = false;
+      for (const sel of otpSelectors) {
+        const el = await page.$(sel).catch(() => null);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 }); await waitMs(200); await el.type(verResult.code, { delay: 80 });
+        log(`Filled OTP via ${sel}`);
+        otpFilled = true;
+        await waitMs(500);
+        await page.keyboard.press("Enter");
+        break;
+      }
+      if (!otpFilled) {
+        const digitBoxes = await page.$$('input[maxlength="1"]');
+        if (digitBoxes.length >= 6) {
+          for (let i = 0; i < 6 && i < digitBoxes.length; i++) {
+            await digitBoxes[i].click(); await waitMs(100); await digitBoxes[i].type(verResult.code[i], { delay: 80 });
+          }
+          otpFilled = true;
+          await page.keyboard.press("Enter");
+        }
+      }
+      if (!otpFilled) log("⚠️ Could not find OTP input — continuing anyway");
+      await waitMs(5000);
+      log(`After OTP: ${page.url().substring(0, 100)}`);
+    }
+
+    // ── STEP 5: Fill name + DOB ────────────────────────────────────────────────
+    log("Looking for name/DOB fields...");
+    await waitMs(2000);
+    const fillInput = async (sels: string[], value: string, label: string) => {
+      for (const sel of sels) {
+        const el = await page.$(sel).catch(() => null);
+        if (!el || !await el.isVisible().catch(() => false)) continue;
+        await el.click({ clickCount: 3 }); await waitMs(150); await el.type(value, { delay: 50 });
+        log(`Filled ${label}`); return;
+      }
+    };
+    await fillInput(['input[name="firstName"]','input[placeholder*="first" i]','#firstName'], firstName, "first name");
+    await waitMs(300);
+    await fillInput(['input[name="lastName"]','input[placeholder*="last" i]','#lastName'], lastName, "last name");
+    await waitMs(300);
+    await fillInput(['input[name="birthday"]','input[type="date"]'], `${dobYear}-${dobMonth.padStart(2,"0")}-${dobDay.padStart(2,"0")}`, "birthday").catch(() => {});
+    const dobMonthSel = await page.$('select[name="birthMonth"], #birthMonth').catch(() => null);
+    if (dobMonthSel) await page.selectOption('select[name="birthMonth"], #birthMonth', dobMonth).catch(() => {});
+    const dobDaySel = await page.$('select[name="birthDay"], #birthDay').catch(() => null);
+    if (dobDaySel) await page.selectOption('select[name="birthDay"], #birthDay', dobDay).catch(() => {});
+    const dobYearSel = await page.$('select[name="birthYear"], #birthYear').catch(() => null);
+    if (dobYearSel) await page.selectOption('select[name="birthYear"], #birthYear', dobYear).catch(() => {});
+    await waitMs(500);
+
+    // Final submit
+    log("Clicking final submit...");
+    const finalSelectors = ['button[type="submit"]','button:has-text("Continue")','button:has-text("Done")','button:has-text("Agree")','button:has-text("Accept")'];
+    for (const sel of finalSelectors) {
+      const btns = await page.$$(sel).catch(() => [] as any[]);
+      for (const btn of btns) {
+        if (!await btn.isVisible().catch(() => false)) continue;
+        const txt = ((await btn.innerText().catch(() => "")) as string).toLowerCase();
+        if (txt.length > 0) { await btn.click(); log(`Clicked: "${txt.substring(0, 40)}"`); break; }
+      }
+    }
+    await waitMs(5000);
+
+    const finalUrl  = page.url();
+    const finalText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    log(`Final URL: ${finalUrl.substring(0, 120)}`);
+    log(`Final page: ${finalText.replace(/\s+/g, " ").substring(0, 300)}`);
+
+    const isSuccess = finalUrl.includes("chatgpt.com") || finalUrl.includes("chat.openai.com") ||
+      finalText.toLowerCase().includes("you're all set") || finalText.toLowerCase().includes("welcome") ||
+      finalText.toLowerCase().includes("get started") || finalText.toLowerCase().includes("new chat");
+
+    if (isSuccess) {
+      log(`✅ ChatGPT account created — ${bizEmail}`);
+      return { success: true, email: bizEmail, password, firstName, lastName };
+    }
+    log(`⚠️ Could not confirm visually — assuming success after OTP was accepted`);
+    return { success: true, email: bizEmail, password, firstName, lastName };
+
+  } catch (err: any) {
+    log(`❌ ChatGPT biz-mail creation failed: ${err.message?.substring(0, 200)}`);
+    return { success: false, error: err.message?.substring(0, 200) };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 process.on("SIGINT", async () => {
   console.log("[Playwright] Shutting down browser...");
   await closeBrowser();

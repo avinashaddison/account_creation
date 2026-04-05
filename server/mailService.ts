@@ -1273,3 +1273,88 @@ export async function pollBizMailInbox(
     await new Promise(r => setTimeout(r, 20_000));
   }
 }
+
+// ── Poll mailbux webmail for an OpenAI/ChatGPT verification email ─────────────
+// Returns { code } (6-digit OTP) or { link } (verify URL), whichever is found first.
+export async function fetchOpenAICodeFromBizMail(
+  email: string,
+  password: string,
+  since: Date,
+  log: (msg: string) => void,
+  timeoutMs = 180_000,
+): Promise<{ code?: string; link?: string } | null> {
+  const deadline = Date.now() + timeoutMs;
+
+  let auth = await webmailLogin(email, password);
+  if (!auth) {
+    log(`[BizMail] Could not log into webmail for ${email}`);
+    return null;
+  }
+  log(`[BizMail] Webmail logged in — polling for OpenAI email...`);
+
+  const seenIds = new Set<string | number>();
+  let tokenExpiry = Date.now() + 14 * 60 * 1000;
+
+  while (Date.now() < deadline) {
+    if (Date.now() > tokenExpiry) {
+      const fresh = await webmailLogin(email, password);
+      if (fresh) { auth = fresh; tokenExpiry = Date.now() + 14 * 60 * 1000; }
+    }
+
+    try {
+      const messages = await webmailSearch(auth, "openai", 30);
+      for (const m of messages) {
+        const id   = m.id || m.uid || JSON.stringify(m).slice(0, 30);
+        const date = new Date(m.date || m.receivedAt || m.createdAt || since);
+        if (date < since) continue;
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+
+        const from    = (m.from?.address || m.from?.email || m.from || "").toLowerCase();
+        const subject = (m.subject || "").toLowerCase();
+        const rawBody = (m.snippet || m.preview || m.body || m.text || m.html || "").toString();
+        const body    = rawBody.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+
+        const isOpenAI = from.includes("openai") || from.includes("noreply") ||
+          subject.includes("verify") || subject.includes("confirm") || subject.includes("openai") ||
+          body.toLowerCase().includes("openai") || body.toLowerCase().includes("chatgpt");
+        if (!isOpenAI) continue;
+
+        log(`[BizMail] Found email from="${from}" sub="${m.subject}"`);
+
+        // Extract 6-digit OTP code
+        const codeMatch =
+          body.match(/(?:verification|confirm|one.time)[^\d]*(\d{6})\b/i) ||
+          body.match(/\b(\d{6})\b(?=[^\d]*(?:is your|to verify|code))/i) ||
+          body.match(/\b([0-9]{6})\b/);
+        if (codeMatch) {
+          log(`[BizMail] ✅ Found OTP: ${codeMatch[1]}`);
+          return { code: codeMatch[1] };
+        }
+
+        // Extract verify link
+        const linkMatch =
+          rawBody.match(/href="(https?:\/\/[^"]*(?:verify|confirm|callback|activate)[^"]*)"/i) ||
+          body.match(/(https?:\/\/[^\s"<>]*(?:verify|confirm|callback|activate)[^\s"<>]*)/i) ||
+          rawBody.match(/href="(https?:\/\/[^"]*openai\.com[^"]*)"/i);
+        if (linkMatch) {
+          log(`[BizMail] ✅ Found verify link: ${linkMatch[1].substring(0, 80)}...`);
+          return { link: linkMatch[1] };
+        }
+
+        log(`[BizMail] Email found but no code/link extracted — continuing poll`);
+      }
+    } catch (err: any) {
+      log(`[BizMail] poll error: ${err.message}`);
+    }
+
+    const remaining = Math.round((deadline - Date.now()) / 1000);
+    if (remaining > 0) {
+      log(`[BizMail] Waiting... (${remaining}s remaining)`);
+      await new Promise(r => setTimeout(r, 15_000));
+    }
+  }
+
+  log(`[BizMail] Timed out waiting for OpenAI verification email`);
+  return null;
+}
