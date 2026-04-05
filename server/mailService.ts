@@ -694,7 +694,27 @@ export async function getMailbuxBearerToken(): Promise<string> {
     return _cachedMailbuxToken.token;
   }
 
-  // Step 1: GET admin login page → extract CSRF meta token + session cookies
+  // ── Method 1: POST /api/oauth password grant (simplest — try first) ────────
+  try {
+    const oauthRes = await mailbuxHttpPost("https://mail.mailbux.com/api/oauth", {
+      grant_type: "password",
+      username: MAILBUX_USER,
+      password: MAILBUX_PASS,
+    });
+    if (oauthRes.status >= 200 && oauthRes.status < 300) {
+      let oauthData: any;
+      try { oauthData = JSON.parse(oauthRes.body); } catch { /* fall through */ }
+      const oauthToken = oauthData?.access_token || oauthData?.stalwart_tokens?.access_token || "";
+      if (oauthToken) {
+        _cachedMailbuxToken = { token: oauthToken, expiry: Date.now() + 50 * 60 * 1000 };
+        console.log("[BizMail] Got Bearer token via /api/oauth");
+        return oauthToken;
+      }
+    }
+  } catch { /* fall through to CSRF method */ }
+
+  // ── Method 2: CSRF login flow — GET /auth/login → POST /api/login ─────────
+  // Confirmed working: returns stalwart_tokens.access_token
   const loginPage = await mailbuxHttpGet("https://mail.mailbux.com/auth/login");
   const csrfMatch = loginPage.body.match(/name="csrf-token"\s+content="([^"]+)"/);
   const csrf = csrfMatch?.[1] || "";
@@ -702,7 +722,6 @@ export async function getMailbuxBearerToken(): Promise<string> {
 
   const sessionCookie = loginPage.rawCookies.map((c: string) => c.split(";")[0]).join("; ");
 
-  // Step 2: POST /api/login with Stalwart tenant credentials
   const loginRes = await mailbuxHttpPost("https://mail.mailbux.com/api/login", {
     email: MAILBUX_USER,
     username: MAILBUX_USER,
@@ -725,7 +744,7 @@ export async function getMailbuxBearerToken(): Promise<string> {
   const token = data.stalwart_tokens.access_token;
   _cachedMailbuxToken = { token, expiry: Date.now() + 50 * 60 * 1000 };
   _cachedMailbuxCookies = sessionCookie;
-  console.log("[BizMail] Got Stalwart Bearer token via API");
+  console.log("[BizMail] Got Stalwart Bearer token via CSRF login flow");
   return token;
 }
 
