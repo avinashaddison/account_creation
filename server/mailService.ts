@@ -390,10 +390,9 @@ export async function pollBizMailViaGmail(
       secure: true,
       auth: { user: _gmailAddress, pass: _gmailAppPassword },
       logger: false,
-      // idleTimeout controls how often ImapFlow refreshes IDLE (sends DONE+IDLE).
-      // Default is 5 minutes — that's why mail was delayed 5 min.
-      // Set to 10 s so idle() resolves within 10 s of an EXISTS notification.
-      idleTimeout: 10_000,
+      // Large idleTimeout — we no longer rely on the timer for detection.
+      // The 'exists' event fires instantly; idle() just keeps the connection alive.
+      idleTimeout: 28 * 60 * 1000,
     });
 
     try {
@@ -409,14 +408,31 @@ export async function pollBizMailViaGmail(
         // Initial sweep for anything that arrived since session start
         await processNewMail(client);
 
-        // IDLE loop — idle() resolves every ~10 s (idleTimeout) so we sweep
-        // for new mail promptly after any EXISTS notification from Gmail.
-        while (!shouldStop() && Date.now() < deadline) {
-          await Promise.race([
-            client.idle(),
-            new Promise<void>(r => setTimeout(r, 15_000)), // safety cap
-          ]);
-          if (!shouldStop()) await processNewMail(client);
+        // When Gmail pushes a new-mail notification it fires 'exists' INSTANTLY
+        // (within 1-2 s of delivery). ImapFlow automatically sends DONE to exit
+        // IDLE, runs our commands, then re-enters IDLE — no timer wait needed.
+        let busy = false;
+        const onExists = async () => {
+          if (shouldStop() || busy) return;
+          busy = true;
+          try { await processNewMail(client); } catch {}
+          busy = false;
+        };
+        client.on("exists", onExists);
+
+        try {
+          while (!shouldStop() && Date.now() < deadline) {
+            // idle() keeps the persistent connection open.
+            // It resolves when EXISTS interrupts it (instant) or after 28 min (reconnect).
+            await Promise.race([
+              client.idle(),
+              new Promise<void>(r => setTimeout(r, 28 * 60 * 1000)),
+            ]);
+            // Safety sweep in case exists fired but busy flag blocked it
+            if (!shouldStop() && !busy) await processNewMail(client).catch(() => {});
+          }
+        } finally {
+          client.off("exists", onExists);
         }
       } finally {
         lock.release();
