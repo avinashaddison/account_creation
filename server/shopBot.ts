@@ -136,12 +136,26 @@ async function getBalance(uid: number): Promise<number> {
 const REQUIRED_CHANNEL = "@projectaddison";
 const CHANNEL_URL      = "https://t.me/projectaddison";
 
-async function isChannelMember(bot: any, uid: number): Promise<boolean> {
+async function isChannelMember(bot: any, uid: number): Promise<"member" | "not_member" | "bot_not_admin"> {
   try {
     const m = await bot.telegram.getChatMember(REQUIRED_CHANNEL, uid);
-    return ["member", "administrator", "creator"].includes(m.status);
-  } catch {
-    return false;
+    const ok = ["member", "administrator", "creator"].includes(m.status);
+    return ok ? "member" : "not_member";
+  } catch (e: any) {
+    const desc: string = e?.description || e?.message || "";
+    console.warn(`[ShopBot] getChatMember error for uid=${uid}:`, desc);
+    // Bot is not an admin of the channel — can't check membership
+    if (
+      desc.includes("CHAT_ADMIN_REQUIRED") ||
+      desc.includes("bot is not a member") ||
+      desc.includes("not enough rights") ||
+      desc.includes("have no rights") ||
+      desc.includes("administrators") ||
+      desc.includes("chat not found")
+    ) {
+      return "bot_not_admin";
+    }
+    return "not_member";
   }
 }
 
@@ -661,8 +675,8 @@ export function startShopBot(token: string) {
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
 
     // ── Channel membership gate ───────────────────────────────────────────────
-    const isMember = await isChannelMember(bot, uid);
-    if (!isMember) {
+    const memberStatus = await isChannelMember(bot, uid);
+    if (memberStatus === "not_member") {
       return safeEdit(ctx,
         `🔒 <b>Channel Access Required</b>\n\n` +
         `${divider()}\n\n` +
@@ -680,6 +694,7 @@ export function startShopBot(token: string) {
         }
       );
     }
+    // "bot_not_admin" → skip gate, let purchase proceed
 
     const prod = await getProductById(productId);
     if (!prod || !prod.active) {
@@ -790,8 +805,8 @@ export function startShopBot(token: string) {
     const uid       = ctx.from.id;
     const productId = (ctx.match as RegExpExecArray)[1];
 
-    const isMember = await isChannelMember(bot, uid);
-    if (!isMember) {
+    const memberStatus = await isChannelMember(bot, uid);
+    if (memberStatus === "not_member") {
       return safeEdit(ctx,
         `🔒 <b>Not Verified Yet</b>\n\n` +
         `${divider()}\n\n` +
@@ -807,6 +822,7 @@ export function startShopBot(token: string) {
         }
       );
     }
+    // "member" or "bot_not_admin" → proceed
 
     // Member confirmed — proceed with purchase
     await safeEdit(ctx,
