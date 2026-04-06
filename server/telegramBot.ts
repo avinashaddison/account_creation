@@ -103,6 +103,7 @@ interface CreateFlow {
   cardId?: string;         // "" = no card, undefined = not set yet
   cardLabel?: string;
   referralUrl?: string;    // "" = no referral, used for Lovable
+  emailType?: "outlook" | "bizmail"; // Replit: which email source to use
 }
 interface MailSession {
   email: string;
@@ -168,9 +169,14 @@ async function getAvailableCount(svc: ServiceConfig): Promise<number> {
 async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserState) {
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
-  const availLine = svc.outlookTable
-    ? `\n<code>◈ Outlook pool  →  ${await getAvailableCount(svc)} available</code>\n`
-    : "\n";
+  let availLine: string;
+  if (flow.emailType === "bizmail") {
+    availLine = `\n<code>◈ Email  →  Business Mail (auto-generated)</code>\n`;
+  } else if (svc.outlookTable) {
+    availLine = `\n<code>◈ Outlook pool  →  ${await getAvailableCount(svc)} available</code>\n`;
+  } else {
+    availLine = "\n";
+  }
 
   await ctx.reply(
     `\n🔷 <b>🏗 CREATE · ${svc.label.toUpperCase()}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -254,7 +260,9 @@ async function showCreateSummary(ctx: any, uid: number, gs: (n: number) => UserS
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
   const infoLines: string[] = [`📦  ${flow.count} account${flow.count === 1 ? "" : "s"}`];
-  if (svc.outlookTable) {
+  if (flow.emailType === "bizmail") {
+    infoLines.push(`💼  Email  ·  Business Mail (auto-generated)`);
+  } else if (svc.outlookTable) {
     infoLines.push(`📬  Outlook pool  ·  ${await getAvailableCount(svc)} available`);
   }
   if (svc.hasCoupon)  infoLines.push(`🎟  Coupon  ·  ${flow.couponCode  || "none"}`);
@@ -1866,6 +1874,42 @@ export function startTelegramBot(config: BotConfig) {
     if (!st.createFlow) st.createFlow = {};
     st.createFlow.service = svcKey;
     await ctx.deleteMessage().catch(() => {});
+    // Replit offers a choice of email provider before the count picker
+    if (svcKey === "replit") {
+      await ctx.reply(
+        `\n🔷 <b>🏗 CREATE · REPLIT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `› Which email type?`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("📧 Outlook Mail", "replit_email_outlook"), Markup.button.callback("💼 Business Mail", "replit_email_bizmail")],
+            [Markup.button.callback("✖ Cancel", "create_cancel")],
+          ]),
+        }
+      );
+      return;
+    }
+    await showCountPicker(ctx, uid, getState);
+  });
+
+  // ── Create flow: Replit email type selection ───────────────────────────────
+  bot.action("replit_email_outlook", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    const st = getState(uid);
+    if (!st.createFlow) st.createFlow = {};
+    st.createFlow.emailType = "outlook";
+    await ctx.deleteMessage().catch(() => {});
+    await showCountPicker(ctx, uid, getState);
+  });
+
+  bot.action("replit_email_bizmail", async (ctx) => {
+    await ctx.answerCbQuery();
+    const uid = ctx.from.id;
+    const st = getState(uid);
+    if (!st.createFlow) st.createFlow = {};
+    st.createFlow.emailType = "bizmail";
+    await ctx.deleteMessage().catch(() => {});
     await showCountPicker(ctx, uid, getState);
   });
 
@@ -2212,7 +2256,11 @@ export function startTelegramBot(config: BotConfig) {
     if (svc.hasCard && flow.cardId) body.cardId = flow.cardId;
     if (svc.hasReferral && flow.referralUrl) body.referralUrl = flow.referralUrl;
 
-    const r = await botApi(svc.endpoint, "POST", body);
+    // Replit with Business Mail uses a dedicated endpoint
+    const endpoint = (flow.service === "replit" && flow.emailType === "bizmail")
+      ? "/api/replit-create-biz/bulk"
+      : svc.endpoint;
+    const r = await botApi(endpoint, "POST", body);
     getState(uid).createFlow = undefined;
 
     if (!r.ok) {
