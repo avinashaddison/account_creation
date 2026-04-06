@@ -267,48 +267,109 @@ export async function pollGmailForElevenLabsLink(
   return null;
 }
 
+// ── Quoted-printable decoder that properly handles multi-byte UTF-8 ───────────
+function decodeQuotedPrintable(input: string): string {
+  // Remove soft line breaks first
+  const joined = input.replace(/=\r?\n/g, "");
+  const result: string[] = [];
+  let i = 0;
+  while (i < joined.length) {
+    if (
+      joined[i] === "=" &&
+      i + 2 < joined.length &&
+      /^[0-9A-Fa-f]{2}$/.test(joined.slice(i + 1, i + 3))
+    ) {
+      // Collect a consecutive run of encoded bytes, then decode as UTF-8
+      const byteArr: number[] = [];
+      while (
+        i < joined.length &&
+        joined[i] === "=" &&
+        i + 2 < joined.length &&
+        /^[0-9A-Fa-f]{2}$/.test(joined.slice(i + 1, i + 3))
+      ) {
+        byteArr.push(parseInt(joined.slice(i + 1, i + 3), 16));
+        i += 3;
+      }
+      result.push(Buffer.from(byteArr).toString("utf8"));
+    } else {
+      result.push(joined[i]);
+      i++;
+    }
+  }
+  return result.join("");
+}
+
+// ── Strip invisible/zero-width Unicode characters that clutter display ────────
+function stripInvisibleChars(text: string): string {
+  return text
+    .replace(/[\u200B-\u200F\u00AD\uFEFF\u2060\u2028\u2029]/g, "") // zero-width / soft-hyphen / BOM
+    .replace(/\u00A0/g, " ");                                        // non-breaking space → regular space
+}
+
+// ── Decode a single MIME part body (handles QP and base64) ───────────────────
+function decodeMimePartBody(partHeaders: string, body: string): string {
+  const enc = (partHeaders.match(/Content-Transfer-Encoding:\s*(\S+)/i)?.[1] || "").toLowerCase();
+  if (enc === "base64") {
+    try {
+      return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
+    } catch {
+      return body;
+    }
+  }
+  if (enc === "quoted-printable") {
+    return decodeQuotedPrintable(body);
+  }
+  // 8bit / 7bit / identity — raw but may still have QP-looking sequences
+  return decodeQuotedPrintable(body);
+}
+
 // ── Extract readable text from raw MIME email source ─────────────────────────
 function extractMimeText(raw: string): string {
+  const clean = (text: string) =>
+    stripInvisibleChars(text).replace(/\s+/g, " ").trim().substring(0, 1200);
+
   // Find boundary for multipart messages
   const boundaryMatch = raw.match(/Content-Type:\s*multipart\/[^;]+;\s*boundary="?([^"\r\n]+)"?/i);
   if (boundaryMatch) {
     const boundary = boundaryMatch[1].trim();
-    const parts = raw.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:--)?`));
+    const parts = raw.split(
+      new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:--)?`)
+    );
+
+    // Prefer text/plain
     for (const part of parts) {
-      if (/Content-Type:\s*text\/plain/i.test(part)) {
-        const bodyStart = part.indexOf("\r\n\r\n");
-        if (bodyStart === -1) continue;
-        return part.slice(bodyStart + 4)
-          .replace(/=\r?\n/g, "")
-          .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-          .trim()
-          .substring(0, 800);
-      }
+      if (!/Content-Type:\s*text\/plain/i.test(part)) continue;
+      const bodyStart = part.indexOf("\r\n\r\n");
+      if (bodyStart === -1) continue;
+      const headers = part.slice(0, bodyStart);
+      const body = part.slice(bodyStart + 4);
+      const decoded = decodeMimePartBody(headers, body);
+      const result = clean(decoded);
+      if (result.length > 10) return result;
     }
-    // Fallback to first HTML part stripped of tags
+
+    // Fallback: text/html stripped of tags
     for (const part of parts) {
-      if (/Content-Type:\s*text\/html/i.test(part)) {
-        const bodyStart = part.indexOf("\r\n\r\n");
-        if (bodyStart === -1) continue;
-        return part.slice(bodyStart + 4)
-          .replace(/=\r?\n/g, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .substring(0, 800);
-      }
+      if (!/Content-Type:\s*text\/html/i.test(part)) continue;
+      const bodyStart = part.indexOf("\r\n\r\n");
+      if (bodyStart === -1) continue;
+      const headers = part.slice(0, bodyStart);
+      const body = part.slice(bodyStart + 4);
+      const decoded = decodeMimePartBody(headers, body);
+      const stripped = decoded.replace(/<[^>]+>/g, " ");
+      const result = clean(stripped);
+      if (result.length > 10) return result;
     }
   }
 
-  // Plain (non-multipart) message — everything after the blank header line
-  const bodyStart = raw.indexOf("\r\n\r\n");
-  if (bodyStart !== -1) {
-    return raw.slice(bodyStart + 4)
-      .replace(/=\r?\n/g, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .substring(0, 800);
+  // Plain (non-multipart) — check transfer encoding in top-level headers
+  const headerEnd = raw.indexOf("\r\n\r\n");
+  if (headerEnd !== -1) {
+    const topHeaders = raw.slice(0, headerEnd);
+    const body = raw.slice(headerEnd + 4);
+    const decoded = decodeMimePartBody(topHeaders, body);
+    const stripped = decoded.replace(/<[^>]+>/g, " ");
+    return clean(stripped);
   }
   return "";
 }
