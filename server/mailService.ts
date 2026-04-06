@@ -850,7 +850,57 @@ function genBizPassword(): string {
   return `Biz@${rand}${num}`;
 }
 
-// Mailbux requires quota >= 1 GB or omit the field (omitting = server default / no limit)
+// ── Human-name pool for realistic-looking email addresses ────────────────────
+const FIRST_NAMES = [
+  "james","john","robert","michael","william","david","richard","joseph","thomas","charles",
+  "christopher","daniel","matthew","anthony","mark","donald","steven","paul","andrew","joshua",
+  "kenneth","kevin","brian","george","timothy","ronald","edward","jason","jeffrey","ryan",
+  "jacob","gary","nicholas","eric","jonathan","stephen","larry","justin","scott","brandon",
+  "benjamin","samuel","raymond","frank","gregory","alexander","patrick","jack","dennis","jerry",
+  "tyler","aaron","jose","adam","henry","nathan","douglas","zachary","peter","kyle",
+  "ethan","walter","noah","jeremy","christian","keith","roger","terry","gerald","harold",
+  "sean","austin","carl","arthur","dylan","jesse","jordan","bryan","bruce","gabriel",
+  "logan","albert","alan","wayne","elijah","randy","roy","vincent","ralph","eugene",
+  "mary","patricia","jennifer","linda","barbara","susan","jessica","sarah","karen","lisa",
+  "nancy","betty","margaret","sandra","ashley","dorothy","kimberly","emily","donna","michelle",
+  "carol","amanda","melissa","deborah","stephanie","rebecca","sharon","laura","cynthia","kathleen",
+  "amy","angela","anna","brenda","pamela","emma","nicole","helen","samantha","katherine",
+  "christine","rachel","carolyn","janet","maria","heather","diane","julia","olivia","kelly",
+  "christina","lauren","joan","evelyn","judith","megan","cheryl","andrea","hannah","martha",
+];
+
+const LAST_NAMES = [
+  "smith","johnson","williams","brown","jones","garcia","miller","davis","rodriguez","martinez",
+  "hernandez","lopez","gonzalez","wilson","anderson","thomas","taylor","moore","jackson","martin",
+  "lee","perez","thompson","white","harris","sanchez","clark","ramirez","lewis","robinson",
+  "walker","young","allen","king","wright","scott","torres","nguyen","hill","flores",
+  "green","adams","nelson","baker","hall","rivera","campbell","mitchell","carter","roberts",
+  "gomez","phillips","evans","turner","diaz","parker","cruz","edwards","collins","reyes",
+  "stewart","morris","morales","murphy","cook","rogers","gutierrez","ortiz","morgan","cooper",
+  "peterson","bailey","reed","kelly","howard","ramos","kim","cox","ward","richardson",
+  "watson","brooks","chavez","wood","bennett","gray","mendoza","ruiz","hughes","price",
+  "alvarez","castillo","sanders","patel","myers","long","ross","foster","jimenez","powell",
+  "jenkins","perry","russell","sullivan","bell","coleman","butler","henderson","barnes","gonzales",
+  "fisher","vasquez","simmons","romero","jordan","patterson","alexander","hamilton","graham","reynolds",
+  "griffin","wallace","moreno","west","cole","hayes","bryant","herrera","gibson","ellis",
+  "tran","medina","aguilar","stevens","murray","ford","castro","marshall","owens","harrison",
+  "fernandez","mcdonald","woods","washington","kennedy","wells","shaw","hansen","porter","dunn",
+];
+
+// Pick a random firstname.lastname not already in existingEmails. Falls back with numeric suffix.
+async function generateHumanUsername(existingEmails: Set<string>): Promise<string> {
+  for (let i = 0; i < 30; i++) {
+    const first = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+    const last  = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+    const email = `${first}.${last}@${MAILBUX_DOMAIN}`;
+    if (!existingEmails.has(email)) return `${first}.${last}`;
+  }
+  // Pool exhausted locally — append random suffix to guarantee uniqueness
+  const first  = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
+  const last   = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
+  const suffix = Math.floor(Math.random() * 990) + 10;
+  return `${first}.${last}${suffix}`;
+}
 
 export async function createBizMailAccount(opts: {
   requestedNum?: number;    // re-create a specific numbered slot
@@ -933,17 +983,19 @@ export async function createBizMailAccount(opts: {
     }
   }
 
-  // ── Auto-increment: loop past any slots that already exist on the server ─
-  const MAX_SKIP = 500; // safety guard against infinite loops
-  for (let skip = 0; skip < MAX_SKIP; skip++) {
-    const password = genBizPassword();
+  // ── Generate a unique human-name email and create the account ────────────
+  const MAX_ATTEMPTS = 50; // safety guard against unlikely repeated server conflicts
+  // Build a set of all emails known to DB (checked locally before hitting server)
+  const allAccounts  = await storage.getAllBizMailAccounts();
+  const usedEmails   = new Set(allAccounts.map(a => a.email.toLowerCase()));
+  const nums         = allAccounts.map(a => a.accountNum).filter((n): n is number => n !== null);
+  let   nextNum      = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
 
-    // Re-read DB each iteration so we account for slots registered mid-loop
-    const all    = await storage.getAllBizMailAccounts();
-    const nums   = all.map(a => a.accountNum).filter((n): n is number => n !== null);
-    const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
-    const accountNum = maxNum + 1;
-    const email = `account${accountNum}@${MAILBUX_DOMAIN}`;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const password   = genBizPassword();
+    const username   = await generateHumanUsername(usedEmails);
+    const email      = `${username}@${MAILBUX_DOMAIN}`;
+    const accountNum = nextNum++;
 
     const res = await fetch(`${MAILBUX_API}/principal`, {
       method: "POST",
@@ -956,7 +1008,7 @@ export async function createBizMailAccount(opts: {
         type: "individual",
         tenant: MAILBUX_USER,
         name: email,
-        description: `Addison Panel business mail #${accountNum}`,
+        description: `Addison Panel business mail — ${email}`,
         secrets: [password],
         emails: [email],
         roles: ["user"],
@@ -973,22 +1025,21 @@ export async function createBizMailAccount(opts: {
     }
 
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
-      // This slot already exists on the server (leftover from a previous session).
-      // Register it in DB so the counter skips it next iteration, then try next number.
-      console.log(`[BizMail] ${email} already exists on server — skipping to next number`);
+      // Name collision on the server — add to local exclusion set and try a new name
+      console.log(`[BizMail] ${email} already exists on server — trying a different name`);
+      usedEmails.add(email.toLowerCase());
       const existing = await storage.getBizMailByEmail(email);
       if (!existing) {
-        // Placeholder entry (isActive=false so it's not treated as a live account)
         await storage.registerBizMailAccount(accountNum, email, "orphaned");
         await storage.markBizMailDeletedByEmail(email);
       }
-      continue; // try accountNum + 1
+      continue;
     }
 
     throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
 
-  throw new Error("Could not find a free account slot after 500 attempts — server may be at capacity.");
+  throw new Error("Could not create a business mail account after 50 attempts — server may be at capacity.");
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
@@ -1262,16 +1313,13 @@ export async function ensureBizMailJmapRouting(bizEmail: string): Promise<void> 
 // Call once at startup so all accounts are ready.
 export async function setupAllBizMailJmapRouting(): Promise<void> {
   try {
-    const adminToken = await getMailbuxBearerToken();
-    const domainRes = await fetch("https://mail.mailbux.com/api/principal/addison.asia", {
-      headers: { "Authorization": `Bearer ${adminToken}`, "Accept": "application/json" },
-    });
-    const domainData = await domainRes.json() as any;
-    const memberCount = domainData?.data?.members || 0;
-    console.log(`[BizMail JMAP] Setting up routing for ${memberCount} @addison.asia accounts`);
-    for (let i = 1; i <= memberCount; i++) {
-      const email = `account${i}@addison.asia`;
-      await ensureBizMailJmapRouting(email);
+    const { storage } = await import("./storage");
+    const all = await storage.getAllBizMailAccounts();
+    // Only route active accounts (skip orphaned/deleted placeholders)
+    const active = all.filter(a => a.isActive && a.password !== "orphaned");
+    console.log(`[BizMail JMAP] Setting up routing for ${active.length} active @addison.asia accounts (${all.length} total in DB)`);
+    for (const acct of active) {
+      await ensureBizMailJmapRouting(acct.email);
     }
   } catch (err: any) {
     console.log(`[BizMail JMAP] setupAllBizMailJmapRouting error: ${err.message}`);

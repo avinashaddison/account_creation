@@ -1300,9 +1300,8 @@ export function startTelegramBot(config: BotConfig) {
       ? `📬 <i>Inbox monitoring active — new emails will be forwarded here</i>`
       : `📭 <i>Inbox monitoring inactive — check webmail manually</i>`;
 
-    const title = isCustom
-      ? `💼 <b>Business Mail — Custom: ${esc(email)}</b>`
-      : `💼 <b>Business Mail — Account #${accountNum}</b>`;
+    const localPart = email.split("@")[0];
+    const title = `💼 <b>Business Mail — ${esc(localPart)}</b>`;
 
     const recycleNotice = recycled.length > 0
       ? `\n♻️ <b>Auto-recycled (freed space):</b>\n` +
