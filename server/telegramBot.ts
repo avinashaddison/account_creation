@@ -1370,17 +1370,20 @@ export function startTelegramBot(config: BotConfig) {
             if (seen.has(msg.id)) continue;
             seen.add(msg.id);
             session.receivedCount++;
+            const body = (msg.text || msg.subject || "(no text content)").substring(0, 3000);
             await bot.telegram.sendMessage(chatId,
               `📬 <b>New Business Email!</b>\n\n` +
               `💼 <b>To:</b> <code>${esc(address)}</code>\n` +
               `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
               `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
               `📅 <b>Date:</b> ${new Date(msg.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
-              `<pre>${esc((msg.text || "(no text content)").substring(0, 3000))}</pre>`,
+              `<pre>${esc(body)}</pre>`,
               { parse_mode: "HTML" }
-            ).catch(() => {});
+            ).catch((e: any) => console.error("[BizMail] Telegram send error:", e.message));
           }
-        } catch {}
+        } catch (e: any) {
+          console.error("[BizMail] Inbox poll error:", e.message);
+        }
         await new Promise(r => setTimeout(r, 10_000));
       }
     })();

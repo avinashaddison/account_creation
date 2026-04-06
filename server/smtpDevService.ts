@@ -118,35 +118,43 @@ export async function deleteAccount(accountId: string): Promise<void> {
   await call("DELETE", `/accounts/${encodeURIComponent(accountId)}`);
 }
 
-export async function listMessages(accountId: string, mailboxId: string, limit = 30): Promise<SmtpDevMessage[]> {
-  const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}/mailboxes/${encodeURIComponent(mailboxId)}/messages?page=1`);
-  return members(data).slice(0, limit).map((m: any) => ({
+function parseFrom(raw: any): string {
+  if (!raw) return "unknown";
+  if (typeof raw === "string") return raw;
+  // smtp.dev returns { address, name } object
+  const name    = raw.name    ? String(raw.name).trim()    : "";
+  const address = raw.address ? String(raw.address).trim() : "";
+  if (name && address) return `${name} <${address}>`;
+  return address || name || "unknown";
+}
+
+function parseMsg(m: any): SmtpDevMessageDetail {
+  const html = m.html ?? m.body ?? m.htmlBody ?? "";
+  const htmlStripped = html ? html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
+  const fallback = htmlStripped || (m.intro || "");
+  const text = m.text ?? m.textBody ?? fallback;
+  return {
     id: String(m.id ?? ""),
-    from: m.from ?? "unknown",
+    from: parseFrom(m.from),
     subject: m.subject ?? "(no subject)",
     intro: m.intro ?? m.preview ?? m.snippet ?? "",
-    date: m.createdAt ?? m.date ?? new Date().toISOString(),
-    seen: m.seen ?? m.isRead ?? false,
+    date: m.date ?? m.createdAt ?? new Date().toISOString(),
+    seen: m.isRead ?? m.seen ?? false,
     hasAttachments: m.hasAttachments ?? false,
-  }));
+    text,
+    html,
+  };
+}
+
+export async function listMessages(accountId: string, mailboxId: string, limit = 30): Promise<SmtpDevMessage[]> {
+  const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}/mailboxes/${encodeURIComponent(mailboxId)}/messages`);
+  return members(data).slice(0, limit).map(parseMsg);
 }
 
 export async function getMessage(accountId: string, mailboxId: string, messageId: string): Promise<SmtpDevMessageDetail | null> {
   try {
     const m: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}/mailboxes/${encodeURIComponent(mailboxId)}/messages/${encodeURIComponent(messageId)}`);
-    const html = m.html ?? m.body ?? m.htmlBody ?? "";
-    const text = m.text ?? m.textBody ?? (html ? html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : m.intro ?? "");
-    return {
-      id: String(m.id ?? ""),
-      from: m.from ?? "unknown",
-      subject: m.subject ?? "(no subject)",
-      intro: m.intro ?? m.preview ?? "",
-      date: m.createdAt ?? m.date ?? new Date().toISOString(),
-      seen: m.seen ?? true,
-      hasAttachments: m.hasAttachments ?? false,
-      text,
-      html,
-    };
+    return parseMsg(m);
   } catch (err: any) {
     console.error("[smtp.dev] getMessage error:", err.message);
     return null;
@@ -154,23 +162,19 @@ export async function getMessage(accountId: string, mailboxId: string, messageId
 }
 
 export async function getFullInbox(accountId: string): Promise<Array<{ id: string; from: string; subject: string; text: string; createdAt: string }>> {
-  // Get account to find INBOX mailbox id (mailboxes are embedded)
+  // Get account with embedded mailboxes in a single call
   const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}`);
   const account = parseAccount(data);
   const inbox = account.mailboxes.find(m => m.path === "INBOX") ?? account.mailboxes[0];
   if (!inbox) return [];
 
-  const messages = await listMessages(accountId, inbox.id, 30);
-  const result = [];
-  for (const msg of messages) {
-    const detail = await getMessage(accountId, inbox.id, msg.id);
-    result.push({
-      id: msg.id,
-      from: msg.from,
-      subject: msg.subject,
-      text: detail?.text ?? msg.intro,
-      createdAt: msg.date,
-    });
-  }
-  return result;
+  // text/html are already in the list response — no extra per-message call needed
+  const messages = await listMessages(accountId, inbox.id, 50);
+  return messages.map(m => ({
+    id: m.id,
+    from: m.from,
+    subject: m.subject,
+    text: (m as SmtpDevMessageDetail).text ?? m.intro,
+    createdAt: m.date,
+  }));
 }
