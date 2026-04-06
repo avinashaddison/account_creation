@@ -103,7 +103,6 @@ interface CreateFlow {
   cardId?: string;         // "" = no card, undefined = not set yet
   cardLabel?: string;
   referralUrl?: string;    // "" = no referral, used for Lovable
-  emailType?: "outlook" | "bizmail"; // Replit: which email source to use
 }
 interface MailSession {
   email: string;
@@ -169,14 +168,9 @@ async function getAvailableCount(svc: ServiceConfig): Promise<number> {
 async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserState) {
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
-  let availLine: string;
-  if (flow.emailType === "bizmail") {
-    availLine = `\n<code>◈ Email  →  Business Mail (auto-generated)</code>\n`;
-  } else if (svc.outlookTable) {
-    availLine = `\n<code>◈ Outlook pool  →  ${await getAvailableCount(svc)} available</code>\n`;
-  } else {
-    availLine = "\n";
-  }
+  const availLine = svc.outlookTable
+    ? `\n<code>◈ Outlook pool  →  ${await getAvailableCount(svc)} available</code>\n`
+    : "\n";
 
   await ctx.reply(
     `\n🔷 <b>🏗 CREATE · ${svc.label.toUpperCase()}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -260,9 +254,7 @@ async function showCreateSummary(ctx: any, uid: number, gs: (n: number) => UserS
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
   const infoLines: string[] = [`📦  ${flow.count} account${flow.count === 1 ? "" : "s"}`];
-  if (flow.emailType === "bizmail") {
-    infoLines.push(`💼  Email  ·  Business Mail (auto-generated)`);
-  } else if (svc.outlookTable) {
+  if (svc.outlookTable) {
     infoLines.push(`📬  Outlook pool  ·  ${await getAvailableCount(svc)} available`);
   }
   if (svc.hasCoupon)  infoLines.push(`🎟  Coupon  ·  ${flow.couponCode  || "none"}`);
@@ -1293,7 +1285,7 @@ export function startTelegramBot(config: BotConfig) {
     if (gmailAddr) {
       const fwd = await createBizMailForwarder(
         email, gmailAddr, true,
-        (isCustom || accountNum === null) ? `BizMail — ${email}` : `BizMail #${accountNum} → Telegram`,
+        isCustom ? `BizMail custom — ${email}` : `BizMail #${accountNum} → Telegram`,
       ).catch(() => ({ success: false }));
       forwardingActive = fwd.success;
     }
@@ -1308,8 +1300,9 @@ export function startTelegramBot(config: BotConfig) {
       ? `📬 <i>Inbox monitoring active — new emails will be forwarded here</i>`
       : `📭 <i>Inbox monitoring inactive — check webmail manually</i>`;
 
-    const localPart = email.split("@")[0];
-    const title = `💼 <b>Business Mail — ${esc(localPart)}</b>`;
+    const title = isCustom
+      ? `💼 <b>Business Mail — Custom: ${esc(email)}</b>`
+      : `💼 <b>Business Mail — Account #${accountNum}</b>`;
 
     const recycleNotice = recycled.length > 0
       ? `\n♻️ <b>Auto-recycled (freed space):</b>\n` +
@@ -1428,12 +1421,9 @@ export function startTelegramBot(config: BotConfig) {
          Markup.button.callback("🆕 New Account", "biz_mail_new"),
          Markup.button.callback("✏️ Custom Name", "biz_mail_custom")],
       ]);
-      // Only show "account${N}" recovery for legacy numbered mailboxes (account\d+@addison.asia).
-      // Human-name and custom accounts always recover by username.
-      const isLegacyNumbered = /^account\d+$/.test(username) && session.accountNum !== null;
-      const recoverHint = isLegacyNumbered
-        ? `Or type <code>account${session.accountNum}</code> in chat to recreate it anytime.`
-        : `Or type <code>${username}</code> in chat to recreate it anytime.`;
+      const recoverHint = session.isCustom
+        ? `Or type <code>${username}</code> in chat to recreate it anytime.`
+        : `Or type <code>account${session.accountNum}</code> in chat to recreate it anytime.`;
 
       await bot.telegram.editMessageText(session.chatId, session.statusMsgId, undefined,
         `💼 <b>Business Mail Stopped</b>\n\n` +
@@ -1874,42 +1864,6 @@ export function startTelegramBot(config: BotConfig) {
     if (!st.createFlow) st.createFlow = {};
     st.createFlow.service = svcKey;
     await ctx.deleteMessage().catch(() => {});
-    // Replit offers a choice of email provider before the count picker
-    if (svcKey === "replit") {
-      await ctx.reply(
-        `\n🔷 <b>🏗 CREATE · REPLIT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `› Which email type?`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("📧 Outlook Mail", "replit_email_outlook"), Markup.button.callback("💼 Business Mail", "replit_email_bizmail")],
-            [Markup.button.callback("✖ Cancel", "create_cancel")],
-          ]),
-        }
-      );
-      return;
-    }
-    await showCountPicker(ctx, uid, getState);
-  });
-
-  // ── Create flow: Replit email type selection ───────────────────────────────
-  bot.action("replit_email_outlook", async (ctx) => {
-    await ctx.answerCbQuery();
-    const uid = ctx.from.id;
-    const st = getState(uid);
-    if (!st.createFlow) st.createFlow = {};
-    st.createFlow.emailType = "outlook";
-    await ctx.deleteMessage().catch(() => {});
-    await showCountPicker(ctx, uid, getState);
-  });
-
-  bot.action("replit_email_bizmail", async (ctx) => {
-    await ctx.answerCbQuery();
-    const uid = ctx.from.id;
-    const st = getState(uid);
-    if (!st.createFlow) st.createFlow = {};
-    st.createFlow.emailType = "bizmail";
-    await ctx.deleteMessage().catch(() => {});
     await showCountPicker(ctx, uid, getState);
   });
 
@@ -2256,11 +2210,7 @@ export function startTelegramBot(config: BotConfig) {
     if (svc.hasCard && flow.cardId) body.cardId = flow.cardId;
     if (svc.hasReferral && flow.referralUrl) body.referralUrl = flow.referralUrl;
 
-    // Replit with Business Mail uses a dedicated endpoint
-    const endpoint = (flow.service === "replit" && flow.emailType === "bizmail")
-      ? "/api/replit-create-biz/bulk"
-      : svc.endpoint;
-    const r = await botApi(endpoint, "POST", body);
+    const r = await botApi(svc.endpoint, "POST", body);
     getState(uid).createFlow = undefined;
 
     if (!r.ok) {

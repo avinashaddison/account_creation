@@ -7,7 +7,7 @@ import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { searchEvents, getEventById } from "./services/ticketmasterDiscoveryService";
 import { startMonitoring, sendTelegramMessage } from "./services/alertService";
-import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials, createBizMailAccount, createBizMailForwarder, ensureBizMailJmapRouting } from "./mailService";
+import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, pollForVerificationCode, pollForDrawConfirmation, generateRandomUsername, fetchMessages, fetchMessageContent, detectProviderFromDomain, hasGmailCredentials, createGmailAddress, pollGmailForVerificationCode, setGmailCredentials } from "./mailService";
 import { fullRegistrationFlow, retryDrawRegistration, completeDrawRegistrationViaApi, completeDrawViaGigyaBrowser, loginOutlookAccount, registerZenrowsAccount, createOutlookAccount, checkGmailAccount, loginGoogleAccount, createGmailAccount, registerReplitAccount, checkoutExistingReplitAccount, onboardingCheckoutReplitAccount, generateSingleCheckoutLink, extractCouponFromReplitAccount, warmReplitAccount, registerLovableAccount, loginAndCompleteOnboarding, registerAdobeAccount, registerV0Account, generateLovableCheckoutLink, checkReplitBanStatus, createElevenLabsAccount, registerChatGptAccount, registerNanoBananaAccount, registerChatGptAccountViaBizMail } from "./playwrightService";
 import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
@@ -3314,107 +3314,6 @@ export async function registerRoutes(
             failCount++;
             broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Error: ${(err.message || "").substring(0, 100)}`, userId);
             broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: toUse.length }, userId);
-          }
-        }
-
-        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
-        broadcastBatchComplete(batchId, userId);
-      })();
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ── Replit bulk creation via Business Mail ────────────────────────────────
-  app.post("/api/replit-create-biz/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
-    try {
-      const { count = 1, couponCode, cardId } = req.body;
-      const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
-      const userId = req.session.userId;
-
-      const bulkId = randomUUID().substring(0, 8);
-      const batchId = `replit-biz-bulk-${bulkId}`;
-
-      // Fetch card details if provided
-      let bulkCardDetails: import("./playwrightService").CardDetails | undefined;
-      if (cardId) {
-        const card = await storage.getSavedCard(cardId);
-        if (card) {
-          const sysOtpEmail = await storage.getSetting("card_otp_gmail");
-          const sysOtpPass = await storage.getSetting("card_otp_gmail_password");
-          bulkCardDetails = { id: card.id, cardNumber: card.cardNumber, expiryMonth: card.expiryMonth, expiryYear: card.expiryYear, cvv: card.cvv, cardholderName: card.cardholderName, otpEmail: card.otpEmail || sysOtpEmail || null, otpEmailPassword: card.otpEmailPassword || sysOtpPass || null };
-        }
-      }
-
-      batchOwners.set(batchId, userId);
-      res.json({ success: true, bulkId, batchId, count: actualCount, message: `Starting biz-mail bulk creation for ${actualCount} account(s)` });
-
-      (async () => {
-        broadcastLog(batchId, bulkId, `🚀 Biz-mail bulk create started — ${actualCount} account(s) queued`, userId);
-        let successCount = 0;
-        let failCount = 0;
-
-        for (let i = 0; i < actualCount; i++) {
-          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${actualCount}] Creating biz mail... ━━━`, userId);
-          let bizEmail = "";
-          let bizPassword = "";
-
-          // Step 1: create a fresh human-name biz mail (auto-recycles at capacity)
-          try {
-            const biz = await createBizMailAccount();
-            bizEmail = biz.email;
-            bizPassword = biz.password;
-            broadcastLog(batchId, bulkId, `📧 [${i + 1}/${actualCount}] Biz mail created: ${bizEmail}`, userId);
-
-            // Step 2: set up Gmail forwarder and JMAP routing for the new biz mail
-            const gmailForward = await storage.getSetting("biz_mail_forward_to");
-            if (gmailForward) {
-              await createBizMailForwarder(bizEmail, gmailForward, true, `Replit biz-mail forwarder — ${bizEmail}`);
-            }
-            await ensureBizMailJmapRouting(bizEmail);
-            broadcastLog(batchId, bulkId, `🔀 [${i + 1}/${actualCount}] Mail routing configured`, userId);
-          } catch (mailErr: any) {
-            failCount++;
-            broadcastLog(batchId, bulkId, `❌ [${i + 1}/${actualCount}] Biz mail setup error: ${(mailErr.message || "").substring(0, 120)}`, userId);
-            broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: mailErr.message, index: i + 1, total: actualCount }, userId);
-            continue;
-          }
-
-          // Step 3: create the Replit account using the biz mail
-          try {
-            const result = await registerReplitAccount(
-              bizEmail,
-              bizPassword,
-              (msg) => broadcastLog(batchId, bulkId, msg, userId),
-              couponCode || undefined,
-              bulkCardDetails,
-              "gmail"
-            );
-            if (result.success) {
-              try {
-                await storage.createReplitAccount({
-                  username: result.username!,
-                  email: result.email!,
-                  password: result.password!,
-                  outlookEmail: bizEmail,
-                  status: "processing",
-                  createdBy: userId,
-                });
-                successCount++;
-                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${actualCount}] Saved — @${result.username}`, userId);
-              } catch (dbErr: any) {
-                broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
-              }
-              broadcast({ type: "replit_create_result", bulkId, batchId, success: true, username: result.username, email: result.email, password: result.password, index: i + 1, total: actualCount }, userId);
-            } else {
-              failCount++;
-              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${actualCount}] Failed: ${result.error || "Unknown"}`, userId);
-              broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: actualCount }, userId);
-            }
-          } catch (err: any) {
-            failCount++;
-            broadcastLog(batchId, bulkId, `❌ [${i + 1}/${actualCount}] Error: ${(err.message || "").substring(0, 100)}`, userId);
-            broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: err.message, index: i + 1, total: actualCount }, userId);
           }
         }
 

@@ -170,96 +170,6 @@ export async function pollGmailForVerificationCode(
   return null;
 }
 
-export async function pollGmailForReplitVerificationLink(
-  since: Date,
-  log: (msg: string) => void = console.log,
-  maxAttempts: number = 8,
-  intervalMs: number = 10000,
-): Promise<string | null> {
-  if (!_gmailAddress || !_gmailAppPassword) {
-    log("[Gmail] No credentials configured — cannot poll for Replit verification email");
-    return null;
-  }
-
-  const { ImapFlow } = await import("imapflow");
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    log(`[Gmail] Polling for Replit verification email... attempt ${attempt}/${maxAttempts}`);
-    let client: any = null;
-    try {
-      client = new ImapFlow({
-        host: "imap.gmail.com",
-        port: 993,
-        secure: true,
-        auth: { user: _gmailAddress, pass: _gmailAppPassword },
-        logger: false,
-      });
-      await client.connect();
-
-      const mailboxes = ["[Gmail]/All Mail", "INBOX", "[Gmail]/Spam"];
-      let link: string | null = null;
-
-      for (const box of mailboxes) {
-        let lock: any = null;
-        try {
-          lock = await client.getMailboxLock(box);
-          const uids = await client.search({ from: "@replit.com", since }, { uid: true });
-          log(`[Gmail] ${box}: found ${uids.length} Replit message(s) since ${since.toISOString()}`);
-          if (uids.length === 0) continue;
-
-          for await (const msg of client.fetch(uids.join(","), { source: true, envelope: true }, { uid: true })) {
-            // IMAP SINCE is date-only (no time) — filter precisely by envelope date
-            const msgDate = msg.envelope?.date ? new Date(msg.envelope.date) : new Date(0);
-            if (msgDate < since) {
-              log(`[Gmail] Skipping old message dated ${msgDate.toISOString()} (before ${since.toISOString()})`);
-              continue;
-            }
-
-            let raw = msg.source?.toString() || "";
-            // Decode quoted-printable soft line breaks first (=\r\n or =\n means continuation)
-            raw = raw.replace(/=\r?\n/g, "");
-            // Decode quoted-printable hex escapes (=3D → =, =26 → &, etc.)
-            raw = raw.replace(/=([0-9A-Fa-f]{2})/g, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
-
-            // Try href-quoted link first (works for HTML parts), then bare URL
-            const m = raw.match(/href="(https?:\/\/[^"]*replit\.com[^"]*(?:verify|confirm|token)[^"]*)"/i)
-              || raw.match(/href='(https?:\/\/[^']*replit\.com[^']*(?:verify|confirm|token)[^']*)'/i)
-              || raw.match(/(https?:\/\/replit\.com\/verify[^\s"'<>\r\n)[\]]+)/i)
-              || raw.match(/(https?:\/\/replit\.com\/[^\s"'<>\r\n)[\]]*(?:verify|confirm|token)=[^\s"'<>\r\n)[\]]+)/i);
-            if (m) {
-              link = (m[1] || m[0]).replace(/&amp;/g, "&").trim();
-              log(`[Gmail] Extracted link from message dated ${msgDate.toISOString()}`);
-              break;
-            }
-            log(`[Gmail] Message dated ${msgDate.toISOString()} — no link pattern matched`);
-          }
-        } finally {
-          if (lock) lock.release();
-        }
-        if (link) break;
-      }
-
-      await client.logout();
-
-      if (link) {
-        log(`[Gmail] Found Replit verification link: ${link.substring(0, 100)}...`);
-        return link;
-      }
-    } catch (err: any) {
-      log(`[Gmail] IMAP error on attempt ${attempt}: ${(err.message || "").substring(0, 80)}`);
-      try { await client?.logout(); } catch {}
-    }
-
-    if (attempt < maxAttempts) {
-      log(`[Gmail] No Replit email yet — waiting ${intervalMs / 1000}s before retry ${attempt + 1}/${maxAttempts}...`);
-      await new Promise(r => setTimeout(r, intervalMs));
-    }
-  }
-
-  log("[Gmail] Replit verification email not found after all attempts");
-  return null;
-}
-
 export async function pollGmailForElevenLabsLink(
   targetAddress: string,
   maxWaitMs: number = 120000,
@@ -357,109 +267,48 @@ export async function pollGmailForElevenLabsLink(
   return null;
 }
 
-// ── Quoted-printable decoder that properly handles multi-byte UTF-8 ───────────
-function decodeQuotedPrintable(input: string): string {
-  // Remove soft line breaks first
-  const joined = input.replace(/=\r?\n/g, "");
-  const result: string[] = [];
-  let i = 0;
-  while (i < joined.length) {
-    if (
-      joined[i] === "=" &&
-      i + 2 < joined.length &&
-      /^[0-9A-Fa-f]{2}$/.test(joined.slice(i + 1, i + 3))
-    ) {
-      // Collect a consecutive run of encoded bytes, then decode as UTF-8
-      const byteArr: number[] = [];
-      while (
-        i < joined.length &&
-        joined[i] === "=" &&
-        i + 2 < joined.length &&
-        /^[0-9A-Fa-f]{2}$/.test(joined.slice(i + 1, i + 3))
-      ) {
-        byteArr.push(parseInt(joined.slice(i + 1, i + 3), 16));
-        i += 3;
-      }
-      result.push(Buffer.from(byteArr).toString("utf8"));
-    } else {
-      result.push(joined[i]);
-      i++;
-    }
-  }
-  return result.join("");
-}
-
-// ── Strip invisible/zero-width Unicode characters that clutter display ────────
-function stripInvisibleChars(text: string): string {
-  return text
-    .replace(/[\u200B-\u200F\u00AD\uFEFF\u2060\u2028\u2029]/g, "") // zero-width / soft-hyphen / BOM
-    .replace(/\u00A0/g, " ");                                        // non-breaking space → regular space
-}
-
-// ── Decode a single MIME part body (handles QP and base64) ───────────────────
-function decodeMimePartBody(partHeaders: string, body: string): string {
-  const enc = (partHeaders.match(/Content-Transfer-Encoding:\s*(\S+)/i)?.[1] || "").toLowerCase();
-  if (enc === "base64") {
-    try {
-      return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
-    } catch {
-      return body;
-    }
-  }
-  if (enc === "quoted-printable") {
-    return decodeQuotedPrintable(body);
-  }
-  // 8bit / 7bit / identity — raw but may still have QP-looking sequences
-  return decodeQuotedPrintable(body);
-}
-
 // ── Extract readable text from raw MIME email source ─────────────────────────
 function extractMimeText(raw: string): string {
-  const clean = (text: string) =>
-    stripInvisibleChars(text).replace(/\s+/g, " ").trim().substring(0, 1200);
-
   // Find boundary for multipart messages
   const boundaryMatch = raw.match(/Content-Type:\s*multipart\/[^;]+;\s*boundary="?([^"\r\n]+)"?/i);
   if (boundaryMatch) {
     const boundary = boundaryMatch[1].trim();
-    const parts = raw.split(
-      new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:--)?`)
-    );
-
-    // Prefer text/plain
+    const parts = raw.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:--)?`));
     for (const part of parts) {
-      if (!/Content-Type:\s*text\/plain/i.test(part)) continue;
-      const bodyStart = part.indexOf("\r\n\r\n");
-      if (bodyStart === -1) continue;
-      const headers = part.slice(0, bodyStart);
-      const body = part.slice(bodyStart + 4);
-      const decoded = decodeMimePartBody(headers, body);
-      const result = clean(decoded);
-      if (result.length > 10) return result;
+      if (/Content-Type:\s*text\/plain/i.test(part)) {
+        const bodyStart = part.indexOf("\r\n\r\n");
+        if (bodyStart === -1) continue;
+        return part.slice(bodyStart + 4)
+          .replace(/=\r?\n/g, "")
+          .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+          .trim()
+          .substring(0, 800);
+      }
     }
-
-    // Fallback: text/html stripped of tags
+    // Fallback to first HTML part stripped of tags
     for (const part of parts) {
-      if (!/Content-Type:\s*text\/html/i.test(part)) continue;
-      const bodyStart = part.indexOf("\r\n\r\n");
-      if (bodyStart === -1) continue;
-      const headers = part.slice(0, bodyStart);
-      const body = part.slice(bodyStart + 4);
-      const decoded = decodeMimePartBody(headers, body);
-      const stripped = decoded.replace(/<[^>]+>/g, " ");
-      const result = clean(stripped);
-      if (result.length > 10) return result;
+      if (/Content-Type:\s*text\/html/i.test(part)) {
+        const bodyStart = part.indexOf("\r\n\r\n");
+        if (bodyStart === -1) continue;
+        return part.slice(bodyStart + 4)
+          .replace(/=\r?\n/g, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .substring(0, 800);
+      }
     }
   }
 
-  // Plain (non-multipart) — check transfer encoding in top-level headers
-  const headerEnd = raw.indexOf("\r\n\r\n");
-  if (headerEnd !== -1) {
-    const topHeaders = raw.slice(0, headerEnd);
-    const body = raw.slice(headerEnd + 4);
-    const decoded = decodeMimePartBody(topHeaders, body);
-    const stripped = decoded.replace(/<[^>]+>/g, " ");
-    return clean(stripped);
+  // Plain (non-multipart) message — everything after the blank header line
+  const bodyStart = raw.indexOf("\r\n\r\n");
+  if (bodyStart !== -1) {
+    return raw.slice(bodyStart + 4)
+      .replace(/=\r?\n/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .substring(0, 800);
   }
   return "";
 }
@@ -940,57 +789,7 @@ function genBizPassword(): string {
   return `Biz@${rand}${num}`;
 }
 
-// ── Human-name pool for realistic-looking email addresses ────────────────────
-const FIRST_NAMES = [
-  "james","john","robert","michael","william","david","richard","joseph","thomas","charles",
-  "christopher","daniel","matthew","anthony","mark","donald","steven","paul","andrew","joshua",
-  "kenneth","kevin","brian","george","timothy","ronald","edward","jason","jeffrey","ryan",
-  "jacob","gary","nicholas","eric","jonathan","stephen","larry","justin","scott","brandon",
-  "benjamin","samuel","raymond","frank","gregory","alexander","patrick","jack","dennis","jerry",
-  "tyler","aaron","jose","adam","henry","nathan","douglas","zachary","peter","kyle",
-  "ethan","walter","noah","jeremy","christian","keith","roger","terry","gerald","harold",
-  "sean","austin","carl","arthur","dylan","jesse","jordan","bryan","bruce","gabriel",
-  "logan","albert","alan","wayne","elijah","randy","roy","vincent","ralph","eugene",
-  "mary","patricia","jennifer","linda","barbara","susan","jessica","sarah","karen","lisa",
-  "nancy","betty","margaret","sandra","ashley","dorothy","kimberly","emily","donna","michelle",
-  "carol","amanda","melissa","deborah","stephanie","rebecca","sharon","laura","cynthia","kathleen",
-  "amy","angela","anna","brenda","pamela","emma","nicole","helen","samantha","katherine",
-  "christine","rachel","carolyn","janet","maria","heather","diane","julia","olivia","kelly",
-  "christina","lauren","joan","evelyn","judith","megan","cheryl","andrea","hannah","martha",
-];
-
-const LAST_NAMES = [
-  "smith","johnson","williams","brown","jones","garcia","miller","davis","rodriguez","martinez",
-  "hernandez","lopez","gonzalez","wilson","anderson","thomas","taylor","moore","jackson","martin",
-  "lee","perez","thompson","white","harris","sanchez","clark","ramirez","lewis","robinson",
-  "walker","young","allen","king","wright","scott","torres","nguyen","hill","flores",
-  "green","adams","nelson","baker","hall","rivera","campbell","mitchell","carter","roberts",
-  "gomez","phillips","evans","turner","diaz","parker","cruz","edwards","collins","reyes",
-  "stewart","morris","morales","murphy","cook","rogers","gutierrez","ortiz","morgan","cooper",
-  "peterson","bailey","reed","kelly","howard","ramos","kim","cox","ward","richardson",
-  "watson","brooks","chavez","wood","bennett","gray","mendoza","ruiz","hughes","price",
-  "alvarez","castillo","sanders","patel","myers","long","ross","foster","jimenez","powell",
-  "jenkins","perry","russell","sullivan","bell","coleman","butler","henderson","barnes","gonzales",
-  "fisher","vasquez","simmons","romero","jordan","patterson","alexander","hamilton","graham","reynolds",
-  "griffin","wallace","moreno","west","cole","hayes","bryant","herrera","gibson","ellis",
-  "tran","medina","aguilar","stevens","murray","ford","castro","marshall","owens","harrison",
-  "fernandez","mcdonald","woods","washington","kennedy","wells","shaw","hansen","porter","dunn",
-];
-
-// Pick a random firstname.lastname not already in existingEmails. Falls back with numeric suffix.
-async function generateHumanUsername(existingEmails: Set<string>): Promise<string> {
-  for (let i = 0; i < 30; i++) {
-    const first = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
-    const last  = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-    const email = `${first}.${last}@${MAILBUX_DOMAIN}`;
-    if (!existingEmails.has(email)) return `${first}.${last}`;
-  }
-  // Pool exhausted locally — append random suffix to guarantee uniqueness
-  const first  = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
-  const last   = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-  const suffix = Math.floor(Math.random() * 990) + 10;
-  return `${first}.${last}${suffix}`;
-}
+// Mailbux requires quota >= 1 GB or omit the field (omitting = server default / no limit)
 
 export async function createBizMailAccount(opts: {
   requestedNum?: number;    // re-create a specific numbered slot
@@ -1073,18 +872,17 @@ export async function createBizMailAccount(opts: {
     }
   }
 
-  // ── Generate a unique human-name email and create the account ────────────
-  // accountNum is left null for human-name accounts (like custom accounts) to
-  // avoid unique-constraint races. Creation order is captured by `id` and `createdAt`.
-  const MAX_ATTEMPTS = 50;
-  // Seed the exclusion set from the DB so we don't try names already registered
-  const allAccounts = await storage.getAllBizMailAccounts();
-  const usedEmails  = new Set(allAccounts.map(a => a.email.toLowerCase()));
-
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  // ── Auto-increment: loop past any slots that already exist on the server ─
+  const MAX_SKIP = 50; // safety guard against infinite loops
+  for (let skip = 0; skip < MAX_SKIP; skip++) {
     const password = genBizPassword();
-    const username = await generateHumanUsername(usedEmails);
-    const email    = `${username}@${MAILBUX_DOMAIN}`;
+
+    // Re-read DB each iteration so we account for slots registered mid-loop
+    const all    = await storage.getAllBizMailAccounts();
+    const nums   = all.map(a => a.accountNum).filter((n): n is number => n !== null);
+    const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
+    const accountNum = maxNum + 1;
+    const email = `account${accountNum}@${MAILBUX_DOMAIN}`;
 
     const res = await fetch(`${MAILBUX_API}/principal`, {
       method: "POST",
@@ -1097,7 +895,7 @@ export async function createBizMailAccount(opts: {
         type: "individual",
         tenant: MAILBUX_USER,
         name: email,
-        description: `Addison Panel business mail — ${email}`,
+        description: `Addison Panel business mail #${accountNum}`,
         secrets: [password],
         emails: [email],
         roles: ["user"],
@@ -1107,51 +905,29 @@ export async function createBizMailAccount(opts: {
     const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
 
     if (json.data && typeof json.data === "number") {
-      // Server created the account — now assign account_num fresh from DB.
-      // Reading after the server call shrinks the concurrent-request race window.
-      // A small retry loop handles the rare case of two simultaneous creations.
+      // Fresh account created successfully
       console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
-      let accountNum: number | null = null;
-      for (let dbRetry = 0; dbRetry < 5; dbRetry++) {
-        const fresh = await storage.getAllBizMailAccounts();
-        const nums  = fresh.map(a => a.accountNum).filter((n): n is number => n !== null);
-        const candidate = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
-        try {
-          await storage.registerBizMailAccount(candidate, email, password);
-          accountNum = candidate;
-          break;
-        } catch (err: any) {
-          const msg = (err.message || "").toLowerCase();
-          if (msg.includes("unique") || msg.includes("duplicate")) {
-            continue; // another request grabbed this number — try next
-          }
-          throw err;
-        }
-      }
-      if (accountNum === null) {
-        // Extremely rare: 5 consecutive races; fall back to null to avoid data loss
-        await storage.registerBizMailAccount(null, email, password);
-      }
+      await storage.registerBizMailAccount(accountNum, email, password);
       return { email, password, accountNum, isCustom: false, recycled };
     }
 
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
-      // Name collision on the server — add to exclusion set and pick a different name
-      console.log(`[BizMail] ${email} already exists on server — trying a different name`);
-      usedEmails.add(email.toLowerCase());
+      // This slot already exists on the server (leftover from a previous session).
+      // Register it in DB so the counter skips it next iteration, then try next number.
+      console.log(`[BizMail] ${email} already exists on server — skipping to next number`);
       const existing = await storage.getBizMailByEmail(email);
       if (!existing) {
-        // Register as orphaned placeholder (accountNum=null, no unique conflict risk)
-        await storage.registerBizMailAccount(null, email, "orphaned");
+        // Placeholder entry (isActive=false so it's not treated as a live account)
+        await storage.registerBizMailAccount(accountNum, email, "orphaned");
         await storage.markBizMailDeletedByEmail(email);
       }
-      continue;
+      continue; // try accountNum + 1
     }
 
     throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
 
-  throw new Error("Could not create a business mail account after 50 attempts — server may be at capacity.");
+  throw new Error("Could not find a free account slot after 50 attempts — server may be at capacity.");
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
@@ -1425,13 +1201,16 @@ export async function ensureBizMailJmapRouting(bizEmail: string): Promise<void> 
 // Call once at startup so all accounts are ready.
 export async function setupAllBizMailJmapRouting(): Promise<void> {
   try {
-    const { storage } = await import("./storage");
-    const all = await storage.getAllBizMailAccounts();
-    // Only route active accounts (skip orphaned/deleted placeholders)
-    const active = all.filter(a => a.isActive && a.password !== "orphaned");
-    console.log(`[BizMail JMAP] Setting up routing for ${active.length} active @addison.asia accounts (${all.length} total in DB)`);
-    for (const acct of active) {
-      await ensureBizMailJmapRouting(acct.email);
+    const adminToken = await getMailbuxBearerToken();
+    const domainRes = await fetch("https://mail.mailbux.com/api/principal/addison.asia", {
+      headers: { "Authorization": `Bearer ${adminToken}`, "Accept": "application/json" },
+    });
+    const domainData = await domainRes.json() as any;
+    const memberCount = domainData?.data?.members || 0;
+    console.log(`[BizMail JMAP] Setting up routing for ${memberCount} @addison.asia accounts`);
+    for (let i = 1; i <= memberCount; i++) {
+      const email = `account${i}@addison.asia`;
+      await ensureBizMailJmapRouting(email);
     }
   } catch (err: any) {
     console.log(`[BizMail JMAP] setupAllBizMailJmapRouting error: ${err.message}`);
@@ -1450,9 +1229,8 @@ async function jmapSearchForBizMailEmails(toEmail: string, since: Date): Promise
     ["Email/get", {
       accountId: JMAP_ADMIN_ACCOUNT_ID,
       "#ids": { resultOf: "0", name: "Email/query", path: "/ids" },
-      properties: ["id", "from", "to", "subject", "receivedAt", "preview", "bodyValues", "textBody", "htmlBody"],
+      properties: ["id", "from", "to", "subject", "receivedAt", "preview", "bodyValues", "textBody"],
       fetchTextBodyValues: true,
-      fetchHTMLBodyValues: true,
     }, "1"],
   ]);
 
@@ -1584,75 +1362,5 @@ export async function fetchOpenAICodeFromBizMail(
   }
 
   log(`[BizMail JMAP] Timed out waiting for OpenAI verification email to ${email}`);
-  return null;
-}
-
-// ── Poll admin JMAP inbox for a Replit verification email ──────────────────────
-// Returns the verify URL or null on timeout. Used for biz-mail (addison.asia) signups.
-export async function pollJmapForReplitVerificationLink(
-  bizEmail: string,
-  since: Date,
-  log: (msg: string) => void,
-  timeoutMs = 180_000,
-): Promise<string | null> {
-  const deadline = Date.now() + timeoutMs;
-  const seenIds = new Set<string>();
-
-  log(`[JMAP] Polling admin inbox for Replit verification email to ${bizEmail}...`);
-
-  while (Date.now() < deadline) {
-    try {
-      const messages = await jmapSearchForBizMailEmails(bizEmail, since);
-
-      for (const m of messages) {
-        const id = m.id as string;
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-
-        const from    = (m.from?.[0]?.email || m.from?.[0]?.name || "").toLowerCase();
-        const subject = (m.subject || "").toLowerCase();
-        // Combine ALL body parts: text, html, and preview for maximum coverage
-        const allBodyValues: string = Object.values(m.bodyValues || {}).map((v: any) => v.value || "").join("\n");
-        const rawHtml = allBodyValues || m.preview || "";
-        const plainText = rawHtml.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
-
-        const isReplit =
-          from.includes("replit") || from.includes("noreply@") ||
-          subject.includes("verify") || subject.includes("confirm") || subject.includes("replit") ||
-          plainText.toLowerCase().includes("replit") || plainText.toLowerCase().includes("verify your email");
-
-        if (!isReplit) continue;
-
-        log(`[JMAP] Found Replit email — from="${from}" subject="${m.subject?.substring(0, 60)}"`);
-        log(`[JMAP] Body length: ${rawHtml.length} chars, bodyValues keys: ${Object.keys(m.bodyValues || {}).join(",")}`);
-
-        // Extract verify link from HTML (href attributes) or plain text URLs
-        // Replit links: https://replit.com/confirm_email?token=... or similar
-        const linkMatch =
-          rawHtml.match(/href="(https?:\/\/replit\.com[^"']*(?:confirm|verify|callback|activate)[^"']*)"/) ||
-          rawHtml.match(/href='(https?:\/\/replit\.com[^"']*(?:confirm|verify|callback|activate)[^"']*)'/) ||
-          rawHtml.match(/href="(https?:\/\/[^"']*replit[^"']*(?:confirm|verify)[^"']*)"/) ||
-          rawHtml.match(/(https?:\/\/replit\.com\/[^\s"'<>]*(?:confirm|verify)[^\s"'<>]*)/) ||
-          plainText.match(/(https?:\/\/replit\.com\/[^\s]*(?:confirm|verify)[^\s]*)/) ||
-          rawHtml.match(/(https?:\/\/[^\s"'<>]*(?:confirm_email|verify_email|confirm-email)[^\s"'<>]*)/);
-
-        if (linkMatch) {
-          log(`[JMAP] ✅ Replit verify link found: ${linkMatch[1].substring(0, 120)}`);
-          return linkMatch[1];
-        }
-
-        log(`[JMAP] Replit email found but no verify link — raw sample: ${rawHtml.substring(0, 300)}`);
-      }
-    } catch (err: any) {
-      log(`[JMAP] poll error: ${err.message}`);
-    }
-
-    const remaining = Math.round((deadline - Date.now()) / 1000);
-    if (remaining <= 0) break;
-    log(`[JMAP] No Replit email yet — waiting 15s (${remaining}s remaining)`);
-    await new Promise(r => setTimeout(r, 15_000));
-  }
-
-  log(`[JMAP] Timed out waiting for Replit verification email to ${bizEmail}`);
   return null;
 }
