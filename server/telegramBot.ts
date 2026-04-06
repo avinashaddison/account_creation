@@ -307,6 +307,7 @@ const KB = {
   MOVIES:   "🎥 Movies Server",
   SHOP:     "🏪 Marketplace",
   PAYMENT:  "💎 Payment Gateway",
+  ADDRESS:  "🏠 Fake US Address",
 } as const;
 
 const MAIN_KEYBOARD = Markup.keyboard([
@@ -314,7 +315,7 @@ const MAIN_KEYBOARD = Markup.keyboard([
   [KB.COPY,     KB.CHECKOUT],
   [KB.CREATE,   KB.MAIL],
   [KB.MOVIES,   KB.SHOP],
-  [KB.PAYMENT],
+  [KB.PAYMENT,  KB.ADDRESS],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
@@ -2589,6 +2590,127 @@ export function startTelegramBot(config: BotConfig) {
   });
   bot.action("pay_copy_upi", async (ctx) => {
     await ctx.answerCbQuery("🇮🇳 UPI copied! → avinashaddison-8@okaxis", { show_alert: true });
+  });
+
+  // ── Fake US Address Generator ─────────────────────────────────────────────
+  const US_CITIES = [
+    { city: "New York",        state: "New York",        abbr: "NY", zip: "10001", areaCode: "212", lat: 40.7128,  lon: -74.0060  },
+    { city: "Los Angeles",     state: "California",      abbr: "CA", zip: "90001", areaCode: "213", lat: 34.0522,  lon: -118.2437 },
+    { city: "Chicago",         state: "Illinois",        abbr: "IL", zip: "60601", areaCode: "312", lat: 41.8781,  lon: -87.6298  },
+    { city: "Houston",         state: "Texas",           abbr: "TX", zip: "77001", areaCode: "713", lat: 29.7604,  lon: -95.3698  },
+    { city: "Phoenix",         state: "Arizona",         abbr: "AZ", zip: "85001", areaCode: "602", lat: 33.4484,  lon: -112.0740 },
+    { city: "Philadelphia",    state: "Pennsylvania",    abbr: "PA", zip: "19101", areaCode: "215", lat: 39.9526,  lon: -75.1652  },
+    { city: "San Antonio",     state: "Texas",           abbr: "TX", zip: "78201", areaCode: "210", lat: 29.4241,  lon: -98.4936  },
+    { city: "San Diego",       state: "California",      abbr: "CA", zip: "92101", areaCode: "619", lat: 32.7157,  lon: -117.1611 },
+    { city: "Dallas",          state: "Texas",           abbr: "TX", zip: "75201", areaCode: "214", lat: 32.7767,  lon: -96.7970  },
+    { city: "San Jose",        state: "California",      abbr: "CA", zip: "95101", areaCode: "408", lat: 37.3382,  lon: -121.8863 },
+    { city: "Austin",          state: "Texas",           abbr: "TX", zip: "78701", areaCode: "512", lat: 30.2672,  lon: -97.7431  },
+    { city: "Jacksonville",    state: "Florida",         abbr: "FL", zip: "32099", areaCode: "904", lat: 30.3322,  lon: -81.6557  },
+    { city: "Fort Worth",      state: "Texas",           abbr: "TX", zip: "76101", areaCode: "817", lat: 32.7555,  lon: -97.3308  },
+    { city: "Columbus",        state: "Ohio",            abbr: "OH", zip: "43085", areaCode: "614", lat: 39.9612,  lon: -82.9988  },
+    { city: "Charlotte",       state: "North Carolina",  abbr: "NC", zip: "28201", areaCode: "704", lat: 35.2271,  lon: -80.8431  },
+    { city: "Indianapolis",    state: "Indiana",         abbr: "IN", zip: "46201", areaCode: "317", lat: 39.7684,  lon: -86.1581  },
+    { city: "San Francisco",   state: "California",      abbr: "CA", zip: "94102", areaCode: "415", lat: 37.7749,  lon: -122.4194 },
+    { city: "Seattle",         state: "Washington",      abbr: "WA", zip: "98101", areaCode: "206", lat: 47.6062,  lon: -122.3321 },
+    { city: "Denver",          state: "Colorado",        abbr: "CO", zip: "80201", areaCode: "303", lat: 39.7392,  lon: -104.9903 },
+    { city: "Nashville",       state: "Tennessee",       abbr: "TN", zip: "37201", areaCode: "615", lat: 36.1627,  lon: -86.7816  },
+    { city: "Oklahoma City",   state: "Oklahoma",        abbr: "OK", zip: "73101", areaCode: "405", lat: 35.4676,  lon: -97.5164  },
+    { city: "El Paso",         state: "Texas",           abbr: "TX", zip: "79901", areaCode: "915", lat: 31.7619,  lon: -106.4850 },
+    { city: "Washington",      state: "District of Columbia", abbr: "DC", zip: "20001", areaCode: "202", lat: 38.9072, lon: -77.0369 },
+    { city: "Las Vegas",       state: "Nevada",          abbr: "NV", zip: "89101", areaCode: "702", lat: 36.1699,  lon: -115.1398 },
+    { city: "Louisville",      state: "Kentucky",        abbr: "KY", zip: "40201", areaCode: "502", lat: 38.2527,  lon: -85.7585  },
+    { city: "Memphis",         state: "Tennessee",       abbr: "TN", zip: "38101", areaCode: "901", lat: 35.1495,  lon: -90.0490  },
+    { city: "Portland",        state: "Oregon",          abbr: "OR", zip: "97201", areaCode: "503", lat: 45.5051,  lon: -122.6750 },
+    { city: "Baltimore",       state: "Maryland",        abbr: "MD", zip: "21201", areaCode: "410", lat: 39.2904,  lon: -76.6122  },
+    { city: "Milwaukee",       state: "Wisconsin",       abbr: "WI", zip: "53201", areaCode: "414", lat: 43.0389,  lon: -87.9065  },
+    { city: "Albuquerque",     state: "New Mexico",      abbr: "NM", zip: "87101", areaCode: "505", lat: 35.0844,  lon: -106.6504 },
+    { city: "Tucson",          state: "Arizona",         abbr: "AZ", zip: "85701", areaCode: "520", lat: 32.2226,  lon: -110.9747 },
+    { city: "Fresno",          state: "California",      abbr: "CA", zip: "93701", areaCode: "559", lat: 36.7378,  lon: -119.7871 },
+    { city: "Sacramento",      state: "California",      abbr: "CA", zip: "95814", areaCode: "916", lat: 38.5816,  lon: -121.4944 },
+    { city: "Mesa",            state: "Arizona",         abbr: "AZ", zip: "85201", areaCode: "480", lat: 33.4152,  lon: -111.8315 },
+    { city: "Atlanta",         state: "Georgia",         abbr: "GA", zip: "30301", areaCode: "404", lat: 33.7490,  lon: -84.3880  },
+    { city: "Omaha",           state: "Nebraska",        abbr: "NE", zip: "68101", areaCode: "402", lat: 41.2565,  lon: -95.9345  },
+    { city: "Colorado Springs",state: "Colorado",        abbr: "CO", zip: "80901", areaCode: "719", lat: 38.8339,  lon: -104.8214 },
+    { city: "Raleigh",         state: "North Carolina",  abbr: "NC", zip: "27601", areaCode: "919", lat: 35.7796,  lon: -78.6382  },
+    { city: "Minneapolis",     state: "Minnesota",       abbr: "MN", zip: "55401", areaCode: "612", lat: 44.9778,  lon: -93.2650  },
+    { city: "Cleveland",       state: "Ohio",            abbr: "OH", zip: "44101", areaCode: "216", lat: 41.4993,  lon: -81.6944  },
+    { city: "Wichita",         state: "Kansas",          abbr: "KS", zip: "67201", areaCode: "316", lat: 37.6872,  lon: -97.3301  },
+    { city: "Arlington",       state: "Texas",           abbr: "TX", zip: "76001", areaCode: "817", lat: 32.7357,  lon: -97.1081  },
+    { city: "New Orleans",     state: "Louisiana",       abbr: "LA", zip: "70112", areaCode: "504", lat: 29.9511,  lon: -90.0715  },
+    { city: "Tampa",           state: "Florida",         abbr: "FL", zip: "33601", areaCode: "813", lat: 27.9506,  lon: -82.4572  },
+    { city: "Miami",           state: "Florida",         abbr: "FL", zip: "33101", areaCode: "305", lat: 25.7617,  lon: -80.1918  },
+    { city: "Pittsburgh",      state: "Pennsylvania",    abbr: "PA", zip: "15201", areaCode: "412", lat: 40.4406,  lon: -79.9959  },
+    { city: "Bakersfield",     state: "California",      abbr: "CA", zip: "93301", areaCode: "661", lat: 35.3733,  lon: -119.0187 },
+    { city: "Honolulu",        state: "Hawaii",          abbr: "HI", zip: "96801", areaCode: "808", lat: 21.3069,  lon: -157.8583 },
+    { city: "Anchorage",       state: "Alaska",          abbr: "AK", zip: "99501", areaCode: "907", lat: 61.2181,  lon: -149.9003 },
+    { city: "St. Louis",       state: "Missouri",        abbr: "MO", zip: "63101", areaCode: "314", lat: 38.6270,  lon: -90.1994  },
+    { city: "Stockton",        state: "California",      abbr: "CA", zip: "95201", areaCode: "209", lat: 37.9577,  lon: -121.2908 },
+  ];
+
+  const STREET_NAMES = [
+    "Main St", "Oak Ave", "Maple Dr", "Cedar Ln", "Elm St", "Washington Blvd",
+    "Park Ave", "Lake Dr", "Hill Rd", "Valley Way", "Sunset Blvd", "River Rd",
+    "Forest Ave", "Meadow Ln", "Lincoln St", "Jefferson Ave", "Madison Dr",
+    "Highland Ave", "Brookside Rd", "Willow Way", "Pine St", "Birch Blvd",
+    "Cherry Ln", "Walnut Ave", "Hickory Dr", "Spruce St", "Poplar Rd",
+    "Magnolia Blvd", "Cypress Dr", "Laurel Ct", "Mulberry St", "Chestnut Ave",
+  ];
+
+  function rnd<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+  function rndInt(min: number, max: number): number { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+  function generateFakeUSAddress() {
+    const loc = rnd(US_CITIES);
+    const streetNum = rndInt(100, 9999);
+    const street = `${streetNum} ${rnd(STREET_NAMES)}`;
+    // Vary the zip slightly (last 2 digits)
+    const zipBase = loc.zip.slice(0, 3);
+    const zip = zipBase + String(rndInt(0, 99)).padStart(2, "0");
+    // Generate realistic local phone number
+    const exchange = rndInt(200, 999);
+    const lineNum = String(rndInt(1000, 9999));
+    const phone = `+1 (${loc.areaCode}) ${exchange}-${lineNum}`;
+    // Vary lat/lon slightly for realism
+    const lat = (loc.lat + (Math.random() - 0.5) * 0.05).toFixed(4);
+    const lon = (loc.lon + (Math.random() - 0.5) * 0.05).toFixed(4);
+
+    return { street, city: loc.city, state: loc.state, abbr: loc.abbr, zip, phone, lat, lon };
+  }
+
+  function buildAddressMsg(addr: ReturnType<typeof generateFakeUSAddress>): string {
+    return (
+      `╔══[ 🏠 FAKE US ADDRESS ]══════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `🏘  <b>Street</b>\n<code>${addr.street}</code>\n\n` +
+      `🌆  <b>City / Town</b>\n<code>${addr.city}</code>\n\n` +
+      `🗺  <b>State / Region</b>\n<code>${addr.state} (${addr.abbr})</code>\n\n` +
+      `📮  <b>Zip / Postal Code</b>\n<code>${addr.zip}</code>\n\n` +
+      `📞  <b>Phone Number</b>\n<code>${addr.phone}</code>\n\n` +
+      `🌍  <b>Country</b>\n<code>United States</code>\n\n` +
+      `📍  <b>Latitude</b>\n<code>${addr.lat}</code>\n\n` +
+      `📍  <b>Longitude</b>\n<code>${addr.lon}</code>\n\n` +
+      `<i>Tap any field above to copy · Press 🔄 for a new address</i>`
+    );
+  }
+
+  bot.hears(KB.ADDRESS, (ctx) => handleMenu(ctx, async () => {
+    const addr = generateFakeUSAddress();
+    await ctx.replyWithHTML(buildAddressMsg(addr), {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🔄 Generate New Address", "addr_regenerate")],
+      ]),
+    });
+  }));
+
+  bot.action("addr_regenerate", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const addr = generateFakeUSAddress();
+    await ctx.editMessageText(buildAddressMsg(addr), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🔄 Generate New Address", "addr_regenerate")],
+      ]),
+    }).catch(() => {});
   });
 
   bot.action("shop_admin_menu", async (ctx) => {
