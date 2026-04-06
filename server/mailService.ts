@@ -1450,8 +1450,9 @@ async function jmapSearchForBizMailEmails(toEmail: string, since: Date): Promise
     ["Email/get", {
       accountId: JMAP_ADMIN_ACCOUNT_ID,
       "#ids": { resultOf: "0", name: "Email/query", path: "/ids" },
-      properties: ["id", "from", "to", "subject", "receivedAt", "preview", "bodyValues", "textBody"],
+      properties: ["id", "from", "to", "subject", "receivedAt", "preview", "bodyValues", "textBody", "htmlBody"],
       fetchTextBodyValues: true,
+      fetchHTMLBodyValues: true,
     }, "1"],
   ]);
 
@@ -1583,5 +1584,75 @@ export async function fetchOpenAICodeFromBizMail(
   }
 
   log(`[BizMail JMAP] Timed out waiting for OpenAI verification email to ${email}`);
+  return null;
+}
+
+// ── Poll admin JMAP inbox for a Replit verification email ──────────────────────
+// Returns the verify URL or null on timeout. Used for biz-mail (addison.asia) signups.
+export async function pollJmapForReplitVerificationLink(
+  bizEmail: string,
+  since: Date,
+  log: (msg: string) => void,
+  timeoutMs = 180_000,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  const seenIds = new Set<string>();
+
+  log(`[JMAP] Polling admin inbox for Replit verification email to ${bizEmail}...`);
+
+  while (Date.now() < deadline) {
+    try {
+      const messages = await jmapSearchForBizMailEmails(bizEmail, since);
+
+      for (const m of messages) {
+        const id = m.id as string;
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+
+        const from    = (m.from?.[0]?.email || m.from?.[0]?.name || "").toLowerCase();
+        const subject = (m.subject || "").toLowerCase();
+        // Combine ALL body parts: text, html, and preview for maximum coverage
+        const allBodyValues: string = Object.values(m.bodyValues || {}).map((v: any) => v.value || "").join("\n");
+        const rawHtml = allBodyValues || m.preview || "";
+        const plainText = rawHtml.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+
+        const isReplit =
+          from.includes("replit") || from.includes("noreply@") ||
+          subject.includes("verify") || subject.includes("confirm") || subject.includes("replit") ||
+          plainText.toLowerCase().includes("replit") || plainText.toLowerCase().includes("verify your email");
+
+        if (!isReplit) continue;
+
+        log(`[JMAP] Found Replit email — from="${from}" subject="${m.subject?.substring(0, 60)}"`);
+        log(`[JMAP] Body length: ${rawHtml.length} chars, bodyValues keys: ${Object.keys(m.bodyValues || {}).join(",")}`);
+
+        // Extract verify link from HTML (href attributes) or plain text URLs
+        // Replit links: https://replit.com/confirm_email?token=... or similar
+        const linkMatch =
+          rawHtml.match(/href="(https?:\/\/replit\.com[^"']*(?:confirm|verify|callback|activate)[^"']*)"/) ||
+          rawHtml.match(/href='(https?:\/\/replit\.com[^"']*(?:confirm|verify|callback|activate)[^"']*)'/) ||
+          rawHtml.match(/href="(https?:\/\/[^"']*replit[^"']*(?:confirm|verify)[^"']*)"/) ||
+          rawHtml.match(/(https?:\/\/replit\.com\/[^\s"'<>]*(?:confirm|verify)[^\s"'<>]*)/) ||
+          plainText.match(/(https?:\/\/replit\.com\/[^\s]*(?:confirm|verify)[^\s]*)/) ||
+          rawHtml.match(/(https?:\/\/[^\s"'<>]*(?:confirm_email|verify_email|confirm-email)[^\s"'<>]*)/);
+
+        if (linkMatch) {
+          log(`[JMAP] ✅ Replit verify link found: ${linkMatch[1].substring(0, 120)}`);
+          return linkMatch[1];
+        }
+
+        log(`[JMAP] Replit email found but no verify link — raw sample: ${rawHtml.substring(0, 300)}`);
+      }
+    } catch (err: any) {
+      log(`[JMAP] poll error: ${err.message}`);
+    }
+
+    const remaining = Math.round((deadline - Date.now()) / 1000);
+    if (remaining <= 0) break;
+    log(`[JMAP] No Replit email yet — waiting 15s (${remaining}s remaining)`);
+    await new Promise(r => setTimeout(r, 15_000));
+  }
+
+  log(`[JMAP] Timed out waiting for Replit verification email to ${bizEmail}`);
   return null;
 }

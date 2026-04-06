@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
-import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink, pollGmailForReplitVerificationLink } from "./mailService";
+import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink, pollGmailForReplitVerificationLink, pollJmapForReplitVerificationLink } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
 import * as http from "http";
@@ -10850,6 +10850,45 @@ export async function registerReplitAccount(
     page = await context.newPage();
     page.setDefaultTimeout(30000);
 
+    // ── Capture Turnstile sitekey + API responses for diagnostics ────────────
+    let capturedTurnstileSitekey: string | null = null;
+    const capturedApiRequests: string[] = [];
+    page.on("request", (req: any) => {
+      const url = req.url() || "";
+      if (url.includes("challenges.cloudflare.com") || url.includes("turnstile")) {
+        const m = url.match(/[?&]sitekey=([^&]+)/);
+        if (m && m[1] && !capturedTurnstileSitekey) {
+          capturedTurnstileSitekey = decodeURIComponent(m[1]);
+          log(`[Turnstile] Captured sitekey from network: ${capturedTurnstileSitekey}`);
+        }
+      }
+      if (url.includes("replit.com") && (url.includes("/api/") || url.includes("/signup") || url.includes("/auth"))) {
+        capturedApiRequests.push(req.method() + " " + url.substring(0, 120));
+      }
+    });
+    let signupApiSuccess = false;
+    let signupUserId: number | null = null;
+    page.on("response", async (resp: any) => {
+      const url = resp.url() || "";
+      if (url.includes("replit.com") && (url.includes("/api/v1/auth") || url.includes("/api/v0/signup"))) {
+        try {
+          const status = resp.status();
+          const text = await resp.text().catch(() => "");
+          log(`[API Resp] ${resp.request().method()} ${url.substring(0, 80)} → ${status} — ${text.substring(0, 200)}`);
+          if (status === 200 && url.includes("/sign-up")) {
+            try {
+              const body = JSON.parse(text);
+              if (body.userId) {
+                signupApiSuccess = true;
+                signupUserId = body.userId;
+                log(`✅ Signup API confirmed — userId: ${body.userId}`);
+              }
+            } catch {}
+          }
+        } catch {}
+      }
+    });
+
     // ── Pre-signup organic browsing — look like a real user discovering the site ──
     log("Visiting Replit homepage before signup...");
     try {
@@ -11092,15 +11131,16 @@ export async function registerReplitAccount(
     await page.waitForTimeout(500);
 
     // ── Detect & solve Cloudflare Turnstile before submit ────────────────────
-    const turnstileSitekey = await page.evaluate(() => {
-      const html = document.documentElement.innerHTML;
-      // Look for explicit sitekey attr on cf-turnstile element
+    // Try DOM-based sitekey first, fall back to network-captured one
+    const domSitekey = await page.evaluate(() => {
       const el = document.querySelector('[data-sitekey]');
       if (el) return el.getAttribute('data-sitekey');
-      // Fallback: scan raw HTML for sitekey pattern
+      const html = document.documentElement.innerHTML;
       const m = html.match(/["']?sitekey["']?\s*[:=]\s*["']([0-9A-Za-z_\-]{20,60})["']/);
       return m ? m[1] : null;
     }).catch(() => null);
+
+    const turnstileSitekey = domSitekey || capturedTurnstileSitekey;
 
     if (turnstileSitekey) {
       log(`Detected Cloudflare Turnstile (sitekey: ${turnstileSitekey}) — solving with CapSolver...`);
@@ -11144,6 +11184,13 @@ export async function registerReplitAccount(
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1000);
 
+    // Log API requests made during submit (helps diagnose if any call was made)
+    if (capturedApiRequests.length > 0) {
+      log(`[Submit] API requests observed: ${capturedApiRequests.slice(-5).join(" | ")}`);
+    } else {
+      log(`[Submit] No Replit API requests observed after form submit`);
+    }
+
     const currentUrl = page.url();
     const pageContent = await page.content().catch(async () => {
       // If still navigating, wait a bit more and retry
@@ -11156,33 +11203,48 @@ export async function registerReplitAccount(
       log(`⚠️ Possible form error text: ${firstLine.substring(0, 200)}`);
     }
 
-    if (pageContent.toLowerCase().includes("verify") || pageContent.toLowerCase().includes("check your email") || pageContent.toLowerCase().includes("verification") || currentUrl.includes("verify") || currentUrl.includes("confirm")) {
-      log("✅ Signup submitted — verification email expected");
-    } else if (pageContent.toLowerCase().includes("error") || pageContent.toLowerCase().includes("already taken") || pageContent.toLowerCase().includes("invalid")) {
+    // Use API-level success detection instead of brittle page-content checks
+    if (signupApiSuccess) {
+      log(`✅ Signup confirmed via API — userId: ${signupUserId} — verification email should arrive shortly`);
+    } else if (pageContent.toLowerCase().includes("verify") || pageContent.toLowerCase().includes("check your email") || pageContent.toLowerCase().includes("verification") || currentUrl.includes("verify") || currentUrl.includes("confirm")) {
+      log("✅ Signup submitted — verification email expected (page detection)");
+    } else {
       const errText = await page.evaluate(() => {
         const el = document.querySelector('[class*="error"], [class*="Error"], [role="alert"], .alert');
         return el ? el.textContent?.trim().substring(0, 200) : null;
       });
-      log(`⚠️ Page error detected: ${errText || "unknown error"}`);
-      log(`Current URL: ${currentUrl}`);
-      if (errText && errText.toLowerCase().includes("already taken")) {
-        log("Username already taken — this account may have been partially created");
+      if (errText) {
+        log(`⚠️ Page error: ${errText}`);
+      } else {
+        log(`Current URL after submit: ${currentUrl}`);
       }
-    } else {
-      log(`Current URL after submit: ${currentUrl}`);
     }
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
     if (mailProvider === "gmail") {
-      log("📧 Biz-mail path: polling Gmail for Replit verification email...");
-      const gmailLink = await pollGmailForReplitVerificationLink(verifyEmailSince, log, 8, 10000);
-      if (gmailLink) {
-        verificationLink = gmailLink;
-        log(`✅ Gmail: Replit verification link extracted`);
+      // Primary: poll JMAP admin inbox directly (biz mail routes to admin via ensureBizMailJmapRouting)
+      log("📧 Biz-mail path: polling JMAP admin inbox for Replit verification email...");
+      const jmapLink = await pollJmapForReplitVerificationLink(
+        outlookEmail, // bizEmail is passed as outlookEmail parameter
+        verifyEmailSince,
+        log,
+        120_000, // 2-minute timeout
+      );
+      if (jmapLink) {
+        verificationLink = jmapLink;
+        log(`✅ JMAP: Replit verification link extracted`);
       } else {
-        log("⚠️ Gmail: no Replit verification link found — account may be unverified");
+        // Fallback: try Gmail forwarding
+        log("⚠️ JMAP: no link found — trying Gmail fallback...");
+        const gmailLink = await pollGmailForReplitVerificationLink(verifyEmailSince, log, 4, 10000);
+        if (gmailLink) {
+          verificationLink = gmailLink;
+          log(`✅ Gmail fallback: Replit verification link extracted`);
+        } else {
+          log("⚠️ No Replit verification link found via JMAP or Gmail");
+        }
       }
     } else {
       log("Now waiting 20s before checking Outlook inbox for verification email...");
