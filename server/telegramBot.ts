@@ -159,10 +159,9 @@ async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserSta
     : "\n";
 
   await ctx.reply(
-    `╔══[ 🏗 CREATE · ${svc.label.toUpperCase()} ]══════════════╗\n` +
-    `╚════════════════════════════════════════╝\n` +
-    availLine +
-    `▸ How many accounts?`,
+    `\n🔷 <b>🏗 CREATE · ${svc.label.toUpperCase()}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        availLine +
+    `› How many accounts?`,
     {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
@@ -177,9 +176,8 @@ async function showCountPicker(ctx: any, uid: number, gs: (n: number) => UserSta
 
 async function showCouponStep(ctx: any) {
   await ctx.reply(
-    `╔══[ 🎟 COUPON CODE ]═════════════════════╗\n` +
-    `╚════════════════════════════════════════╝\n\n` +
-    `▸ Apply a coupon during account creation?`,
+    `\n🔷 <b>🎟 COUPON CODE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `› Apply a coupon during account creation?`,
     {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
@@ -209,9 +207,8 @@ async function showCardStep(ctx: any, uid: number, gs: (n: number) => UserState)
   });
 
   await ctx.reply(
-    `╔══[ 💳 SELECT CARD ]═════════════════════╗\n` +
-    `╚════════════════════════════════════════╝\n\n` +
-    `▸ Choose a saved card or skip:`,
+    `\n🔷 <b>💳 SELECT CARD</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `› Choose a saved card or skip:`,
     {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
@@ -225,9 +222,8 @@ async function showCardStep(ctx: any, uid: number, gs: (n: number) => UserState)
 
 async function showReferralStep(ctx: any) {
   await ctx.reply(
-    `╔══[ 🔗 REFERRAL URL ]════════════════════╗\n` +
-    `╚════════════════════════════════════════╝\n\n` +
-    `▸ Enter a Lovable referral URL or skip:\n` +
+    `\n🔷 <b>🔗 REFERRAL URL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `› Enter a Lovable referral URL or skip:\n` +
     `<code>  must start with https://lovable.dev/</code>`,
     {
       parse_mode: "HTML",
@@ -243,26 +239,20 @@ async function showReferralStep(ctx: any) {
 async function showCreateSummary(ctx: any, uid: number, gs: (n: number) => UserState) {
   const flow = gs(uid).createFlow!;
   const svc = SERVICE_CONFIGS[flow.service!];
-  const lines: string[] = [
-    `╔══[ 🏗 JOB SUMMARY ]═════════════════════╗`,
-    `╚════════════════════════════════════════╝\n`,
-    `<b>${svc.emoji} ${svc.label}</b>\n`,
-    `<code>◈ Count     →  ${flow.count} accounts`,
-  ];
-
+  const infoLines: string[] = [`📦  ${flow.count} account${flow.count === 1 ? "" : "s"}`];
   if (svc.outlookTable) {
-    lines.push(`◈ Outlook   →  ${await getAvailableCount(svc)} available`);
+    infoLines.push(`📬  Outlook pool  ·  ${await getAvailableCount(svc)} available`);
   }
-  if (svc.hasCoupon) {
-    lines.push(`◈ Coupon    →  ${flow.couponCode || "none"}`);
-  }
-  if (svc.hasCard) {
-    lines.push(`◈ Card      →  ${flow.cardLabel || "none"}`);
-  }
-  if (svc.hasReferral) {
-    lines.push(`◈ Referral  →  ${flow.referralUrl ? flow.referralUrl.slice(0, 35) + "…" : "none"}`);
-  }
-  lines.push(`</code>\n▸ Confirm and launch job?`);
+  if (svc.hasCoupon)  infoLines.push(`🎟  Coupon  ·  ${flow.couponCode  || "none"}`);
+  if (svc.hasCard)    infoLines.push(`💳  Card    ·  ${flow.cardLabel   || "none"}`);
+  if (svc.hasReferral) infoLines.push(`🔗  Referral  ·  ${flow.referralUrl ? flow.referralUrl.slice(0, 35) + "…" : "none"}`);
+
+  const lines: string[] = [
+    `\n🔷 <b>JOB SUMMARY</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`,
+    `${svc.emoji}  <b>${svc.label}</b>\n`,
+    infoLines.join("\n"),
+    `\n<i>Ready to launch — confirm below.</i>`,
+  ];
 
   await ctx.reply(lines.join("\n"), {
     parse_mode: "HTML",
@@ -596,8 +586,8 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
     return b;
   }
 
-  let t = `╔══[ ⚡ ACCOUNT TRACKER ]═════════════════╗\n`;
-  t += `╚════════════════════════════════════════╝\n`;
+  let t = `\n🔷 <b>⚡ ACCOUNT TRACKER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  t += ``;
   t += `<code>◈ Snapshot  →  ${now}\n`;
   t += `◈ Total     →  ${grandTotal} accounts</code>\n`;
 
@@ -889,8 +879,7 @@ export function startTelegramBot(config: BotConfig) {
   bot.command("id", async (ctx) => {
     const uid = ctx.from?.id;
     await ctx.reply(
-      `╔══[ IDENTITY ]══════════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
+      `\n🔷 <b>IDENTITY</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<code>◈ Telegram ID  →  ${uid}\n` +
       `◈ Username     →  @${ctx.from?.username || "—"}</code>\n\n` +
       `→ Add ID to <b>TELEGRAM_ALLOWED_IDS</b> to grant access.`,
@@ -905,8 +894,7 @@ export function startTelegramBot(config: BotConfig) {
     if (ALLOWED.size > 0 && !ALLOWED.has(uid)) {
       botLog(`Blocked unauthorized user ${uid} (@${ctx.from?.username || "unknown"})`);
       await ctx.reply(
-        `╔══[ ACCESS DENIED ]═════════════════════╗\n` +
-        `╚════════════════════════════════════════╝\n\n` +
+        `\n🔷 <b>ACCESS DENIED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `🔴  UNAUTHORIZED\n\n` +
         `<code>◈ Your ID  →  ${uid}</code>\n\n` +
         `→ Contact admin to be added to the allowlist.`,
@@ -938,14 +926,12 @@ export function startTelegramBot(config: BotConfig) {
       await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
     }
     await ctx.reply(
-      `╔══[ ADDISON PANEL v2 ]══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ System boot...\n` +
-      `▸ Auth verified ✓\n` +
-      `▸ DB connection established ✓\n\n` +
-      `<code>◈ Operator  →  ${ctx.from.first_name || ctx.from.username || "Admin"}\n` +
-      `◈ User ID   →  ${ctx.from.id}</code>\n\n` +
-      `→ Tap <b>Menu</b> below to open the command panel.`,
+      `\n🔷 <b>ADDISON PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `👤  <b>${ctx.from.first_name || ctx.from.username || "Admin"}</b>  <code>#${ctx.from.id}</code>\n\n` +
+      `✅  Auth verified\n` +
+      `✅  Database connected\n` +
+      `✅  All systems operational\n\n` +
+      `Tap <b>Menu</b> below to open the command panel.`,
       { parse_mode: "HTML" }
     );
   });
@@ -957,9 +943,8 @@ export function startTelegramBot(config: BotConfig) {
       await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
     }
     await ctx.reply(
-      `╔══[ COMMAND PANEL ]══════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Select a module:`,
+      `\n🔷 <b>COMMAND PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Select a module from the keyboard below.`,
       { parse_mode: "HTML", ...MAIN_KEYBOARD }
     );
   });
@@ -1011,9 +996,8 @@ export function startTelegramBot(config: BotConfig) {
 
   const handleAccounts = (ctx: any) => handleMenu(ctx, async () => {
     await ctx.reply(
-      `╔══[ 🗄 ACCOUNTS ]════════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Select a platform to query:`,
+      `\n🔷 <b>ACCOUNTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Select a platform to view available accounts:`,
       { parse_mode: "HTML", ...(await inlineAccountTypes()) }
     );
   });
@@ -1023,9 +1007,8 @@ export function startTelegramBot(config: BotConfig) {
   bot.hears(KB.COPY, (ctx) => handleMenu(ctx, async () => {
     getState(ctx.from.id).copyType = undefined;
     await ctx.reply(
-      `╔══[ 📋 COPY ACCOUNTS ]═══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Select a platform to export:`,
+      `\n🔷 <b>COPY ACCOUNTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Select a platform to export credentials for:`,
       { parse_mode: "HTML", ...(await inlineCopyTypes()) }
     );
   }));
@@ -1038,13 +1021,12 @@ export function startTelegramBot(config: BotConfig) {
     const maxPossible = Math.min(sourceCnt * 3, processing, 100);
     getState(ctx.from.id).awaitingText = "checkout_count";
     await ctx.reply(
-      `╔══[ 🔗 CHECKOUT LINKS ]══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `<code>◈ Processing targets  →  ${processing}\n` +
-      `◈ Coupon sources       →  ${sourceCnt}\n` +
-      `◈ Max possible         →  ${maxPossible}</code>\n\n` +
-      `▸ How many checkout links to generate? (1–100)\n` +
-      `  Each referral generates up to 3, sources chain automatically.`,
+      `\n🔷 <b>CHECKOUT LINKS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📋  Processing targets  ·  <b>${processing}</b>\n` +
+      `🔗  Coupon sources      ·  <b>${sourceCnt}</b>\n` +
+      `📊  Max possible        ·  <b>${maxPossible}</b>\n\n` +
+      `How many checkout links to generate? <i>(1–100)</i>\n` +
+      `Each referral yields up to 3 links, sources chain automatically.`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1069,16 +1051,15 @@ export function startTelegramBot(config: BotConfig) {
   bot.hears(KB.CREATE, (ctx) => handleMenu(ctx, async () => {
     getState(ctx.from.id).createFlow = {};
     await ctx.reply(
-      `╔══[ 🏗 CREATE ACCOUNTS ]═════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Select a target platform:`,
+      `\n🔷 <b>CREATE ACCOUNTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Choose a platform to create accounts on:`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔵 Replit",  "cs_replit"),  Markup.button.callback("💜 Lovable", "cs_lovable")],
-          [Markup.button.callback("⚡ v0.dev",  "cs_v0"),      Markup.button.callback("🅰️ Adobe",   "cs_adobe")],
-          [Markup.button.callback("🤖 ChatGPT", "cs_chatgpt_biz")],
-          [Markup.button.callback("✖ Cancel",   "create_cancel")],
+          [Markup.button.callback("🔵  Replit",   "cs_replit"),  Markup.button.callback("💜  Lovable",  "cs_lovable")],
+          [Markup.button.callback("⚡  v0.dev",   "cs_v0"),      Markup.button.callback("🅰️  Adobe",    "cs_adobe")],
+          [Markup.button.callback("🤖  ChatGPT",  "cs_chatgpt_biz")],
+          [Markup.button.callback("✖  Cancel",    "create_cancel")],
         ]),
       }
     );
@@ -1605,8 +1586,7 @@ export function startTelegramBot(config: BotConfig) {
     rows.rows.forEach((r: any) => { map[r.key] = r.value; });
     const mask = (v: string) => v ? `${v.slice(0, 16)}…` : "not set";
     await ctx.reply(
-      `╔══[ ⚙ SETTINGS ]════════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
+      `\n🔷 <b>⚙ SETTINGS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<code>◈ Proxy      →  ${mask(map["residential_proxy_url"] || "")}\n` +
       `◈ Capsolver  →  ${mask(map["capsolver_api_key"] || "")}\n` +
       `◈ ZenRows    →  ${mask(map["zenrows_api_key"] || "")}\n` +
@@ -1622,9 +1602,8 @@ export function startTelegramBot(config: BotConfig) {
 
   bot.hears("❓ Help", (ctx) => handleMenu(ctx, async () => {
     await ctx.reply(
-      `╔══[ ❓ HELP ]════════════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Use <b>/menu</b> to open the command panel\n\n` +
+      `\n🔷 <b>❓ HELP</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Use <b>/menu</b> to open the command panel\n\n` +
       `<code>⚡ Database Status          →  live account counts\n` +
       `🗄 Available Accounts       →  browse by status\n` +
       `📋 Copy Accounts            →  export credentials to chat\n` +
@@ -1634,7 +1613,7 @@ export function startTelegramBot(config: BotConfig) {
       `🎬 Movies Server            →  MoviesDrive scraper\n` +
       `🛒 Marketplace              →  shop admin panel\n` +
       `💳 Payment Gateway          →  payment methods & addresses</code>\n\n` +
-      `▸ /cancel — abort a running scan`,
+      `› /cancel — abort a running scan`,
       { parse_mode: "HTML" }
     );
   }));
@@ -1922,7 +1901,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
     getState(uid).awaitingText = "create_count";
-    await ctx.editMessageText(`▸ Type the custom <b>count</b>:`, { parse_mode: "HTML" });
+    await ctx.editMessageText(`› Type the custom <b>count</b>:`, { parse_mode: "HTML" });
   });
 
   // ── Create flow: coupon step ──────────────────────────────────────────────
@@ -1930,7 +1909,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery();
     const uid = ctx.from.id;
     getState(uid).awaitingText = "coupon_code";
-    await ctx.editMessageText(`▸ Type the <b>coupon code</b>:`, { parse_mode: "HTML" });
+    await ctx.editMessageText(`› Type the <b>coupon code</b>:`, { parse_mode: "HTML" });
   });
 
   bot.action("create_skip_coupon", async (ctx) => {
@@ -1961,7 +1940,7 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).awaitingText = "referral_url";
     await ctx.editMessageText(
-      `▸ Type the <b>referral URL</b>:\n<code>  must start with https://lovable.dev/</code>`,
+      `› Type the <b>referral URL</b>:\n<code>  must start with https://lovable.dev/</code>`,
       { parse_mode: "HTML" }
     );
   });
@@ -2564,12 +2543,11 @@ export function startTelegramBot(config: BotConfig) {
     const totalCust  = parseInt(custRes.rows[0]?.cnt ?? "0");
     const totalOrds  = parseInt(orderRes.rows[0]?.cnt ?? "0");
     await ctx.reply(
-      `╔══[ 🛒 SHOP ADMIN ]══════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
+      `\n🔷 <b>🛒 SHOP ADMIN</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<code>◈ Active products  →  ${activeProd}\n` +
       `◈ Customers        →  ${totalCust}\n` +
       `◈ Total orders     →  ${totalOrds}</code>\n\n` +
-      `▸ Select a module:`,
+      `› Select a module:`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -2586,8 +2564,7 @@ export function startTelegramBot(config: BotConfig) {
 
   bot.hears(KB.PAYMENT, (ctx) => handleMenu(ctx, async () => {
     const msg =
-      `╔══[ 💳 PAYMENT METHODS ]═════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
+      `\n🔷 <b>💳 PAYMENT METHODS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `✨ <b>Send payment to any method below</b>\n` +
       `<i>Tap any address to copy instantly</i>\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -2714,8 +2691,7 @@ export function startTelegramBot(config: BotConfig) {
 
   function buildAddressMsg(addr: ReturnType<typeof generateFakeUSAddress>): string {
     return (
-      `╔══[ 🏠 FAKE US ADDRESS ]══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
+      `\n🔷 <b>🏠 FAKE US ADDRESS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `🏘  <b>Street</b>\n<code>${addr.street}</code>\n\n` +
       `🌆  <b>City / Town</b>\n<code>${addr.city}</code>\n\n` +
       `🗺  <b>State / Region</b>\n<code>${addr.state} (${addr.abbr})</code>\n\n` +
@@ -2755,12 +2731,11 @@ export function startTelegramBot(config: BotConfig) {
 
   function buildProductsListMsg(rows: any[]): string {
     if (rows.length === 0) {
-      return `╔══[ 📦 PRODUCTS ]════════════════════════╗\n` +
-             `╚════════════════════════════════════════╝\n\n` +
-             `<code>◈ No products yet</code>\n\n▸ Use "Add Product" to create one.`;
+      return `\n🔷 <b>📦 PRODUCTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+             `<code>◈ No products yet</code>\n\n› Use "Add Product" to create one.`;
     }
-    let t = `╔══[ 📦 PRODUCTS (${rows.length}) ]══════════════════╗\n` +
-            `╚════════════════════════════════════════╝\n\n`;
+    let t = `\n🔷 <b>📦 PRODUCTS (${rows.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `\n`;
     for (const p of rows) {
       const st = p.active ? "🟢" : "🔴";
       t += `${st}  <b>${p.name}</b>  <code>$${parseFloat(p.price).toFixed(2)}</code>\n`;
@@ -2801,9 +2776,8 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).shopAdminFlow = { step: "name" };
     await ctx.reply(
-      `╔══[ ➕ ADD PRODUCT — 1/5 ]════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Enter the product <b>name</b>:\n<code>  e.g. "Replit Core 1 Month"</code>`,
+      `\n🔷 <b>➕ ADD PRODUCT — 1/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter the product <b>name</b>:\n<code>  e.g. "Replit Core 1 Month"</code>`,
       { parse_mode: "HTML" }
     );
   });
@@ -2816,15 +2790,14 @@ export function startTelegramBot(config: BotConfig) {
     const p = res.rows[0];
     if (!p) return safeEdit(ctx, "Product not found.");
     const info =
-      `╔══[ ✏ EDIT PRODUCT ]═════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
+      `\n🔷 <b>✏ EDIT PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<b>${p.name}</b>\n` +
       `<code>◈ Description   →  ${p.description || "—"}\n` +
       `◈ Price         →  $${parseFloat(p.price).toFixed(2)}\n` +
       `◈ Account type  →  ${p.account_type}\n` +
       `◈ Status filter →  ${p.status_filter}\n` +
       `◈ Active        →  ${p.active ? "Yes" : "No"}</code>\n\n` +
-      `▸ Select a field to edit:`;
+      `› Select a field to edit:`;
     await safeEdit(ctx, info, {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
@@ -2849,11 +2822,11 @@ export function startTelegramBot(config: BotConfig) {
     };
     getState(uid).shopAdminFlow = { step: stepMap[field], editProductId: productId };
     const promptMap: Record<string, string> = {
-      name:          `▸ Enter new <b>name</b>:`,
-      description:   `▸ Enter new <b>description</b> (or <code>-</code> to clear):`,
-      price:         `▸ Enter new <b>price</b> in USD:\n<code>  e.g. 1.50</code>`,
-      account_type:  `▸ Enter new <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
-      status_filter: `▸ Enter new <b>status filter</b>:\n<code>  e.g. available | working | created</code>`,
+      name:          `› Enter new <b>name</b>:`,
+      description:   `› Enter new <b>description</b> (or <code>-</code> to clear):`,
+      price:         `› Enter new <b>price</b> in USD:\n<code>  e.g. 1.50</code>`,
+      account_type:  `› Enter new <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+      status_filter: `› Enter new <b>status filter</b>:\n<code>  e.g. available | working | created</code>`,
     };
     await ctx.reply(promptMap[field], { parse_mode: "HTML" });
   });
@@ -2865,8 +2838,7 @@ export function startTelegramBot(config: BotConfig) {
     const total = parseInt(countRes.rows[0]?.cnt ?? "0");
     if (total === 0) {
       return safeEdit(ctx,
-        `╔══[ 👥 CUSTOMERS ]═══════════════════════╗\n` +
-        `╚════════════════════════════════════════╝\n\n` +
+        `\n🔷 <b>👥 CUSTOMERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `<code>◈ No customers yet</code>`,
         { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩ Back", "shop_admin_menu")]]) }
       );
@@ -2877,8 +2849,8 @@ export function startTelegramBot(config: BotConfig) {
     );
     const page = Math.floor(offset / PAGE) + 1;
     const totalPages = Math.ceil(total / PAGE);
-    let t = `╔══[ 👥 CUSTOMERS (${total}) — ${page}/${totalPages} ]══╗\n` +
-            `╚════════════════════════════════════════╝\n\n`;
+    let t = `\n🔷 <b>👥 CUSTOMERS (${total}) — ${page}/${totalPages}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `\n`;
     for (const c of res.rows) {
       const name = c.username ? `@${c.username}` : (c.first_name ?? `ID:${c.telegram_id}`);
       t += `<code>◈ ${name.padEnd(20)}  $${parseFloat(c.balance).toFixed(2)}</code>\n`;
@@ -2908,9 +2880,8 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).shopAdminFlow = { step: "topup_uid" };
     await ctx.reply(
-      `╔══[ 💰 TOP UP BALANCE ]══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `▸ Enter the customer's <b>Telegram ID</b>:`,
+      `\n🔷 <b>💰 TOP UP BALANCE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter the customer's <b>Telegram ID</b>:`,
       { parse_mode: "HTML" }
     );
   });
@@ -2929,9 +2900,8 @@ export function startTelegramBot(config: BotConfig) {
         flow.name = text;
         flow.step = "description";
         return ctx.reply(
-          `╔══[ ➕ ADD PRODUCT — 2/5 ]════════════════╗\n` +
-          `╚════════════════════════════════════════╝\n\n` +
-          `▸ Enter a short <b>description</b>\n<code>  or send - to skip</code>`,
+          `\n🔷 <b>➕ ADD PRODUCT — 2/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `› Enter a short <b>description</b>\n<code>  or send - to skip</code>`,
           { parse_mode: "HTML" }
         );
       }
@@ -2940,9 +2910,8 @@ export function startTelegramBot(config: BotConfig) {
         flow.description = text === "-" ? "" : text;
         flow.step = "price";
         return ctx.reply(
-          `╔══[ ➕ ADD PRODUCT — 3/5 ]════════════════╗\n` +
-          `╚════════════════════════════════════════╝\n\n` +
-          `▸ Enter the <b>price</b> in USD:\n<code>  e.g. 1.00</code>`,
+          `\n🔷 <b>➕ ADD PRODUCT — 3/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `› Enter the <b>price</b> in USD:\n<code>  e.g. 1.00</code>`,
           { parse_mode: "HTML" }
         );
       }
@@ -2955,9 +2924,8 @@ export function startTelegramBot(config: BotConfig) {
         flow.price = price.toFixed(2);
         flow.step = "account_type";
         return ctx.reply(
-          `╔══[ ➕ ADD PRODUCT — 4/5 ]════════════════╗\n` +
-          `╚════════════════════════════════════════╝\n\n` +
-          `▸ Enter the <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+          `\n🔷 <b>➕ ADD PRODUCT — 4/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `› Enter the <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
           { parse_mode: "HTML" }
         );
       }
@@ -2973,9 +2941,8 @@ export function startTelegramBot(config: BotConfig) {
         flow.accountType = at;
         flow.step = "status_filter";
         return ctx.reply(
-          `╔══[ ➕ ADD PRODUCT — 5/5 ]════════════════╗\n` +
-          `╚════════════════════════════════════════╝\n\n` +
-          `▸ Enter the <b>status filter</b>:\n` +
+          `\n🔷 <b>➕ ADD PRODUCT — 5/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `› Enter the <b>status filter</b>:\n` +
           `<code>  accounts with this status will be sold\n` +
           `  e.g. available | working | created</code>`,
           { parse_mode: "HTML" }
@@ -3068,7 +3035,7 @@ export function startTelegramBot(config: BotConfig) {
         flow.topupUid = telegramId;
         flow.step = "topup_amount";
         return ctx.reply(
-          `<code>◈ Current balance  →  $${parseFloat(custRes.rows[0].balance).toFixed(2)}</code>\n\n▸ Enter the <b>amount to add</b>:\n<code>  e.g. 5.00</code>`,
+          `<code>◈ Current balance  →  $${parseFloat(custRes.rows[0].balance).toFixed(2)}</code>\n\n› Enter the <b>amount to add</b>:\n<code>  e.g. 5.00</code>`,
           { parse_mode: "HTML" }
         );
       }
