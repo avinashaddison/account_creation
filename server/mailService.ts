@@ -794,7 +794,7 @@ function genBizPassword(): string {
 export async function createBizMailAccount(opts: {
   requestedNum?: number;    // re-create a specific numbered slot
   customUsername?: string;  // create/recreate a custom-named account (e.g. "john")
-} = {}): Promise<{ email: string; password: string; accountNum: number | null; isCustom: boolean }> {
+} = {}): Promise<{ email: string; password: string; accountNum: number | null; isCustom: boolean; recycled: string[] }> {
   const { storage } = await import("./storage");
   const token = await getMailbuxBearerToken();
   const isCustom = !!opts.customUsername;
@@ -846,23 +846,25 @@ export async function createBizMailAccount(opts: {
       } else {
         await storage.registerBizMailAccount(accountNum, email, password);
       }
-      return { email, password, accountNum, isCustom };
+      return { email, password, accountNum, isCustom, recycled: [] };
     }
 
     throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
 
   // ── Auto-recycle: if at capacity (≥10 active), delete the 5 oldest ────────
-  const ACTIVE_CAP   = 10;
+  const ACTIVE_CAP    = 10;
   const RECYCLE_COUNT = 5;
+  const recycled: string[] = [];
   const active = await storage.getActiveBizMailAccounts();
   if (active.length >= ACTIVE_CAP) {
     const toDelete = await storage.getOldestActiveBizMailAccounts(RECYCLE_COUNT);
     console.log(`[BizMail] At capacity (${active.length}/${ACTIVE_CAP}) — recycling ${toDelete.length} oldest accounts`);
     for (const acct of toDelete) {
       try {
-        await deleteBizMailAccount(acct.email);
-        await storage.markBizMailDeletedByEmail(acct.email);
+        await deleteBizMailAccount(acct.email);        // throws on non-2xx
+        await storage.markBizMailDeletedByEmail(acct.email); // only runs if delete succeeded
+        recycled.push(acct.email);
         console.log(`[BizMail] Recycled ${acct.email}`);
       } catch (e: any) {
         console.warn(`[BizMail] Recycle error for ${acct.email}: ${e.message}`);
@@ -906,7 +908,7 @@ export async function createBizMailAccount(opts: {
       // Fresh account created successfully
       console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
       await storage.registerBizMailAccount(accountNum, email, password);
-      return { email, password, accountNum, isCustom: false };
+      return { email, password, accountNum, isCustom: false, recycled };
     }
 
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
@@ -929,16 +931,16 @@ export async function createBizMailAccount(opts: {
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
-  try {
-    const token = await getMailbuxBearerToken();
-    await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
-      method: "DELETE",
-      headers: { "Authorization": `Bearer ${token}` },
-    });
-    console.log(`[BizMail] Deleted Stalwart account: ${email}`);
-  } catch (err: any) {
-    console.log(`[BizMail] deleteBizMailAccount error: ${err.message}`);
+  const token = await getMailbuxBearerToken();
+  const res = await fetch(`${MAILBUX_API}/principal/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Stalwart DELETE ${email} returned ${res.status}: ${body.substring(0, 120)}`);
   }
+  console.log(`[BizMail] Deleted Stalwart account: ${email} (status ${res.status})`);
 }
 
 // ── Email Forwarders API ──────────────────────────────────────────────────────

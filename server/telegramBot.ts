@@ -1268,9 +1268,9 @@ export function startTelegramBot(config: BotConfig) {
       { parse_mode: "HTML" }
     );
 
-    let email: string, password: string, accountNum: number | null, isCustom: boolean;
+    let email: string, password: string, accountNum: number | null, isCustom: boolean, recycled: string[];
     try {
-      ({ email, password, accountNum, isCustom } = await createBizMailAccount(opts));
+      ({ email, password, accountNum, isCustom, recycled } = await createBizMailAccount(opts));
     } catch (err: any) {
       await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
         `❌ <b>Failed to create business mail</b>\n<code>${esc(err.message?.substring(0, 200))}</code>`,
@@ -1309,6 +1309,11 @@ export function startTelegramBot(config: BotConfig) {
       ? `💼 <b>Business Mail — Custom: ${esc(email)}</b>`
       : `💼 <b>Business Mail — Account #${accountNum}</b>`;
 
+    const recycleNotice = recycled.length > 0
+      ? `\n♻️ <b>Auto-recycled (freed space):</b>\n` +
+        recycled.map(e => `  · <code>${esc(e)}</code>`).join("\n") + "\n"
+      : "";
+
     const bizStatusCard =
       `${title}\n\n` +
       `📧 <b>Email:</b> <code>${esc(email)}</code>\n` +
@@ -1316,7 +1321,7 @@ export function startTelegramBot(config: BotConfig) {
       `🌐 <b>Webmail:</b> <a href="https://mail.mailbux.com/inbox/login">mail.mailbux.com/inbox/login</a>\n` +
       `📮 <b>IMAP:</b> <code>mail.mailbux.com:993 (SSL)</code>\n` +
       `📤 <b>SMTP:</b> <code>mail.mailbux.com:587 (STARTTLS)</code>\n\n` +
-      `${capacityLine}\n\n` +
+      `${capacityLine}${recycleNotice}\n` +
       inboxNote;
 
     await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
