@@ -32,6 +32,17 @@ const ACCOUNT_TABLE_MAP: Record<string, string> = {
   gmail:    "private_gmail_accounts",
 };
 
+const PLATFORM_EMOJI: Record<string, string> = {
+  replit:   "🔵",
+  lovable:  "💜",
+  v0:       "⚡",
+  adobe:    "🅰️",
+  chatgpt:  "🤖",
+  eleven:   "🎙",
+  outlook:  "📧",
+  gmail:    "📬",
+};
+
 function truncate(text: string, limit = 4000): string {
   return text.length > limit ? text.slice(0, limit - 3) + "…" : text;
 }
@@ -61,67 +72,24 @@ function platformLabel(account_type: string): string {
   return map[account_type] ?? account_type;
 }
 
+function platformEmoji(account_type: string): string {
+  return PLATFORM_EMOJI[account_type] ?? "🔹";
+}
+
+function stockBadge(stock: number): string {
+  if (stock === 0) return "🔴 Sold Out";
+  if (stock <= 3)  return `🟠 Only ${stock} left!`;
+  if (stock <= 10) return `🟡 ${stock} in stock`;
+  return `🟢 ${stock} available`;
+}
+
 function stockLine(stock: number): string {
   if (stock === 0) return "🔴  SOLD OUT";
   if (stock <= 5)  return `🟡  LOW — ×${stock} remaining`;
   return `🟢  IN STOCK — ×${stock} units`;
 }
 
-function buildProductCard(p: ProductWithStock, index: number): string {
-  const platform = platformLabel(p.account_type);
-  const desc     = p.description ? `\n  <i>${escHtml(p.description)}</i>` : "";
-  return (
-    `<b>${index + 1}. ${escHtml(p.name)}</b>${desc}\n` +
-    `<code>` +
-    `  Platform  ◈  ${platform}\n` +
-    `  Price     ◈  ${fmt$(p.price)} / account\n` +
-    `  Stock     ◈  ${stockLine(p.stock)}` +
-    `</code>`
-  );
-}
-
-function buildProductButtons(products: ProductWithStock[]) {
-  return products.map((p) => {
-    const icon      = p.stock > 0 ? "⚡" : "🔴";
-    const stockText = p.stock > 0 ? `×${p.stock}` : "SOLD OUT";
-    return [Markup.button.callback(
-      `${icon}  ${p.name}  ·  ${fmt$(p.price)}  ·  ${stockText}`,
-      `shop_product_${p.id}`
-    )];
-  });
-}
-
-// Convert text to mathematical sans-serif bold unicode (renders as a different font in Telegram)
-// Must use [...str] spread to correctly iterate surrogate pairs (non-BMP chars)
-function toBold(text: string): string {
-  const upperChars = [..."𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"];
-  const lowerChars = [..."𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇"];
-  return [...text].map(c => {
-    const u = c.charCodeAt(0);
-    if (u >= 65 && u <= 90) return upperChars[u - 65];
-    if (u >= 97 && u <= 122) return lowerChars[u - 97];
-    return c;
-  }).join("");
-}
-
-async function safeReply(ctx: any, text: string, extra: any = {}) {
-  try {
-    return await ctx.reply(truncate(text), extra);
-  } catch (e: any) {
-    console.error("[ShopBot] safeReply failed:", e.message);
-    return null;
-  }
-}
-
-async function safeEdit(ctx: any, text: string, extra: any = {}) {
-  try {
-    return await ctx.editMessageText(truncate(text), extra);
-  } catch {
-    return safeReply(ctx, text, extra);
-  }
-}
-
-// ── Main reply keyboard ────────────────────────────────────────────────────────
+// ── Main reply keyboard ──────────────────────────────────────────────────────
 const BTN = {
   ACCOUNTS:  "🛍 // ACCOUNTS",
   BALANCE:   "💰 // BALANCE",
@@ -137,7 +105,7 @@ const SHOP_KEYBOARD = Markup.keyboard([
   [BTN.IDENTITY,  BTN.SUPPORT],
 ]).resize();
 
-// ── Per-user shop state ────────────────────────────────────────────────────────
+// ── Per-user state ───────────────────────────────────────────────────────────
 interface ShopUserState {
   selectedProductId?: string;
 }
@@ -147,7 +115,7 @@ function getState(uid: number): ShopUserState {
   return userState.get(uid)!;
 }
 
-// ── DB helpers ─────────────────────────────────────────────────────────────────
+// ── DB helpers ───────────────────────────────────────────────────────────────
 async function upsertCustomer(uid: number, username?: string, firstName?: string) {
   await dbQuery(
     `INSERT INTO shop_customers (telegram_id, username, first_name)
@@ -253,7 +221,6 @@ async function purchaseProduct(
   try {
     await client.query("BEGIN");
 
-    // Lock customer row and check balance
     const custRes = await client.query(
       `SELECT balance FROM shop_customers WHERE telegram_id = $1 FOR UPDATE`,
       [uid]
@@ -272,7 +239,6 @@ async function purchaseProduct(
       };
     }
 
-    // Get and lock oldest available account (respects min_credits if set)
     const minCred = prod.min_credits ?? null;
     const acctSql = minCred != null
       ? `SELECT id, email, password FROM ${table} WHERE status = $1 AND credits >= $2 ORDER BY credits DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`
@@ -286,16 +252,13 @@ async function purchaseProduct(
 
     const { id: accountId, email: accountEmail, password: accountPassword } = acctRes.rows[0];
 
-    // Deduct balance
     await client.query(
       `UPDATE shop_customers SET balance = balance - $1 WHERE telegram_id = $2`,
       [price, uid]
     );
 
-    // Mark account as sold_out
     await client.query(`UPDATE ${table} SET status = 'sold_out' WHERE id = $1`, [accountId]);
 
-    // Insert order (store credentials at purchase time)
     const orderRes = await client.query(
       `INSERT INTO shop_orders
          (telegram_id, product_id, product_name, account_id, account_email, account_password, amount)
@@ -322,7 +285,7 @@ async function purchaseProduct(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ── DB table setup ───────────────────────────────────────────────────────────
 async function ensureShopTables() {
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS shop_customers (
@@ -360,6 +323,77 @@ async function ensureShopTables() {
   console.log("[ShopBot] Tables ready");
 }
 
+// ── Safe messaging helpers ───────────────────────────────────────────────────
+async function safeReply(ctx: any, text: string, extra: any = {}) {
+  try {
+    return await ctx.reply(truncate(text), extra);
+  } catch (e: any) {
+    console.error("[ShopBot] safeReply failed:", e.message);
+    return null;
+  }
+}
+
+async function safeEdit(ctx: any, text: string, extra: any = {}) {
+  try {
+    return await ctx.editMessageText(truncate(text), extra);
+  } catch {
+    return safeReply(ctx, text, extra);
+  }
+}
+
+// Edit a message that was previously sent (by message object reference)
+async function editMsg(ctx: any, msg: any, text: string, extra: any = {}) {
+  try {
+    return await ctx.telegram.editMessageText(
+      msg.chat.id,
+      msg.message_id,
+      undefined,
+      truncate(text),
+      extra
+    );
+  } catch {
+    return safeReply(ctx, text, extra);
+  }
+}
+
+// ── UI builders ──────────────────────────────────────────────────────────────
+function divider(): string {
+  return "─────────────────────────────────────";
+}
+
+function header(title: string, sub?: string): string {
+  const line = `[ ${title} ]`;
+  return sub
+    ? `<b>${line}</b>\n<i>${escHtml(sub)}</i>\n${divider()}`
+    : `<b>${line}</b>\n${divider()}`;
+}
+
+function buildProductCard(p: ProductWithStock): string {
+  const emoji   = platformEmoji(p.account_type);
+  const plat    = platformLabel(p.account_type);
+  const badge   = stockBadge(p.stock);
+  const desc    = p.description ? `\n<i>  ${escHtml(p.description)}</i>` : "";
+  return (
+    `${emoji} <b>${escHtml(p.name)}</b>${desc}\n` +
+    `<code>` +
+    `  Platform  ›  ${plat}\n` +
+    `  Price     ›  ${fmt$(p.price)} / account\n` +
+    `  Stock     ›  ${badge}` +
+    `</code>`
+  );
+}
+
+function buildProductButtons(products: ProductWithStock[]) {
+  return products.map((p) => {
+    const emoji     = platformEmoji(p.account_type);
+    const inStock   = p.stock > 0;
+    const stockTag  = inStock ? `${p.stock} left` : "SOLD OUT";
+    const label     = `${emoji}  ${p.name}  ·  ${fmt$(p.price)}  ·  ${stockTag}`;
+    return [Markup.button.callback(label, `shop_product_${p.id}`)];
+  });
+}
+
+// ── Main bot export ──────────────────────────────────────────────────────────
 export function startShopBot(token: string) {
   if (!token) {
     console.warn("[ShopBot] No token provided — shop bot disabled");
@@ -368,83 +402,125 @@ export function startShopBot(token: string) {
 
   const bot = new Telegraf(token);
 
-  // ── Ensure DB tables exist before handling any messages ───────────────────
   ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
-  // ── Global error guard ────────────────────────────────────────────────────
   bot.catch((err: any, ctx: any) => {
-    console.error("[ShopBot] Unhandled handler error:", err?.message || err);
+    console.error("[ShopBot] Unhandled error:", err?.message || err);
     try {
-      ctx?.answerCbQuery?.("An error occurred. Please try again.").catch(() => {});
+      ctx?.answerCbQuery?.("Something went wrong. Please try again.").catch(() => {});
     } catch {}
   });
 
-  // ── /start ────────────────────────────────────────────────────────────────
+  // ── /start ─────────────────────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const uid = ctx.from.id;
-    // Set menu button for this specific chat so the "/" icon appears immediately
     bot.telegram.setChatMenuButton({
       chatId: ctx.chat.id,
       menuButton: { type: "commands" },
     }).catch(() => {});
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
-    const name = ctx.from.first_name || ctx.from.username || "User";
-    const usernameDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    const name    = ctx.from.first_name || ctx.from.username || "User";
+    const uname   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+
     await ctx.reply(
       truncate(
-        `╔══[ PROJECT ADDISON v2 ]══╗\n` +
-        `║   🔐  Digital Access Store   ║\n` +
-        `╚══════════════════════════════╝\n\n` +
-        `▸ Session initialized...\n` +
-        `▸ Identity confirmed ✓\n\n` +
-        `Hello, <b>${escHtml(name)}</b>\n\n` +
-        `<code>◈ Balance   →  ${fmt$(balance)}\n` +
-        `◈ Username  →  ${usernameDisplay}\n` +
-        `◈ User ID   →  ${uid}</code>\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `  System online · Loading inventory...\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+        `[ PROJECT ADDISON v2 ]\n` +
+        `<i>Global AI Tools Marketplace</i>\n` +
+        `${divider()}\n\n` +
+        `Welcome back, <b>${escHtml(name)}</b>!\n\n` +
+        `<code>` +
+        `  Balance   ›  ${fmt$(balance)}\n` +
+        `  Username  ›  ${uname}\n` +
+        `  User ID   ›  ${uid}` +
+        `</code>\n\n` +
+        `${divider()}\n` +
+        `Use the menu below to get started.`
       ),
       { parse_mode: "HTML", ...SHOP_KEYBOARD }
     );
-    // Auto-fetch and display live product list immediately
+
+    // Show product list right after welcome
     await showProductList(ctx);
   });
 
-  // ── /menu ─────────────────────────────────────────────────────────────────
   bot.command("menu", async (ctx) => {
-    await ctx.reply("Use the menu below:", SHOP_KEYBOARD);
+    await ctx.reply("Menu restored.", SHOP_KEYBOARD);
   });
 
-  // ── Accounts ──────────────────────────────────────────────────────────────
+  // ── Product list ──────────────────────────────────────────────────────────
   async function showProductList(ctx: any) {
+    // Step 1: loading indicator
+    const loader = await safeReply(
+      ctx,
+      `⏳ <i>Fetching live inventory…</i>`,
+      { parse_mode: "HTML" }
+    );
+
+    // Step 2: fetch live data
     const products = await getProductsWithStock();
+
     if (products.length === 0) {
-      return safeReply(ctx,
-        `╔══[ INVENTORY ]══╗\n` +
-        `║  ⚠ No Stock Found  ║\n` +
-        `╚══════════════════╝\n\n` +
-        `▸ No products online at this time.\n` +
-        `→ Contact ${escHtml(SUPPORT_CONTACT)}`,
-        { parse_mode: "HTML" }
-      );
+      if (loader) {
+        await editMsg(ctx, loader,
+          `${header("🛍 MARKETPLACE", "Project Addison v2")}\n\n` +
+          `⚠️ <b>No products online right now.</b>\n` +
+          `<i>Check back soon or contact support.</i>\n\n` +
+          `→ ${escHtml(SUPPORT_CONTACT)}`,
+          { parse_mode: "HTML" }
+        );
+      }
+      return;
     }
 
-    const header =
-      `╔══[ 🛍 LIVE INVENTORY ]══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n`;
+    const cards = products
+      .map((p) => buildProductCard(p))
+      .join(`\n${divider()}\n`);
 
-    const cards = products.map((p, i) => buildProductCard(p, i)).join("\n\n─────────────────────────────────────────\n\n");
+    const text =
+      `${header("🛍 LIVE MARKETPLACE", "Tap a product below to view details & buy")}\n\n` +
+      `${cards}\n\n` +
+      `${divider()}\n` +
+      `<i>Prices in USD · Instant delivery after purchase</i>`;
 
-    await safeReply(ctx,
-      header + cards + `\n\n─────────────────────────────────────────\n▸ Tap a product below to purchase:`,
-      { parse_mode: "HTML", ...Markup.inlineKeyboard(buildProductButtons(products)) }
-    );
+    const keyboard = Markup.inlineKeyboard([
+      ...buildProductButtons(products),
+      [Markup.button.callback("🔄  Refresh", "shop_refresh_products")],
+    ]);
+
+    if (loader) {
+      await editMsg(ctx, loader, text, { parse_mode: "HTML", ...keyboard });
+    } else {
+      await safeReply(ctx, text, { parse_mode: "HTML", ...keyboard });
+    }
   }
 
   bot.hears(BTN.ACCOUNTS, async (ctx) => {
     await showProductList(ctx);
+  });
+
+  bot.action("shop_refresh_products", async (ctx) => {
+    await ctx.answerCbQuery("Refreshing…").catch(() => {});
+    const products = await getProductsWithStock();
+    if (products.length === 0) {
+      return safeEdit(ctx,
+        `${header("🛍 MARKETPLACE")}\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
+        { parse_mode: "HTML" }
+      );
+    }
+    const cards = products.map((p) => buildProductCard(p)).join(`\n${divider()}\n`);
+    const text =
+      `${header("🛍 LIVE MARKETPLACE", "Tap a product below to view details & buy")}\n\n` +
+      `${cards}\n\n` +
+      `${divider()}\n` +
+      `<i>Prices in USD · Instant delivery after purchase</i>`;
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        ...buildProductButtons(products),
+        [Markup.button.callback("🔄  Refresh", "shop_refresh_products")],
+      ]),
+    });
   });
 
   // ── Product detail ────────────────────────────────────────────────────────
@@ -453,104 +529,144 @@ export function startShopBot(token: string) {
     const productId = (ctx.match as RegExpExecArray)[1];
     getState(ctx.from.id).selectedProductId = productId;
 
+    // Show loading state immediately
+    await safeEdit(ctx,
+      `⏳ <i>Loading product details…</i>`,
+      { parse_mode: "HTML" }
+    );
+
     const prod = await getProductById(productId);
     if (!prod || !prod.active) {
-      return safeEdit(ctx, "This product is no longer available.");
+      return safeEdit(ctx,
+        `${header("⚠️ UNAVAILABLE")}\n\nThis product is no longer available.\n\n→ <b>Back to shop:</b> tap the button below.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        }
+      );
     }
 
-    const platform  = platformLabel(prod.account_type);
-    const descLine  = prod.description ? `\n<i>${escHtml(prod.description)}</i>\n` : "";
-    const inStock   = prod.stock > 0;
-    const buyLabel  = inStock ? `⚡  BUY NOW  ·  ${fmt$(prod.price)}` : `🔴  OUT OF STOCK`;
+    const emoji    = platformEmoji(prod.account_type);
+    const plat     = platformLabel(prod.account_type);
+    const inStock  = prod.stock > 0;
+    const desc     = prod.description
+      ? `\n<i>${escHtml(prod.description)}</i>\n`
+      : "";
 
-    await safeEdit(
-      ctx,
-      `╔══[ PRODUCT DETAIL ]═════════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n\n` +
-      `<b>${escHtml(prod.name)}</b>${descLine}\n` +
+    const text =
+      `${header(`${emoji} PRODUCT DETAILS`)}\n\n` +
+      `<b>${escHtml(prod.name)}</b>${desc}\n` +
       `<code>` +
-      `  Platform  ◈  ${platform}\n` +
-      `  Price     ◈  ${fmt$(prod.price)} / account\n` +
-      `  Stock     ◈  ${stockLine(prod.stock)}\n` +
-      `</code>\n` +
-      (inStock ? `▸ Confirm purchase below:` : `▸ This product is currently out of stock.`),
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          ...(inStock ? [[Markup.button.callback(buyLabel, `shop_buy_${productId}`)]] : []),
-          [Markup.button.callback("‹  Back to Shop", "shop_back_products")],
-        ]),
-      }
-    );
+      `  Platform   ›  ${plat}\n` +
+      `  Price      ›  ${fmt$(prod.price)} / account\n` +
+      `  Stock      ›  ${stockBadge(prod.stock)}\n` +
+      `  Delivery   ›  Instant` +
+      `</code>\n\n` +
+      (inStock
+        ? `✅ <b>In stock.</b> Ready to deliver instantly after purchase.`
+        : `❌ <b>Currently out of stock.</b> Check back soon.`
+      );
+
+    const buttons = [
+      ...(inStock
+        ? [[Markup.button.callback(`✅  Buy Now  —  ${fmt$(prod.price)}`, `shop_buy_${productId}`)]]
+        : []
+      ),
+      [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+    ];
+
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard(buttons),
+    });
   });
 
+  // ── Back to product list ──────────────────────────────────────────────────
   bot.action("shop_back_products", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
+
+    await safeEdit(ctx, `⏳ <i>Loading inventory…</i>`, { parse_mode: "HTML" });
+
     const products = await getProductsWithStock();
     if (products.length === 0) {
-      return safeEdit(ctx, "No products available right now. Check back soon!");
+      return safeEdit(ctx,
+        `${header("🛍 MARKETPLACE")}\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
+        { parse_mode: "HTML" }
+      );
     }
-    const header =
-      `╔══[ 🛍 LIVE INVENTORY ]══════════════════╗\n` +
-      `╚════════════════════════════════════════╝\n`;
-    const cards = products.map((p, i) => buildProductCard(p, i)).join("\n\n─────────────────────────────────────────\n\n");
-    await safeEdit(ctx,
-      header + cards + `\n\n─────────────────────────────────────────\n▸ Tap a product below to purchase:`,
-      { parse_mode: "HTML", ...Markup.inlineKeyboard(buildProductButtons(products)) }
-    );
+    const cards = products.map((p) => buildProductCard(p)).join(`\n${divider()}\n`);
+    const text =
+      `${header("🛍 LIVE MARKETPLACE", "Tap a product below to view details & buy")}\n\n` +
+      `${cards}\n\n` +
+      `${divider()}\n` +
+      `<i>Prices in USD · Instant delivery after purchase</i>`;
+
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        ...buildProductButtons(products),
+        [Markup.button.callback("🔄  Refresh", "shop_refresh_products")],
+      ]),
+    });
   });
 
   // ── Buy flow ──────────────────────────────────────────────────────────────
   bot.action(/^shop_buy_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery("Processing…").catch(() => {});
-    const uid = ctx.from.id;
+    const uid       = ctx.from.id;
     const productId = (ctx.match as RegExpExecArray)[1];
 
-    // Ensure customer row exists
+    // Show processing state
+    await safeEdit(ctx,
+      `⚙️ <i>Processing your purchase…\nPlease wait a moment.</i>`,
+      { parse_mode: "HTML" }
+    );
+
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
 
     const prod = await getProductById(productId);
     if (!prod || !prod.active) {
-      return safeEdit(ctx, "This product is no longer available.");
+      return safeEdit(ctx,
+        `${header("⚠️ UNAVAILABLE")}\n\nThis product is no longer available.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        }
+      );
     }
 
     const balance = await getBalance(uid);
-    const price = parseFloat(prod.price);
+    const price   = parseFloat(prod.price);
 
     if (balance < price) {
       const shortfall = (price - balance).toFixed(2);
-      return safeEdit(
-        ctx,
-        `╔══[ ACCESS DENIED ]══════╗\n` +
-        `║  ⚠  Insufficient Funds   ║\n` +
-        `╚═════════════════════════╝\n\n` +
-        `<code>◆ Product   →  ${escHtml(prod.name)}\n` +
-        `◆ Required  →  ${fmt$(price)}\n` +
-        `◆ Balance   →  ${fmt$(balance)}\n` +
-        `◆ Shortfall →  $${shortfall}</code>\n\n` +
-        `→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
+      return safeEdit(ctx,
+        `${header("💳 INSUFFICIENT FUNDS")}\n\n` +
+        `<code>` +
+        `  Product    ›  ${escHtml(prod.name)}\n` +
+        `  Required   ›  ${fmt$(price)}\n` +
+        `  Balance    ›  ${fmt$(balance)}\n` +
+        `  Shortfall  ›  $${shortfall}` +
+        `</code>\n\n` +
+        `To top up your wallet, contact:\n${escHtml(SUPPORT_CONTACT)}`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("← Back to Products", "shop_back_products")],
+            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
           ]),
         }
       );
     }
 
     if (prod.stock === 0) {
-      return safeEdit(
-        ctx,
-        `╔══[ UNAVAILABLE ]══╗\n` +
-        `║  ⚠  Out of Stock   ║\n` +
-        `╚═══════════════════╝\n\n` +
-        `▸ <b>${escHtml(prod.name)}</b> has sold out.\n` +
-        `→ Check back soon`,
+      return safeEdit(ctx,
+        `${header("❌ OUT OF STOCK")}\n\n` +
+        `<b>${escHtml(prod.name)}</b> just sold out.\n` +
+        `<i>Check back soon — stock is updated frequently.</i>`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("← Back to Products", "shop_back_products")],
-          ]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
         }
       );
     }
@@ -559,54 +675,75 @@ export function startShopBot(token: string) {
 
     if (!result.success) {
       if (result.reason === "insufficient_funds") {
-        return safeEdit(
-          ctx,
-          `╔══[ ACCESS DENIED ]══════╗\n` +
-          `║  ⚠  Insufficient Funds   ║\n` +
-          `╚═════════════════════════╝\n\n` +
-          `▸ Need <b>$${(result.shortfall ?? 0).toFixed(2)}</b> more.\n` +
+        return safeEdit(ctx,
+          `${header("💳 INSUFFICIENT FUNDS")}\n\n` +
+          `Need <b>$${(result.shortfall ?? 0).toFixed(2)}</b> more to complete this purchase.\n\n` +
           `→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
-          { parse_mode: "HTML" }
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          }
         );
       }
       if (result.reason === "out_of_stock") {
-        return safeEdit(
-          ctx,
-          `╔══[ UNAVAILABLE ]══╗\n` +
-          `║  ⚠  Out of Stock   ║\n` +
-          `╚═══════════════════╝\n\n` +
-          `▸ <b>${escHtml(prod.name)}</b> just sold out.\n` +
-          `→ Check back soon`,
-          { parse_mode: "HTML" }
+        return safeEdit(ctx,
+          `${header("❌ OUT OF STOCK")}\n\n` +
+          `<b>${escHtml(prod.name)}</b> just sold out.\n` +
+          `<i>Check back soon.</i>`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          }
         );
       }
-      return safeEdit(
-        ctx,
-        `╔══[ ERROR ]══╗\n` +
-        `║  ✖  Failed   ║\n` +
-        `╚═════════════╝\n\n` +
-        `▸ Something went wrong.\n` +
-        `→ Contact ${escHtml(SUPPORT_CONTACT)} for help`,
-        { parse_mode: "HTML" }
+      return safeEdit(ctx,
+        `${header("⚠️ PURCHASE FAILED")}\n\n` +
+        `Something went wrong. Your balance was not charged.\n\n` +
+        `→ Contact ${escHtml(SUPPORT_CONTACT)} if this keeps happening.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        }
       );
     }
 
-    // Success — send confirmation with credentials
-    await safeEdit(
-      ctx,
-      `╔══[ TRANSACTION CONFIRMED ]══╗\n` +
-      `║  ✅  Purchase Successful!    ║\n` +
-      `╚═════════════════════════════╝\n\n` +
-      `▸ <b>${escHtml(prod.name)}</b>\n\n` +
-      `<code>LOGIN  →  ${escHtml(result.accountEmail)}\n` +
-      `PASS   →  ${escHtml(result.accountPassword)}</code>\n\n` +
-      `<code>◈ New balance  →  ${fmt$(result.newBalance)}</code>\n\n` +
-      `⚠ <i>Credentials saved — access anytime via My Orders</i>`,
+    // ── Success ──────────────────────────────────────────────────────────────
+    const emoji = platformEmoji(prod.account_type);
+    await safeEdit(ctx,
+      `${header("✅ PURCHASE SUCCESSFUL")}\n\n` +
+      `${emoji} <b>${escHtml(prod.name)}</b>\n\n` +
+      `<code>` +
+      `  Email      ›  ${escHtml(result.accountEmail)}\n` +
+      `  Password   ›  ${escHtml(result.accountPassword)}` +
+      `</code>\n\n` +
+      `${divider()}\n` +
+      `<code>  New Balance  ›  ${fmt$(result.newBalance)}</code>\n\n` +
+      `<i>Credentials saved — view anytime via My Orders.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("← Back to Products", "shop_back_products")],
+          [Markup.button.callback("📦  My Orders", "shop_view_orders")],
+          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
         ]),
+      }
+    );
+  });
+
+  // ── Deposit info (inline) ─────────────────────────────────────────────────
+  bot.action("shop_deposit_info", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    await safeEdit(ctx,
+      `${header("➕ DEPOSIT")}\n\n` +
+      `To add funds to your wallet, message the support contact and include your User ID.\n\n` +
+      `<code>` +
+      `  Support  ›  ${SUPPORT_CONTACT}\n` +
+      `  Your ID  ›  ${uid}` +
+      `</code>\n\n` +
+      `<i>Deposits are processed manually and confirmed within minutes.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
       }
     );
   });
@@ -616,144 +753,170 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
-    await safeReply(
-      ctx,
-      `╔══[ WALLET STATUS ]══╗\n` +
-      `║  💰  Account Balance  ║\n` +
-      `╚═════════════════════╝\n\n` +
-      `<code>◈ Balance  →  ${fmt$(balance)}</code>\n\n` +
-      `→ To top up: ${escHtml(SUPPORT_CONTACT)}`,
+    await safeReply(ctx,
+      `${header("💰 MY WALLET")}\n\n` +
+      `<code>` +
+      `  Balance   ›  ${fmt$(balance)}\n` +
+      `  User ID   ›  ${uid}` +
+      `</code>\n\n` +
+      `<i>To top up, contact: ${escHtml(SUPPORT_CONTACT)}</i>`,
       { parse_mode: "HTML" }
     );
   });
 
-  // ── Add Funds ─────────────────────────────────────────────────────────────
+  // ── Deposit ───────────────────────────────────────────────────────────────
   bot.hears(BTN.DEPOSIT, async (ctx) => {
-    await safeReply(
-      ctx,
-      `╔══[ DEPOSIT PORTAL ]══╗\n` +
-      `║  ➕  Fund Your Account ║\n` +
-      `╚══════════════════════╝\n\n` +
-      `<code>◆ Contact  →  ${SUPPORT_CONTACT}\n` +
-      `◆ Your ID  →  ${ctx.from.id}</code>\n\n` +
-      `→ Send your User ID when requesting top-up`,
+    const uid = ctx.from.id;
+    await safeReply(ctx,
+      `${header("➕ DEPOSIT FUNDS")}\n\n` +
+      `Message our support contact with your User ID to add funds to your wallet.\n\n` +
+      `<code>` +
+      `  Contact  ›  ${SUPPORT_CONTACT}\n` +
+      `  Your ID  ›  ${uid}` +
+      `</code>\n\n` +
+      `<i>Deposits are confirmed within minutes.</i>`,
       { parse_mode: "HTML" }
     );
   });
 
   // ── Support ───────────────────────────────────────────────────────────────
   bot.hears(BTN.SUPPORT, async (ctx) => {
-    await safeReply(
-      ctx,
-      `╔══[ SUPPORT ]══════╗\n` +
-      `║  💬  Help Desk      ║\n` +
-      `╚═══════════════════╝\n\n` +
-      `<code>◆ Agent   →  ${SUPPORT_CONTACT}\n` +
-      `◆ Status  →  Online</code>\n\n` +
-      `→ Describe your issue clearly`,
+    await safeReply(ctx,
+      `${header("💬 SUPPORT")}\n\n` +
+      `Our team is available to help with:\n` +
+      `  • Account issues or questions\n` +
+      `  • Deposits and balance top-ups\n` +
+      `  • Order problems or disputes\n\n` +
+      `<code>  Agent   ›  ${SUPPORT_CONTACT}</code>\n\n` +
+      `<i>Please include your User ID: <b>${ctx.from.id}</b></i>`,
       { parse_mode: "HTML" }
     );
   });
 
-  // ── My Account ID ─────────────────────────────────────────────────────────
+  // ── My ID ─────────────────────────────────────────────────────────────────
   bot.hears(BTN.IDENTITY, async (ctx) => {
-    const uid = ctx.from.id;
-    const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
-    await safeReply(
-      ctx,
-      `╔══[ IDENTITY ]══════╗\n` +
-      `║  🪪  Account Info    ║\n` +
-      `╚════════════════════╝\n\n` +
-      `<code>◈ Username  →  ${username}\n` +
-      `◈ User ID   →  ${uid}</code>`,
+    const uid   = ctx.from.id;
+    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    await safeReply(ctx,
+      `${header("🪪 MY IDENTITY")}\n\n` +
+      `<code>` +
+      `  Username  ›  ${uname}\n` +
+      `  User ID   ›  ${uid}` +
+      `</code>\n\n` +
+      `<i>Share your User ID when contacting support.</i>`,
       { parse_mode: "HTML" }
     );
   });
 
-  // ── My Orders ─────────────────────────────────────────────────────────────
+  // ── My Orders (keyboard button) ────────────────────────────────────────────
   bot.hears(BTN.ORDERS, async (ctx) => {
     const uid = ctx.from.id;
+    await showOrders(ctx, uid, false);
+  });
+
+  // ── My Orders (inline button) ──────────────────────────────────────────────
+  bot.action("shop_view_orders", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    await showOrders(ctx, uid, true);
+  });
+
+  async function showOrders(ctx: any, uid: number, isEdit: boolean) {
     const res = await dbQuery(
-      `SELECT id, product_name, amount, created_at FROM shop_orders
-       WHERE telegram_id = $1 ORDER BY created_at DESC LIMIT 5`,
+      `SELECT id, product_name, amount, account_type, created_at
+       FROM shop_orders
+       WHERE telegram_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
       [uid]
     );
 
     if (res.rows.length === 0) {
-      return safeReply(ctx,
-        `╔══[ ORDER HISTORY ]══╗\n` +
-        `║  📦  No Orders Found  ║\n` +
-        `╚═════════════════════╝\n\n` +
-        `▸ No purchases yet.\n` +
-        `→ Browse <b>Accounts</b> to get started`,
-        { parse_mode: "HTML" }
-      );
+      const text =
+        `${header("📦 ORDER HISTORY")}\n\n` +
+        `<i>No purchases yet.</i>\n\n` +
+        `Browse the marketplace to get started:`;
+      const kb = Markup.inlineKeyboard([[Markup.button.callback("🛍  Browse Marketplace", "shop_back_products")]]);
+      if (isEdit) return safeEdit(ctx, text, { parse_mode: "HTML", ...kb });
+      return safeReply(ctx, text, { parse_mode: "HTML", ...kb });
     }
 
-    const orderLines: string[] = [
-      `╔══[ ORDER HISTORY ]══════╗\n` +
-      `║  📦  Your Purchases       ║\n` +
-      `╚═════════════════════════╝\n`
+    const lines: string[] = [
+      `${header("📦 ORDER HISTORY", `Last ${res.rows.length} purchases`)}\n`
     ];
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = res.rows.map((o: any, i: number) => {
-      const date = new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      orderLines.push(`<code>${i + 1}.</code> <b>${escHtml(o.product_name)}</b>  —  ${fmt$(o.amount)}  —  ${date}`);
-      return [Markup.button.callback(`[ ${i + 1} ] Reveal Credentials`, `shop_creds_${o.id}`)];
-    });
-    orderLines.push(`\n▸ Tap below to reveal credentials:`);
 
-    await safeReply(ctx, orderLines.join("\n"), {
-      parse_mode: "HTML",
-      ...Markup.inlineKeyboard(buttons),
+    const buttons = res.rows.map((o: any, i: number) => {
+      const emoji = platformEmoji(o.account_type ?? "");
+      const date  = new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      lines.push(`${emoji} <b>${escHtml(o.product_name)}</b>  —  ${fmt$(o.amount)}  —  <i>${date}</i>`);
+      return [Markup.button.callback(`🔑  Reveal #${i + 1}: ${o.product_name}`, `shop_creds_${o.id}`)];
     });
-  });
 
-  // ── Show credentials for an order ─────────────────────────────────────────
+    lines.push(`\n${divider()}\n<i>Tap an order below to reveal login credentials.</i>`);
+
+    const text = lines.join("\n");
+    const kb   = Markup.inlineKeyboard(buttons);
+
+    if (isEdit) return safeEdit(ctx, text, { parse_mode: "HTML", ...kb });
+    return safeReply(ctx, text, { parse_mode: "HTML", ...kb });
+  }
+
+  // ── Reveal credentials ────────────────────────────────────────────────────
   bot.action(/^shop_creds_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const orderId = (ctx.match as RegExpExecArray)[1];
-    const uid = ctx.from.id;
+    const uid     = ctx.from.id;
 
     const res = await dbQuery(
-      `SELECT product_name, account_email, account_password, amount, created_at
+      `SELECT product_name, account_type, account_email, account_password, amount, created_at
        FROM shop_orders WHERE id = $1 AND telegram_id = $2`,
       [orderId, uid]
     );
 
     if (!res.rows[0]) {
-      return safeEdit(ctx, "Order not found.");
+      return safeEdit(ctx,
+        `${header("⚠️ NOT FOUND")}\n\nOrder not found or does not belong to your account.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  My Orders", "shop_view_orders")]]),
+        }
+      );
     }
 
-    const o = res.rows[0];
-    const date = new Date(o.created_at).toLocaleString("en-US", {
+    const o     = res.rows[0];
+    const emoji = platformEmoji(o.account_type ?? "");
+    const date  = new Date(o.created_at).toLocaleString("en-US", {
       month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
     });
 
-    await safeEdit(
-      ctx,
-      `╔══[ CREDENTIALS ]═══════╗\n` +
-      `║  🔑  Access Details      ║\n` +
-      `╚════════════════════════╝\n\n` +
-      `▸ <b>${escHtml(o.product_name)}</b>\n\n` +
-      `<code>◆ Purchased  →  ${date}\n` +
-      `◆ Amount     →  ${fmt$(o.amount)}\n\n` +
-      `LOGIN  →  ${escHtml(o.account_email)}\n` +
-      `PASS   →  ${escHtml(o.account_password)}</code>`,
-      { parse_mode: "HTML" }
+    await safeEdit(ctx,
+      `${header("🔑 CREDENTIALS")}\n\n` +
+      `${emoji} <b>${escHtml(o.product_name)}</b>\n\n` +
+      `<code>` +
+      `  Purchased  ›  ${date}\n` +
+      `  Amount     ›  ${fmt$(o.amount)}\n\n` +
+      `  Email      ›  ${escHtml(o.account_email)}\n` +
+      `  Password   ›  ${escHtml(o.account_password)}` +
+      `</code>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("◀  My Orders", "shop_view_orders")]]),
+      }
     );
   });
 
-  // ── Shortcut commands ─────────────────────────────────────────────────────
+  // ── Commands ──────────────────────────────────────────────────────────────
   bot.command("balance", async (ctx) => {
     const uid = ctx.from.id;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
     await safeReply(ctx,
-      `╔══[ WALLET STATUS ]══╗\n` +
-      `║  💰  Account Balance  ║\n` +
-      `╚═════════════════════╝\n\n` +
-      `<code>◈ Balance  →  ${fmt$(balance)}</code>\n\n` +
-      `→ To top up: ${escHtml(SUPPORT_CONTACT)}`,
+      `${header("💰 MY WALLET")}\n\n` +
+      `<code>` +
+      `  Balance   ›  ${fmt$(balance)}\n` +
+      `  User ID   ›  ${uid}` +
+      `</code>\n\n` +
+      `<i>To top up: ${escHtml(SUPPORT_CONTACT)}</i>`,
       { parse_mode: "HTML" }
     );
   });
@@ -763,32 +926,30 @@ export function startShopBot(token: string) {
   });
 
   bot.command("id", async (ctx) => {
-    const uid = ctx.from.id;
-    const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    const uid   = ctx.from.id;
+    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await safeReply(ctx,
-      `╔══[ IDENTITY ]══════╗\n` +
-      `║  🪪  Account Info    ║\n` +
-      `╚════════════════════╝\n\n` +
-      `<code>◈ Username  →  ${username}\n` +
-      `◈ User ID   →  ${uid}</code>`,
+      `${header("🪪 MY IDENTITY")}\n\n` +
+      `<code>` +
+      `  Username  ›  ${uname}\n` +
+      `  User ID   ›  ${uid}` +
+      `</code>`,
       { parse_mode: "HTML" }
     );
   });
 
-  // ── Register commands + Menu button in Telegram ────────────────────────────
+  // ── Register commands ─────────────────────────────────────────────────────
   async function registerCommands() {
     try {
       await bot.telegram.setMyCommands([
-        { command: "start",   description: "Open the store" },
-        { command: "shop",    description: "Browse accounts" },
-        { command: "balance", description: "Check my balance" },
-        { command: "id",      description: "My Telegram ID" },
+        { command: "start",   description: "Open the marketplace" },
+        { command: "shop",    description: "Browse AI tools" },
+        { command: "balance", description: "Check my wallet balance" },
+        { command: "id",      description: "My Telegram user ID" },
         { command: "menu",    description: "Show keyboard" },
       ]);
-      console.log("[ShopBot] Commands registered");
-      // Set default menu button for all new chats globally
       await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
-      console.log("[ShopBot] Global menu button set (type: commands)");
+      console.log("[ShopBot] Commands registered");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
     }
@@ -798,7 +959,7 @@ export function startShopBot(token: string) {
   async function launch(attempt = 1) {
     try {
       await bot.launch({ dropPendingUpdates: true });
-      console.log("[ShopBot] Polling started (Project Addison v2 — open to all users)");
+      console.log("[ShopBot] Online — Project Addison v2 Marketplace");
       await registerCommands();
     } catch (err: any) {
       const delay = Math.min(attempt * 5000, 60_000);
@@ -808,7 +969,6 @@ export function startShopBot(token: string) {
   }
   launch();
 
-  // ── Graceful shutdown ─────────────────────────────────────────────────────
   process.once("SIGINT",  () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 }
