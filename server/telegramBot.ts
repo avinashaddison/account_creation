@@ -2540,29 +2540,53 @@ export function startTelegramBot(config: BotConfig) {
   // ── Shop admin helpers ────────────────────────────────────────────────────
   const SHOP_ACCOUNT_TYPES = ["replit", "lovable", "v0", "adobe", "chatgpt", "eleven", "outlook", "gmail"];
 
-  async function showShopAdminMenu(ctx: any) {
-    const [prodRes, custRes, orderRes] = await Promise.all([
+  async function showShopAdminMenu(ctx: any, edit = false) {
+    const [prodRes, custRes, orderRes, pendingRes, revenueRes] = await Promise.all([
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_products WHERE active = true`),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_orders`),
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_activation_orders WHERE status = 'pending'`),
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as total FROM shop_orders`),
     ]);
-    const activeProd = parseInt(prodRes.rows[0]?.cnt ?? "0");
-    const totalCust  = parseInt(custRes.rows[0]?.cnt ?? "0");
-    const totalOrds  = parseInt(orderRes.rows[0]?.cnt ?? "0");
-    await ctx.reply(
-      `\n🔷 <b>🛒 SHOP ADMIN</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<code>◈ Active products  →  ${activeProd}\n` +
-      `◈ Customers        →  ${totalCust}\n` +
-      `◈ Total orders     →  ${totalOrds}</code>\n\n` +
-      `› Select a module:`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("📦 Products", "shop_admin_products"), Markup.button.callback("➕ Add Product", "shop_admin_add_product")],
-          [Markup.button.callback("👥 Customers", "shop_admin_customers"), Markup.button.callback("💰 Top Up", "shop_admin_topup")],
-        ]),
-      }
-    );
+    const activeProd    = parseInt(prodRes.rows[0]?.cnt ?? "0");
+    const totalCust     = parseInt(custRes.rows[0]?.cnt ?? "0");
+    const totalOrds     = parseInt(orderRes.rows[0]?.cnt ?? "0");
+    const pendingAct    = parseInt(pendingRes.rows[0]?.cnt ?? "0");
+    const revenue       = parseFloat(revenueRes.rows[0]?.total ?? "0");
+    const pendingBadge  = pendingAct > 0 ? ` 🔴 ${pendingAct}` : " ✅ 0";
+
+    const text =
+      `\n🛒 <b>SHOP MANAGEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<b>📊  DASHBOARD</b>\n\n` +
+      `<code>` +
+      `📦  Active Products      ${String(activeProd).padStart(5)}\n` +
+      `👥  Total Customers      ${String(totalCust).padStart(5)}\n` +
+      `🧾  Completed Orders     ${String(totalOrds).padStart(5)}\n` +
+      `⏳  Pending Activations  ${String(pendingAct).padStart(5)}\n` +
+      `💵  Total Revenue      $${revenue.toFixed(2).padStart(7)}` +
+      `</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `› Choose a module:`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback("📦  MANAGE PRODUCTS",   "shop_admin_products"),
+        Markup.button.callback("➕  ADD PRODUCT",        "shop_admin_add_product"),
+      ],
+      [
+        Markup.button.callback("👥  CUSTOMER DATABASE",  "shop_admin_customers"),
+        Markup.button.callback("💰  FUND ACCOUNT",       "shop_admin_topup"),
+      ],
+      [
+        Markup.button.callback(`📋  ACTIVATION ORDERS${pendingBadge}`, "shop_admin_act_orders"),
+      ],
+    ]);
+
+    if (edit) {
+      await safeEdit(ctx, text, { parse_mode: "HTML", ...keyboard });
+    } else {
+      await ctx.reply(text, { parse_mode: "HTML", ...keyboard });
+    }
   }
 
   bot.hears(KB.SHOP, (ctx) => handleMenu(ctx, async () => {
@@ -2733,30 +2757,35 @@ export function startTelegramBot(config: BotConfig) {
 
   bot.action("shop_admin_menu", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    await showShopAdminMenu(ctx);
+    await showShopAdminMenu(ctx, true);
   });
 
   function buildProductsListMsg(rows: any[]): string {
     if (rows.length === 0) {
-      return `\n🔷 <b>📦 PRODUCTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-             `<code>◈ No products yet</code>\n\n› Use "Add Product" to create one.`;
+      return (
+        `\n📦 <b>MANAGE PRODUCTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<i>No products created yet.</i>\n\n` +
+        `Tap <b>➕ ADD PRODUCT</b> to add your first listing.`
+      );
     }
-    let t = `\n🔷 <b>📦 PRODUCTS (${rows.length})</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `\n`;
+    let t = `\n📦 <b>MANAGE PRODUCTS</b>  <code>${rows.length} total</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     for (const p of rows) {
-      const st = p.active ? "🟢" : "🔴";
-      t += `${st}  <b>${p.name}</b>  <code>$${parseFloat(p.price).toFixed(2)}</code>\n`;
-      t += `<code>   type: ${p.account_type}  ·  filter: ${p.status_filter}</code>\n\n`;
+      const badge = p.active ? "🟢 ON" : "🔴 OFF";
+      t += `${badge}  <b>${p.name}</b>  <code>$${parseFloat(p.price).toFixed(2)}</code>\n`;
+      t += `<code>  ${p.account_type}  ·  filter: ${p.status_filter}</code>\n\n`;
     }
     return t.trimEnd();
   }
 
   function buildProductsListButtons(rows: any[]) {
     const buttons: ReturnType<typeof Markup.button.callback>[][] = rows.map((p: any) => [
-      Markup.button.callback(p.active ? `⏸ Off` : `▶ On`, `shop_toggle_${p.id}`),
-      Markup.button.callback(`✏ ${p.name.slice(0, 20)}`, `shop_edit_${p.id}`),
+      Markup.button.callback(p.active ? `⏸  Deactivate` : `▶  Activate`, `shop_toggle_${p.id}`),
+      Markup.button.callback(`✏  ${p.name.slice(0, 18)}`, `shop_edit_${p.id}`),
     ]);
-    buttons.push([Markup.button.callback("➕ Add Product", "shop_admin_add_product"), Markup.button.callback("↩ Back", "shop_admin_menu")]);
+    buttons.push([
+      Markup.button.callback("➕  ADD PRODUCT", "shop_admin_add_product"),
+      Markup.button.callback("↩  Back", "shop_admin_menu"),
+    ]);
     return Markup.inlineKeyboard(buttons);
   }
 
@@ -2840,34 +2869,51 @@ export function startTelegramBot(config: BotConfig) {
 
   // ── Paginated customer list ───────────────────────────────────────────────
   async function showCustomerPage(ctx: any, offset: number) {
-    const PAGE = 25;
-    const countRes = await dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`);
-    const total = parseInt(countRes.rows[0]?.cnt ?? "0");
+    const PAGE = 20;
+    const [countRes, totalBalRes] = await Promise.all([
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`),
+      dbQuery(`SELECT COALESCE(SUM(balance),0) as total FROM shop_customers`),
+    ]);
+    const total     = parseInt(countRes.rows[0]?.cnt ?? "0");
+    const totalBal  = parseFloat(totalBalRes.rows[0]?.total ?? "0");
+
     if (total === 0) {
       return safeEdit(ctx,
-        `\n🔷 <b>👥 CUSTOMERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `<code>◈ No customers yet</code>`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩ Back", "shop_admin_menu")]]) }
+        `\n👥 <b>CUSTOMER DATABASE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<i>No customers have used the shop bot yet.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([
+          [Markup.button.callback("💰  FUND ACCOUNT", "shop_admin_topup"), Markup.button.callback("↩  Back", "shop_admin_menu")],
+        ]) }
       );
     }
     const res = await dbQuery(
       `SELECT telegram_id, username, first_name, balance FROM shop_customers ORDER BY balance DESC LIMIT $1 OFFSET $2`,
       [PAGE, offset]
     );
-    const page = Math.floor(offset / PAGE) + 1;
+    const page       = Math.floor(offset / PAGE) + 1;
     const totalPages = Math.ceil(total / PAGE);
-    let t = `\n🔷 <b>👥 CUSTOMERS (${total}) — ${page}/${totalPages}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `\n`;
+
+    let t =
+      `\n👥 <b>CUSTOMER DATABASE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>Customers: ${total}   Held funds: $${totalBal.toFixed(2)}</code>\n` +
+      `<code>Page ${page} of ${totalPages}</code>\n\n` +
+      `<code>`;
     for (const c of res.rows) {
-      const name = c.username ? `@${c.username}` : (c.first_name ?? `ID:${c.telegram_id}`);
-      t += `<code>◈ ${name.padEnd(20)}  $${parseFloat(c.balance).toFixed(2)}</code>\n`;
+      const name = c.username ? `@${c.username}` : (c.first_name ? c.first_name : `id:${c.telegram_id}`);
+      const bal  = `$${parseFloat(c.balance).toFixed(2)}`;
+      t += `${name.slice(0, 18).padEnd(18)}  ${bal.padStart(7)}\n`;
     }
+    t += `</code>`;
+
     const navButtons: ReturnType<typeof Markup.button.callback>[] = [];
-    if (offset > 0) navButtons.push(Markup.button.callback("← Prev", `shop_customers_page_${offset - PAGE}`));
-    if (offset + PAGE < total) navButtons.push(Markup.button.callback("Next →", `shop_customers_page_${offset + PAGE}`));
+    if (offset > 0)               navButtons.push(Markup.button.callback("◀  Prev", `shop_customers_page_${offset - PAGE}`));
+    if (offset + PAGE < total)    navButtons.push(Markup.button.callback("Next  ▶", `shop_customers_page_${offset + PAGE}`));
     const rows: ReturnType<typeof Markup.button.callback>[][] = [];
     if (navButtons.length) rows.push(navButtons);
-    rows.push([Markup.button.callback("💰 Top Up", "shop_admin_topup"), Markup.button.callback("↩ Back", "shop_admin_menu")]);
+    rows.push([
+      Markup.button.callback("💰  FUND ACCOUNT", "shop_admin_topup"),
+      Markup.button.callback("↩  Back",          "shop_admin_menu"),
+    ]);
     await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) });
   }
 
@@ -2887,10 +2933,43 @@ export function startTelegramBot(config: BotConfig) {
     const uid = ctx.from.id;
     getState(uid).shopAdminFlow = { step: "topup_uid" };
     await ctx.reply(
-      `\n🔷 <b>💰 TOP UP BALANCE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `› Enter the customer's <b>Telegram ID</b>:`,
+      `\n💰 <b>FUND CUSTOMER ACCOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter the customer's <b>Telegram ID</b>:\n` +
+      `<i>  e.g. 123456789</i>`,
       { parse_mode: "HTML" }
     );
+  });
+
+  // ── Activation orders list ────────────────────────────────────────────────
+  bot.action("shop_admin_act_orders", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(
+      `SELECT id, telegram_id, service, delivery_type, email, amount, status, created_at
+       FROM shop_activation_orders ORDER BY created_at DESC LIMIT 20`
+    );
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n📋 <b>ACTIVATION ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<i>No activation orders yet.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
+      );
+    }
+    const serviceLabel: Record<string, string> = { chatgpt_plus: "ChatGPT+", replit_core: "Replit Core" };
+    let t = `\n📋 <b>ACTIVATION ORDERS</b>  <code>last ${res.rows.length}</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    for (const r of res.rows) {
+      const svc   = serviceLabel[r.service] ?? r.service;
+      const type  = r.delivery_type === "activate" ? "🔑" : "📦";
+      const stat  = r.status === "pending" ? "⏳" : r.status === "completed" ? "✅" : "❌";
+      const email = r.email ? r.email.slice(0, 20) : "—";
+      const date  = new Date(r.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+      t += `${stat} ${type} ${svc.padEnd(10)}  $${parseFloat(r.amount).toFixed(2)}  ${date}\n`;
+      if (r.email) t += `   ${email}\n`;
+    }
+    t += `</code>`;
+    await safeEdit(ctx, t, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]),
+    });
   });
 
   // ── Activation order approval from admin ─────────────────────────────────
@@ -3097,17 +3176,25 @@ export function startTelegramBot(config: BotConfig) {
       if (flow.step === "topup_uid") {
         const telegramId = parseInt(text.trim());
         if (isNaN(telegramId)) {
-          return ctx.reply(`🔴  Invalid Telegram ID. Enter a number:`, { parse_mode: "HTML" });
+          return ctx.reply(`🔴  Invalid Telegram ID. Please enter a numeric ID:`, { parse_mode: "HTML" });
         }
-        const custRes = await dbQuery(`SELECT telegram_id, balance FROM shop_customers WHERE telegram_id = $1`, [telegramId]);
+        const custRes = await dbQuery(
+          `SELECT telegram_id, username, first_name, balance FROM shop_customers WHERE telegram_id = $1`,
+          [telegramId]
+        );
         if (!custRes.rows[0]) {
           st.shopAdminFlow = undefined;
-          return ctx.reply(`🔴  Customer <code>${telegramId}</code> not found.`, { parse_mode: "HTML" });
+          return ctx.reply(`🔴  Customer <code>${telegramId}</code> not found in database.`, { parse_mode: "HTML" });
         }
+        const c    = custRes.rows[0];
+        const name = c.username ? `@${c.username}` : (c.first_name ?? `ID:${c.telegram_id}`);
         flow.topupUid = telegramId;
         flow.step = "topup_amount";
         return ctx.reply(
-          `<code>◈ Current balance  →  $${parseFloat(custRes.rows[0].balance).toFixed(2)}</code>\n\n› Enter the <b>amount to add</b>:\n<code>  e.g. 5.00</code>`,
+          `\n💰 <b>FUND CUSTOMER ACCOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `<code>Customer:  ${name}\n` +
+          `Balance:   $${parseFloat(c.balance).toFixed(2)}</code>\n\n` +
+          `› Enter the <b>amount to add</b> in USD:\n<code>  e.g. 5.00</code>`,
           { parse_mode: "HTML" }
         );
       }
@@ -3122,13 +3209,18 @@ export function startTelegramBot(config: BotConfig) {
             `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
             [amount.toFixed(2), flow.topupUid]
           );
-          const after = await dbQuery(`SELECT balance FROM shop_customers WHERE telegram_id = $1`, [flow.topupUid]);
+          const after   = await dbQuery(
+            `SELECT balance, username, first_name FROM shop_customers WHERE telegram_id = $1`,
+            [flow.topupUid]
+          );
+          const afterRow = after.rows[0];
+          const name     = afterRow?.username ? `@${afterRow.username}` : (afterRow?.first_name ?? `ID:${flow.topupUid}`);
           st.shopAdminFlow = undefined;
           return ctx.reply(
-            `🟢  <b>BALANCE TOPPED UP</b>\n\n` +
-            `<code>◈ Customer    →  ${flow.topupUid}\n` +
-            `◈ Added       →  $${amount.toFixed(2)}\n` +
-            `◈ New balance →  $${parseFloat(after.rows[0]?.balance ?? "0").toFixed(2)}</code>`,
+            `\n🟢 <b>ACCOUNT FUNDED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+            `<code>Customer:      ${name}\n` +
+            `Amount added:  +$${amount.toFixed(2)}\n` +
+            `New balance:   $${parseFloat(afterRow?.balance ?? "0").toFixed(2)}</code>`,
             { parse_mode: "HTML" }
           );
         } catch (err: any) {
