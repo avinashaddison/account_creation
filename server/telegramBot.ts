@@ -2570,11 +2570,11 @@ export function startTelegramBot(config: BotConfig) {
 
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback("📦  MANAGE PRODUCTS",   "shop_admin_products"),
+        Markup.button.callback("📦  PRODUCTS",            "shop_admin_products"),
         Markup.button.callback("➕  ADD PRODUCT",        "shop_admin_add_product"),
       ],
       [
-        Markup.button.callback("👥  CUSTOMER DATABASE",  "shop_admin_customers"),
+        Markup.button.callback("👥  CUSTOMER",            "shop_admin_customers"),
         Markup.button.callback("💰  FUND ACCOUNT",       "shop_admin_topup"),
       ],
       [
