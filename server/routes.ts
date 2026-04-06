@@ -5268,23 +5268,29 @@ export async function registerRoutes(
       (async () => {
         broadcastLog(batchId, bulkId, `🚀 Starting ChatGPT BizMail creation — ${num} account(s)`, userId);
 
-        // Load active biz mail accounts
+        // Load active biz mail accounts that have NOT already been used for a ChatGPT account
         const bizMailRows = await db.execute(sql`
           SELECT id, account_num, email, password
           FROM biz_mail_accounts
           WHERE is_active = true AND deleted_at IS NULL
+            AND email NOT IN (SELECT COALESCE(email, '') FROM chatgpt_accounts)
           ORDER BY account_num ASC
         `);
         if (bizMailRows.rows.length === 0) {
-          broadcastLog(batchId, bulkId, `❌ No active biz mail accounts found. Generate them first via 🏢 Biz Mail.`, userId);
+          broadcastLog(batchId, bulkId, `❌ No unused biz mail slots available — all active addresses already have a ChatGPT account. Recycle or add more biz mail accounts first.`, userId);
           broadcastBatchComplete(batchId, userId);
           return;
         }
 
+        const effectiveNum = Math.min(num, bizMailRows.rows.length);
+        if (effectiveNum < num) {
+          broadcastLog(batchId, bulkId, `⚠️ Only ${effectiveNum} unused biz mail slot(s) available — creating ${effectiveNum} account(s) instead of ${num}.`, userId);
+        }
+
         let successCount = 0;
         let failCount = 0;
-        for (let i = 0; i < num; i++) {
-          const bizAcc = bizMailRows.rows[i % bizMailRows.rows.length] as { id: number; account_num: number; email: string; password: string };
+        for (let i = 0; i < effectiveNum; i++) {
+          const bizAcc = bizMailRows.rows[i] as { id: number; account_num: number; email: string; password: string };
           broadcastLog(batchId, bulkId, `\n[${i + 1}/${num}] Using biz email: ${bizAcc.email}`, userId);
 
           try {
