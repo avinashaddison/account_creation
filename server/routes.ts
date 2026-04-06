@@ -13,6 +13,7 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
+import { listDomains, listAccounts, createAccount, deleteAccount, getFullInbox } from "./smtpDevService";
 import { activateOutlookSession, stopOutlookSession, getOutlookMessages, getOutlookSessionInfo } from "./outlookWorkspaceService";
 import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
 import { getFivesimBalance } from "./fivesimService";
@@ -6049,6 +6050,59 @@ export async function registerRoutes(
       res.json({ movies });
     } catch (err: any) {
       res.status(500).json({ message: "Failed to fetch movies", error: err.message });
+    }
+  });
+
+  // ── smtp.dev inbox routes ─────────────────────────────────────────────────
+  app.get("/api/smtpdev/domains", requireAuth, async (_req, res) => {
+    try {
+      const domains = await listDomains();
+      res.json(domains);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/smtpdev/accounts", requireAuth, async (req, res) => {
+    try {
+      const domainId = req.query.domainId as string | undefined;
+      const accounts = await listAccounts(domainId);
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/smtpdev/accounts", requireAuth, async (req, res) => {
+    try {
+      const { address, password } = req.body;
+      if (!address) {
+        return res.status(400).json({ error: "address is required (e.g. john@addison.asia)" });
+      }
+      const pwd = password || (Math.random().toString(36).slice(2, 10) + "Aa1!");
+      const result = await createAccount(address, pwd);
+      res.json({ ...result.account, password: pwd });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/smtpdev/accounts/:id", requireAuth, async (req, res) => {
+    try {
+      await deleteAccount(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/smtpdev/accounts/:id/inbox", requireAuth, async (req, res) => {
+    try {
+      const messages = await getFullInbox(req.params.id);
+      res.json(messages);
+    } catch (err: any) {
+      console.error("[smtp.dev] inbox route error:", err.message);
+      res.json([]);
     }
   });
 

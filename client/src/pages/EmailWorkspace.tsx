@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Plus, Copy, Trash2, Mail, Inbox, RefreshCw,
   CheckCircle2, Clock, Search, Eye, Users, Zap,
-  AtSign, Shield, AlertTriangle, FileText,
+  AtSign, Shield, AlertTriangle, FileText, Server, X,
 } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { subscribe } from "@/lib/ws";
@@ -14,6 +14,8 @@ const R = "#ff1a1a";
 const GA = (a: number) => `rgba(0,255,65,${a})`;
 const RA = (a: number) => `rgba(255,26,26,${a})`;
 const PA = (a: number) => `rgba(168,85,247,${a})`;
+const EA = (a: number) => `rgba(16,185,129,${a})`; // emerald for smtp.dev
+const E = "#10b981";
 const BG0 = "#07050a";
 const BG1 = "#080510";
 const BG2 = "#0a0614";
@@ -27,9 +29,16 @@ type AccountEmailItem = {
   id: string; address: string; firstName: string;
   lastName: string; status: string; createdAt: string; source: "account";
 };
-type EmailItem = TempEmailItem | AccountEmailItem;
+type SmtpDevItem = {
+  id: string; address: string; username: string;
+  domainId: string; domainName: string; password?: string;
+  createdAt: string; source: "smtpdev";
+};
+type EmailItem = TempEmailItem | AccountEmailItem | SmtpDevItem;
 type InboxMessage = { id: string; from: string; subject: string; text: string; createdAt: string; };
-type TabType = "all" | "temp" | "account";
+type TabType = "all" | "temp" | "account" | "smtpdev";
+
+type SmtpDevDomain = { id: string; name: string; isActive: boolean; };
 
 /* ─── Helpers ───────────────────────────────────────────────── */
 function timeAgo(iso: string): string {
@@ -38,9 +47,6 @@ function timeAgo(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return new Date(iso).toLocaleDateString("en", { month: "short", day: "numeric" });
-}
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
 /* ─── Sub-components ────────────────────────────────────────── */
@@ -105,11 +111,134 @@ function extractOtp(text: string): string | null {
   return null;
 }
 
+/* ─── Create smtp.dev account modal ────────────────────────── */
+function CreateSmtpDevModal({
+  domains,
+  onClose,
+  onCreate,
+}: {
+  domains: SmtpDevDomain[];
+  onClose: () => void;
+  onCreate: (address: string) => Promise<void>;
+}) {
+  const [selectedDomain, setSelectedDomain] = useState(domains[0]?.name ?? "");
+  const [username, setUsername] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState("");
+
+  const fullAddress = username.trim() && selectedDomain ? `${username.trim().toLowerCase()}@${selectedDomain}` : "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fullAddress) { setErr("Fill in username and select a domain"); return; }
+    setSubmitting(true); setErr("");
+    try {
+      await onCreate(fullAddress);
+      onClose();
+    } catch (ex: any) {
+      setErr(ex.message || "Failed to create account");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(7,5,10,0.85)", backdropFilter: "blur(4px)",
+    }} onClick={onClose}>
+      <form onSubmit={handleSubmit} onClick={e => e.stopPropagation()} style={{
+        background: "#0d0b18", border: `1px solid ${EA(0.3)}`, borderRadius: 10,
+        padding: "28px 32px", width: 360, display: "flex", flexDirection: "column", gap: 16,
+        boxShadow: `0 0 40px ${EA(0.1)}`,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: E, letterSpacing: "0.15em", fontFamily: "monospace" }}>
+              CREATE smtp.dev ACCOUNT
+            </div>
+            <div style={{ fontSize: 9, color: EA(0.4), letterSpacing: "0.1em", fontFamily: "monospace", marginTop: 2 }}>
+              New inbox on your smtp.dev domain
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: EA(0.4), padding: 4 }}>
+            <X style={{ width: 16, height: 16 }} />
+          </button>
+        </div>
+
+        {domains.length === 0 && (
+          <div style={{ fontSize: 10, color: RA(0.7), fontFamily: "monospace", padding: "8px 10px", background: RA(0.06), borderRadius: 5, border: `1px solid ${RA(0.2)}` }}>
+            No domains found — check your smtp.dev dashboard at smtp.dev
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <label style={{ fontSize: 9, color: EA(0.5), letterSpacing: "0.12em", fontFamily: "monospace" }}>EMAIL ADDRESS</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+            <input
+              type="text" value={username} onChange={e => setUsername(e.target.value.replace(/[@\s]/g, ""))}
+              placeholder="username" data-testid="input-smtpdev-username"
+              style={{
+                flex: 1, background: EA(0.06), border: `1px solid ${EA(0.2)}`,
+                borderRadius: "5px 0 0 5px", padding: "7px 10px",
+                color: "rgba(255,255,255,0.85)", fontSize: 11, fontFamily: "monospace", outline: "none",
+              }}
+            />
+            <span style={{
+              background: EA(0.04), borderTop: `1px solid ${EA(0.2)}`, borderBottom: `1px solid ${EA(0.2)}`,
+              padding: "7px 6px", color: EA(0.5), fontSize: 10, fontFamily: "monospace",
+            }}>@</span>
+            {domains.length === 1 ? (
+              <div style={{
+                background: EA(0.04), border: `1px solid ${EA(0.2)}`, borderLeft: "none",
+                borderRadius: "0 5px 5px 0", padding: "7px 10px",
+                color: EA(0.7), fontSize: 10, fontFamily: "monospace", whiteSpace: "nowrap",
+              }}>
+                {domains[0].name}
+              </div>
+            ) : (
+              <select value={selectedDomain} onChange={e => setSelectedDomain(e.target.value)}
+                data-testid="select-smtpdev-domain"
+                style={{
+                  background: EA(0.06), border: `1px solid ${EA(0.2)}`, borderLeft: "none",
+                  borderRadius: "0 5px 5px 0", padding: "7px 8px",
+                  color: "rgba(255,255,255,0.85)", fontSize: 10, fontFamily: "monospace", outline: "none",
+                }}>
+                {domains.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+              </select>
+            )}
+          </div>
+          {fullAddress && (
+            <div style={{ fontSize: 9, color: EA(0.5), fontFamily: "monospace", letterSpacing: "0.06em" }}>
+              → {fullAddress}
+            </div>
+          )}
+        </div>
+
+        {err && <div style={{ fontSize: 10, color: R, fontFamily: "monospace" }}>{err}</div>}
+
+        <button type="submit" disabled={submitting || !fullAddress} data-testid="button-create-smtpdev-account"
+          style={{
+            padding: "9px 0", borderRadius: 6, border: `1px solid ${EA(0.5)}`,
+            background: submitting ? EA(0.08) : EA(0.15),
+            color: E, fontSize: 11, fontFamily: "monospace", fontWeight: 800, letterSpacing: "0.12em",
+            cursor: submitting ? "wait" : "pointer", opacity: !fullAddress ? 0.5 : 1,
+          }}>
+          {submitting ? "CREATING..." : "CREATE ACCOUNT"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 /* ─── Main component ────────────────────────────────────────── */
 export default function EmailWorkspace() {
   const [tempEmails, setTempEmails] = useState<TempEmailItem[]>([]);
   const [accountEmails, setAccountEmails] = useState<AccountEmailItem[]>([]);
+  const [smtpDevAccounts, setSmtpDevAccounts] = useState<SmtpDevItem[]>([]);
+  const [smtpDevDomains, setSmtpDevDomains] = useState<SmtpDevDomain[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sdLoading, setSdLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<EmailItem | null>(null);
   const [inbox, setInbox] = useState<InboxMessage[]>([]);
@@ -122,12 +251,53 @@ export default function EmailWorkspace() {
   const [scanning, setScanning] = useState(false);
   const [scanCount, setScanCount] = useState(0);
   const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function showToast(msg: string, kind: "ok" | "err" = "ok") {
     setToast({ msg, kind });
     setTimeout(() => setToast(null), 3000);
   }
+
+  const fetchSmtpDevDomains = useCallback(async () => {
+    try {
+      const res = await fetch("/api/smtpdev/domains", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setSmtpDevDomains(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+  }, []);
+
+  const fetchSmtpDevAccounts = useCallback(async () => {
+    setSdLoading(true);
+    try {
+      const res = await fetch("/api/smtpdev/accounts", { credentials: "include" });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) {
+        const data = await res.json();
+        const raw: any[] = Array.isArray(data) ? data : [];
+        const items: SmtpDevItem[] = raw
+          .filter(a => !a.isDeleted)
+          .map((a: any) => {
+            const addr: string = a.address ?? "";
+            const parts = addr.split("@");
+            return {
+              id: String(a.id ?? ""),
+              address: addr,
+              username: parts[0] ?? addr,
+              domainId: "",
+              domainName: parts[1] ?? "",
+              createdAt: a.createdAt ?? new Date().toISOString(),
+              source: "smtpdev" as const,
+            };
+          });
+        setSmtpDevAccounts(items);
+      }
+    } catch {} finally {
+      setSdLoading(false);
+    }
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -152,6 +322,8 @@ export default function EmailWorkspace() {
 
   useEffect(() => {
     fetchAll();
+    fetchSmtpDevAccounts();
+    fetchSmtpDevDomains();
     const unsub = subscribe((msg: any) => {
       if (msg.type === "account_update") {
         setAccountEmails(prev => {
@@ -166,14 +338,16 @@ export default function EmailWorkspace() {
       }
     });
     return () => { unsub(); if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchAll]);
+  }, [fetchAll, fetchSmtpDevAccounts, fetchSmtpDevDomains]);
 
   const allEmails: EmailItem[] = (() => {
-    const t = activeTab === "account" ? [] : tempEmails;
-    const a = activeTab === "temp" ? [] : accountEmails;
-    const combined = [...t, ...a];
-    if (!searchTerm) return combined;
-    return combined.filter(e => e.address.toLowerCase().includes(searchTerm.toLowerCase()));
+    let items: EmailItem[] = [];
+    if (activeTab === "all") items = [...tempEmails, ...accountEmails, ...smtpDevAccounts];
+    else if (activeTab === "temp") items = [...tempEmails];
+    else if (activeTab === "account") items = [...accountEmails];
+    else if (activeTab === "smtpdev") items = [...smtpDevAccounts];
+    if (!searchTerm) return items;
+    return items.filter(e => e.address.toLowerCase().includes(searchTerm.toLowerCase()));
   })();
 
   async function generateNewMail() {
@@ -209,10 +383,62 @@ export default function EmailWorkspace() {
     } catch {} finally { setDeletingId(null); }
   }
 
+  async function deleteSmtpDevAccount(id: string) {
+    setDeletingId(id); sounds.click();
+    try {
+      const res = await fetch(`/api/smtpdev/accounts/${id}`, { method: "DELETE", credentials: "include" });
+      if (res.ok) {
+        setSmtpDevAccounts(prev => prev.filter(e => e.id !== id));
+        if (selectedEmail?.id === id) { setSelectedEmail(null); setInbox([]); if (pollRef.current) clearInterval(pollRef.current); }
+        showToast("Account deleted", "ok");
+      } else {
+        const e = await res.json().catch(() => ({ error: "Failed" }));
+        showToast(e.error || "Delete failed", "err");
+      }
+    } catch (ex: any) {
+      showToast(ex.message, "err");
+    } finally { setDeletingId(null); }
+  }
+
+  async function createSmtpDevAccount(address: string) {
+    const res = await fetch("/api/smtpdev/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({ error: "Failed" }));
+      throw new Error(e.error || "Failed to create account");
+    }
+    const a = await res.json();
+    const parts = (a.address ?? address).split("@");
+    const item: SmtpDevItem = {
+      id: a.id,
+      address: a.address ?? address,
+      username: parts[0] ?? address,
+      domainId: "",
+      domainName: parts[1] ?? "",
+      password: a.password,
+      createdAt: a.createdAt ?? new Date().toISOString(),
+      source: "smtpdev",
+    };
+    setSmtpDevAccounts(prev => [item, ...prev]);
+    setSelectedEmail(item);
+    fetchInbox(item);
+    sounds.success();
+    showToast(`Created: ${item.address}`, "ok");
+  }
+
   async function fetchInbox(email: EmailItem) {
     setSelectedEmail(email); setInboxLoading(true); setInbox([]); setExpandedMsg(null);
     if (pollRef.current) clearInterval(pollRef.current);
-    const inboxUrl = email.source === "temp" ? `/api/temp-emails/${email.id}/inbox` : `/api/emails/${email.id}/inbox`;
+
+    let inboxUrl: string;
+    if (email.source === "temp") inboxUrl = `/api/temp-emails/${email.id}/inbox`;
+    else if (email.source === "smtpdev") inboxUrl = `/api/smtpdev/accounts/${email.id}/inbox`;
+    else inboxUrl = `/api/emails/${email.id}/inbox`;
+
     try {
       const res = await fetch(inboxUrl, { credentials: "include" });
       if (res.status === 401) { handleUnauthorized(); return; }
@@ -240,18 +466,27 @@ export default function EmailWorkspace() {
     setTimeout(() => setCopiedId(null), 2000);
   }
 
-  const tabs: { key: TabType; label: string; count: number }[] = [
-    { key: "all",     label: "All",       count: tempEmails.length + accountEmails.length },
-    { key: "temp",    label: "Generated", count: tempEmails.length },
-    { key: "account", label: "Accounts",  count: accountEmails.length },
+  const tabs: { key: TabType; label: string; count: number; color: string }[] = [
+    { key: "all",      label: "All",       count: tempEmails.length + accountEmails.length + smtpDevAccounts.length, color: G },
+    { key: "temp",     label: "Generated", count: tempEmails.length, color: "#a855f7" },
+    { key: "account",  label: "Accounts",  count: accountEmails.length, color: G },
+    { key: "smtpdev",  label: "smtp.dev",  count: smtpDevAccounts.length, color: E },
   ];
 
   const selIsTmp = selectedEmail?.source === "temp";
+  const selIsSd  = selectedEmail?.source === "smtpdev";
 
   /* ── Render ── */
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: BG0, fontFamily: "'Courier New', Courier, monospace", overflow: "hidden", position: "relative" }}>
       <Toast toast={toast} />
+      {showCreateModal && (
+        <CreateSmtpDevModal
+          domains={smtpDevDomains}
+          onClose={() => setShowCreateModal(false)}
+          onCreate={createSmtpDevAccount}
+        />
+      )}
 
       {/* ══ TOP BAR ═════════════════════════════════════════════ */}
       <div style={{ flexShrink: 0, background: BG1, borderBottom: `1px solid ${GA(0.14)}`, position: "relative", overflow: "hidden" }}>
@@ -265,7 +500,7 @@ export default function EmailWorkspace() {
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 800, color: G, letterSpacing: "0.2em", textShadow: `0 0 10px ${GA(0.6)}` }}>MAIL_INTERCEPT</div>
-              <div style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.15em" }}>EMAIL WORKSPACE v2.0</div>
+              <div style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.15em" }}>EMAIL WORKSPACE v2.1</div>
             </div>
           </div>
 
@@ -276,7 +511,12 @@ export default function EmailWorkspace() {
             <Blink color={scanning ? "#ffaa00" : G} />
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: GA(0.7), letterSpacing: "0.05em" }}>
-                {tempEmails.length + accountEmails.length} MAILBOXES ACTIVE
+                {tempEmails.length + accountEmails.length + smtpDevAccounts.length} MAILBOXES ACTIVE
+                {smtpDevAccounts.length > 0 && (
+                  <span style={{ marginLeft: 8, fontSize: 9, color: EA(0.7), border: `1px solid ${EA(0.3)}`, borderRadius: 4, padding: "1px 5px" }}>
+                    {smtpDevAccounts.length} smtp.dev
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 8, color: GA(0.3), letterSpacing: "0.12em" }}>
                 {scanning ? `SCANNING · POLL #${scanCount}` : selectedEmail ? `MONITORING: ${selectedEmail.address}` : "SELECT MAILBOX TO MONITOR"}
@@ -286,18 +526,26 @@ export default function EmailWorkspace() {
 
           {/* Actions */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            <button onClick={fetchAll} data-testid="button-refresh-workspace"
+            <button onClick={() => { fetchAll(); fetchSmtpDevAccounts(); }} data-testid="button-refresh-workspace"
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 5, background: GA(0.06), border: `1px solid ${GA(0.18)}`, color: GA(0.6), fontSize: 9, fontFamily: "monospace", fontWeight: 700, cursor: "pointer", letterSpacing: "0.12em" }}>
               <RefreshCw style={{ width: 10, height: 10, animation: loading ? "spin 1s linear infinite" : "none" }} /> REFRESH
             </button>
 
-            <button onClick={generateNewMail} disabled={generating} data-testid="button-generate-email"
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 16px", borderRadius: 5, background: GA(0.15), border: `1px solid ${GA(0.45)}`, color: G, fontSize: 10, fontFamily: "monospace", fontWeight: 800, cursor: generating ? "wait" : "pointer", letterSpacing: "0.12em", textShadow: `0 0 8px ${GA(0.7)}`, boxShadow: `0 0 14px ${GA(0.12)}`, opacity: generating ? 0.7 : 1 }}>
-              {generating
-                ? <RefreshCw style={{ width: 12, height: 12, animation: "spin 0.8s linear infinite" }} />
-                : <Zap style={{ width: 12, height: 12 }} />}
-              {generating ? "GENERATING..." : "GENERATE NEW MAIL"}
-            </button>
+            {activeTab === "smtpdev" ? (
+              <button onClick={() => { sounds.click(); setShowCreateModal(true); }} data-testid="button-create-smtpdev"
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 16px", borderRadius: 5, background: EA(0.15), border: `1px solid ${EA(0.45)}`, color: E, fontSize: 10, fontFamily: "monospace", fontWeight: 800, cursor: "pointer", letterSpacing: "0.12em", textShadow: `0 0 8px ${EA(0.7)}`, boxShadow: `0 0 14px ${EA(0.12)}` }}>
+                <Plus style={{ width: 12, height: 12 }} />
+                CREATE INBOX
+              </button>
+            ) : (
+              <button onClick={generateNewMail} disabled={generating} data-testid="button-generate-email"
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 16px", borderRadius: 5, background: GA(0.15), border: `1px solid ${GA(0.45)}`, color: G, fontSize: 10, fontFamily: "monospace", fontWeight: 800, cursor: generating ? "wait" : "pointer", letterSpacing: "0.12em", textShadow: `0 0 8px ${GA(0.7)}`, boxShadow: `0 0 14px ${GA(0.12)}`, opacity: generating ? 0.7 : 1 }}>
+                {generating
+                  ? <RefreshCw style={{ width: 12, height: 12, animation: "spin 0.8s linear infinite" }} />
+                  : <Zap style={{ width: 12, height: 12 }} />}
+                {generating ? "GENERATING..." : "GENERATE NEW MAIL"}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -313,7 +561,7 @@ export default function EmailWorkspace() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.25em", color: GA(0.35) }}>// MAILBOXES</span>
               <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, color: GA(0.4), background: GA(0.08), padding: "1px 7px", borderRadius: 10, border: `1px solid ${GA(0.15)}` }}>
-                {tempEmails.length + accountEmails.length}
+                {tempEmails.length + accountEmails.length + smtpDevAccounts.length}
               </span>
             </div>
 
@@ -322,10 +570,10 @@ export default function EmailWorkspace() {
               {tabs.map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key)} data-testid={`tab-${tab.key}`}
                   style={{
-                    flex: 1, padding: "5px 4px", borderRadius: 4, border: "none", cursor: "pointer", fontFamily: "monospace", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
-                    background: activeTab === tab.key ? GA(0.12) : "transparent",
-                    color: activeTab === tab.key ? G : GA(0.35),
-                    borderBottom: activeTab === tab.key ? `2px solid ${G}` : "2px solid transparent",
+                    flex: 1, padding: "5px 2px", borderRadius: 4, border: "none", cursor: "pointer", fontFamily: "monospace", fontSize: 8, fontWeight: 700, letterSpacing: "0.05em",
+                    background: activeTab === tab.key ? (tab.key === "smtpdev" ? EA(0.12) : GA(0.12)) : "transparent",
+                    color: activeTab === tab.key ? tab.color : GA(0.35),
+                    borderBottom: activeTab === tab.key ? `2px solid ${tab.color}` : "2px solid transparent",
                     transition: "all 0.12s",
                   }}>
                   {tab.label} ({tab.count})
@@ -351,62 +599,87 @@ export default function EmailWorkspace() {
             </div>
           </div>
 
+          {/* smtp.dev banner when on that tab */}
+          {activeTab === "smtpdev" && (
+            <div style={{ flexShrink: 0, padding: "8px 14px", background: EA(0.04), borderBottom: `1px solid ${EA(0.12)}`, display: "flex", alignItems: "center", gap: 8 }}>
+              <Server style={{ width: 11, height: 11, color: E, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 9, color: E, fontWeight: 700, letterSpacing: "0.08em" }}>smtp.dev INBOXES</div>
+                <div style={{ fontSize: 8, color: EA(0.45), letterSpacing: "0.05em" }}>
+                  {sdLoading ? "Loading..." : `${smtpDevAccounts.length} account(s) · ${smtpDevDomains.length} domain(s)`}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Email list */}
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {loading ? (
+            {(loading || (activeTab === "smtpdev" && sdLoading)) ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 8 }}>
                 <RefreshCw style={{ width: 18, height: 18, color: GA(0.25), animation: "spin 1.5s linear infinite" }} />
                 <span style={{ fontSize: 9, color: GA(0.2), letterSpacing: "0.15em" }}>LOADING...</span>
               </div>
             ) : allEmails.length === 0 ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60%", gap: 10 }}>
-                <Mail style={{ width: 28, height: 28, color: GA(0.12) }} />
+                {activeTab === "smtpdev"
+                  ? <Server style={{ width: 28, height: 28, color: EA(0.2) }} />
+                  : <Mail style={{ width: 28, height: 28, color: GA(0.12) }} />}
                 <span style={{ fontSize: 9, color: GA(0.2), letterSpacing: "0.12em" }}>
-                  {tempEmails.length + accountEmails.length === 0 ? "NO MAILBOXES YET" : "NO MATCHES"}
+                  {activeTab === "smtpdev" ? "NO smtp.dev ACCOUNTS" : "NO MAILBOXES YET"}
                 </span>
-                {tempEmails.length + accountEmails.length === 0 && (
-                  <span style={{ fontSize: 8, color: GA(0.15), letterSpacing: "0.08em", textAlign: "center" }}>Click GENERATE NEW MAIL to start</span>
+                {activeTab === "smtpdev" && (
+                  <span style={{ fontSize: 8, color: EA(0.2), letterSpacing: "0.08em", textAlign: "center", padding: "0 16px" }}>
+                    Click CREATE INBOX to add one
+                  </span>
                 )}
               </div>
             ) : (
               allEmails.map(em => {
                 const isAcc = em.source === "account";
+                const isSd  = em.source === "smtpdev";
                 const accEm = isAcc ? (em as AccountEmailItem) : null;
                 const isSel = selectedEmail?.id === em.id && selectedEmail?.source === em.source;
+
+                const accentColor = isSd ? E : isAcc ? G : "#a855f7";
+                const accentAlpha = isSd ? EA : isAcc ? GA : PA;
+                const tagLabel = isSd ? "SMTP" : isAcc ? (accEm?.status?.toUpperCase() || "VERIFIED") : "TEMP";
+
                 return (
                   <div key={`${em.source}-${em.id}`} onClick={() => fetchInbox(em)} data-testid={`email-item-${em.source}-${em.id}`}
                     style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "9px 14px",
-                      background: isSel ? GA(0.1) : "transparent",
-                      borderLeft: isSel ? `2px solid ${G}` : "2px solid transparent",
+                      background: isSel ? (isSd ? EA(0.08) : GA(0.08)) : "transparent",
+                      borderLeft: isSel ? `2px solid ${accentColor}` : "2px solid transparent",
                       borderBottom: `1px solid ${GA(0.06)}`,
                       cursor: "pointer", transition: "all 0.1s",
                     }}>
 
                     {/* Icon */}
                     <div style={{ width: 30, height: 30, borderRadius: 7, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                      background: isAcc ? GA(0.08) : PA(0.1),
-                      border: `1px solid ${isAcc ? GA(0.2) : PA(0.25)}`,
+                      background: accentAlpha(0.1),
+                      border: `1px solid ${accentAlpha(0.25)}`,
                     }}>
-                      {isAcc
-                        ? <Users style={{ width: 13, height: 13, color: G }} />
-                        : <Mail style={{ width: 13, height: 13, color: "#a855f7" }} />}
+                      {isSd
+                        ? <Server style={{ width: 13, height: 13, color: E }} />
+                        : isAcc
+                          ? <Users style={{ width: 13, height: 13, color: G }} />
+                          : <Mail style={{ width: 13, height: 13, color: "#a855f7" }} />}
                     </div>
 
                     {/* Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                        <span style={{ fontSize: 10, fontFamily: "monospace", color: isSel ? G : "rgba(255,255,255,0.7)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>
+                        <span style={{ fontSize: 10, fontFamily: "monospace", color: isSel ? accentColor : "rgba(255,255,255,0.7)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
                           {em.address}
                         </span>
                         <span style={{
                           fontSize: 7, fontFamily: "monospace", fontWeight: 800, padding: "1px 5px", borderRadius: 3,
-                          background: isAcc ? GA(0.1) : PA(0.15),
-                          border: `1px solid ${isAcc ? GA(0.25) : PA(0.3)}`,
-                          color: isAcc ? G : "#a855f7",
+                          background: accentAlpha(0.12),
+                          border: `1px solid ${accentAlpha(0.3)}`,
+                          color: accentColor,
                           letterSpacing: "0.08em", flexShrink: 0,
                         }}>
-                          {isAcc ? (accEm?.status?.toUpperCase() || "VERIFIED") : "TEMP"}
+                          {tagLabel}
                         </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -417,7 +690,7 @@ export default function EmailWorkspace() {
                       </div>
                     </div>
 
-                    {/* Actions (visible on hover) */}
+                    {/* Actions */}
                     <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
                       <button onClick={e => { e.stopPropagation(); copyText(em.address, `${em.source}-${em.id}`); }}
                         data-testid={`button-copy-${em.source}-${em.id}`}
@@ -426,8 +699,8 @@ export default function EmailWorkspace() {
                           ? <CheckCircle2 style={{ width: 10, height: 10, color: G }} />
                           : <Copy style={{ width: 10, height: 10, color: GA(0.45) }} />}
                       </button>
-                      {!isAcc && (
-                        <button onClick={e => { e.stopPropagation(); deleteEmail(em.id); }} disabled={deletingId === em.id}
+                      {(em.source === "temp" || em.source === "smtpdev") && (
+                        <button onClick={e => { e.stopPropagation(); isSd ? deleteSmtpDevAccount(em.id) : deleteEmail(em.id); }} disabled={deletingId === em.id}
                           data-testid={`button-delete-${em.id}`}
                           style={{ width: 22, height: 22, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", background: RA(0.06), border: `1px solid ${RA(0.15)}`, cursor: "pointer" }}>
                           {deletingId === em.id
@@ -449,8 +722,8 @@ export default function EmailWorkspace() {
           {/* Inbox header */}
           <div style={{ flexShrink: 0, height: 48, padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${GA(0.1)}`, background: BG2 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-              <Inbox style={{ width: 13, height: 13, color: GA(0.45), flexShrink: 0 }} />
-              <span style={{ fontSize: 11, fontFamily: "monospace", color: selectedEmail ? GA(0.8) : GA(0.25), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "0.03em" }}>
+              <Inbox style={{ width: 13, height: 13, color: selIsSd ? EA(0.6) : GA(0.45), flexShrink: 0 }} />
+              <span style={{ fontSize: 11, fontFamily: "monospace", color: selectedEmail ? (selIsSd ? EA(0.9) : GA(0.8)) : GA(0.25), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "0.03em" }}>
                 {selectedEmail ? selectedEmail.address : "SELECT A MAILBOX"}
               </span>
               {selectedEmail && (
@@ -472,11 +745,14 @@ export default function EmailWorkspace() {
                     <span style={{ fontSize: 8, color: "#ffaa00", letterSpacing: "0.12em" }}>SCANNING...</span>
                   </div>
                 )}
-                <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, padding: "2px 10px", borderRadius: 10, background: GA(0.1), border: `1px solid ${GA(0.25)}`, color: GA(0.8), letterSpacing: "0.08em" }}>
+                <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, padding: "2px 10px", borderRadius: 10,
+                  background: selIsSd ? EA(0.1) : GA(0.1),
+                  border: `1px solid ${selIsSd ? EA(0.25) : GA(0.25)}`,
+                  color: selIsSd ? E : GA(0.8), letterSpacing: "0.08em" }}>
                   {inbox.length} MSG{inbox.length !== 1 ? "S" : ""}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: G, boxShadow: `0 0 6px ${G}`, animation: "pulse 2s ease-in-out infinite" }} />
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: selIsSd ? E : G, boxShadow: `0 0 6px ${selIsSd ? E : G}`, animation: "pulse 2s ease-in-out infinite" }} />
                   <span style={{ fontSize: 8, color: GA(0.35), letterSpacing: "0.1em" }}>LIVE SCAN EVERY 5S</span>
                 </div>
               </div>
@@ -488,13 +764,18 @@ export default function EmailWorkspace() {
             <div style={{ flexShrink: 0, padding: "6px 20px", borderBottom: `1px solid ${GA(0.07)}`, background: "#060110", display: "flex", alignItems: "center", gap: 14 }}>
               <span style={{
                 fontSize: 7, fontFamily: "monospace", fontWeight: 800, padding: "2px 7px", borderRadius: 3, letterSpacing: "0.1em",
-                background: selIsTmp ? PA(0.15) : GA(0.1),
-                border: `1px solid ${selIsTmp ? PA(0.3) : GA(0.25)}`,
-                color: selIsTmp ? "#a855f7" : G,
+                background: selIsSd ? EA(0.12) : selIsTmp ? PA(0.15) : GA(0.1),
+                border: `1px solid ${selIsSd ? EA(0.3) : selIsTmp ? PA(0.3) : GA(0.25)}`,
+                color: selIsSd ? E : selIsTmp ? "#a855f7" : G,
               }}>
-                {selIsTmp ? "TEMP" : "ACCOUNT"}
+                {selIsSd ? "smtp.dev" : selIsTmp ? "TEMP" : "ACCOUNT"}
               </span>
-              {!selIsTmp && selectedEmail.source === "account" && (
+              {selIsSd && selectedEmail.source === "smtpdev" && (
+                <span style={{ fontSize: 9, color: EA(0.45), letterSpacing: "0.05em" }}>
+                  {(selectedEmail as SmtpDevItem).username}@{(selectedEmail as SmtpDevItem).domainName}
+                </span>
+              )}
+              {!selIsSd && !selIsTmp && selectedEmail.source === "account" && (
                 <span style={{ fontSize: 9, color: GA(0.4), letterSpacing: "0.05em" }}>
                   {(selectedEmail as AccountEmailItem).firstName} {(selectedEmail as AccountEmailItem).lastName}
                 </span>
@@ -517,92 +798,71 @@ export default function EmailWorkspace() {
               </div>
             ) : inboxLoading ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "50%", gap: 10 }}>
-                <RefreshCw style={{ width: 22, height: 22, color: GA(0.3), animation: "spin 1s linear infinite" }} />
+                <RefreshCw style={{ width: 22, height: 22, color: selIsSd ? EA(0.4) : GA(0.3), animation: "spin 1s linear infinite" }} />
                 <span style={{ fontSize: 9, color: GA(0.25), letterSpacing: "0.15em" }}>LOADING INBOX...</span>
               </div>
             ) : inbox.length === 0 ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "50%", gap: 12 }}>
-                <Mail style={{ width: 26, height: 26, color: GA(0.1) }} />
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: GA(0.15), letterSpacing: "0.2em", marginBottom: 4 }}>NO MESSAGES</div>
-                  <div style={{ fontSize: 8, color: GA(0.1), letterSpacing: "0.1em" }}>Inbox auto-scans every 5 seconds</div>
-                </div>
+                <Mail style={{ width: 26, height: 26, color: selIsSd ? EA(0.15) : GA(0.1) }} />
+                <span style={{ fontSize: 9, color: GA(0.2), letterSpacing: "0.12em" }}>INBOX EMPTY</span>
+                <span style={{ fontSize: 8, color: GA(0.12), letterSpacing: "0.08em" }}>Polling every 5 seconds...</span>
               </div>
             ) : (
-              <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ padding: "10px 0" }}>
                 {inbox.map(msg => {
+                  const otp = extractOtp(msg.text ?? "");
                   const isExp = expandedMsg === msg.id;
-                  const plainText = msg.text?.replace(/<[^>]*>/g, "") || "";
-                  const otp = extractOtp(`${msg.subject} ${plainText}`);
                   return (
-                    <div key={msg.id} onClick={() => { setExpandedMsg(isExp ? null : msg.id); sounds.click(); }}
-                      data-testid={`inbox-msg-${msg.id}`}
+                    <div key={msg.id} data-testid={`msg-${msg.id}`}
+                      onClick={() => { setExpandedMsg(isExp ? null : msg.id); sounds.click(); }}
                       style={{
-                        borderRadius: 6, border: `1px solid ${isExp ? GA(0.25) : GA(0.1)}`,
-                        background: isExp ? GA(0.06) : "rgba(0,0,0,0.25)",
-                        cursor: "pointer", transition: "all 0.15s",
-                        boxShadow: isExp ? `0 0 20px ${GA(0.06)}` : "none",
+                        margin: "0 16px 8px", padding: "12px 14px", borderRadius: 7, cursor: "pointer",
+                        background: isExp ? (selIsSd ? EA(0.07) : GA(0.07)) : GA(0.03),
+                        border: `1px solid ${isExp ? (selIsSd ? EA(0.25) : GA(0.25)) : GA(0.08)}`,
+                        transition: "all 0.15s",
                       }}>
 
                       {/* Message header */}
-                      <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: isExp ? 10 : 0 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          {/* Subject + OTP inline */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 5, flexWrap: "wrap" }}>
-                            <span style={{ fontSize: 11, fontFamily: "monospace", fontWeight: 700, color: isExp ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.75)", letterSpacing: "0.02em" }}>
-                              {msg.subject || "(no subject)"}
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 10, fontFamily: "monospace", fontWeight: 700, color: selIsSd ? E : G, letterSpacing: "0.03em" }}>
+                              {msg.subject}
                             </span>
                             {otp && <OtpChip code={otp} />}
                           </div>
-                          <span style={{ fontSize: 9, color: GA(0.35), letterSpacing: "0.04em" }}>From: {msg.from}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontSize: 9, color: GA(0.45), fontFamily: "monospace" }}>
+                              FROM: <span style={{ color: GA(0.7) }}>{msg.from}</span>
+                            </span>
+                            <span style={{ fontSize: 8, color: GA(0.25), fontFamily: "monospace" }}>
+                              {new Date(msg.createdAt).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                          <span style={{ fontSize: 9, color: GA(0.3), letterSpacing: "0.04em" }}>{fmtTime(msg.createdAt)}</span>
-                          <Eye style={{ width: 11, height: 11, color: isExp ? G : GA(0.25), transition: "color 0.15s" }} />
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <button onClick={e => { e.stopPropagation(); copyText(msg.text ?? "", `msg-${msg.id}`); }}
+                            data-testid={`button-copy-msg-${msg.id}`}
+                            style={{ width: 22, height: 22, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", background: GA(0.06), border: `1px solid ${GA(0.15)}`, cursor: "pointer" }}>
+                            {copiedId === `msg-${msg.id}`
+                              ? <CheckCircle2 style={{ width: 10, height: 10, color: G }} />
+                              : <Copy style={{ width: 10, height: 10, color: GA(0.4) }} />}
+                          </button>
+                          <div style={{ display: "flex", alignItems: "center" }}>
+                            <Eye style={{ width: 10, height: 10, color: isExp ? (selIsSd ? E : G) : GA(0.25) }} />
+                          </div>
                         </div>
                       </div>
 
-                      {/* Preview snippet */}
-                      {!isExp && (
-                        <div style={{ padding: "0 14px 10px" }}>
-                          <span style={{ fontSize: 9, color: GA(0.2), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
-                            {plainText.substring(0, 120) || "(empty)"}
-                          </span>
-                        </div>
-                      )}
-
                       {/* Expanded body */}
                       {isExp && (
-                        <div style={{ padding: "0 14px 14px" }}>
-                          {otp && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", borderRadius: 6, marginBottom: 12, background: GA(0.07), border: `1px solid ${GA(0.3)}`, boxShadow: `0 0 20px ${GA(0.07)}` }}>
-                              <div style={{ width: 32, height: 32, borderRadius: 7, background: GA(0.14), border: `1px solid ${GA(0.4)}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <Shield style={{ width: 15, height: 15, color: G, filter: `drop-shadow(0 0 5px ${G})` }} />
-                              </div>
-                              <div>
-                                <div style={{ fontSize: 7, fontWeight: 800, color: GA(0.45), letterSpacing: "0.2em", marginBottom: 4 }}>VERIFICATION CODE</div>
-                                <div style={{ fontSize: 26, fontWeight: 900, letterSpacing: "0.3em", color: G, textShadow: `0 0 20px ${GA(0.9)}, 0 0 40px ${GA(0.4)}`, fontFamily: "monospace" }}>
-                                  {otp}
-                                </div>
-                              </div>
-                              <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(otp!); showToast("OTP copied!", "ok"); sounds.click(); }}
-                                style={{ marginLeft: "auto", padding: "6px 14px", borderRadius: 5, background: GA(0.16), border: `1px solid ${GA(0.45)}`, color: G, fontSize: 10, fontFamily: "monospace", fontWeight: 800, cursor: "pointer", letterSpacing: "0.1em" }}>
-                                COPY
-                              </button>
-                            </div>
-                          )}
-                          <div style={{ borderRadius: 5, padding: "12px 14px", background: "rgba(0,0,0,0.35)", border: `1px solid ${GA(0.08)}` }}>
-                            <pre style={{ margin: 0, fontSize: 10, fontFamily: "monospace", color: "rgba(255,255,255,0.55)", whiteSpace: "pre-wrap", lineHeight: 1.7, wordBreak: "break-word" }}>
-                              {plainText || "(empty body)"}
-                            </pre>
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                            <button onClick={e => { e.stopPropagation(); copyText(plainText, "body-" + msg.id); }}
-                              style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 4, background: GA(0.07), border: `1px solid ${GA(0.15)}`, color: GA(0.5), fontSize: 9, fontFamily: "monospace", fontWeight: 700, cursor: "pointer", letterSpacing: "0.1em" }}>
-                              {copiedId === "body-" + msg.id ? <CheckCircle2 style={{ width: 10, height: 10, color: G }} /> : <Copy style={{ width: 10, height: 10 }} />}
-                              COPY BODY
-                            </button>
-                          </div>
+                        <div style={{
+                          marginTop: 4, padding: "10px 12px", borderRadius: 5, background: GA(0.03),
+                          border: `1px solid ${GA(0.08)}`, maxHeight: 280, overflowY: "auto",
+                        }}>
+                          <pre style={{ margin: 0, fontFamily: "monospace", fontSize: 10, color: GA(0.65), whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.6 }}>
+                            {msg.text || "(empty)"}
+                          </pre>
                         </div>
                       )}
                     </div>
@@ -613,19 +873,6 @@ export default function EmailWorkspace() {
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes spin    { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        @keyframes scanbeam{ 0%{top:0%} 100%{top:100%} }
-        @keyframes fadeIn  { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
-        @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        ::-webkit-scrollbar { width:4px; height:4px; }
-        ::-webkit-scrollbar-track { background:transparent; }
-        ::-webkit-scrollbar-thumb { background:${GA(0.2)}; border-radius:2px; }
-        ::-webkit-scrollbar-thumb:hover { background:${GA(0.35)}; }
-        [data-testid^="email-item-"]:hover { background: ${GA(0.05)} !important; }
-        [data-testid^="inbox-msg-"]:hover  { border-color: ${GA(0.2)} !important; }
-      `}</style>
     </div>
   );
 }
