@@ -5322,7 +5322,7 @@ export async function registerRoutes(
           }
         }
 
-        broadcastLog(batchId, bulkId, `\n📊 Done: ${successCount} created, ${failCount} failed`, userId);
+        broadcastLog(batchId, bulkId, `🏁 Done — ${successCount} created, ${failCount} failed`, userId);
         broadcastBatchComplete(batchId, userId);
       })();
     } catch (err: any) { res.status(500).json({ error: err.message }); }
