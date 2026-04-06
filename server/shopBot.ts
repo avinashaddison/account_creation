@@ -91,15 +91,18 @@ function stockLine(stock: number): string {
 
 // ── Main reply keyboard ──────────────────────────────────────────────────────
 const BTN = {
-  ACCOUNTS:  "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
-  BALANCE:   "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
-  ORDERS:    "📦  𝗢𝗥𝗗𝗘𝗥𝗦",
-  DEPOSIT:   "➕  𝗔𝗗𝗗  𝗙𝗨𝗡𝗗𝗦",
-  IDENTITY:  "🪪  𝗠𝗬  𝗣𝗥𝗢𝗙𝗜𝗟𝗘",
-  SUPPORT:   "💬  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
+  CHATGPT_PLUS: "🤖  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2",
+  REPLIT_CORE:  "🔵  𝗥𝗲𝗽𝗹𝗶𝘁  𝗖𝗼𝗿𝗲  ·  $2",
+  ACCOUNTS:     "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
+  BALANCE:      "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
+  ORDERS:       "📦  𝗢𝗥𝗗𝗘𝗥𝗦",
+  DEPOSIT:      "➕  𝗔𝗗𝗗  𝗙𝗨𝗡𝗗𝗦",
+  IDENTITY:     "🪪  𝗠𝗬  𝗣𝗥𝗢𝗙𝗜𝗟𝗘",
+  SUPPORT:      "💬  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
 } as const;
 
 const SHOP_KEYBOARD = Markup.keyboard([
+  [BTN.CHATGPT_PLUS, BTN.REPLIT_CORE],
   [BTN.ACCOUNTS],
   [BTN.BALANCE,   BTN.ORDERS],
   [BTN.DEPOSIT,   BTN.SUPPORT],
@@ -114,6 +117,102 @@ const userState = new Map<number, ShopUserState>();
 function getState(uid: number): ShopUserState {
   if (!userState.has(uid)) userState.set(uid, {});
   return userState.get(uid)!;
+}
+
+type ActivationService = "chatgpt_plus" | "replit_core";
+interface ActivationFlow {
+  service:  ActivationService;
+  step:     "waiting_email" | "waiting_password" | "confirm";
+  email?:   string;
+  password?: string;
+  promptMsgId?: number; // message to delete when done collecting
+}
+const activationFlows = new Map<number, ActivationFlow>();
+
+const ACTIVATION_PRICE = 2.00;
+const ACTIVATION_LABEL: Record<ActivationService, string> = {
+  chatgpt_plus: "ChatGPT Plus",
+  replit_core:  "Replit Core",
+};
+const ACTIVATION_EMOJI: Record<ActivationService, string> = {
+  chatgpt_plus: "🤖",
+  replit_core:  "🔵",
+};
+
+// ── Countdown helpers ─────────────────────────────────────────────────────────
+function progressBar(pct: number, width = 18): string {
+  const filled = Math.min(width, Math.round((pct / 100) * width));
+  return "▓".repeat(filled) + "░".repeat(width - filled);
+}
+function timeStr(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+function buildCountdownMsg(
+  service: ActivationService,
+  email: string,
+  secsLeft: number,
+  newBalance: number,
+  done: boolean
+): string {
+  const emoji = ACTIVATION_EMOJI[service];
+  const name  = ACTIVATION_LABEL[service];
+  const TOTAL = 300;
+  const elapsed = TOTAL - secsLeft;
+  const pct   = Math.min(100, Math.round((elapsed / TOTAL) * 100));
+  const bar   = progressBar(pct);
+  if (done) {
+    return (
+      `${emoji} <b>${name} — Activated!</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <code>${escHtml(email)}</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  <b>100%</b>\n\n` +
+      `✅ <b>Activation Complete!</b>\n` +
+      `<i>${name} has been applied to your account.</i>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `💰 Balance: <b>${fmt$(newBalance)}</b>\n` +
+      `💬 Issues? ${escHtml(SUPPORT_CONTACT)}`
+    );
+  }
+  return (
+    `${emoji} <b>${name} — Activating…</b>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📧 <code>${escHtml(email)}</code>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `${bar}  <b>${pct}%</b>\n` +
+    `⏳ <b>${timeStr(secsLeft)}</b> remaining\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `💰 Balance: <b>${fmt$(newBalance)}</b>\n` +
+    `🔄 <i>Upgrading your account…</i>\n` +
+    `💬 ${escHtml(SUPPORT_CONTACT)}`
+  );
+}
+
+async function startCountdown(
+  botRef: any,
+  chatId: number,
+  msgId: number,
+  service: ActivationService,
+  email: string,
+  newBalance: number
+) {
+  const TOTAL    = 300;
+  const TICK_MS  = 30_000;
+  let secsLeft   = TOTAL;
+
+  const timer = setInterval(async () => {
+    secsLeft -= 30;
+    const done = secsLeft <= 0;
+    const text = buildCountdownMsg(service, email, Math.max(0, secsLeft), newBalance, done);
+    try {
+      await botRef.telegram.editMessageText(chatId, msgId, undefined, truncate(text), {
+        parse_mode: "HTML",
+      });
+    } catch {}
+    if (done) clearInterval(timer);
+  }, TICK_MS);
 }
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
@@ -344,6 +443,17 @@ async function ensureShopTables() {
       account_email TEXT,
       account_password TEXT,
       amount NUMERIC(10,2) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS shop_activation_orders (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      telegram_id BIGINT NOT NULL,
+      service TEXT NOT NULL,
+      delivery_type TEXT NOT NULL DEFAULT 'activate',
+      email TEXT,
+      password TEXT,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 2.00,
+      status TEXT NOT NULL DEFAULT 'pending',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
@@ -945,6 +1055,348 @@ export function startShopBot(token: string) {
   });
   bot.action("dep_copy_upi", async (ctx) => {
     await ctx.answerCbQuery("🇮🇳 UPI → avinashaddison-8@okaxis", { show_alert: true });
+  });
+
+  // ── Activation Service — keyboard button handlers ─────────────────────────
+  async function showActivationMenu(ctx: any, service: ActivationService) {
+    const emoji = ACTIVATION_EMOJI[service];
+    const name  = ACTIVATION_LABEL[service];
+    await safeReply(ctx,
+      `${emoji} <b>${name} — $${ACTIVATION_PRICE.toFixed(2)}</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Choose how you'd like to receive your upgrade:\n\n` +
+      `🔑  <b>Activate at my Mail</b>\n` +
+      `<i>You provide your account — we upgrade it to ${name}.\n` +
+      `Your credentials stay on your device.</i>\n\n` +
+      `📦  <b>Send Account by your side</b>\n` +
+      `<i>We send you a ready-made ${name} account instantly.</i>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💵 Both options: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`🔑  Activate at my Mail`, `act_mine_${service}`)],
+          [Markup.button.callback(`📦  Send Account by your side`, `act_send_${service}`)],
+          [Markup.button.callback(`◀  Back to Menu`, `act_back`)],
+        ]),
+      }
+    );
+  }
+
+  bot.hears(BTN.CHATGPT_PLUS, async (ctx) => {
+    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+    await showActivationMenu(ctx, "chatgpt_plus");
+  });
+
+  bot.hears(BTN.REPLIT_CORE, async (ctx) => {
+    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+    await showActivationMenu(ctx, "replit_core");
+  });
+
+  bot.action("act_back", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    await safeEdit(ctx, `<i>Use the menu below to navigate.</i>`, { parse_mode: "HTML" });
+  });
+
+  // ── "Activate at my Mail" → collect email ─────────────────────────────────
+  bot.action(/^act_mine_(chatgpt_plus|replit_core)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid     = ctx.from.id;
+    const service = (ctx.match as RegExpExecArray)[1] as ActivationService;
+    const emoji   = ACTIVATION_EMOJI[service];
+    const name    = ACTIVATION_LABEL[service];
+
+    activationFlows.set(uid, { service, step: "waiting_email" });
+
+    const msg = await safeEdit(ctx,
+      `${emoji} <b>${name} — Activate at my Mail</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <b>Step 1 of 2 — Email</b>\n\n` +
+      `Please type and send your <b>${name} account email</b>:\n\n` +
+      `<i>Example: yourname@gmail.com</i>`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", `act_cancel`)]]) }
+    );
+  });
+
+  // ── "Send Account by your side" → balance check → payment ────────────────
+  bot.action(/^act_send_(chatgpt_plus|replit_core)$/, async (ctx) => {
+    await ctx.answerCbQuery("Processing…").catch(() => {});
+    const uid     = ctx.from.id;
+    const service = (ctx.match as RegExpExecArray)[1] as ActivationService;
+    const emoji   = ACTIVATION_EMOJI[service];
+    const name    = ACTIVATION_LABEL[service];
+
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+
+    const memberStatus = await isChannelMember(bot, uid);
+    if (memberStatus === "not_member") {
+      return safeEdit(ctx,
+        `🔒 <b>Channel Access Required</b>\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `Join our channel to purchase services.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📢  Join @projectaddison", CHANNEL_URL)],
+            [Markup.button.callback("✅  I've Joined — Verify", `actsend_verify_${service}`)],
+          ]),
+        }
+      );
+    }
+
+    const balance = await getBalance(uid);
+    if (balance < ACTIVATION_PRICE) {
+      const shortfall = (ACTIVATION_PRICE - balance).toFixed(2);
+      return safeEdit(ctx,
+        `💳 <b>Insufficient Funds</b>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `${emoji} <b>${name} Account</b>\n` +
+        `💵 Required: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>  ·  Balance: <b>${fmt$(balance)}</b>\n` +
+        `⚠️ Need <b>$${shortfall}</b> more`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+            [Markup.button.callback("◀  Back", `act_back`)],
+          ]),
+        }
+      );
+    }
+
+    return safeEdit(ctx,
+      `${emoji} <b>${name} — Send Account</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📦 We will deliver a ready-made <b>${name}</b> account to you.\n\n` +
+      `💵 Cost: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>\n` +
+      `💰 Your balance: <b>${fmt$(balance)}</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `<i>Tap Confirm to pay and place your order.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅  Confirm — Pay $${ACTIVATION_PRICE.toFixed(2)}`, `actsend_pay_${service}`)],
+          [Markup.button.callback("❌  Cancel", `act_back`)],
+        ]),
+      }
+    );
+  });
+
+  // ── Send Account — payment ────────────────────────────────────────────────
+  bot.action(/^actsend_pay_(chatgpt_plus|replit_core)$/, async (ctx) => {
+    await ctx.answerCbQuery("Charging…").catch(() => {});
+    const uid     = ctx.from.id;
+    const service = (ctx.match as RegExpExecArray)[1] as ActivationService;
+    const emoji   = ACTIVATION_EMOJI[service];
+    const name    = ACTIVATION_LABEL[service];
+
+    const client = await pool.connect();
+    let newBalance = 0;
+    try {
+      await client.query("BEGIN");
+      const r = await client.query(`SELECT balance FROM shop_customers WHERE telegram_id = $1 FOR UPDATE`, [uid]);
+      const bal = parseFloat(r.rows[0]?.balance ?? "0");
+      if (bal < ACTIVATION_PRICE) {
+        await client.query("ROLLBACK");
+        return safeEdit(ctx, `💳 <b>Insufficient Funds</b>`, { parse_mode: "HTML" });
+      }
+      await client.query(`UPDATE shop_customers SET balance = balance - $1 WHERE telegram_id = $2`, [ACTIVATION_PRICE, uid]);
+      newBalance = bal - ACTIVATION_PRICE;
+      await client.query(
+        `INSERT INTO shop_activation_orders (telegram_id, service, delivery_type, amount) VALUES ($1, $2, 'send_account', $3)`,
+        [uid, service, ACTIVATION_PRICE]
+      );
+      await client.query("COMMIT");
+    } catch (err: any) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[ShopBot] actsend_pay error:", err.message);
+      return safeEdit(ctx, `⚠️ <b>Payment Failed</b>\n\nYour balance was not charged.`, { parse_mode: "HTML" });
+    } finally {
+      client.release();
+    }
+
+    await safeEdit(ctx,
+      `${emoji} <b>${name} Account — Order Placed!</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `✅ <b>Payment confirmed</b> · $${ACTIVATION_PRICE.toFixed(2)} charged\n\n` +
+      `📦 Your <b>${name}</b> account will be delivered shortly.\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `💰 New balance: <b>${fmt$(newBalance)}</b>\n` +
+      `💬 For status: ${escHtml(SUPPORT_CONTACT)}\n` +
+      `🪪 Your ID: <code>${uid}</code>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("📦  My Orders", "shop_view_orders")]]),
+      }
+    );
+  });
+
+  // ── Send Account — verify after channel join ──────────────────────────────
+  bot.action(/^actsend_verify_(chatgpt_plus|replit_core)$/, async (ctx) => {
+    await ctx.answerCbQuery("Checking…").catch(() => {});
+    const uid     = ctx.from.id;
+    const service = (ctx.match as RegExpExecArray)[1] as ActivationService;
+    const ms      = await isChannelMember(bot, uid);
+    if (ms === "not_member") {
+      return ctx.answerCbQuery("🔒 Still not a member — please join first", { show_alert: true });
+    }
+    // Redirect to payment confirmation
+    const balance = await getBalance(uid);
+    const emoji   = ACTIVATION_EMOJI[service];
+    const name    = ACTIVATION_LABEL[service];
+    return safeEdit(ctx,
+      `${emoji} <b>${name} — Send Account</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `✅ Membership verified!\n\n` +
+      `💵 Cost: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>  ·  Balance: <b>${fmt$(balance)}</b>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅  Confirm — Pay $${ACTIVATION_PRICE.toFixed(2)}`, `actsend_pay_${service}`)],
+          [Markup.button.callback("❌  Cancel", "act_back")],
+        ]),
+      }
+    );
+  });
+
+  // ── Cancel activation ─────────────────────────────────────────────────────
+  bot.action("act_cancel", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    activationFlows.delete(uid);
+    await safeEdit(ctx, `❌ <b>Cancelled.</b>\n\n<i>Use the menu below to navigate.</i>`, { parse_mode: "HTML" });
+  });
+
+  // ── Confirm activation payment ────────────────────────────────────────────
+  bot.action(/^act_pay_(chatgpt_plus|replit_core)$/, async (ctx) => {
+    await ctx.answerCbQuery("Charging…").catch(() => {});
+    const uid     = ctx.from.id;
+    const service = (ctx.match as RegExpExecArray)[1] as ActivationService;
+    const flow    = activationFlows.get(uid);
+    if (!flow || !flow.email || !flow.password) {
+      return safeEdit(ctx, `⚠️ Session expired. Please start again.`, { parse_mode: "HTML" });
+    }
+    const { email, password } = flow;
+
+    const client = await pool.connect();
+    let newBalance = 0;
+    try {
+      await client.query("BEGIN");
+      const r = await client.query(`SELECT balance FROM shop_customers WHERE telegram_id = $1 FOR UPDATE`, [uid]);
+      const bal = parseFloat(r.rows[0]?.balance ?? "0");
+      if (bal < ACTIVATION_PRICE) {
+        await client.query("ROLLBACK");
+        activationFlows.delete(uid);
+        return safeEdit(ctx,
+          `💳 <b>Insufficient Funds</b>\n\nBalance: <b>${fmt$(bal)}</b>  ·  Required: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("➕  Deposit Info", "shop_deposit_info")]]),
+          }
+        );
+      }
+      await client.query(`UPDATE shop_customers SET balance = balance - $1 WHERE telegram_id = $2`, [ACTIVATION_PRICE, uid]);
+      newBalance = bal - ACTIVATION_PRICE;
+      await client.query(
+        `INSERT INTO shop_activation_orders (telegram_id, service, delivery_type, email, password, amount) VALUES ($1, $2, 'activate', $3, $4, $5)`,
+        [uid, service, email, password, ACTIVATION_PRICE]
+      );
+      await client.query("COMMIT");
+    } catch (err: any) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[ShopBot] act_pay error:", err.message);
+      activationFlows.delete(uid);
+      return safeEdit(ctx, `⚠️ <b>Payment Failed</b>\n\nYour balance was not charged.`, { parse_mode: "HTML" });
+    } finally {
+      client.release();
+    }
+
+    activationFlows.delete(uid);
+
+    // Grab identifiers BEFORE editing (message_id stays the same after edit)
+    const chatId = ctx.chat?.id ?? ctx.callbackQuery?.message?.chat?.id;
+    const msgId  = ctx.callbackQuery?.message?.message_id;
+
+    // Show initial countdown message
+    const initMsg = buildCountdownMsg(service, email, 300, newBalance, false);
+    await safeEdit(ctx, initMsg, { parse_mode: "HTML" });
+
+    // Start background countdown using the same message
+    if (chatId && msgId) {
+      startCountdown(bot, chatId, msgId, service, email, newBalance).catch(() => {});
+    }
+  });
+
+  // ── Text message handler — collect email / password for activation ─────────
+  bot.on("text", async (ctx: any, next: any) => {
+    const uid  = ctx.from?.id;
+    if (!uid) return next();
+    const flow = activationFlows.get(uid);
+    if (!flow) return next(); // not in activation flow — let hears handlers run
+
+    const text = ctx.message.text?.trim() ?? "";
+
+    // Delete user's message (contains sensitive data)
+    await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
+
+    if (flow.step === "waiting_email") {
+      if (!text.includes("@")) {
+        const msg = await safeReply(ctx,
+          `⚠️ That doesn't look like a valid email. Please send your email address again:`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "act_cancel")]]),
+          }
+        );
+        return;
+      }
+      flow.email = text;
+      flow.step  = "waiting_password";
+      activationFlows.set(uid, flow);
+
+      const emoji = ACTIVATION_EMOJI[flow.service];
+      const name  = ACTIVATION_LABEL[flow.service];
+      await safeReply(ctx,
+        `${emoji} <b>${name} — Activate at my Mail</b>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `✅ Email received.\n\n` +
+        `🔑 <b>Step 2 of 2 — Password</b>\n\n` +
+        `Please send your <b>${name} account password</b>:\n\n` +
+        `<i>It will be deleted immediately after reading.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "act_cancel")]]),
+        }
+      );
+      return;
+    }
+
+    if (flow.step === "waiting_password") {
+      flow.password = text;
+      flow.step     = "confirm";
+      activationFlows.set(uid, flow);
+
+      const emoji   = ACTIVATION_EMOJI[flow.service];
+      const name    = ACTIVATION_LABEL[flow.service];
+      const balance = await getBalance(uid);
+
+      await safeReply(ctx,
+        `${emoji} <b>${name} — Confirm Activation</b>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `📧 Email:    <code>${escHtml(flow.email!)}</code>\n` +
+        `🔑 Password: <code>${escHtml(flow.password)}</code>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `💵 Cost:    <b>$${ACTIVATION_PRICE.toFixed(2)}</b>\n` +
+        `💰 Balance: <b>${fmt$(balance)}</b>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `<i>Tap Pay to start activation. Your credentials are only used to apply the upgrade.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback(`✅  Pay $${ACTIVATION_PRICE.toFixed(2)} — Activate Now`, `act_pay_${flow.service}`)],
+            [Markup.button.callback("❌  Cancel", "act_cancel")],
+          ]),
+        }
+      );
+    }
   });
 
   // ── My Balance ────────────────────────────────────────────────────────────
