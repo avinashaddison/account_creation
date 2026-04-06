@@ -2836,6 +2836,26 @@ export async function registerRoutes(
     res.json(account);
   });
 
+  app.post("/api/private/outlook/bulk", requireAuth, async (req, res) => {
+    if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
+    const { accounts } = req.body;
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      return res.status(400).json({ error: "accounts array is required" });
+    }
+    const results = { added: 0, skipped: 0, errors: [] as string[] };
+    for (const { email, password } of accounts) {
+      if (!email || !password) { results.skipped++; continue; }
+      try {
+        await storage.createPrivateOutlook({ email: email.trim(), password: password.trim(), status: "active", createdBy: req.session.userId });
+        results.added++;
+      } catch (err: any) {
+        results.skipped++;
+        results.errors.push(email);
+      }
+    }
+    res.json(results);
+  });
+
   app.delete("/api/private/outlook/:id", requireAuth, async (req, res) => {
     if (req.session.role !== "superadmin") return res.status(403).json({ error: "Access denied" });
     await storage.deletePrivateOutlook(req.params.id);

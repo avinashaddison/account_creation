@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar, Code2, Link, ExternalLink } from "lucide-react";
+import { Copy, Trash2, Mail, Key, Plus, RefreshCw, Check, Eye, EyeOff, Shield, Database, Loader2, X, Zap, Download, Inbox, User, Calendar, Code2, Link, ExternalLink, Upload } from "lucide-react";
 import { handleUnauthorized } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { sounds } from "@/lib/sounds";
@@ -99,6 +99,8 @@ export default function PrivateAccount() {
   const [purgeLogs, setPurgeLogs] = useState<string[]>([]);
   const [purgeRunning, setPurgeRunning] = useState(false);
   const [selectedReplitIds, setSelectedReplitIds] = useState<Set<string>>(new Set());
+  const [csvImporting, setCsvImporting] = useState(false);
+  const csvImportRef = useRef<HTMLInputElement | null>(null);
   const warmLogsEndRef = useRef<HTMLDivElement | null>(null);
   const purgeLogsEndRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -381,6 +383,43 @@ export default function PrivateAccount() {
         fetchOutlook();
       }
     } catch {} finally { setSaving(false); }
+  }
+
+  async function importOutlookFromCSV(file: File) {
+    setCsvImporting(true);
+    try {
+      const text = await file.text();
+      const lines = text.split("\n").filter((l) => l.trim());
+      const accounts: { email: string; password: string }[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",");
+        const rawEmail = (cols[1] || "").trim().replace(/^'+/, "");
+        const password = (cols[3] || "").trim();
+        if (rawEmail && password) accounts.push({ email: rawEmail, password });
+      }
+      if (accounts.length === 0) {
+        toast({ title: "No accounts found", description: "Could not extract email/password from CSV", variant: "destructive" });
+        return;
+      }
+      const res = await fetch("/api/private/outlook/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accounts }),
+        credentials: "include",
+      });
+      const result = await res.json();
+      if (res.ok) {
+        toast({ title: `Imported ${result.added} accounts`, description: result.skipped > 0 ? `${result.skipped} skipped (duplicates or errors)` : "All accounts imported successfully" });
+        fetchOutlook();
+      } else {
+        toast({ title: "Import failed", description: result.error || "Unknown error", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Import error", description: err.message, variant: "destructive" });
+    } finally {
+      setCsvImporting(false);
+      if (csvImportRef.current) csvImportRef.current.value = "";
+    }
   }
 
   async function addZenrowsKey() {
@@ -711,19 +750,43 @@ export default function PrivateAccount() {
                 {outlookAccounts.length} total
               </span>
             </div>
-            <button
-              onClick={() => { setAddOutlookOpen(!addOutlookOpen); sounds.navigate(); }}
-              data-testid="button-add-outlook"
-              className="flex items-center gap-1.5 text-[11px] font-mono font-semibold px-3 py-1.5 rounded-lg transition-all duration-200"
-              style={{
-                color: "#34d399",
-                background: "rgba(52,211,153,0.08)",
-                border: "1px solid rgba(52,211,153,0.2)",
-              }}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Manual
-            </button>
+            <div className="flex items-center gap-2">
+              <input
+                ref={csvImportRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                data-testid="input-outlook-csv"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) importOutlookFromCSV(f); }}
+              />
+              <button
+                onClick={() => csvImportRef.current?.click()}
+                disabled={csvImporting}
+                data-testid="button-import-outlook-csv"
+                className="flex items-center gap-1.5 text-[11px] font-mono font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 disabled:opacity-40"
+                style={{
+                  color: "#a78bfa",
+                  background: "rgba(167,139,250,0.08)",
+                  border: "1px solid rgba(167,139,250,0.2)",
+                }}
+              >
+                {csvImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                {csvImporting ? "Importing..." : "Import CSV"}
+              </button>
+              <button
+                onClick={() => { setAddOutlookOpen(!addOutlookOpen); sounds.navigate(); }}
+                data-testid="button-add-outlook"
+                className="flex items-center gap-1.5 text-[11px] font-mono font-semibold px-3 py-1.5 rounded-lg transition-all duration-200"
+                style={{
+                  color: "#34d399",
+                  background: "rgba(52,211,153,0.08)",
+                  border: "1px solid rgba(52,211,153,0.2)",
+                }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Manual
+              </button>
+            </div>
           </div>
 
           {addOutlookOpen && (
