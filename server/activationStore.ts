@@ -1,4 +1,11 @@
 import { Telegram } from "telegraf";
+import { Pool } from "pg";
+
+const _pool = new Pool({
+  connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 2,
+});
 
 export type ActivationService = "chatgpt_plus" | "replit_core";
 
@@ -115,13 +122,19 @@ export async function startActivationCountdown(
 
   await sendUpdate(secsLeft, false);
 
+  const TICK = 5; // update every 5 seconds — avoids Telegram rate limits
   const timer = setInterval(async () => {
-    secsLeft -= 1;
+    secsLeft -= TICK;
     const done = secsLeft <= 0;
     await sendUpdate(Math.max(0, secsLeft), done);
     if (done) {
       clearInterval(timer);
       pendingActivations.delete(pending.orderId);
+      // Auto-complete the activation order in DB
+      _pool.query(
+        `UPDATE shop_activation_orders SET status = 'completed' WHERE telegram_id = $1 AND service = $2 AND status != 'completed' ORDER BY created_at DESC LIMIT 1`,
+        [pending.userId, pending.service]
+      ).catch((e: any) => console.error("[activationStore] auto-complete order error:", e.message));
     }
-  }, 1000);
+  }, TICK * 1000);
 }

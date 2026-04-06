@@ -127,15 +127,31 @@ function getState(uid: number): ShopUserState {
 }
 
 interface ActivationFlow {
-  service:  ActivationService;
-  step:     "waiting_email" | "waiting_password" | "confirm";
-  email?:   string;
+  service:   ActivationService;
+  step:      "waiting_email" | "waiting_password" | "confirm";
+  email?:    string;
   password?: string;
   promptMsgId?: number;
 }
 const activationFlows = new Map<number, ActivationFlow>();
 
+// Buy flow (promo code + confirm)
+interface BuyFlow {
+  productId:    string;
+  step:         "promo" | "confirm";
+  promoCode?:   string;
+  discountAmt?: number;
+}
+const buyFlows = new Map<number, BuyFlow>();
+
+// Deposit screenshot flow
+interface DepositFlow {
+  step: "waiting_screenshot";
+}
+const depositFlows = new Map<number, DepositFlow>();
+
 const ACTIVATION_PRICE = 2.00;
+const VIP_THRESHOLD    = 10.00;
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
 async function upsertCustomer(uid: number, username?: string, firstName?: string, referredBy?: number) {
@@ -173,6 +189,96 @@ async function getBalance(uid: number): Promise<number> {
 async function getReferralReward(): Promise<number> {
   const r = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'referral_reward'`);
   return parseFloat(r.rows[0]?.value ?? "0.50");
+}
+
+async function validatePromoCode(code: string, price: number): Promise<{ valid: false; reason: string } | { valid: true; discountAmt: number; codeId: number }> {
+  const r = await dbQuery(
+    `SELECT id, discount_pct, discount_fixed, max_uses, uses_count, active, expires_at
+     FROM shop_promo_codes WHERE UPPER(code) = UPPER($1)`,
+    [code]
+  );
+  const row = r.rows[0];
+  if (!row)           return { valid: false, reason: "Invalid promo code." };
+  if (!row.active)    return { valid: false, reason: "This promo code is no longer active." };
+  if (row.expires_at && new Date(row.expires_at) < new Date()) return { valid: false, reason: "This promo code has expired." };
+  if (row.max_uses > 0 && row.uses_count >= row.max_uses)      return { valid: false, reason: "This promo code has reached its usage limit." };
+  const pctOff   = parseFloat(row.discount_pct ?? "0");
+  const fixedOff = parseFloat(row.discount_fixed ?? "0");
+  let discount   = fixedOff + (price * pctOff / 100);
+  discount = Math.min(discount, price);
+  return { valid: true, discountAmt: parseFloat(discount.toFixed(2)), codeId: row.id };
+}
+
+async function usePromoCode(codeId: number) {
+  await dbQuery(`UPDATE shop_promo_codes SET uses_count = uses_count + 1 WHERE id = $1`, [codeId]);
+}
+
+async function checkAndUpdateVip(uid: number) {
+  const r = await dbQuery(`SELECT total_spend, vip FROM shop_customers WHERE telegram_id = $1`, [uid]);
+  const row = r.rows[0];
+  if (!row || row.vip) return;
+  if (parseFloat(row.total_spend ?? "0") >= VIP_THRESHOLD) {
+    await dbQuery(`UPDATE shop_customers SET vip = TRUE WHERE telegram_id = $1`, [uid]);
+  }
+}
+
+function alertAdminLowStock(productName: string, remaining: number) {
+  const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+  const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!adminToken || adminIds.length === 0) return;
+  const text =
+    `⚠️ <b>LOW STOCK ALERT</b>\n\n` +
+    `📦 Product: <b>${escHtml(productName)}</b>\n` +
+    `📉 Only <b>${remaining}</b> unit${remaining !== 1 ? "s" : ""} remaining!\n\n` +
+    `<i>Restock soon to avoid losing sales.</i>`;
+  for (const id of adminIds) {
+    fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: id, text, parse_mode: "HTML" }),
+    }).catch(() => {});
+  }
+}
+
+async function notifyRestockSubscribers(bot: any, productId: string, productName: string) {
+  const r = await dbQuery(`SELECT telegram_id FROM shop_restock_subs WHERE product_id = $1`, [productId]);
+  if (r.rows.length === 0) return;
+  const emoji = "🔔";
+  for (const row of r.rows) {
+    bot.telegram.sendMessage(
+      row.telegram_id,
+      `${emoji} <b>Back in Stock!</b>\n\n` +
+      `📦 <b>${escHtml(productName)}</b> is now available again.\n\n` +
+      `<i>Tap below to buy before it sells out!</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("⚡  Buy Now", `shop_product_${productId}`)]]),
+      }
+    ).catch(() => {});
+  }
+  // Remove subs after notifying
+  await dbQuery(`DELETE FROM shop_restock_subs WHERE product_id = $1`, [productId]);
+}
+
+function sendRatingRequest(bot: any, uid: number, orderId: string, productName: string) {
+  setTimeout(async () => {
+    bot.telegram.sendMessage(
+      uid,
+      `⭐ <b>Rate Your Purchase</b>\n\n` +
+      `How was <b>${escHtml(productName)}</b>?\n\n` +
+      `<i>Tap a star to rate — takes 1 second!</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[
+          Markup.button.callback("1⭐", `rate_${orderId}_1`),
+          Markup.button.callback("2⭐", `rate_${orderId}_2`),
+          Markup.button.callback("3⭐", `rate_${orderId}_3`),
+          Markup.button.callback("4⭐", `rate_${orderId}_4`),
+          Markup.button.callback("5⭐", `rate_${orderId}_5`),
+        ]]),
+      }
+    ).catch(() => {});
+  }, 3000);
 }
 
 async function processReferralReward(newUid: number, bot: any) {
@@ -305,6 +411,9 @@ interface PurchaseResult {
   accountPassword: string;
   newBalance: number;
   orderId: string;
+  finalPrice: number;
+  stockRemaining: number;
+  productName: string;
 }
 interface PurchaseFailure {
   success: false;
@@ -315,7 +424,8 @@ interface PurchaseFailure {
 
 async function purchaseProduct(
   uid: number,
-  productId: string
+  productId: string,
+  discountAmt = 0
 ): Promise<PurchaseResult | PurchaseFailure> {
   const prod = await getProductById(productId);
   if (!prod) return { success: false, reason: "product_not_found" };
@@ -324,7 +434,8 @@ async function purchaseProduct(
   const table = ACCOUNT_TABLE_MAP[prod.account_type];
   if (!table) return { success: false, reason: "error", message: "Unknown account type" };
 
-  const price = parseFloat(prod.price);
+  const listPrice  = parseFloat(prod.price);
+  const finalPrice = Math.max(0, parseFloat((listPrice - discountAmt).toFixed(2)));
 
   const client: PoolClient = await pool.connect();
   try {
@@ -339,12 +450,12 @@ async function purchaseProduct(
       return { success: false, reason: "error", message: "Customer not found" };
     }
     const balance = parseFloat(custRes.rows[0].balance);
-    if (balance < price) {
+    if (balance < finalPrice) {
       await client.query("ROLLBACK");
       return {
         success: false,
         reason: "insufficient_funds",
-        shortfall: parseFloat((price - balance).toFixed(2)),
+        shortfall: parseFloat((finalPrice - balance).toFixed(2)),
       };
     }
 
@@ -362,8 +473,8 @@ async function purchaseProduct(
     const { id: accountId, email: accountEmail, password: accountPassword } = acctRes.rows[0];
 
     await client.query(
-      `UPDATE shop_customers SET balance = balance - $1 WHERE telegram_id = $2`,
-      [price, uid]
+      `UPDATE shop_customers SET balance = balance - $1, total_spend = total_spend + $1 WHERE telegram_id = $2`,
+      [finalPrice, uid]
     );
 
     await client.query(`UPDATE ${table} SET status = 'sold_out' WHERE id = $1`, [accountId]);
@@ -373,17 +484,25 @@ async function purchaseProduct(
          (telegram_id, product_id, product_name, account_id, account_email, account_password, amount)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
-      [uid, productId, prod.name, accountId, accountEmail, accountPassword, price]
+      [uid, productId, prod.name, accountId, accountEmail, accountPassword, finalPrice]
     );
 
     await client.query("COMMIT");
+
+    // Count remaining stock after purchase
+    const { sql: stockSql, params: stockParams } = stockCountSql(table, prod.status_filter, prod.min_credits ?? null);
+    const stockRes = await dbQuery(stockSql, stockParams).catch(() => ({ rows: [{ cnt: "0" }] }));
+    const stockRemaining = parseInt(stockRes.rows[0]?.cnt ?? "0");
 
     return {
       success: true,
       accountEmail,
       accountPassword,
-      newBalance: balance - price,
+      newBalance: balance - finalPrice,
       orderId: orderRes.rows[0].id,
+      finalPrice,
+      stockRemaining,
+      productName: prod.name,
     };
   } catch (err: any) {
     await client.query("ROLLBACK").catch(() => {});
@@ -723,10 +842,18 @@ export function startShopBot(token: string) {
         : `❌ <b>Out of stock.</b> Check back soon.`
       );
 
+    const subsRes = await dbQuery(
+      `SELECT 1 FROM shop_restock_subs WHERE telegram_id = $1 AND product_id = $2`,
+      [ctx.from.id, productId]
+    );
+    const alreadySubscribed = subsRes.rows.length > 0;
+
     const buttons = [
       ...(inStock
         ? [[Markup.button.callback(`✅  Buy Now  —  ${fmt$(prod.price)}`, `shop_buy_${productId}`)]]
-        : []
+        : alreadySubscribed
+          ? [[Markup.button.callback("🔔  Notify Me (subscribed)", `notify_already_${productId}`)]]
+          : [[Markup.button.callback("🔔  Notify Me When Back in Stock", `notify_me_${productId}`)]]
       ),
       [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
     ];
@@ -769,18 +896,29 @@ export function startShopBot(token: string) {
     });
   });
 
+  // ── Notify Me (restock subscription) ─────────────────────────────────────
+  bot.action(/^notify_me_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    await dbQuery(
+      `INSERT INTO shop_restock_subs (telegram_id, product_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [uid, productId]
+    );
+    return ctx.answerCbQuery("🔔 You'll be notified when this is back in stock!", { show_alert: true });
+  });
+
+  bot.action(/^notify_already_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("🔔 Already subscribed — we'll ping you when it restocks!", { show_alert: true });
+  });
+
   // ── Buy flow ──────────────────────────────────────────────────────────────
   bot.action(/^shop_buy_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery("Processing…").catch(() => {});
     const uid       = ctx.from.id;
     const productId = (ctx.match as RegExpExecArray)[1];
 
-    // Show processing state
-    await safeEdit(ctx,
-      `⚙️ <i>Processing your purchase…\nPlease wait a moment.</i>`,
-      { parse_mode: "HTML" }
-    );
-
+    await safeEdit(ctx, `⚙️ <i>Checking availability…</i>`, { parse_mode: "HTML" });
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
 
     // ── Channel membership gate ───────────────────────────────────────────────
@@ -803,7 +941,6 @@ export function startShopBot(token: string) {
         }
       );
     }
-    // "bot_not_admin" → skip gate, let purchase proceed
 
     const prod = await getProductById(productId);
     if (!prod || !prod.active) {
@@ -851,51 +988,117 @@ export function startShopBot(token: string) {
       );
     }
 
-    const result = await purchaseProduct(uid, productId);
+    // ── Confirmation screen ───────────────────────────────────────────────────
+    const emoji = platformEmoji(prod.account_type);
+    buyFlows.set(uid, { productId, step: "confirm" });
+    return safeEdit(ctx,
+      `${emoji} <b>Confirm Purchase</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)}</b>\n` +
+      `💵 Price: <b>${fmt$(price)}</b>\n` +
+      `💰 Balance after: <b>${fmt$(balance - price)}</b>\n\n` +
+      `${divider()}\n` +
+      `<i>Have a promo code? Apply it for a discount!</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅  Confirm Purchase  —  ${fmt$(price)}`, `buyconfirm_${productId}`)],
+          [Markup.button.callback("🏷️  Apply Promo Code", `buypromo_${productId}`)],
+          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+        ]),
+      }
+    );
+  });
+
+  // ── Promo code entry ──────────────────────────────────────────────────────
+  bot.action(/^buypromo_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    buyFlows.set(uid, { productId, step: "promo" });
+    return safeEdit(ctx,
+      `🏷️ <b>Apply Promo Code</b>\n\n` +
+      `${divider()}\n\n` +
+      `Type and send your <b>promo code</b> below:\n\n` +
+      `<i>Codes are not case-sensitive.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", `buycancel_${productId}`)]]),
+      }
+    );
+  });
+
+  bot.action(/^buycancel_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    buyFlows.delete(uid);
+    return safeEdit(ctx, `❌ <i>Cancelled.</i>`, { parse_mode: "HTML" });
+  });
+
+  // ── Confirm purchase ──────────────────────────────────────────────────────
+  bot.action(/^buyconfirm_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Processing…").catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const flow      = buyFlows.get(uid);
+    const discount  = flow?.discountAmt ?? 0;
+    const promoCode = flow?.promoCode;
+    buyFlows.delete(uid);
+
+    await safeEdit(ctx, `⚙️ <i>Processing payment…</i>`, { parse_mode: "HTML" });
+
+    const prod = await getProductById(productId);
+    if (!prod || !prod.active) {
+      return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    }
+
+    const result = await purchaseProduct(uid, productId, discount);
 
     if (!result.success) {
       if (result.reason === "insufficient_funds") {
         return safeEdit(ctx,
-          `${header("💳 INSUFFICIENT FUNDS")}\n\n` +
-          `Need <b>$${(result.shortfall ?? 0).toFixed(2)}</b> more to complete this purchase.\n\n` +
-          `→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
-          }
+          `💳 <b>Insufficient Funds</b>\n\n` +
+          `Need <b>$${(result.shortfall ?? 0).toFixed(2)}</b> more.\n\n→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]) }
         );
       }
       if (result.reason === "out_of_stock") {
         return safeEdit(ctx,
-          `${header("❌ OUT OF STOCK")}\n\n` +
-          `<b>${escHtml(prod.name)}</b> just sold out.\n` +
-          `<i>Check back soon.</i>`,
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
-          }
+          `❌ <b>Just sold out.</b>\n<i>Check back soon.</i>`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]) }
         );
       }
       return safeEdit(ctx,
-        `${header("⚠️ PURCHASE FAILED")}\n\n` +
-        `Something went wrong. Your balance was not charged.\n\n` +
-        `→ Contact ${escHtml(SUPPORT_CONTACT)} if this keeps happening.`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
-        }
+        `⚠️ <b>Purchase Failed.</b> Balance not charged.\n→ ${escHtml(SUPPORT_CONTACT)}`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]) }
       );
     }
 
-    // ── Success ──────────────────────────────────────────────────────────────
-    const emoji = platformEmoji(prod.account_type);
+    // ── Post-purchase tasks ───────────────────────────────────────────────────
+    checkAndUpdateVip(uid).catch(() => {});
+    if (result.stockRemaining <= 3) {
+      alertAdminLowStock(result.productName, result.stockRemaining);
+      if (result.stockRemaining === 0) {
+        notifyRestockSubscribers(bot, productId, result.productName).catch(() => {});
+      }
+    }
+    sendRatingRequest(bot, uid, result.orderId, result.productName);
+
+    const discountLine = discount > 0
+      ? `🏷️ Promo <b>${escHtml(promoCode ?? "")}</b>: <b>-${fmt$(discount)}</b>\n`
+      : "";
+
+    const pEmoji = platformEmoji(prod.account_type);
     await safeEdit(ctx,
       `✅ <b>Purchase Successful!</b>\n\n` +
-      `${emoji} <b>${escHtml(prod.name)}</b>\n\n` +
+      `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
       `${divider()}\n\n` +
       `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
       `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
       `${divider()}\n\n` +
+      `${discountLine}` +
+      `💵 Paid: <b>${fmt$(result.finalPrice)}</b>\n` +
       `💰 New balance: <b>${fmt$(result.newBalance)}</b>\n` +
       `<i>Credentials saved — access anytime in My Orders.</i>`,
       {
@@ -994,15 +1197,22 @@ export function startShopBot(token: string) {
       );
     }
 
-    const acc   = result.account!;
-    const emoji = platformEmoji(prod.accountType ?? "");
+    checkAndUpdateVip(uid).catch(() => {});
+    if (result.stockRemaining <= 3) {
+      alertAdminLowStock(result.productName, result.stockRemaining);
+      if (result.stockRemaining === 0) notifyRestockSubscribers(bot, productId, result.productName).catch(() => {});
+    }
+    sendRatingRequest(bot, uid, result.orderId, result.productName);
+
+    const pEmoji = platformEmoji(prod.account_type ?? "");
     await safeEdit(ctx,
       `🎉 <b>Purchase Successful!</b>\n\n` +
-      `${emoji} <b>${escHtml(prod.name)}</b>\n\n` +
+      `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
       `${divider()}\n\n` +
-      `📧 <b>Email</b>\n<code>${escHtml(acc.email)}</code>\n\n` +
-      `🔑 <b>Password</b>\n<code>${escHtml(acc.password)}</code>\n\n` +
+      `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
+      `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
       `${divider()}\n\n` +
+      `💰 New balance: <b>${fmt$(result.newBalance)}</b>\n` +
       `<i>Save these credentials safely. For issues, contact ${escHtml(SUPPORT_CONTACT)}</i>`,
       {
         parse_mode: "HTML",
@@ -1015,32 +1225,15 @@ export function startShopBot(token: string) {
   bot.action("shop_deposit_info", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
-    await safeEdit(ctx,
-      `➕ <b>Add Funds</b>\n\n` +
-      `${divider()}\n\n` +
-      `🟡  <b>Binance ID</b>\n<code>510120124</code>\n\n` +
-      `${divider()}\n\n` +
-      `💎  <b>USDT TRC20</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
-      `${divider()}\n\n` +
-      `🔷  <b>USDT BEP20</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
-      `${divider()}\n\n` +
-      `🇮🇳  <b>UPI (India)</b>\n<code>avinashaddison-8@okaxis</code>\n\n` +
-      `${divider()}\n\n` +
-      `🪪  Your ID: <code>${uid}</code>\n` +
-      `💬  After payment, send a screenshot to ${escHtml(SUPPORT_CONTACT)}\n\n` +
-      `⚡  Minimum deposit: <b>$1.00</b>\n` +
-      `<i>Deposits are confirmed within minutes.</i>`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("🟡  Copy Binance ID",  "dep_copy_binance")],
-          [Markup.button.callback("💎  Copy USDT TRC20",  "dep_copy_trc20")],
-          [Markup.button.callback("🔷  Copy USDT BEP20",  "dep_copy_bep20")],
-          [Markup.button.callback("🇮🇳  Copy UPI",        "dep_copy_upi")],
-          [Markup.button.callback("◀  Back to Shop",      "shop_back_products")],
-        ]),
-      }
-    );
+    await safeEdit(ctx, depositText(uid), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20", "dep_copy_trc20")],
+        [Markup.button.callback("🔷  BEP20",          "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",  "dep_copy_upi")],
+        [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+        [Markup.button.callback("◀  Back to Shop",          "shop_back_products")],
+      ]),
+    });
   });
 
   bot.action("dep_copy_binance", async (ctx) => {
@@ -1380,10 +1573,71 @@ export function startShopBot(token: string) {
     }
   });
 
+  // ── Rating handler ────────────────────────────────────────────────────────
+  bot.action(/^rate_([^_]+)_([1-5])$/, async (ctx) => {
+    await ctx.answerCbQuery("Thank you for your rating!").catch(() => {});
+    const uid     = ctx.from.id;
+    const orderId = (ctx.match as RegExpExecArray)[1];
+    const rating  = parseInt((ctx.match as RegExpExecArray)[2]);
+    await dbQuery(
+      `INSERT INTO shop_order_ratings (order_id, telegram_id, rating) VALUES ($1, $2, $3) ON CONFLICT (order_id) DO UPDATE SET rating = $3`,
+      [orderId, uid, rating]
+    ).catch(() => {});
+    const stars = "⭐".repeat(rating) + "☆".repeat(5 - rating);
+    await safeEdit(ctx,
+      `${stars}\n\n<b>Thanks for rating!</b>\n<i>Your feedback helps us improve.</i>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+  });
+
   // ── Text message handler — collect email / password for activation ─────────
   bot.on("text", async (ctx: any, next: any) => {
     const uid  = ctx.from?.id;
     if (!uid) return next();
+
+    // ── Buy promo code flow ───────────────────────────────────────────────────
+    const buyFlow = buyFlows.get(uid);
+    if (buyFlow && buyFlow.step === "promo") {
+      const code = ctx.message.text?.trim() ?? "";
+      await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
+      const prod = await getProductById(buyFlow.productId);
+      if (!prod) {
+        buyFlows.delete(uid);
+        return safeReply(ctx, `⚠️ Product not found. Please start again.`, { parse_mode: "HTML" });
+      }
+      const validResult = await validatePromoCode(code, parseFloat(prod.price));
+      if (!validResult.valid) {
+        return safeReply(ctx,
+          `🚫 <b>Invalid Code</b>\n\n${escHtml(validResult.reason)}\n\n<i>Type another code or tap Cancel.</i>`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", `buycancel_${buyFlow.productId}`)]]),
+          }
+        );
+      }
+      const finalPrice = Math.max(0, parseFloat(prod.price) - validResult.discountAmt);
+      buyFlows.set(uid, { ...buyFlow, step: "confirm", promoCode: code.toUpperCase(), discountAmt: validResult.discountAmt });
+      // Use the promo code count immediately (decrement uses)
+      usePromoCode(validResult.codeId).catch(() => {});
+      return safeReply(ctx,
+        `🏷️ <b>Promo Code Applied!</b>\n\n` +
+        `${divider()}\n\n` +
+        `Code: <b>${escHtml(code.toUpperCase())}</b>\n` +
+        `Discount: <b>-${fmt$(validResult.discountAmt)}</b>\n` +
+        `Original: <s>${fmt$(parseFloat(prod.price))}</s>\n` +
+        `New price: <b>${fmt$(finalPrice)}</b>\n\n` +
+        `${divider()}\n` +
+        `<i>Tap Confirm to complete your purchase.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback(`✅  Confirm  —  ${fmt$(finalPrice)}`, `buyconfirm_${buyFlow.productId}`)],
+            [Markup.button.callback("❌  Cancel", `buycancel_${buyFlow.productId}`)],
+          ]),
+        }
+      );
+    }
+
     const flow = activationFlows.get(uid);
     if (!flow) return next(); // not in activation flow — let hears handlers run
 
@@ -1458,21 +1712,28 @@ export function startShopBot(token: string) {
   bot.hears(BTN.BALANCE, async (ctx) => {
     const uid = ctx.from.id;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
-    const balance = await getBalance(uid);
+    const r = await dbQuery(`SELECT balance, vip, total_spend FROM shop_customers WHERE telegram_id = $1`, [uid]);
+    const row     = r.rows[0];
+    const balance = parseFloat(row?.balance ?? "0");
+    const vip     = row?.vip ?? false;
+    const spend   = parseFloat(row?.total_spend ?? "0");
+    const vipLine = vip ? `\n👑 Status: <b>VIP Member</b>` : `\n🎯 Next VIP at <b>$${VIP_THRESHOLD.toFixed(2)}</b> spent (${fmt$(spend)} so far)`;
     await safeReply(ctx,
       `💰 <b>My Wallet</b>\n\n` +
       `${divider()}\n\n` +
       `💵 Balance: <b>${fmt$(balance)}</b>\n` +
-      `🪪 User ID: <code>${uid}</code>\n\n` +
-      `<i>To add funds, contact ${escHtml(SUPPORT_CONTACT)}</i>`,
-      { parse_mode: "HTML" }
+      `🪪 User ID: <code>${uid}</code>${vipLine}\n\n` +
+      `<i>To add funds, tap <b>Add Funds</b> below.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("➕  Add Funds", "shop_deposit_info")]]),
+      }
     );
   });
 
   // ── Deposit ───────────────────────────────────────────────────────────────
-  bot.hears(BTN.DEPOSIT, async (ctx) => {
-    const uid = ctx.from.id;
-    await safeReply(ctx,
+  function depositText(uid: number): string {
+    return (
       `➕ <b>Add Funds</b>\n\n` +
       `${divider()}\n\n` +
       `🟡  <b>Binance ID</b>\n<code>510120124</code>\n\n` +
@@ -1484,19 +1745,104 @@ export function startShopBot(token: string) {
       `🇮🇳  <b>UPI (India)</b>\n<code>avinashaddison-8@okaxis</code>\n\n` +
       `${divider()}\n\n` +
       `🪪  Your ID: <code>${uid}</code>\n` +
-      `💬  After payment, send a screenshot to ${escHtml(SUPPORT_CONTACT)}\n\n` +
-      `⚡  Minimum deposit: <b>$1.00</b>\n` +
-      `<i>Deposits are confirmed within minutes.</i>`,
+      `⚡  Minimum deposit: <b>$1.00</b>\n\n` +
+      `<i>After paying, tap <b>📸 Submit Payment Proof</b> to send your screenshot for fast confirmation.</i>`
+    );
+  }
+
+  bot.hears(BTN.DEPOSIT, async (ctx) => {
+    const uid = ctx.from.id;
+    await safeReply(ctx, depositText(uid), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
+        [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
+        [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+      ]),
+    });
+  });
+
+  bot.action("dep_submit_proof", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    depositFlows.set(uid, { step: "waiting_screenshot" });
+    return safeEdit(ctx,
+      `📸 <b>Submit Payment Proof</b>\n\n` +
+      `${divider()}\n\n` +
+      `Send your <b>payment screenshot</b> as a photo right now.\n\n` +
+      `<i>Our team will confirm and credit your balance within minutes.\n` +
+      `Include your Telegram ID <code>${uid}</code> in the payment notes if possible.</i>`,
       {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("🟡  Copy Binance ID",  "dep_copy_binance")],
-          [Markup.button.callback("💎  Copy USDT TRC20",  "dep_copy_trc20")],
-          [Markup.button.callback("🔷  Copy USDT BEP20",  "dep_copy_bep20")],
-          [Markup.button.callback("🇮🇳  Copy UPI",        "dep_copy_upi")],
-        ]),
+        ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "dep_cancel_proof")]]),
       }
     );
+  });
+
+  bot.action("dep_cancel_proof", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    depositFlows.delete(uid);
+    return safeEdit(ctx, `❌ <i>Cancelled.</i>`, { parse_mode: "HTML" });
+  });
+
+  // ── Photo handler — deposit screenshots ───────────────────────────────────
+  bot.on("photo", async (ctx: any, next: any) => {
+    const uid  = ctx.from?.id;
+    if (!uid) return next();
+    const flow = depositFlows.get(uid);
+    if (!flow) return next();
+    depositFlows.delete(uid);
+
+    const photos    = ctx.message.photo;
+    const fileId    = photos[photos.length - 1]?.file_id;
+
+    // Save deposit request to DB
+    const insRes = await dbQuery(
+      `INSERT INTO shop_deposit_requests (telegram_id, screenshot_file_id, status) VALUES ($1, $2, 'pending') RETURNING id`,
+      [uid, fileId]
+    );
+    const reqId = insRes.rows[0]?.id;
+
+    await safeReply(ctx,
+      `✅ <b>Proof Submitted!</b>\n\n` +
+      `${divider()}\n\n` +
+      `📋 Request ID: <code>${reqId}</code>\n` +
+      `🪪 Your ID: <code>${uid}</code>\n\n` +
+      `Our team will review and credit your balance shortly.\n` +
+      `<i>Average confirmation: under 15 minutes.</i>`,
+      { parse_mode: "HTML" }
+    );
+
+    // Notify admin
+    const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+    const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+    if (adminToken && adminIds.length > 0) {
+      const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Unknown";
+      for (const adminId of adminIds) {
+        fetch(`https://api.telegram.org/bot${adminToken}/sendPhoto`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: adminId,
+            photo: fileId,
+            caption:
+              `📸 <b>NEW DEPOSIT PROOF</b>\n\n` +
+              `👤 ${escHtml(uname)}\n` +
+              `🆔 User ID: <code>${uid}</code>\n` +
+              `📋 Request: #${reqId}\n\n` +
+              `<i>Tap below to approve or deny.</i>`,
+            parse_mode: "HTML",
+            reply_markup: JSON.stringify({
+              inline_keyboard: [
+                [{ text: "✅  Approve + Set Amount", callback_data: `dep_approve_${reqId}_${uid}` }],
+                [{ text: "❌  Deny",                 callback_data: `dep_deny_${reqId}_${uid}` }],
+              ],
+            }),
+          }),
+        }).catch(() => {});
+      }
+    }
   });
 
   // ── Support ───────────────────────────────────────────────────────────────
@@ -1515,17 +1861,38 @@ export function startShopBot(token: string) {
     );
   });
 
-  // ── My ID ─────────────────────────────────────────────────────────────────
+  // ── My ID / Profile ───────────────────────────────────────────────────────
   bot.hears(BTN.IDENTITY, async (ctx) => {
     const uid   = ctx.from.id;
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    const r = await dbQuery(`SELECT vip, total_spend, balance FROM shop_customers WHERE telegram_id = $1`, [uid]);
+    const row   = r.rows[0];
+    const vip   = row?.vip ?? false;
+    const spend = parseFloat(row?.total_spend ?? "0");
+    const bal   = parseFloat(row?.balance ?? "0");
+    const vipBadge = vip ? "  👑 <b>VIP</b>" : "";
     await safeReply(ctx,
-      `🪪 <b>My Profile</b>\n\n` +
+      `🪪 <b>My Profile</b>${vipBadge}\n\n` +
       `${divider()}\n\n` +
       `👤 Username: <b>${uname}</b>\n` +
-      `🆔 User ID: <code>${uid}</code>\n\n` +
+      `🆔 User ID: <code>${uid}</code>\n` +
+      `💰 Balance: <b>${fmt$(bal)}</b>\n` +
+      `💳 Total Spent: <b>${fmt$(spend)}</b>\n` +
+      `${vip ? "👑 Status: <b>VIP Member</b>" : `🎯 VIP at $${VIP_THRESHOLD.toFixed(2)} total spend`}\n\n` +
       `<i>Share your ID when contacting support.</i>`,
       { parse_mode: "HTML" }
+    );
+  });
+
+  // ── /cancel — exit any active flow ────────────────────────────────────────
+  bot.command("cancel", async (ctx) => {
+    const uid = ctx.from.id;
+    activationFlows.delete(uid);
+    buyFlows.delete(uid);
+    depositFlows.delete(uid);
+    await safeReply(ctx,
+      `❌ <b>Cancelled.</b>\n\n<i>All active flows cleared. Use the menu below to continue.</i>`,
+      { parse_mode: "HTML", ...SHOP_KEYBOARD }
     );
   });
 
@@ -1703,6 +2070,7 @@ export function startShopBot(token: string) {
         { command: "shop",    description: "Browse AI tools marketplace" },
         { command: "balance", description: "Check my wallet balance" },
         { command: "id",      description: "My Telegram user ID" },
+        { command: "cancel",  description: "Cancel any active flow" },
       ]);
       await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
       console.log("[ShopBot] Commands registered");

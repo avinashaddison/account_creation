@@ -129,7 +129,10 @@ interface ShopAdminFlow {
   step?: "name" | "description" | "price" | "account_type" | "status_filter"
        | "topup_uid" | "topup_amount"
        | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter"
-       | "activation_time" | "refer_amount";
+       | "activation_time" | "refer_amount"
+       | "broadcast_text" | "search_uid"
+       | "promo_code" | "promo_discount" | "promo_maxuses"
+       | "dep_approve_amount";
   name?: string;
   description?: string;
   price?: string;
@@ -138,6 +141,10 @@ interface ShopAdminFlow {
   topupUid?: number;
   editProductId?: string;
   activationOrderId?: string;
+  promoCode?: string;
+  promoDiscount?: string;
+  depRequestId?: number;
+  depUserId?: number;
 }
 interface UserState {
   lastCopiedIds?: string[];
@@ -2571,6 +2578,15 @@ export function startTelegramBot(config: BotConfig) {
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `› Choose a module:`;
 
+    const [depRes, subsRes] = await Promise.all([
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_deposit_requests WHERE status = 'pending'`),
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_restock_subs`),
+    ]);
+    const pendingDeps   = parseInt(depRes.rows[0]?.cnt ?? "0");
+    const restockSubs   = parseInt(subsRes.rows[0]?.cnt ?? "0");
+    const depBadge      = pendingDeps > 0 ? ` 🔴 ${pendingDeps}` : "";
+    const subsBadge     = restockSubs > 0 ? ` ·  ${restockSubs} subs` : "";
+
     const keyboard = Markup.inlineKeyboard([
       [
         Markup.button.callback("📦  PRODUCTS",            "shop_admin_products"),
@@ -2582,9 +2598,19 @@ export function startTelegramBot(config: BotConfig) {
       ],
       [
         Markup.button.callback(`📋  ACTIVATION ORDERS${pendingBadge}`, "shop_admin_act_orders"),
+        Markup.button.callback(`📸  DEPOSITS${depBadge}`, "shop_admin_deposits"),
       ],
       [
+        Markup.button.callback("📢  BROADCAST",           "shop_admin_broadcast"),
+        Markup.button.callback("📊  ANALYTICS",           "shop_admin_analytics"),
+      ],
+      [
+        Markup.button.callback("🔍  SEARCH CUSTOMER",    "shop_admin_search"),
         Markup.button.callback(`🔗  REFER REWARD  ·  $${referAmount.toFixed(2)}`, "shop_admin_refer_amount"),
+      ],
+      [
+        Markup.button.callback(`📦  PROMO CODES`,         "shop_admin_promos"),
+        Markup.button.callback(`🔔  RESTOCK NOTIFY${subsBadge}`, "shop_admin_restock"),
       ],
     ]);
 
@@ -2993,6 +3019,291 @@ export function startTelegramBot(config: BotConfig) {
     });
   });
 
+  // ── Broadcast ─────────────────────────────────────────────────────────────
+  bot.action("shop_admin_broadcast", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    const r = await dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`);
+    const total = parseInt(r.rows[0]?.cnt ?? "0");
+    getState(uid).shopAdminFlow = { step: "broadcast_text" };
+    await ctx.reply(
+      `\n📢 <b>BROADCAST MESSAGE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>Recipients:  ${total} customers</code>\n\n` +
+      `› Type your <b>broadcast message</b>:\n<i>Supports HTML. Sent to all customers.</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+  bot.action("shop_admin_analytics", async (ctx) => {
+    await ctx.answerCbQuery("Loading analytics…").catch(() => {});
+    const [todayRes, weekRes, monthRes, bestRes, topCustRes, avgRating] = await Promise.all([
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '1 day'`),
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '7 days'`),
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '30 days'`),
+      dbQuery(`SELECT product_name, COUNT(*) as cnt, SUM(amount) as rev FROM shop_orders GROUP BY product_name ORDER BY cnt DESC LIMIT 5`),
+      dbQuery(`SELECT c.first_name, c.username, SUM(o.amount) as spent FROM shop_orders o JOIN shop_customers c ON o.telegram_id = c.telegram_id GROUP BY c.telegram_id, c.first_name, c.username ORDER BY spent DESC LIMIT 5`),
+      dbQuery(`SELECT ROUND(AVG(rating),1) as avg FROM shop_order_ratings`),
+    ]);
+    const today = parseFloat(todayRes.rows[0]?.t ?? "0");
+    const week  = parseFloat(weekRes.rows[0]?.t ?? "0");
+    const month = parseFloat(monthRes.rows[0]?.t ?? "0");
+    const avg   = avgRating.rows[0]?.avg ?? "N/A";
+
+    let t = `\n📊 <b>REVENUE ANALYTICS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    t += `<b>💵 Revenue</b>\n<code>`;
+    t += `Today:   $${today.toFixed(2)}\n`;
+    t += `7 days:  $${week.toFixed(2)}\n`;
+    t += `30 days: $${month.toFixed(2)}\n`;
+    t += `Rating:  ${avg} / 5\n</code>\n\n`;
+
+    if (bestRes.rows.length > 0) {
+      t += `<b>📦 Top Products</b>\n<code>`;
+      for (const r of bestRes.rows) {
+        t += `${String(r.cnt).padStart(3)}x  $${parseFloat(r.rev).toFixed(2)}  ${r.product_name.slice(0, 20)}\n`;
+      }
+      t += `</code>\n\n`;
+    }
+    if (topCustRes.rows.length > 0) {
+      t += `<b>👥 Top Customers</b>\n<code>`;
+      for (const r of topCustRes.rows) {
+        const name = r.username ? `@${r.username}` : (r.first_name ?? "Unknown");
+        t += `$${parseFloat(r.spent).toFixed(2).padStart(7)}  ${name.slice(0, 18)}\n`;
+      }
+      t += `</code>`;
+    }
+    await safeEdit(ctx, t, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]),
+    });
+  });
+
+  // ── Customer search ───────────────────────────────────────────────────────
+  bot.action("shop_admin_search", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "search_uid" };
+    await ctx.reply(
+      `\n🔍 <b>SEARCH CUSTOMER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter a <b>Telegram ID</b> or <b>@username</b>:`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Deposit requests ──────────────────────────────────────────────────────
+  bot.action("shop_admin_deposits", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(
+      `SELECT d.id, d.telegram_id, d.status, d.amount_requested, d.created_at, c.username, c.first_name
+       FROM shop_deposit_requests d
+       LEFT JOIN shop_customers c ON d.telegram_id = c.telegram_id
+       ORDER BY d.created_at DESC LIMIT 20`
+    );
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n📸 <b>DEPOSIT REQUESTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No deposit requests yet.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
+      );
+    }
+    let t = `\n📸 <b>DEPOSIT REQUESTS</b>  <code>last ${res.rows.length}</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const r of res.rows) {
+      const name = r.username ? `@${r.username}` : (r.first_name ?? `${r.telegram_id}`);
+      const stat = r.status === "pending" ? "⏳" : r.status === "approved" ? "✅" : "❌";
+      const amt  = r.amount_requested ? `$${parseFloat(r.amount_requested).toFixed(2)}` : "—";
+      const date = new Date(r.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+      t += `${stat} #${r.id}  ${name.slice(0, 14).padEnd(14)}  ${amt}  ${date}\n`;
+      if (r.status === "pending") {
+        buttons.push([
+          Markup.button.callback(`✅ #${r.id} Approve`, `dep_approve_${r.id}_${r.telegram_id}`),
+          Markup.button.callback(`❌ Deny`, `dep_deny_${r.id}_${r.telegram_id}`),
+        ]);
+      }
+    }
+    t += `</code>`;
+    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
+    await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  bot.action(/^dep_approve_(\d+)_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid     = ctx.from.id;
+    const reqId   = parseInt((ctx.match as RegExpExecArray)[1]);
+    const custUid = parseInt((ctx.match as RegExpExecArray)[2]);
+    getState(uid).shopAdminFlow = { step: "dep_approve_amount", depRequestId: reqId, depUserId: custUid };
+    await ctx.reply(
+      `\n✅ <b>APPROVE DEPOSIT #${reqId}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Customer ID: <code>${custUid}</code>\n\n` +
+      `› Enter the <b>amount to credit</b> in USD:\n<code>  e.g. 5.00</code>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  bot.action(/^dep_deny_(\d+)_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Denied").catch(() => {});
+    const reqId   = parseInt((ctx.match as RegExpExecArray)[1]);
+    const custUid = parseInt((ctx.match as RegExpExecArray)[2]);
+    await dbQuery(`UPDATE shop_deposit_requests SET status = 'denied', resolved_at = NOW() WHERE id = $1`, [reqId]);
+    // Notify customer via shop bot
+    const shopToken = process.env.TELEGRAM_BOT_TOKEN_2;
+    if (shopToken) {
+      fetch(`https://api.telegram.org/bot${shopToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: custUid,
+          text: `❌ <b>Deposit Request #${reqId} Denied</b>\n\nWe could not verify your payment. Please contact support: @avinashaddison`,
+          parse_mode: "HTML",
+        }),
+      }).catch(() => {});
+    }
+    await ctx.reply(`❌ Deposit #${reqId} denied. Customer notified.`);
+  });
+
+  // ── Promo codes ───────────────────────────────────────────────────────────
+  bot.action("shop_admin_promos", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(
+      `SELECT code, discount_pct, discount_fixed, max_uses, uses_count, active, expires_at
+       FROM shop_promo_codes ORDER BY created_at DESC LIMIT 20`
+    );
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n🏷️ <b>PROMO CODES</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No promo codes created yet.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("➕  Create Code", "shop_admin_promo_create")],
+            [Markup.button.callback("↩  Back", "shop_admin_menu")],
+          ]),
+        }
+      );
+    }
+    let t = `\n🏷️ <b>PROMO CODES</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const r of res.rows) {
+      const stat   = r.active ? "🟢" : "🔴";
+      const disc   = parseFloat(r.discount_pct) > 0 ? `${parseFloat(r.discount_pct).toFixed(0)}% off` : `$${parseFloat(r.discount_fixed).toFixed(2)} off`;
+      const uses   = r.max_uses > 0 ? `${r.uses_count}/${r.max_uses}` : `${r.uses_count}/∞`;
+      t += `${stat} ${r.code.padEnd(12)} ${disc.padEnd(10)} ${uses}\n`;
+      buttons.push([
+        Markup.button.callback(`${r.active ? "⏸ Disable" : "▶ Enable"} ${r.code}`, `shop_promo_toggle_${r.code}`),
+      ]);
+    }
+    t += `</code>`;
+    buttons.push([Markup.button.callback("➕  Create Code", "shop_admin_promo_create"), Markup.button.callback("↩  Back", "shop_admin_menu")]);
+    await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  bot.action("shop_admin_promo_create", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "promo_code" };
+    await ctx.reply(
+      `\n🏷️ <b>CREATE PROMO CODE — 1/3</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter the <b>promo code</b>:\n<code>  e.g. SAVE20 · WELCOME · LAUNCH10</code>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  bot.action(/^shop_promo_toggle_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const code = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT active FROM shop_promo_codes WHERE code = $1`, [code]);
+    if (!r.rows[0]) return ctx.answerCbQuery("Code not found", { show_alert: true });
+    const newActive = !r.rows[0].active;
+    await dbQuery(`UPDATE shop_promo_codes SET active = $1 WHERE code = $2`, [newActive, code]);
+    await ctx.answerCbQuery(`${newActive ? "🟢 Enabled" : "🔴 Disabled"}: ${code}`, { show_alert: true });
+    // Refresh list
+    const res = await dbQuery(`SELECT code, discount_pct, discount_fixed, max_uses, uses_count, active FROM shop_promo_codes ORDER BY created_at DESC LIMIT 20`);
+    let t = `\n🏷️ <b>PROMO CODES</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const row of res.rows) {
+      const stat = row.active ? "🟢" : "🔴";
+      const disc = parseFloat(row.discount_pct) > 0 ? `${parseFloat(row.discount_pct).toFixed(0)}%` : `$${parseFloat(row.discount_fixed).toFixed(2)}`;
+      t += `${stat} ${row.code.padEnd(12)} ${disc}\n`;
+      buttons.push([Markup.button.callback(`${row.active ? "⏸ Disable" : "▶ Enable"} ${row.code}`, `shop_promo_toggle_${row.code}`)]);
+    }
+    t += `</code>`;
+    buttons.push([Markup.button.callback("➕  Create Code", "shop_admin_promo_create"), Markup.button.callback("↩  Back", "shop_admin_menu")]);
+    await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  // ── Restock subscribers ───────────────────────────────────────────────────
+  bot.action("shop_admin_restock", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(
+      `SELECT s.product_id, p.name as product_name, COUNT(*) as sub_count
+       FROM shop_restock_subs s
+       LEFT JOIN shop_products p ON p.id::text = s.product_id
+       GROUP BY s.product_id, p.name
+       ORDER BY sub_count DESC`
+    );
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n🔔 <b>RESTOCK SUBSCRIBERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No subscribers yet.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
+      );
+    }
+    let t = `\n🔔 <b>RESTOCK SUBSCRIBERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const r of res.rows) {
+      const name = r.product_name ?? r.product_id;
+      t += `${String(r.sub_count).padStart(3)} subs  ${name.slice(0, 25)}\n`;
+      buttons.push([Markup.button.callback(`📢 Notify ${r.sub_count} subs — ${name.slice(0, 20)}`, `shop_notify_restock_${r.product_id}`)]);
+    }
+    t += `</code>`;
+    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
+    await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  bot.action(/^shop_notify_restock_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Sending notifications…").catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name FROM shop_products WHERE id::text = $1`, [productId]);
+    const productName = r.rows[0]?.name ?? "Unknown";
+    const shopToken   = process.env.TELEGRAM_BOT_TOKEN_2;
+    if (!shopToken) return ctx.reply("❌ Shop bot token not configured.");
+    const subs = await dbQuery(`SELECT telegram_id FROM shop_restock_subs WHERE product_id = $1`, [productId]);
+    let sent = 0;
+    for (const row of subs.rows) {
+      try {
+        await fetch(`https://api.telegram.org/bot${shopToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: row.telegram_id,
+            text: `🔔 <b>Back in Stock!</b>\n\n📦 <b>${productName}</b> is now available!\n\n<i>Tap below to buy before it sells out!</i>`,
+            parse_mode: "HTML",
+            reply_markup: JSON.stringify({ inline_keyboard: [[{ text: "⚡  Buy Now", callback_data: `shop_product_${productId}` }]] }),
+          }),
+        });
+        sent++;
+        await new Promise(r => setTimeout(r, 50)); // Rate limit
+      } catch {}
+    }
+    await dbQuery(`DELETE FROM shop_restock_subs WHERE product_id = $1`, [productId]);
+    await ctx.reply(`✅ Notified <b>${sent}</b> subscriber${sent !== 1 ? "s" : ""} for <b>${productName}</b>. Subscribers cleared.`, { parse_mode: "HTML" });
+  });
+
+  // ── Quick topup from search results ──────────────────────────────────────
+  bot.action(/^topup_found_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid     = ctx.from.id;
+    const custUid = parseInt((ctx.match as RegExpExecArray)[1]);
+    const r = await dbQuery(`SELECT username, first_name, balance FROM shop_customers WHERE telegram_id = $1`, [custUid]);
+    if (!r.rows[0]) return ctx.reply("Customer not found.");
+    const c    = r.rows[0];
+    const name = c.username ? `@${c.username}` : (c.first_name ?? `${custUid}`);
+    getState(uid).shopAdminFlow = { step: "topup_amount", topupUid: custUid };
+    await ctx.reply(
+      `\n💰 <b>FUND CUSTOMER ACCOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>Customer:  ${name}\nBalance:   $${parseFloat(c.balance).toFixed(2)}</code>\n\n` +
+      `› Enter the <b>amount to add</b> in USD:\n<code>  e.g. 5.00</code>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── Activation order approval from admin ─────────────────────────────────
   bot.action(/^approve_act_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
@@ -3267,6 +3578,147 @@ export function startTelegramBot(config: BotConfig) {
           `<i>All new referrals will now earn $${amount.toFixed(2)} per invite.</i>`,
           { parse_mode: "HTML" }
         );
+      }
+
+      // ── Broadcast ───────────────────────────────────────────────────────────
+      if (flow.step === "broadcast_text") {
+        st.shopAdminFlow = undefined;
+        const shopToken = process.env.TELEGRAM_BOT_TOKEN_2;
+        if (!shopToken) return ctx.reply("❌ Shop bot token not configured.");
+        const custs = await dbQuery(`SELECT telegram_id FROM shop_customers`);
+        const total = custs.rows.length;
+        await ctx.reply(`📢 Sending broadcast to <b>${total}</b> customers…`, { parse_mode: "HTML" });
+        let sent = 0, failed = 0;
+        for (const row of custs.rows) {
+          try {
+            await fetch(`https://api.telegram.org/bot${shopToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: row.telegram_id, text, parse_mode: "HTML" }),
+            });
+            sent++;
+            await new Promise(r => setTimeout(r, 35)); // ~28 msg/s max
+          } catch { failed++; }
+        }
+        return ctx.reply(`✅ Broadcast done.\n<code>Sent: ${sent}  Failed: ${failed}</code>`, { parse_mode: "HTML" });
+      }
+
+      // ── Customer search ─────────────────────────────────────────────────────
+      if (flow.step === "search_uid") {
+        st.shopAdminFlow = undefined;
+        const q = text.trim().replace(/^@/, "");
+        const isNum = /^\d+$/.test(q);
+        const res = isNum
+          ? await dbQuery(`SELECT * FROM shop_customers WHERE telegram_id = $1`, [parseInt(q)])
+          : await dbQuery(`SELECT * FROM shop_customers WHERE LOWER(username) = LOWER($1) OR first_name ILIKE $2 LIMIT 5`, [q, `%${q}%`]);
+        if (res.rows.length === 0) {
+          return ctx.reply(`🔴 No customer found for <code>${text.trim()}</code>`, { parse_mode: "HTML" });
+        }
+        for (const c of res.rows) {
+          const name   = c.username ? `@${c.username}` : (c.first_name ?? "—");
+          const vip    = c.vip ? " 👑 VIP" : "";
+          const orders = await dbQuery(`SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as t FROM shop_orders WHERE telegram_id = $1`, [c.telegram_id]);
+          const oRow   = orders.rows[0];
+          await ctx.reply(
+            `\n👤 <b>CUSTOMER</b>${vip}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>` +
+            `Name:       ${name}\n` +
+            `ID:         ${c.telegram_id}\n` +
+            `Balance:    $${parseFloat(c.balance ?? "0").toFixed(2)}\n` +
+            `Spend:      $${parseFloat(c.total_spend ?? "0").toFixed(2)}\n` +
+            `Orders:     ${oRow?.cnt ?? 0}\n` +
+            `Revenue:    $${parseFloat(oRow?.t ?? "0").toFixed(2)}\n` +
+            `Joined:     ${new Date(c.created_at).toLocaleDateString("en-GB")}\n` +
+            `</code>`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback(`💰 Fund Account`, `topup_found_${c.telegram_id}`)]]),
+            }
+          );
+        }
+        return;
+      }
+
+      // ── Promo code creation ─────────────────────────────────────────────────
+      if (flow.step === "promo_code") {
+        const code = text.trim().toUpperCase().replace(/\s+/g, "_").slice(0, 20);
+        if (!code) return ctx.reply(`🔴 Invalid code. Try again:`);
+        flow.promoCode = code;
+        flow.step = "promo_discount";
+        return ctx.reply(
+          `\n🏷️ <b>CREATE PROMO — 2/3</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `Code: <code>${code}</code>\n\n` +
+          `› Enter the <b>discount</b>:\n<code>  e.g. 20%  ·  1.00  ·  20%+1.00</code>\n` +
+          `<i>Use % for percentage, plain number for fixed $, or both.</i>`,
+          { parse_mode: "HTML" }
+        );
+      }
+
+      if (flow.step === "promo_discount") {
+        const raw = text.trim();
+        const pctMatch   = raw.match(/(\d+(?:\.\d+)?)%/);
+        const fixedMatch = raw.match(/\$?(\d+(?:\.\d+)?)(?!%)/);
+        const pct   = pctMatch   ? parseFloat(pctMatch[1])   : 0;
+        const fixed = fixedMatch ? parseFloat(fixedMatch[1]) : 0;
+        if (pct === 0 && fixed === 0) return ctx.reply(`🔴 Could not parse discount. Try <code>20%</code> or <code>1.50</code>:`, { parse_mode: "HTML" });
+        flow.promoDiscount = JSON.stringify({ pct, fixed });
+        flow.step = "promo_maxuses";
+        return ctx.reply(
+          `\n🏷️ <b>CREATE PROMO — 3/3</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `Discount: <code>${pct > 0 ? pct + "%" : ""}${pct > 0 && fixed > 0 ? " + " : ""}${fixed > 0 ? "$" + fixed.toFixed(2) : ""}</code>\n\n` +
+          `› Enter <b>max uses</b> (0 = unlimited):`,
+          { parse_mode: "HTML" }
+        );
+      }
+
+      if (flow.step === "promo_maxuses") {
+        const maxUses = parseInt(text.trim());
+        if (isNaN(maxUses) || maxUses < 0) return ctx.reply(`🔴 Enter a number (0 for unlimited):`);
+        const disc = JSON.parse(flow.promoDiscount ?? "{}");
+        const code = flow.promoCode!;
+        await dbQuery(
+          `INSERT INTO shop_promo_codes (code, discount_pct, discount_fixed, max_uses, active)
+           VALUES ($1, $2, $3, $4, true)
+           ON CONFLICT (code) DO UPDATE SET discount_pct=$2, discount_fixed=$3, max_uses=$4, active=true`,
+          [code, disc.pct ?? 0, disc.fixed ?? 0, maxUses]
+        );
+        st.shopAdminFlow = undefined;
+        return ctx.reply(
+          `\n🟢 <b>PROMO CODE CREATED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>` +
+          `Code:      ${code}\n` +
+          `Discount:  ${disc.pct > 0 ? disc.pct + "%" : ""}${disc.pct > 0 && disc.fixed > 0 ? " + " : ""}${disc.fixed > 0 ? "$" + disc.fixed.toFixed(2) : ""}\n` +
+          `Max uses:  ${maxUses === 0 ? "Unlimited" : maxUses}\n` +
+          `</code>`,
+          { parse_mode: "HTML" }
+        );
+      }
+
+      // ── Deposit approval amount ─────────────────────────────────────────────
+      if (flow.step === "dep_approve_amount") {
+        const amount = parseFloat(text.trim());
+        if (isNaN(amount) || amount <= 0) return ctx.reply(`🔴 Enter a valid amount like <code>5.00</code>:`, { parse_mode: "HTML" });
+        const reqId   = flow.depRequestId!;
+        const custUid = flow.depUserId!;
+        st.shopAdminFlow = undefined;
+        try {
+          await dbQuery(`UPDATE shop_deposit_requests SET status = 'approved', amount_requested = $1, resolved_at = NOW() WHERE id = $2`, [amount.toFixed(2), reqId]);
+          await dbQuery(`UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`, [amount.toFixed(2), custUid]);
+          // Notify customer
+          const shopToken = process.env.TELEGRAM_BOT_TOKEN_2;
+          if (shopToken) {
+            fetch(`https://api.telegram.org/bot${shopToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: custUid,
+                text: `✅ <b>Deposit Approved!</b>\n\n<code>+$${amount.toFixed(2)}</code> has been added to your wallet.\n\n<i>Thank you for your payment!</i>`,
+                parse_mode: "HTML",
+              }),
+            }).catch(() => {});
+          }
+          return ctx.reply(`✅ Deposit #${reqId} approved · <code>+$${amount.toFixed(2)}</code> credited to <code>${custUid}</code>`, { parse_mode: "HTML" });
+        } catch (err: any) {
+          return ctx.reply(`🔴 Failed: <code>${err.message}</code>`, { parse_mode: "HTML" });
+        }
       }
 
       return;
