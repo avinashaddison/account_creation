@@ -758,15 +758,41 @@ export function startShopBot(token: string) {
     await safeEdit(ctx,
       `➕ <b>Add Funds</b>\n\n` +
       `${divider()}\n\n` +
-      `Message support with your User ID to deposit funds.\n\n` +
-      `💬 Contact: <b>${SUPPORT_CONTACT}</b>\n` +
-      `🪪 Your ID: <code>${uid}</code>\n\n` +
-      `<i>Deposits confirmed within minutes.</i>`,
+      `🟡  <b>Binance ID</b>\n<code>510120124</code>\n\n` +
+      `${divider()}\n\n` +
+      `💎  <b>USDT TRC20</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
+      `${divider()}\n\n` +
+      `🔷  <b>USDT BEP20</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+      `${divider()}\n\n` +
+      `🇮🇳  <b>UPI (India)</b>\n<code>avinashaddison-8@okaxis</code>\n\n` +
+      `${divider()}\n\n` +
+      `🪪  Your ID: <code>${uid}</code>\n` +
+      `💬  After payment, send a screenshot to ${escHtml(SUPPORT_CONTACT)}\n\n` +
+      `<i>Deposits are confirmed within minutes.</i>`,
       {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🟡  Copy Binance ID",  "dep_copy_binance")],
+          [Markup.button.callback("💎  Copy USDT TRC20",  "dep_copy_trc20")],
+          [Markup.button.callback("🔷  Copy USDT BEP20",  "dep_copy_bep20")],
+          [Markup.button.callback("🇮🇳  Copy UPI",        "dep_copy_upi")],
+          [Markup.button.callback("◀  Back to Shop",      "shop_back_products")],
+        ]),
       }
     );
+  });
+
+  bot.action("dep_copy_binance", async (ctx) => {
+    await ctx.answerCbQuery("🟡 Binance ID → 510120124", { show_alert: true });
+  });
+  bot.action("dep_copy_trc20", async (ctx) => {
+    await ctx.answerCbQuery("💎 TRC20 → TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB", { show_alert: true });
+  });
+  bot.action("dep_copy_bep20", async (ctx) => {
+    await ctx.answerCbQuery("🔷 BEP20 → 0x107fc554bba4cadd5c4e9f1e189d7dd93770202e", { show_alert: true });
+  });
+  bot.action("dep_copy_upi", async (ctx) => {
+    await ctx.answerCbQuery("🇮🇳 UPI → avinashaddison-8@okaxis", { show_alert: true });
   });
 
   // ── My Balance ────────────────────────────────────────────────────────────
@@ -790,11 +816,26 @@ export function startShopBot(token: string) {
     await safeReply(ctx,
       `➕ <b>Add Funds</b>\n\n` +
       `${divider()}\n\n` +
-      `Message support with your User ID to top up your wallet.\n\n` +
-      `💬 Contact: <b>${SUPPORT_CONTACT}</b>\n` +
-      `🪪 Your ID: <code>${uid}</code>\n\n` +
+      `🟡  <b>Binance ID</b>\n<code>510120124</code>\n\n` +
+      `${divider()}\n\n` +
+      `💎  <b>USDT TRC20</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
+      `${divider()}\n\n` +
+      `🔷  <b>USDT BEP20</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+      `${divider()}\n\n` +
+      `🇮🇳  <b>UPI (India)</b>\n<code>avinashaddison-8@okaxis</code>\n\n` +
+      `${divider()}\n\n` +
+      `🪪  Your ID: <code>${uid}</code>\n` +
+      `💬  After payment, send a screenshot to ${escHtml(SUPPORT_CONTACT)}\n\n` +
       `<i>Deposits are confirmed within minutes.</i>`,
-      { parse_mode: "HTML" }
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🟡  Copy Binance ID",  "dep_copy_binance")],
+          [Markup.button.callback("💎  Copy USDT TRC20",  "dep_copy_trc20")],
+          [Markup.button.callback("🔷  Copy USDT BEP20",  "dep_copy_bep20")],
+          [Markup.button.callback("🇮🇳  Copy UPI",        "dep_copy_upi")],
+        ]),
+      }
     );
   });
 
