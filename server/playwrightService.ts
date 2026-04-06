@@ -19447,7 +19447,8 @@ export async function generateSingleCheckoutLink(
       // Strip any existing coupon param from the referral URL and re-apply cleanly
       try {
         const ru = new URL(referralBaseUrl.replace(/&amp;/g, "&"));
-        ru.searchParams.set("coupon", couponCode);
+        if (couponCode && couponCode.trim()) ru.searchParams.set("coupon", couponCode.trim());
+        else ru.searchParams.delete("coupon");
         // Remove success/cancel redirect params — we just need the Stripe redirect
         ru.searchParams.delete("success_url");
         ru.searchParams.delete("cancel_url");
@@ -19456,13 +19457,15 @@ export async function generateSingleCheckoutLink(
         checkoutUrl = ru.toString();
         log(`🔗 Using extracted referral URL (price: ${ru.pathname.split("/").pop()?.substring(0, 30)})`);
       } catch {
-        checkoutUrl = `https://replit.com/stripe-checkout-by-price/price_1PsGgmKnqbzFOD8CRhOl4S0u?coupon=${encodeURIComponent(couponCode)}`;
-        log(`⚠️  Referral URL parse failed — falling back to Stripe price ID`);
+        const couponPart = couponCode && couponCode.trim() ? `?coupon=${encodeURIComponent(couponCode.trim())}` : "";
+        checkoutUrl = `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26${couponPart}`;
+        log(`⚠️  Referral URL parse failed — falling back to price alias`);
       }
     } else {
-      // Fallback: try the stable Stripe price ID directly
-      checkoutUrl = `https://replit.com/stripe-checkout-by-price/price_1PsGgmKnqbzFOD8CRhOl4S0u?coupon=${encodeURIComponent(couponCode)}`;
-      log(`🔗 Using fallback Stripe price ID for checkout URL`);
+      // Fallback: use the Feb-26 price alias (Replit's current monthly Core alias)
+      const couponPart = couponCode && couponCode.trim() ? `?coupon=${encodeURIComponent(couponCode.trim())}` : "";
+      checkoutUrl = `https://replit.com/stripe-checkout-by-price/core_1mo_20usd_monthly_feb_26${couponPart}`;
+      log(`🔗 Using fallback price alias for checkout URL${couponPart ? "" : " (no coupon)"}`);
     }
     log(`💰 Navigating to checkout URL...`);
     // Use "commit" so goto resolves as soon as navigation is committed (no need to wait
