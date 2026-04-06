@@ -768,6 +768,7 @@ export function startShopBot(token: string) {
       `${divider()}\n\n` +
       `🪪  Your ID: <code>${uid}</code>\n` +
       `💬  After payment, send a screenshot to ${escHtml(SUPPORT_CONTACT)}\n\n` +
+      `⚡  Minimum deposit: <b>$1.00</b>\n` +
       `<i>Deposits are confirmed within minutes.</i>`,
       {
         parse_mode: "HTML",
@@ -826,6 +827,7 @@ export function startShopBot(token: string) {
       `${divider()}\n\n` +
       `🪪  Your ID: <code>${uid}</code>\n` +
       `💬  After payment, send a screenshot to ${escHtml(SUPPORT_CONTACT)}\n\n` +
+      `⚡  Minimum deposit: <b>$1.00</b>\n` +
       `<i>Deposits are confirmed within minutes.</i>`,
       {
         parse_mode: "HTML",
