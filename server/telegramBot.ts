@@ -298,15 +298,15 @@ function statusEmoji(s: string) {
 
 // ── Reply keyboard — shown on /start and after completing actions ──────────────
 const KB = {
-  STATS:    "⚡ STATS",
-  ACCOUNTS: "🗄 ACCOUNTS",
-  COPY:     "📋 COPY",
-  CHECKOUT: "🔗 CHECKOUT",
-  CREATE:   "🏗 CREATE",
-  MAIL:     "📧 MAIL",
-  MOVIES:   "🎬 MOVIES",
-  SHOP:     "🛒 SHOP",
-  PAYMENT:  "💳 PAYMENT",
+  STATS:    "⚡ Database Status",
+  ACCOUNTS: "🗄 Available Accounts",
+  COPY:     "📋 Copy Accounts",
+  CHECKOUT: "🔗 Checkout Link Generator",
+  CREATE:   "🏗 Create New Accounts",
+  MAIL:     "📧 Mail Generator",
+  MOVIES:   "🎬 Movies Server",
+  SHOP:     "🛒 Marketplace",
+  PAYMENT:  "💳 Payment Gateway",
 } as const;
 
 const MAIN_KEYBOARD = Markup.keyboard([
@@ -1589,15 +1589,15 @@ export function startTelegramBot(config: BotConfig) {
       `╔══[ ❓ HELP ]════════════════════════════╗\n` +
       `╚════════════════════════════════════════╝\n\n` +
       `▸ Use <b>/menu</b> to open the command panel\n\n` +
-      `<code>⚡ STATS     →  live account counts\n` +
-      `🗄 ACCOUNTS  →  browse by status\n` +
-      `📋 COPY      →  export credentials to chat\n` +
-      `🔗 CHECKOUT  →  generate Stripe links\n` +
-      `🏗 CREATE    →  spin up new accounts\n` +
-      `📧 MAIL      →  temporary email generator\n` +
-      `🎬 MOVIES    →  MoviesDrive scraper\n` +
-      `🛒 SHOP      →  shop admin panel\n` +
-      `💳 PAYMENT   →  payment methods & addresses</code>\n\n` +
+      `<code>⚡ Database Status          →  live account counts\n` +
+      `🗄 Available Accounts       →  browse by status\n` +
+      `📋 Copy Accounts            →  export credentials to chat\n` +
+      `🔗 Checkout Link Generator  →  generate Stripe links\n` +
+      `🏗 Create New Accounts      →  spin up new accounts\n` +
+      `📧 Mail Generator           →  temporary email generator\n` +
+      `🎬 Movies Server            →  MoviesDrive scraper\n` +
+      `🛒 Marketplace              →  shop admin panel\n` +
+      `💳 Payment Gateway          →  payment methods & addresses</code>\n\n` +
       `▸ /cancel — abort a running scan`,
       { parse_mode: "HTML" }
     );
