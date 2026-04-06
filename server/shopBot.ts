@@ -91,18 +91,19 @@ function stockLine(stock: number): string {
 
 // ── Main reply keyboard ──────────────────────────────────────────────────────
 const BTN = {
-  ACCOUNTS:  "🛍 // ACCOUNTS",
-  BALANCE:   "💰 // BALANCE",
-  ORDERS:    "📦 // MY ORDERS",
-  DEPOSIT:   "➕ // DEPOSIT",
-  IDENTITY:  "🪪 // MY ID",
-  SUPPORT:   "💬 // SUPPORT",
+  ACCOUNTS:  "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
+  BALANCE:   "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
+  ORDERS:    "📦  𝗢𝗥𝗗𝗘𝗥𝗦",
+  DEPOSIT:   "➕  𝗔𝗗𝗗  𝗙𝗨𝗡𝗗𝗦",
+  IDENTITY:  "🪪  𝗠𝗬  𝗣𝗥𝗢𝗙𝗜𝗟𝗘",
+  SUPPORT:   "💬  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
 } as const;
 
 const SHOP_KEYBOARD = Markup.keyboard([
-  [BTN.ACCOUNTS,  BTN.BALANCE],
-  [BTN.ORDERS,    BTN.DEPOSIT],
-  [BTN.IDENTITY,  BTN.SUPPORT],
+  [BTN.ACCOUNTS],
+  [BTN.BALANCE,   BTN.ORDERS],
+  [BTN.DEPOSIT,   BTN.SUPPORT],
+  [BTN.IDENTITY],
 ]).resize();
 
 // ── Per-user state ───────────────────────────────────────────────────────────
