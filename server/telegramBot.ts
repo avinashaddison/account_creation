@@ -297,24 +297,25 @@ function statusEmoji(s: string) {
 
 // ── Reply keyboard — shown on /start and after completing actions ──────────────
 const KB = {
-  STATS:    "📊 Database Status",
-  ACCOUNTS: "🔑 Available Accounts",
-  COPY:     "📤 Copy Accounts",
-  CHECKOUT: "🛒 Checkout Link",
-  CREATE:   "🤖 Create Accounts",
-  MAIL:     "📮 Mail Generator",
-  MOVIES:   "🎥 Movies Server",
-  SHOP:     "🏪 Marketplace",
-  PAYMENT:  "💎 Payment Gateway",
-  ADDRESS:  "🏠 Fake US Address",
+  STATS:    "📡  𝗗𝗔𝗧𝗔𝗕𝗔𝗦𝗘",
+  ACCOUNTS: "🔑  𝗔𝗖𝗖𝗢𝗨𝗡𝗧𝗦",
+  COPY:     "📋  𝗖𝗢𝗣𝗬",
+  CHECKOUT: "🛒  𝗖𝗛𝗘𝗖𝗞𝗢𝗨𝗧",
+  CREATE:   "⚡  𝗖𝗥𝗘𝗔𝗧𝗘  𝗔𝗖𝗖𝗢𝗨𝗡𝗧𝗦",
+  MAIL:     "📬  𝗠𝗔𝗜𝗟  𝗚𝗘𝗡",
+  MOVIES:   "🎬  𝗠𝗢𝗩𝗜𝗘𝗦",
+  SHOP:     "🛍  𝗦𝗛𝗢𝗣",
+  PAYMENT:  "💳  𝗣𝗔𝗬𝗠𝗘𝗡𝗧",
+  ADDRESS:  "📍  𝗔𝗗𝗗𝗥𝗘𝗦𝗦",
 } as const;
 
 const MAIN_KEYBOARD = Markup.keyboard([
+  [KB.CREATE],
   [KB.STATS,    KB.ACCOUNTS],
   [KB.COPY,     KB.CHECKOUT],
-  [KB.CREATE,   KB.MAIL],
-  [KB.MOVIES,   KB.SHOP],
-  [KB.PAYMENT,  KB.ADDRESS],
+  [KB.MAIL,     KB.MOVIES],
+  [KB.SHOP,     KB.PAYMENT],
+  [KB.ADDRESS],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
