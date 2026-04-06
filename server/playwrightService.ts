@@ -11014,8 +11014,36 @@ export async function registerReplitAccount(
 
     await page.waitForTimeout(600);
 
-    // ── Check if username is already visible (single-step form) ──────────────
-    const usernameSelectors = ['input[name="username"]', 'input[placeholder*="username" i]', 'input[id*="username" i]', 'input[autocomplete="username"]'];
+    // ── Helper: dump all visible inputs for debugging ─────────────────────────
+    const dumpVisibleInputs = async (label: string) => {
+      try {
+        const inputs = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('input')).map(el => ({
+            name: el.name, type: el.type, placeholder: el.placeholder,
+            id: el.id, autocomplete: el.autocomplete,
+            visible: el.offsetParent !== null && el.style.display !== 'none',
+          })).filter(i => i.visible);
+        });
+        log(`[${label}] Visible inputs: ${JSON.stringify(inputs)}`);
+        const btns = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('button')).map(el => ({
+            text: el.innerText.trim().substring(0, 40), type: el.type,
+            visible: el.offsetParent !== null && el.style.display !== 'none',
+          })).filter(b => b.visible);
+        });
+        log(`[${label}] Visible buttons: ${JSON.stringify(btns)}`);
+      } catch {}
+    };
+
+    await dumpVisibleInputs("after-email-fill");
+
+    // ── Check if a username field is visible (some Replit form variants show it) ──
+    const usernameSelectors = [
+      'input[name="username"]', 'input[name="handle"]', 'input[name="login"]',
+      'input[placeholder*="username" i]', 'input[placeholder*="handle" i]',
+      'input[id*="username" i]', 'input[id*="handle" i]',
+      'input[autocomplete="username"]',
+    ];
     const isUsernameVisible = async () => {
       for (const sel of usernameSelectors) {
         try {
@@ -11028,24 +11056,7 @@ export async function registerReplitAccount(
 
     let usernameField = await isUsernameVisible();
 
-    // ── If no username yet, click Continue/Next to reach step 2 ─────────────
-    if (!usernameField) {
-      log("Username field not visible — clicking Continue to advance to next step...");
-      const advanced = await clickNonOauthButton(["Get started"]);
-      if (advanced) {
-        // Wait for the next form step to render
-        try {
-          await page.waitForSelector(usernameSelectors.join(", "), { timeout: 10000, state: "visible" });
-          log("Username field appeared after step advance");
-        } catch {
-          log("⚠️ Username field still not visible after 10s — proceeding anyway");
-          await page.waitForTimeout(3000);
-        }
-        usernameField = await isUsernameVisible();
-      }
-    }
-
-    // ── Fill username ────────────────────────────────────────────────────────
+    // ── Fill username only if it's present (current Replit form has no username field) ──
     let usernameFilled = false;
     if (usernameField) {
       try {
@@ -11057,8 +11068,9 @@ export async function registerReplitAccount(
           usernameFilled = true;
         }
       } catch {}
+    } else {
+      log("No username field on form — Replit will auto-assign username after signup");
     }
-    if (!usernameFilled) log("⚠️ Could not find username field — form may be email-only step");
     await page.waitForTimeout(500);
 
     // ── Fill password ────────────────────────────────────────────────────────
@@ -11078,6 +11090,41 @@ export async function registerReplitAccount(
     }
     if (!passwordFilled) log("⚠️ Could not find password field");
     await page.waitForTimeout(500);
+
+    // ── Detect & solve Cloudflare Turnstile before submit ────────────────────
+    const turnstileSitekey = await page.evaluate(() => {
+      const html = document.documentElement.innerHTML;
+      // Look for explicit sitekey attr on cf-turnstile element
+      const el = document.querySelector('[data-sitekey]');
+      if (el) return el.getAttribute('data-sitekey');
+      // Fallback: scan raw HTML for sitekey pattern
+      const m = html.match(/["']?sitekey["']?\s*[:=]\s*["']([0-9A-Za-z_\-]{20,60})["']/);
+      return m ? m[1] : null;
+    }).catch(() => null);
+
+    if (turnstileSitekey) {
+      log(`Detected Cloudflare Turnstile (sitekey: ${turnstileSitekey}) — solving with CapSolver...`);
+      try {
+        const tsResult = await solveAntiTurnstile("https://replit.com/signup", turnstileSitekey);
+        if (tsResult.success && tsResult.token) {
+          log(`✅ Turnstile solved — injecting token (len: ${tsResult.token.length})`);
+          await page.evaluate((token: string) => {
+            document.querySelectorAll('input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]')
+              .forEach((el: any) => { el.value = token; });
+            const cbs: any[] = (window as any).__pendingTsCallbacks || [];
+            cbs.forEach((cb: any) => { try { cb(token); } catch {} });
+            (window as any).__pendingTsCallbacks = [];
+          }, tsResult.token);
+          await page.waitForTimeout(1500);
+        } else {
+          log(`⚠️ Turnstile solve failed: ${tsResult.error || "unknown"} — proceeding anyway`);
+        }
+      } catch (tsErr: any) {
+        log(`⚠️ Turnstile error: ${tsErr.message} — proceeding anyway`);
+      }
+    } else {
+      log("No Turnstile sitekey detected — submitting directly");
+    }
 
     // ── Submit form (Create Account) ─────────────────────────────────────────
     log("Submitting signup form...");
