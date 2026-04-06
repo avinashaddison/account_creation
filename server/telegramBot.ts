@@ -8,6 +8,11 @@ import {
   createBizMailForwarder, listBizMailForwarders,
   pollBizMailViaGmail, getGmailAddress, type BizMailMessage,
 } from "./mailService";
+import {
+  pendingActivations, adminApprovalStates,
+  startActivationCountdown,
+  ACTIVATION_LABEL, ACTIVATION_EMOJI,
+} from "./activationStore";
 
 const SERVER_PORT = process.env.PORT || 5000;
 const BASE_URL = `http://localhost:${SERVER_PORT}`;
@@ -123,7 +128,8 @@ interface BizMailSession {
 interface ShopAdminFlow {
   step?: "name" | "description" | "price" | "account_type" | "status_filter"
        | "topup_uid" | "topup_amount"
-       | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter";
+       | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter"
+       | "activation_time";
   name?: string;
   description?: string;
   price?: string;
@@ -131,6 +137,7 @@ interface ShopAdminFlow {
   statusFilter?: string;
   topupUid?: number;
   editProductId?: string;
+  activationOrderId?: string;
 }
 interface UserState {
   lastCopiedIds?: string[];
@@ -2886,6 +2893,38 @@ export function startTelegramBot(config: BotConfig) {
     );
   });
 
+  // ── Activation order approval from admin ─────────────────────────────────
+  bot.action(/^approve_act_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid     = ctx.from.id;
+    const orderId = (ctx.match as RegExpExecArray)[1];
+    const pending = pendingActivations.get(orderId);
+
+    if (!pending) {
+      return ctx.reply(
+        `\n🔷 <b>ACTIVATION ORDER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `⚠️ Order <code>${orderId}</code> not found.\n` +
+        `It may have already been processed or expired.`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    const emoji = ACTIVATION_EMOJI[pending.service];
+    const name  = ACTIVATION_LABEL[pending.service];
+
+    getState(uid).shopAdminFlow = { step: "activation_time", activationOrderId: orderId };
+
+    await ctx.reply(
+      `\n🔷 <b>APPROVE ACTIVATION</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${emoji} <b>${name}</b>\n` +
+      `📧 <code>${pending.email}</code>\n` +
+      `👤 User ID: <code>${pending.userId}</code>\n\n` +
+      `› How many <b>minutes</b> will this take?\n` +
+      `<i>e.g. type  2  for 2 minutes</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── Text message handler ──────────────────────────────────────────────────
   bot.on("text", async (ctx) => {
     const uid = ctx.from.id;
@@ -2895,6 +2934,39 @@ export function startTelegramBot(config: BotConfig) {
     // ── Shop admin multi-step text flows ─────────────────────────────────
     if (st.shopAdminFlow?.step) {
       const flow = st.shopAdminFlow;
+
+      // Activation time approval
+      if (flow.step === "activation_time") {
+        const mins = parseInt(text, 10);
+        if (isNaN(mins) || mins < 1 || mins > 120) {
+          return ctx.reply(`🔴  Enter a valid number of minutes (1–120):`, { parse_mode: "HTML" });
+        }
+        const orderId = flow.activationOrderId ?? "";
+        const pending = pendingActivations.get(orderId);
+        st.shopAdminFlow = undefined;
+
+        if (!pending) {
+          return ctx.reply(`⚠️ Order not found or already handled.`, { parse_mode: "HTML" });
+        }
+
+        const shopBotToken = process.env.TELEGRAM_BOT_TOKEN_2;
+        if (!shopBotToken) {
+          return ctx.reply(`⚠️ Shop bot token not configured.`, { parse_mode: "HTML" });
+        }
+
+        const emoji = ACTIVATION_EMOJI[pending.service];
+        const name  = ACTIVATION_LABEL[pending.service];
+
+        await ctx.reply(
+          `✅ <b>Approved!</b> Starting ${mins}-minute countdown for ${name} activation of <code>${pending.email}</code>.`,
+          { parse_mode: "HTML" }
+        );
+
+        startActivationCountdown(shopBotToken, pending, mins).catch((e) =>
+          console.error("[TelegramBot] Countdown error:", e.message)
+        );
+        return;
+      }
 
       if (flow.step === "name") {
         flow.name = text;

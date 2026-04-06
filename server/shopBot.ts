@@ -1,5 +1,11 @@
 import { Telegraf, Markup } from "telegraf";
 import { Pool, PoolClient } from "pg";
+import {
+  pendingActivations, adminApprovalStates as _adminApprovalStates,
+  buildActivationCountdownMsg,
+  type PendingActivation, type ActivationService,
+  ACTIVATION_LABEL, ACTIVATION_EMOJI,
+} from "./activationStore";
 
 const SUPPORT_CONTACT = "@avinashaddison";
 
@@ -119,101 +125,16 @@ function getState(uid: number): ShopUserState {
   return userState.get(uid)!;
 }
 
-type ActivationService = "chatgpt_plus" | "replit_core";
 interface ActivationFlow {
   service:  ActivationService;
   step:     "waiting_email" | "waiting_password" | "confirm";
   email?:   string;
   password?: string;
-  promptMsgId?: number; // message to delete when done collecting
+  promptMsgId?: number;
 }
 const activationFlows = new Map<number, ActivationFlow>();
 
 const ACTIVATION_PRICE = 2.00;
-const ACTIVATION_LABEL: Record<ActivationService, string> = {
-  chatgpt_plus: "ChatGPT Plus",
-  replit_core:  "Replit Core",
-};
-const ACTIVATION_EMOJI: Record<ActivationService, string> = {
-  chatgpt_plus: "🤖",
-  replit_core:  "🔵",
-};
-
-// ── Countdown helpers ─────────────────────────────────────────────────────────
-function progressBar(pct: number, width = 18): string {
-  const filled = Math.min(width, Math.round((pct / 100) * width));
-  return "▓".repeat(filled) + "░".repeat(width - filled);
-}
-function timeStr(secs: number): string {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-function buildCountdownMsg(
-  service: ActivationService,
-  email: string,
-  secsLeft: number,
-  newBalance: number,
-  done: boolean
-): string {
-  const emoji = ACTIVATION_EMOJI[service];
-  const name  = ACTIVATION_LABEL[service];
-  const TOTAL = 300;
-  const elapsed = TOTAL - secsLeft;
-  const pct   = Math.min(100, Math.round((elapsed / TOTAL) * 100));
-  const bar   = progressBar(pct);
-  if (done) {
-    return (
-      `${emoji} <b>${name} — Activated!</b>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📧 <code>${escHtml(email)}</code>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  <b>100%</b>\n\n` +
-      `✅ <b>Activation Complete!</b>\n` +
-      `<i>${name} has been applied to your account.</i>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `💰 Balance: <b>${fmt$(newBalance)}</b>\n` +
-      `💬 Issues? ${escHtml(SUPPORT_CONTACT)}`
-    );
-  }
-  return (
-    `${emoji} <b>${name} — Activating…</b>\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `📧 <code>${escHtml(email)}</code>\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `${bar}  <b>${pct}%</b>\n` +
-    `⏳ <b>${timeStr(secsLeft)}</b> remaining\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `💰 Balance: <b>${fmt$(newBalance)}</b>\n` +
-    `🔄 <i>Upgrading your account…</i>\n` +
-    `💬 ${escHtml(SUPPORT_CONTACT)}`
-  );
-}
-
-async function startCountdown(
-  botRef: any,
-  chatId: number,
-  msgId: number,
-  service: ActivationService,
-  email: string,
-  newBalance: number
-) {
-  const TOTAL    = 300;
-  const TICK_MS  = 30_000;
-  let secsLeft   = TOTAL;
-
-  const timer = setInterval(async () => {
-    secsLeft -= 30;
-    const done = secsLeft <= 0;
-    const text = buildCountdownMsg(service, email, Math.max(0, secsLeft), newBalance, done);
-    try {
-      await botRef.telegram.editMessageText(chatId, msgId, undefined, truncate(text), {
-        parse_mode: "HTML",
-      });
-    } catch {}
-    if (done) clearInterval(timer);
-  }, TICK_MS);
-}
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
 async function upsertCustomer(uid: number, username?: string, firstName?: string) {
@@ -1106,9 +1027,29 @@ export function startShopBot(token: string) {
     const emoji   = ACTIVATION_EMOJI[service];
     const name    = ACTIVATION_LABEL[service];
 
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    const balance = await getBalance(uid);
+    if (balance < ACTIVATION_PRICE) {
+      const shortfall = (ACTIVATION_PRICE - balance).toFixed(2);
+      return safeEdit(ctx,
+        `💳 <b>Insufficient Funds</b>\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `${emoji} <b>${name} Activation</b>\n` +
+        `💵 Required: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>  ·  Balance: <b>${fmt$(balance)}</b>\n` +
+        `⚠️ Need <b>$${shortfall}</b> more to proceed`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+            [Markup.button.callback("◀  Back", "act_back")],
+          ]),
+        }
+      );
+    }
+
     activationFlows.set(uid, { service, step: "waiting_email" });
 
-    const msg = await safeEdit(ctx,
+    await safeEdit(ctx,
       `${emoji} <b>${name} — Activate at my Mail</b>\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `📧 <b>Step 1 of 2 — Email</b>\n\n` +
@@ -1311,17 +1252,53 @@ export function startShopBot(token: string) {
 
     activationFlows.delete(uid);
 
-    // Grab identifiers BEFORE editing (message_id stays the same after edit)
+    // Grab identifiers for the waiting message
     const chatId = ctx.chat?.id ?? ctx.callbackQuery?.message?.chat?.id;
     const msgId  = ctx.callbackQuery?.message?.message_id;
 
-    // Show initial countdown message
-    const initMsg = buildCountdownMsg(service, email, 300, newBalance, false);
-    await safeEdit(ctx, initMsg, { parse_mode: "HTML" });
+    const orderId = String(Date.now()) + "_" + uid;
+    const emoji   = ACTIVATION_EMOJI[service];
+    const name    = ACTIVATION_LABEL[service];
 
-    // Start background countdown using the same message
+    // Show "waiting for admin" message
+    const waitingText =
+      `${emoji} <b>${name} — Order Placed!</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 <code>${escHtml(email)}</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `⏳ <b>Your order is being processed…</b>\n` +
+      `Our team has been notified and will begin activation shortly.\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `💰 Balance: <b>${fmt$(newBalance)}</b>\n` +
+      `💬 Support: @avinashaddison`;
+    await safeEdit(ctx, waitingText, { parse_mode: "HTML" });
+
+    // Save pending activation so admin bot can start countdown when approved
     if (chatId && msgId) {
-      startCountdown(bot, chatId, msgId, service, email, newBalance).catch(() => {});
+      pendingActivations.set(orderId, { orderId, userId: uid, chatId, msgId, service, email, newBalance });
+    }
+
+    // Notify admin bot users
+    const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+    const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+    if (adminToken && adminIds.length > 0) {
+      const notifText =
+        `📦 <b>NEW ACTIVATION ORDER</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `${emoji} <b>Service:</b> ${name}\n` +
+        `📧 <b>Email:</b> <code>${escHtml(email)}</code>\n` +
+        `🔑 <b>Password:</b> <code>${escHtml(password)}</code>\n` +
+        `👤 <b>User ID:</b> <code>${uid}</code>\n` +
+        `🆔 <b>Order ID:</b> <code>${orderId}</code>\n\n` +
+        `Tap <b>Approve</b> to start activation and set completion time.`;
+      const keyboard = { inline_keyboard: [[{ text: "✅  Approve + Set Time", callback_data: `approve_act_${orderId}` }]] };
+      for (const adminId of adminIds) {
+        await fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: adminId, text: notifText, parse_mode: "HTML", reply_markup: keyboard }),
+        }).catch((e) => console.error("[ShopBot] admin notify error:", e.message));
+      }
     }
   });
 
