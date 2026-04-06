@@ -852,6 +852,24 @@ export async function createBizMailAccount(opts: {
     throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
 
+  // ── Auto-recycle: if at capacity (≥10 active), delete the 5 oldest ────────
+  const ACTIVE_CAP   = 10;
+  const RECYCLE_COUNT = 5;
+  const active = await storage.getActiveBizMailAccounts();
+  if (active.length >= ACTIVE_CAP) {
+    const toDelete = await storage.getOldestActiveBizMailAccounts(RECYCLE_COUNT);
+    console.log(`[BizMail] At capacity (${active.length}/${ACTIVE_CAP}) — recycling ${toDelete.length} oldest accounts`);
+    for (const acct of toDelete) {
+      try {
+        await deleteBizMailAccount(acct.email);
+        await storage.markBizMailDeletedByEmail(acct.email);
+        console.log(`[BizMail] Recycled ${acct.email}`);
+      } catch (e: any) {
+        console.warn(`[BizMail] Recycle error for ${acct.email}: ${e.message}`);
+      }
+    }
+  }
+
   // ── Auto-increment: loop past any slots that already exist on the server ─
   const MAX_SKIP = 50; // safety guard against infinite loops
   for (let skip = 0; skip < MAX_SKIP; skip++) {

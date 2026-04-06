@@ -135,7 +135,7 @@ interface ShopAdminFlow {
 }
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username";
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
@@ -1239,6 +1239,7 @@ export function startTelegramBot(config: BotConfig) {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📨 Temp Mail", "mail_temp"), Markup.button.callback("💼 Business Mail", "biz_mail_new")],
+          [Markup.button.callback("♻️ Restore Biz Mail", "biz_mail_restore")],
         ]),
       }
     );
@@ -1369,6 +1370,35 @@ export function startTelegramBot(config: BotConfig) {
       `Example: type <code>john</code> to create <code>john@addison.asia</code>\n` +
       `Or type <code>myshop</code> to get <code>myshop@addison.asia</code>\n\n` +
       `<i>Allowed: letters, numbers, dots (.), hyphens (-), underscores (_)</i>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+  });
+
+  // ── Restore deleted biz mail account ─────────────────────────────────────
+  bot.action("biz_mail_restore", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const { storage } = await import("./storage");
+    const deleted = await storage.getDeletedBizMailAccounts();
+    if (deleted.length === 0) {
+      await bot.telegram.sendMessage(chatId,
+        `♻️ <b>No deleted biz mail accounts</b>\n\nAll accounts are currently active.`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+      return;
+    }
+    const list = deleted.slice(0, 20).map((a, i) => {
+      const label = a.accountNum ? `account${a.accountNum}` : a.email.split("@")[0];
+      const when = a.deletedAt ? new Date(a.deletedAt).toLocaleDateString() : "?";
+      return `${i + 1}. <code>${esc(label)}</code> — deleted ${when}`;
+    }).join("\n");
+    getState(uid).awaitingText = "biz_mail_restore_username";
+    await bot.telegram.sendMessage(chatId,
+      `♻️ <b>Restore a Biz Mail Account</b>\n\n` +
+      `<b>Deleted accounts:</b>\n${list}\n\n` +
+      `Type the username you want to restore (or any custom name).\n` +
+      `Example: <code>account1</code> or <code>myshop</code>`,
       { parse_mode: "HTML" }
     ).catch(() => {});
   });
@@ -3139,6 +3169,44 @@ export function startTelegramBot(config: BotConfig) {
         return;
       }
       await startBizMailSession(ctx.chat!.id, uid, { customUsername: raw });
+      return;
+    }
+
+    if (st.awaitingText === "biz_mail_restore_username") {
+      st.awaitingText = undefined;
+      const raw = text.trim().replace(/@.*$/, "").toLowerCase().replace(/[^a-z0-9._-]/g, "");
+      if (!raw) {
+        await ctx.reply("⚠️ Invalid username. Use letters, numbers, dots, hyphens, or underscores only.").catch(() => {});
+        return;
+      }
+      const chatId = ctx.chat!.id;
+      const loadMsg = await bot.telegram.sendMessage(chatId,
+        `⏳ Restoring <code>${esc(raw)}@addison.asia</code>…`,
+        { parse_mode: "HTML" }
+      ).catch(() => undefined);
+      try {
+        const { createBizMailAccount, ensureBizMailJmapRouting } = await import("./mailService");
+        const result = await createBizMailAccount({ customUsername: raw });
+        await ensureBizMailJmapRouting(result.email).catch(() => {});
+        const label = result.accountNum ? `account${result.accountNum}` : raw;
+        const msg =
+          `✅ <b>Biz Mail Restored!</b>\n\n` +
+          `📧 <code>${esc(result.email)}</code>\n` +
+          `🔑 <code>${esc(result.password)}</code>\n` +
+          `🏷 ${label}`;
+        if (loadMsg) {
+          await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined, msg, { parse_mode: "HTML" }).catch(() => {});
+        } else {
+          await bot.telegram.sendMessage(chatId, msg, { parse_mode: "HTML" }).catch(() => {});
+        }
+      } catch (err: any) {
+        const errMsg = `❌ Restore failed: ${esc(err.message || "Unknown error")}`;
+        if (loadMsg) {
+          await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined, errMsg, { parse_mode: "HTML" }).catch(() => {});
+        } else {
+          await bot.telegram.sendMessage(chatId, errMsg, { parse_mode: "HTML" }).catch(() => {});
+        }
+      }
       return;
     }
   });

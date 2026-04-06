@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { users, accounts, billingRecords, paymentRequests, settings, tempEmails, privateOutlookAccounts, privateZenrowsKeys, privateGmailAccounts, tmTrackedEvents, tmAlerts, replitAccounts, lovableAccounts, v0Accounts, savedCards, adobeAccounts, elevenLabsAccounts, chatgptAccounts, bizMailAccounts } from "@shared/schema";
 import type { User, InsertUser, Account, InsertAccount, BillingRecord, InsertBilling, PaymentRequest, InsertPaymentRequest, TempEmail, InsertTempEmail, PrivateOutlookAccount, InsertPrivateOutlook, PrivateZenrowsKey, InsertPrivateZenrowsKey, PrivateGmailAccount, InsertPrivateGmail, TmTrackedEvent, InsertTmTrackedEvent, TmAlert, InsertTmAlert, ReplitAccount, InsertReplitAccount, LovableAccount, InsertLovableAccount, V0Account, InsertV0Account, SavedCard, InsertSavedCard, AdobeAccount, InsertAdobeAccount, ElevenLabsAccount, InsertElevenLabsAccount, ChatGptAccount, InsertChatGptAccount, BizMailAccount } from "@shared/schema";
-import { eq, desc, sql, count, and, or, inArray } from "drizzle-orm";
+import { eq, desc, sql, count, and, or, inArray, isNull, isNotNull } from "drizzle-orm";
 import pg from "pg";
 
 export interface IStorage {
@@ -111,6 +111,9 @@ export interface IStorage {
   markBizMailDeletedByEmail(email: string): Promise<void>;
   reactivateBizMailAccount(accountNum: number, password: string): Promise<void>;
   reactivateBizMailAccountByEmail(email: string, password: string): Promise<void>;
+  getDeletedBizMailAccounts(): Promise<BizMailAccount[]>;
+  getActiveBizMailAccounts(): Promise<BizMailAccount[]>;
+  getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -730,6 +733,25 @@ export class DatabaseStorage implements IStorage {
     await db.update(bizMailAccounts)
       .set({ isActive: true, deletedAt: null, password })
       .where(eq(bizMailAccounts.email, email));
+  }
+
+  async getDeletedBizMailAccounts(): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(isNotNull(bizMailAccounts.deletedAt))
+      .orderBy(desc(bizMailAccounts.deletedAt));
+  }
+
+  async getActiveBizMailAccounts(): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(isNull(bizMailAccounts.deletedAt))
+      .orderBy(bizMailAccounts.createdAt);
+  }
+
+  async getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(isNull(bizMailAccounts.deletedAt))
+      .orderBy(bizMailAccounts.createdAt)
+      .limit(limit);
   }
 }
 
