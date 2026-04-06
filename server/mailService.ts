@@ -873,7 +873,7 @@ export async function createBizMailAccount(opts: {
   }
 
   // ── Auto-increment: loop past any slots that already exist on the server ─
-  const MAX_SKIP = 50; // safety guard against infinite loops
+  const MAX_SKIP = 500; // safety guard against infinite loops
   for (let skip = 0; skip < MAX_SKIP; skip++) {
     const password = genBizPassword();
 
@@ -927,7 +927,7 @@ export async function createBizMailAccount(opts: {
     throw new Error(json.details || json.detail || json.error || JSON.stringify(json));
   }
 
-  throw new Error("Could not find a free account slot after 50 attempts — server may be at capacity.");
+  throw new Error("Could not find a free account slot after 500 attempts — server may be at capacity.");
 }
 
 export async function deleteBizMailAccount(email: string): Promise<void> {
