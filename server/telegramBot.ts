@@ -306,6 +306,7 @@ const KB = {
   MAIL:     "📧 MAIL",
   MOVIES:   "🎬 MOVIES",
   SHOP:     "🛒 SHOP",
+  PAYMENT:  "💳 PAYMENT",
 } as const;
 
 const MAIN_KEYBOARD = Markup.keyboard([
@@ -313,6 +314,7 @@ const MAIN_KEYBOARD = Markup.keyboard([
   [KB.COPY,     KB.CHECKOUT],
   [KB.CREATE,   KB.MAIL],
   [KB.MOVIES,   KB.SHOP],
+  [KB.PAYMENT],
 ]).resize().oneTime();
 
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
@@ -1594,7 +1596,8 @@ export function startTelegramBot(config: BotConfig) {
       `🏗 CREATE    →  spin up new accounts\n` +
       `📧 MAIL      →  temporary email generator\n` +
       `🎬 MOVIES    →  MoviesDrive scraper\n` +
-      `🛒 SHOP      →  shop admin panel</code>\n\n` +
+      `🛒 SHOP      →  shop admin panel\n` +
+      `💳 PAYMENT   →  payment methods & addresses</code>\n\n` +
       `▸ /cancel — abort a running scan`,
       { parse_mode: "HTML" }
     );
@@ -2544,6 +2547,49 @@ export function startTelegramBot(config: BotConfig) {
   bot.hears(KB.SHOP, (ctx) => handleMenu(ctx, async () => {
     await showShopAdminMenu(ctx);
   }));
+
+  bot.hears(KB.PAYMENT, (ctx) => handleMenu(ctx, async () => {
+    const msg =
+      `╔══[ 💳 PAYMENT METHODS ]═════════════════╗\n` +
+      `╚════════════════════════════════════════╝\n\n` +
+      `✨ <b>Send payment to any method below</b>\n` +
+      `<i>Tap any address to copy instantly</i>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🟡  <b>BINANCE</b>\n` +
+      `<code>510120124</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💎  <b>USDT TRC20</b>\n` +
+      `<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🔷  <b>USDT BEP20</b>\n` +
+      `<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🇮🇳  <b>UPI (India)</b>\n` +
+      `<code>avinashaddison-8@okaxis</code>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💫  After payment, contact admin with screenshot`;
+    await ctx.replyWithHTML(msg, {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🟡 Binance · 510120124", "pay_copy_binance")],
+        [Markup.button.callback("💎 USDT TRC20", "pay_copy_trc20")],
+        [Markup.button.callback("🔷 USDT BEP20", "pay_copy_bep20")],
+        [Markup.button.callback("🇮🇳 UPI India", "pay_copy_upi")],
+      ]),
+    });
+  }));
+
+  bot.action("pay_copy_binance", async (ctx) => {
+    await ctx.answerCbQuery("🟡 Binance ID copied! → 510120124", { show_alert: true });
+  });
+  bot.action("pay_copy_trc20", async (ctx) => {
+    await ctx.answerCbQuery("💎 TRC20 copied! → TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB", { show_alert: true });
+  });
+  bot.action("pay_copy_bep20", async (ctx) => {
+    await ctx.answerCbQuery("🔷 BEP20 copied! → 0x107fc554bba4cadd5c4e9f1e189d7dd93770202e", { show_alert: true });
+  });
+  bot.action("pay_copy_upi", async (ctx) => {
+    await ctx.answerCbQuery("🇮🇳 UPI copied! → avinashaddison-8@okaxis", { show_alert: true });
+  });
 
   bot.action("shop_admin_menu", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
