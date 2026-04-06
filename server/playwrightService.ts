@@ -10956,25 +10956,46 @@ export async function registerReplitAccount(
       log("⚠️ Form fields not found within 12s — attempting to fill anyway");
     }
 
+    // ── Helper: click a non-OAuth submit/continue button ──────────────────────
+    const clickNonOauthButton = async (extraLabels: string[] = []): Promise<boolean> => {
+      const oauthWords = ["google", "github", "apple", "facebook", "twitter", "x.com"];
+      const sels = [
+        'button[type="submit"]',
+        'button:has-text("Create Account")',
+        'button:has-text("Create account")',
+        'button:has-text("Sign Up")',
+        'button:has-text("Sign up")',
+        'button:has-text("Continue")',
+        'button:has-text("Next")',
+        ...extraLabels.map(l => `button:has-text("${l}")`),
+        'input[type="submit"]',
+      ];
+      for (const sel of sels) {
+        try {
+          const btns = await page.$$(sel);
+          for (const btn of btns) {
+            const txt = await btn.innerText().catch(() => "");
+            if (oauthWords.some(w => txt.toLowerCase().includes(w))) continue;
+            if (txt.trim().length === 0) continue;
+            const visible = await btn.isVisible().catch(() => false);
+            if (!visible) continue;
+            await btn.click();
+            log(`Clicked button: "${txt.substring(0, 40)}" (${sel})`);
+            return true;
+          }
+        } catch {}
+      }
+      return false;
+    };
+
+    // Capture timestamp BEFORE form submission — any verification email arriving
+    // after this point is for this account. (IMAP SINCE is date-only; we filter
+    // by envelope date in the Gmail poller for precision.)
+    const verifyEmailSince = new Date(Date.now() - 10_000);
+
     log("Filling signup form...");
-    const usernameSelectors = ['input[name="username"]', 'input[placeholder*="username" i]', 'input[id*="username" i]', 'input[autocomplete="username"]'];
-    let usernameFilled = false;
-    for (const sel of usernameSelectors) {
-      try {
-        const el = await page.$(sel);
-        if (el && await el.isVisible().catch(() => false)) {
-          await el.click({ clickCount: 3 });
-          await el.type(username, { delay: 40 });
-          log(`Typed username into ${sel}`);
-          usernameFilled = true;
-          break;
-        }
-      } catch {}
-    }
-    if (!usernameFilled) log("⚠️ Could not find username field");
 
-    await page.waitForTimeout(500);
-
+    // ── Step 1: Fill email ───────────────────────────────────────────────────
     const emailSelectors = ['input[name="email"]', 'input[type="email"]', 'input[placeholder*="email" i]', 'input[id*="email" i]'];
     let emailFilled = false;
     for (const sel of emailSelectors) {
@@ -10991,8 +11012,56 @@ export async function registerReplitAccount(
     }
     if (!emailFilled) log("⚠️ Could not find email field");
 
+    await page.waitForTimeout(600);
+
+    // ── Check if username is already visible (single-step form) ──────────────
+    const usernameSelectors = ['input[name="username"]', 'input[placeholder*="username" i]', 'input[id*="username" i]', 'input[autocomplete="username"]'];
+    const isUsernameVisible = async () => {
+      for (const sel of usernameSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (el && await el.isVisible().catch(() => false)) return sel;
+        } catch {}
+      }
+      return null;
+    };
+
+    let usernameField = await isUsernameVisible();
+
+    // ── If no username yet, click Continue/Next to reach step 2 ─────────────
+    if (!usernameField) {
+      log("Username field not visible — clicking Continue to advance to next step...");
+      const advanced = await clickNonOauthButton(["Get started"]);
+      if (advanced) {
+        // Wait for the next form step to render
+        try {
+          await page.waitForSelector(usernameSelectors.join(", "), { timeout: 10000, state: "visible" });
+          log("Username field appeared after step advance");
+        } catch {
+          log("⚠️ Username field still not visible after 10s — proceeding anyway");
+          await page.waitForTimeout(3000);
+        }
+        usernameField = await isUsernameVisible();
+      }
+    }
+
+    // ── Fill username ────────────────────────────────────────────────────────
+    let usernameFilled = false;
+    if (usernameField) {
+      try {
+        const el = await page.$(usernameField);
+        if (el) {
+          await el.click({ clickCount: 3 });
+          await el.type(username, { delay: 40 });
+          log(`Typed username into ${usernameField}`);
+          usernameFilled = true;
+        }
+      } catch {}
+    }
+    if (!usernameFilled) log("⚠️ Could not find username field — form may be email-only step");
     await page.waitForTimeout(500);
 
+    // ── Fill password ────────────────────────────────────────────────────────
     const passwordSelectors = ['input[name="password"]', 'input[type="password"]', 'input[placeholder*="password" i]', 'input[id*="password" i]'];
     let passwordFilled = false;
     for (const sel of passwordSelectors) {
@@ -11008,46 +11077,13 @@ export async function registerReplitAccount(
       } catch {}
     }
     if (!passwordFilled) log("⚠️ Could not find password field");
-
     await page.waitForTimeout(500);
 
+    // ── Submit form (Create Account) ─────────────────────────────────────────
     log("Submitting signup form...");
-    const submitSelectors = [
-      'button[type="submit"]',
-      'button:has-text("Create Account")',
-      'button:has-text("Create account")',
-      'button:has-text("Sign Up")',
-      'button:has-text("Sign up")',
-      'button:has-text("Create my account")',
-      'button:has-text("Continue")',
-      'input[type="submit"]',
-    ];
-    let submitted = false;
-    for (const sel of submitSelectors) {
-      try {
-        const btns = await page.$$(sel);
-        for (const btn of btns) {
-          const txt = await btn.innerText().catch(() => "");
-          if (
-            txt.toLowerCase().includes("google") ||
-            txt.toLowerCase().includes("github") ||
-            txt.toLowerCase().includes("apple") ||
-            txt.toLowerCase().includes("facebook")
-          ) {
-            log(`Skipping OAuth button: "${txt.substring(0, 30)}"`);
-            continue;
-          }
-          if (txt.trim().length === 0) continue;
-          await btn.click();
-          log(`Clicked submit button "${txt.substring(0, 40)}" (${sel})`);
-          submitted = true;
-          break;
-        }
-        if (submitted) break;
-      } catch {}
-    }
+    const submitted = await clickNonOauthButton();
     if (!submitted) {
-      log("Trying Enter key to submit...");
+      log("No submit button found — trying Enter key...");
       await page.keyboard.press("Enter");
     }
 
@@ -11088,8 +11124,6 @@ export async function registerReplitAccount(
     } else {
       log(`Current URL after submit: ${currentUrl}`);
     }
-
-    const verifyEmailSince = new Date(Date.now() - 30_000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;

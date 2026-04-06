@@ -207,16 +207,31 @@ export async function pollGmailForReplitVerificationLink(
           log(`[Gmail] ${box}: found ${uids.length} Replit message(s) since ${since.toISOString()}`);
           if (uids.length === 0) continue;
 
-          for await (const msg of client.fetch(uids.join(","), { source: true }, { uid: true })) {
-            const raw = msg.source?.toString() || "";
-            // Try href-quoted link first (most reliable), then bare URL
+          for await (const msg of client.fetch(uids.join(","), { source: true, envelope: true }, { uid: true })) {
+            // IMAP SINCE is date-only (no time) — filter precisely by envelope date
+            const msgDate = msg.envelope?.date ? new Date(msg.envelope.date) : new Date(0);
+            if (msgDate < since) {
+              log(`[Gmail] Skipping old message dated ${msgDate.toISOString()} (before ${since.toISOString()})`);
+              continue;
+            }
+
+            let raw = msg.source?.toString() || "";
+            // Decode quoted-printable soft line breaks first (=\r\n or =\n means continuation)
+            raw = raw.replace(/=\r?\n/g, "");
+            // Decode quoted-printable hex escapes (=3D → =, =26 → &, etc.)
+            raw = raw.replace(/=([0-9A-Fa-f]{2})/g, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+
+            // Try href-quoted link first (works for HTML parts), then bare URL
             const m = raw.match(/href="(https?:\/\/[^"]*replit\.com[^"]*(?:verify|confirm|token)[^"]*)"/i)
-              || raw.match(/(https?:\/\/replit\.com\/verify[^\s"'<>\r\n)]+)/i)
-              || raw.match(/(https?:\/\/replit\.com\/[^\s"'<>\r\n)]*token=[^\s"'<>\r\n)]+)/i);
+              || raw.match(/href='(https?:\/\/[^']*replit\.com[^']*(?:verify|confirm|token)[^']*)'/i)
+              || raw.match(/(https?:\/\/replit\.com\/verify[^\s"'<>\r\n)[\]]+)/i)
+              || raw.match(/(https?:\/\/replit\.com\/[^\s"'<>\r\n)[\]]*(?:verify|confirm|token)=[^\s"'<>\r\n)[\]]+)/i);
             if (m) {
-              link = (m[1] || m[0]).replace(/&amp;/g, "&").replace(/=\r?\n/g, "=").trim();
+              link = (m[1] || m[0]).replace(/&amp;/g, "&").trim();
+              log(`[Gmail] Extracted link from message dated ${msgDate.toISOString()}`);
               break;
             }
+            log(`[Gmail] Message dated ${msgDate.toISOString()} — no link pattern matched`);
           }
         } finally {
           if (lock) lock.release();
