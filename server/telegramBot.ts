@@ -1259,6 +1259,26 @@ export function startTelegramBot(config: BotConfig) {
     return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   }
 
+  function genRealisticUsername(): string {
+    const first = ["james","john","robert","michael","william","david","richard","joseph","thomas","charles",
+      "emma","olivia","ava","isabella","sophia","mia","charlotte","amelia","harper","evelyn",
+      "noah","liam","mason","ethan","oliver","aiden","lucas","elijah","logan","jackson",
+      "emily","abigail","madison","chloe","grace","lily","zoey","claire","layla","natalie",
+      "daniel","matthew","samuel","henry","alexander","sebastian","jack","owen","ryan","nathan",
+      "sarah","hannah","brooklyn","aaliyah","alexa","savannah","anna","stella","victoria","aria"];
+    const last  = ["smith","johnson","williams","brown","jones","garcia","miller","davis","wilson","moore",
+      "taylor","anderson","thomas","jackson","white","harris","martin","thompson","young","lee",
+      "walker","allen","king","wright","scott","green","baker","adams","nelson","carter",
+      "mitchell","perez","roberts","turner","phillips","campbell","parker","evans","edwards","collins",
+      "stewart","morris","nguyen","rogers","reed","cook","morgan","bell","murphy","bailey"];
+    const sep   = [".", "_", ""][Math.floor(Math.random() * 3)];
+    const f     = first[Math.floor(Math.random() * first.length)];
+    const l     = last[Math.floor(Math.random() * last.length)];
+    // Occasionally add a short number suffix for uniqueness
+    const suffix = Math.random() < 0.45 ? String(Math.floor(Math.random() * 99) + 1) : "";
+    return `${f}${sep}${l}${suffix}`;
+  }
+
   async function startBizMailSession(chatId: number, uid: number, opts: {
     requestedNum?: number;
     customUsername?: string;
@@ -1285,8 +1305,8 @@ export function startTelegramBot(config: BotConfig) {
       username   = `account${opts.requestedNum}`;
       accountNum = opts.requestedNum;
     } else {
-      // Random account: pick next available number
-      username   = `account${Math.floor(Math.random() * 9000) + 1000}`;
+      // Generate a realistic-looking name
+      username   = genRealisticUsername();
       accountNum = null;
     }
 
