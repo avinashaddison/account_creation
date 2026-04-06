@@ -13074,7 +13074,7 @@ export async function registerLovableAccount(
     // ── BROWSER LAUNCH ────────────────────────────────────────────────────────
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    stealthChromium.use(StealthPlugin());
+    try { stealthChromium.use(StealthPlugin()); } catch {}
 
     let usingZenRows = false;
     let context: any;
@@ -14417,7 +14417,7 @@ export async function registerAdobeAccount(
 
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    stealthChromium.use(StealthPlugin());
+    try { stealthChromium.use(StealthPlugin()); } catch {}
 
     let context: any;
     if (zenrowsApiKey) {
@@ -15742,7 +15742,7 @@ export async function registerV0Account(
     log("Launching stealth browser with BRD residential proxy for v0.dev...");
     const { chromium: stealthChrm } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    stealthChrm.use(StealthPlugin());
+    try { stealthChrm.use(StealthPlugin()); } catch {}
 
     browser = await stealthChrm.launch({
       headless: true,
@@ -18673,7 +18673,7 @@ export async function warmReplitAccount(
     if (!usingZenRows) {
       const { chromium: wChromium } = await import("playwright-extra");
       const WStealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-      wChromium.use(WStealthPlugin());
+      try { wChromium.use(WStealthPlugin()); } catch {}
       browser = await wChromium.launch({
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
@@ -19033,7 +19033,7 @@ export async function generateSingleCheckoutLink(
 
       const { chromium: stealthChromium } = await import("playwright-extra");
       const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
-      stealthChromium.use(StealthPluginCls());
+      try { stealthChromium.use(StealthPluginCls()); } catch {}
       const glLaunchOptions: any = {
         headless: true,
         args: [
@@ -19770,7 +19770,7 @@ export async function checkReplitBanStatus(
       log(`⚠️ ZenRows unavailable — using local stealth browser`);
       const { chromium: stealthChromium } = await import("playwright-extra");
       const StealthPluginCls = (await import("puppeteer-extra-plugin-stealth")).default;
-      stealthChromium.use(StealthPluginCls());
+      try { stealthChromium.use(StealthPluginCls()); } catch {}
       browser = await stealthChromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
     }
 
@@ -20883,7 +20883,7 @@ export async function registerChatGptAccount(
   try {
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    stealthChromium.use(StealthPlugin());
+    try { stealthChromium.use(StealthPlugin()); } catch {}
 
     // Proxy selection: Apify (primary) → SOAX (fallback) → nsocks (last resort)
     let proxyConfig: any = undefined;
@@ -21609,7 +21609,7 @@ export async function registerChatGptAccountViaBizMail(
   try {
     const { chromium: stealthChromium } = await import("playwright-extra");
     const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    stealthChromium.use(StealthPlugin());
+    try { stealthChromium.use(StealthPlugin()); } catch {}
 
     // Proxy selection: Apify → SOAX → nsocks
     let proxyConfig: any = undefined;
