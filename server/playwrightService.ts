@@ -21718,7 +21718,9 @@ export async function registerChatGptAccountViaBizMail(
     await waitMs(500);
 
     const continueSelectors = ['button[type="submit"]','button:has-text("Continue")','[data-action-button-primary="true"]'];
+    let emailContinueClicked = false;
     for (const sel of continueSelectors) {
+      if (emailContinueClicked) break;
       const btns = await page.$$(sel).catch(() => [] as any[]);
       for (const btn of btns) {
         if (!await btn.isVisible().catch(() => false)) continue;
@@ -21726,6 +21728,7 @@ export async function registerChatGptAccountViaBizMail(
         if (txt.includes("google") || txt.includes("microsoft") || txt.includes("apple")) continue;
         await btn.click();
         log(`Clicked continue (email): "${txt.substring(0, 30) || "button"}"`);
+        emailContinueClicked = true;
         break;
       }
     }
@@ -21833,17 +21836,85 @@ export async function registerChatGptAccountViaBizMail(
         log(`Filled ${label}`); return;
       }
     };
-    await fillInput(['input[name="firstName"]','input[placeholder*="first" i]','#firstName'], firstName, "first name");
+
+    // Try separate first/last name first, then fall back to single full name field
+    const firstNameEl = await page.$('input[name="firstName"], input[placeholder*="first" i], #firstName').catch(() => null);
+    if (firstNameEl && await firstNameEl.isVisible().catch(() => false)) {
+      await firstNameEl.click({ clickCount: 3 }); await waitMs(150); await firstNameEl.type(firstName, { delay: 50 });
+      log(`Filled first name: ${firstName}`);
+      await waitMs(300);
+      await fillInput(['input[name="lastName"]','input[placeholder*="last" i]','#lastName'], lastName, "last name");
+    } else {
+      // OpenAI about-you page uses a single "Full name" field
+      const fullName = `${firstName} ${lastName}`;
+      await fillInput([
+        'input[name="name"]','input[name="fullName"]','input[name="full_name"]',
+        'input[placeholder*="full name" i]','input[placeholder*="your name" i]',
+        'input[aria-label*="name" i]',
+      ], fullName, `full name: ${fullName}`);
+    }
     await waitMs(300);
-    await fillInput(['input[name="lastName"]','input[placeholder*="last" i]','#lastName'], lastName, "last name");
-    await waitMs(300);
-    await fillInput(['input[name="birthday"]','input[type="date"]'], `${dobYear}-${dobMonth.padStart(2,"0")}-${dobDay.padStart(2,"0")}`, "birthday").catch(() => {});
-    const dobMonthSel = await page.$('select[name="birthMonth"], #birthMonth').catch(() => null);
-    if (dobMonthSel) await page.selectOption('select[name="birthMonth"], #birthMonth', dobMonth).catch(() => {});
-    const dobDaySel = await page.$('select[name="birthDay"], #birthDay').catch(() => null);
-    if (dobDaySel) await page.selectOption('select[name="birthDay"], #birthDay', dobDay).catch(() => {});
-    const dobYearSel = await page.$('select[name="birthYear"], #birthYear').catch(() => null);
-    if (dobYearSel) await page.selectOption('select[name="birthYear"], #birthYear', dobYear).catch(() => {});
+
+    // Birthday — OpenAI about-you uses React Aria DatePicker: hidden input[name="birthday"] + spinbutton UI
+    const mm = dobMonth.padStart(2, "0");
+    const dd = dobDay.padStart(2, "0");
+    const yy = dobYear;
+    let dobFilled = false;
+
+    // OpenAI about-you uses React Aria DatePicker: hidden input[name="birthday"] + spinbutton UI
+    // Strategy 1: Interact with the spinbutton UI (role="spinbutton" inputs for month/day/year)
+    try {
+      const monthSpin = await page.$('[role="spinbutton"][aria-label*="month" i], [role="spinbutton"]:first-child').catch(() => null);
+      if (monthSpin && await monthSpin.isVisible().catch(() => false)) {
+        await monthSpin.click(); await waitMs(100);
+        await monthSpin.type(mm, { delay: 50 }); await waitMs(150);
+        const daySpin = await page.$('[role="spinbutton"][aria-label*="day" i]').catch(() => null);
+        if (daySpin) { await daySpin.click(); await waitMs(100); await daySpin.type(dd, { delay: 50 }); await waitMs(150); }
+        const yearSpin = await page.$('[role="spinbutton"][aria-label*="year" i]').catch(() => null);
+        if (yearSpin) { await yearSpin.click(); await waitMs(100); await yearSpin.type(yy, { delay: 50 }); await waitMs(150); }
+        // Verify the hidden input got updated
+        const hiddenVal = await page.$eval('input[name="birthday"]', (el: HTMLInputElement) => el.value).catch(() => "");
+        log(`After spinbutton fill, hidden birthday value: "${hiddenVal}"`);
+        if (hiddenVal && !hiddenVal.includes(new Date().getFullYear().toString())) { dobFilled = true; log(`Filled birthday via spinbuttons: ${mm}/${dd}/${yy}`); }
+      }
+    } catch {}
+
+    // Strategy 2: Direct JS injection into the hidden input (React Aria pattern)
+    if (!dobFilled) {
+      const dobValue = `${yy}-${mm}-${dd}`;
+      const injected = await page.evaluate((dateStr: string) => {
+        const el = document.querySelector('input[name="birthday"]') as HTMLInputElement;
+        if (!el) return false;
+        // React/React Aria native value setter
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        if (nativeInputValueSetter) { nativeInputValueSetter.call(el, dateStr); }
+        else { el.value = dateStr; }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }, dobValue).catch(() => false);
+      if (injected) { log(`Injected birthday via JS: ${dobValue}`); dobFilled = true; }
+    }
+
+    // Strategy 3: Native date input visible
+    if (!dobFilled) {
+      const nativeDateEl = await page.$('input[type="date"]').catch(() => null);
+      if (nativeDateEl && await nativeDateEl.isVisible().catch(() => false)) {
+        await nativeDateEl.fill(`${yy}-${mm}-${dd}`).catch(() => {});
+        log(`Filled birthday (native date): ${yy}-${mm}-${dd}`); dobFilled = true;
+      }
+    }
+
+    if (!dobFilled) {
+      // Strategy 4: Select dropdowns
+      const dobMonthSel = await page.$('select[name="birthMonth"], #birthMonth, select[aria-label*="month" i]').catch(() => null);
+      if (dobMonthSel) { await page.selectOption('select[name="birthMonth"], #birthMonth', mm).catch(() => {}); dobFilled = true; }
+      const dobDaySel = await page.$('select[name="birthDay"], #birthDay').catch(() => null);
+      if (dobDaySel) { await page.selectOption('select[name="birthDay"], #birthDay', dd).catch(() => {}); }
+      const dobYearSel = await page.$('select[name="birthYear"], #birthYear').catch(() => null);
+      if (dobYearSel) { await page.selectOption('select[name="birthYear"], #birthYear', yy).catch(() => {}); }
+    }
+    if (!dobFilled) log(`⚠️ Could not fill birthday — trying to proceed`);
     await waitMs(500);
 
     // Final submit
@@ -21864,13 +21935,22 @@ export async function registerChatGptAccountViaBizMail(
     log(`Final URL: ${finalUrl.substring(0, 120)}`);
     log(`Final page: ${finalText.replace(/\s+/g, " ").substring(0, 300)}`);
 
+    const finalTextLower = finalText.toLowerCase();
     const isSuccess = finalUrl.includes("chatgpt.com") || finalUrl.includes("chat.openai.com") ||
-      finalText.toLowerCase().includes("you're all set") || finalText.toLowerCase().includes("welcome") ||
-      finalText.toLowerCase().includes("get started") || finalText.toLowerCase().includes("new chat");
+      finalTextLower.includes("you're all set") || finalTextLower.includes("welcome") ||
+      finalTextLower.includes("get started") || finalTextLower.includes("new chat");
+
+    const hasFormError = finalTextLower.includes("can't create an account") ||
+      finalTextLower.includes("cannot create an account") ||
+      finalTextLower.includes("please enter name") ||
+      (finalUrl.includes("about-you") && finalTextLower.includes("try again"));
 
     if (isSuccess) {
       log(`✅ ChatGPT account created — ${bizEmail}`);
       return { success: true, email: bizEmail, password, firstName, lastName };
+    }
+    if (hasFormError) {
+      throw new Error(`OpenAI about-you form rejected: ${finalText.replace(/\s+/g, " ").substring(0, 150)}`);
     }
     log(`⚠️ Could not confirm visually — assuming success after OTP was accepted`);
     return { success: true, email: bizEmail, password, firstName, lastName };
