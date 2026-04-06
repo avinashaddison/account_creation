@@ -1393,7 +1393,7 @@ export function startTelegramBot(config: BotConfig) {
       ).catch(() => {});
       return;
     }
-    const list = deleted.slice(0, 20).map((a, i) => {
+    const list = deleted.map((a, i) => {
       const label = a.accountNum ? `account${a.accountNum}` : a.email.split("@")[0];
       const when = a.deletedAt ? new Date(a.deletedAt).toLocaleDateString() : "?";
       return `${i + 1}. <code>${esc(label)}</code> — deleted ${when}`;
