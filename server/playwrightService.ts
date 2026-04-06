@@ -10958,7 +10958,7 @@ export async function registerReplitAccount(
 
     // ── Helper: click a non-OAuth submit/continue button ──────────────────────
     const clickNonOauthButton = async (extraLabels: string[] = []): Promise<boolean> => {
-      const oauthWords = ["google", "github", "apple", "facebook", "twitter", "x.com"];
+      const oauthWords = ["google", "github", "apple", "facebook", "twitter", "x.com", "with x", "with google", "with github", "with apple"];
       const sels = [
         'button[type="submit"]',
         'button:has-text("Create Account")',
