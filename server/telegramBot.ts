@@ -1420,9 +1420,12 @@ export function startTelegramBot(config: BotConfig) {
          Markup.button.callback("🆕 New Account", "biz_mail_new"),
          Markup.button.callback("✏️ Custom Name", "biz_mail_custom")],
       ]);
-      const recoverHint = (session.isCustom || session.accountNum === null)
-        ? `Or type <code>${username}</code> in chat to recreate it anytime.`
-        : `Or type <code>account${session.accountNum}</code> in chat to recreate it anytime.`;
+      // Only show "account${N}" recovery for legacy numbered mailboxes (account\d+@addison.asia).
+      // Human-name and custom accounts always recover by username.
+      const isLegacyNumbered = /^account\d+$/.test(username) && session.accountNum !== null;
+      const recoverHint = isLegacyNumbered
+        ? `Or type <code>account${session.accountNum}</code> in chat to recreate it anytime.`
+        : `Or type <code>${username}</code> in chat to recreate it anytime.`;
 
       await bot.telegram.editMessageText(session.chatId, session.statusMsgId, undefined,
         `💼 <b>Business Mail Stopped</b>\n\n` +
