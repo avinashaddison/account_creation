@@ -1017,10 +1017,32 @@ export async function createBizMailAccount(opts: {
     const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
 
     if (json.data && typeof json.data === "number") {
-      // Fresh account created successfully — accountNum=null, ordering via id/createdAt
+      // Server created the account — now assign account_num fresh from DB.
+      // Reading after the server call shrinks the concurrent-request race window.
+      // A small retry loop handles the rare case of two simultaneous creations.
       console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
-      await storage.registerBizMailAccount(null, email, password);
-      return { email, password, accountNum: null, isCustom: false, recycled };
+      let accountNum: number | null = null;
+      for (let dbRetry = 0; dbRetry < 5; dbRetry++) {
+        const fresh = await storage.getAllBizMailAccounts();
+        const nums  = fresh.map(a => a.accountNum).filter((n): n is number => n !== null);
+        const candidate = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
+        try {
+          await storage.registerBizMailAccount(candidate, email, password);
+          accountNum = candidate;
+          break;
+        } catch (err: any) {
+          const msg = (err.message || "").toLowerCase();
+          if (msg.includes("unique") || msg.includes("duplicate")) {
+            continue; // another request grabbed this number — try next
+          }
+          throw err;
+        }
+      }
+      if (accountNum === null) {
+        // Extremely rare: 5 consecutive races; fall back to null to avoid data loss
+        await storage.registerBizMailAccount(null, email, password);
+      }
+      return { email, password, accountNum, isCustom: false, recycled };
     }
 
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {

@@ -1285,7 +1285,7 @@ export function startTelegramBot(config: BotConfig) {
     if (gmailAddr) {
       const fwd = await createBizMailForwarder(
         email, gmailAddr, true,
-        isCustom ? `BizMail custom — ${email}` : `BizMail #${accountNum} → Telegram`,
+        (isCustom || accountNum === null) ? `BizMail — ${email}` : `BizMail #${accountNum} → Telegram`,
       ).catch(() => ({ success: false }));
       forwardingActive = fwd.success;
     }
