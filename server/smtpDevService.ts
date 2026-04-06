@@ -129,10 +129,11 @@ function parseFrom(raw: any): string {
 }
 
 function parseMsg(m: any): SmtpDevMessageDetail {
-  const html = m.html ?? m.body ?? m.htmlBody ?? "";
+  const rawHtml = m.html ?? m.body ?? m.htmlBody ?? "";
+  const html = typeof rawHtml === "string" ? rawHtml : "";
   const htmlStripped = html ? html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
-  const fallback = htmlStripped || (m.intro || "");
-  const text = m.text ?? m.textBody ?? fallback;
+  const rawText = m.text ?? m.textBody ?? "";
+  const text = (typeof rawText === "string" && rawText) ? rawText : (htmlStripped || String(m.intro || ""));
   return {
     id: String(m.id ?? ""),
     from: parseFrom(m.from),

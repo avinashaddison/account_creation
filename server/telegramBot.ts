@@ -129,6 +129,7 @@ interface BizMailSession {
   statusMsgId: number;
   chatId: number;
   receivedCount: number;
+  checkInbox: () => Promise<number>; // returns count of new messages found
 }
 
 interface ShopAdminFlow {
@@ -1329,6 +1330,7 @@ export function startTelegramBot(config: BotConfig) {
       [Markup.button.callback("🔄 New Account", "biz_mail_new"),
        Markup.button.callback("✏️ Custom Name", "biz_mail_custom"),
        Markup.button.callback("⏹ Stop & Delete", "biz_mail_stop")],
+      [Markup.button.callback("📬 Refresh Inbox", "biz_mail_refresh")],
     ]);
 
     const title = isCustom
@@ -1350,6 +1352,30 @@ export function startTelegramBot(config: BotConfig) {
       bizStatusCard, { parse_mode: "HTML", ...bizKeyboard }
     ).catch(() => {});
 
+    const seen = new Set<string>();
+
+    const checkInbox = async (): Promise<number> => {
+      let newCount = 0;
+      const msgs = await smtpDevInbox(accountId);
+      for (const msg of msgs) {
+        if (seen.has(msg.id)) continue;
+        seen.add(msg.id);
+        session.receivedCount++;
+        newCount++;
+        const body = (msg.text || msg.subject || "(no text content)").substring(0, 3000);
+        await bot.telegram.sendMessage(chatId,
+          `📬 <b>New Business Email!</b>\n\n` +
+          `💼 <b>To:</b> <code>${esc(address)}</code>\n` +
+          `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
+          `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
+          `📅 <b>Date:</b> ${new Date(msg.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
+          `<pre>${esc(body)}</pre>`,
+          { parse_mode: "HTML" }
+        ).catch((e: any) => console.error("[BizMail] Telegram send error:", e.message));
+      }
+      return newCount;
+    };
+
     const session: BizMailSession = {
       email: address, password, accountId,
       accountNum, isCustom,
@@ -1357,34 +1383,19 @@ export function startTelegramBot(config: BotConfig) {
       statusMsgId: loadMsg.message_id,
       chatId,
       receivedCount: 0,
+      checkInbox,
     };
     state.bizMailSession = session;
 
-    // Poll smtp.dev inbox and forward new messages here
-    const seen = new Set<string>();
+    // Auto-poll smtp.dev inbox every 1 second
     (async () => {
       while (!session.stopped) {
         try {
-          const msgs = await smtpDevInbox(accountId);
-          for (const msg of msgs) {
-            if (seen.has(msg.id)) continue;
-            seen.add(msg.id);
-            session.receivedCount++;
-            const body = (msg.text || msg.subject || "(no text content)").substring(0, 3000);
-            await bot.telegram.sendMessage(chatId,
-              `📬 <b>New Business Email!</b>\n\n` +
-              `💼 <b>To:</b> <code>${esc(address)}</code>\n` +
-              `👤 <b>From:</b> <code>${esc(msg.from)}</code>\n` +
-              `📌 <b>Subject:</b> ${esc(msg.subject)}\n` +
-              `📅 <b>Date:</b> ${new Date(msg.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
-              `<pre>${esc(body)}</pre>`,
-              { parse_mode: "HTML" }
-            ).catch((e: any) => console.error("[BizMail] Telegram send error:", e.message));
-          }
+          await checkInbox();
         } catch (e: any) {
           console.error("[BizMail] Inbox poll error:", e.message);
         }
-        await new Promise(r => setTimeout(r, 10_000));
+        await new Promise(r => setTimeout(r, 1_000));
       }
     })();
   }
@@ -1392,6 +1403,28 @@ export function startTelegramBot(config: BotConfig) {
   bot.action("biz_mail_new", async (ctx) => {
     await ctx.answerCbQuery("Creating account...").catch(() => {});
     await startBizMailSession(ctx.chat!.id, ctx.from!.id);
+  });
+
+  bot.action("biz_mail_refresh", async (ctx) => {
+    const uid = ctx.from!.id;
+    const state = getState(uid);
+    const session = state.bizMailSession;
+    if (!session || session.stopped) {
+      await ctx.answerCbQuery("No active session.").catch(() => {});
+      return;
+    }
+    try {
+      await ctx.answerCbQuery("Checking inbox...").catch(() => {});
+      const found = await session.checkInbox();
+      if (found === 0) {
+        await ctx.answerCbQuery("No new emails.").catch(() => {});
+      } else {
+        await ctx.answerCbQuery(`📬 ${found} new email${found > 1 ? "s" : ""} found!`).catch(() => {});
+      }
+    } catch (e: any) {
+      await ctx.answerCbQuery("Error checking inbox.").catch(() => {});
+      console.error("[BizMail] Manual refresh error:", e.message);
+    }
   });
 
   // ── Custom username entry ──────────────────────────────────────────────────
