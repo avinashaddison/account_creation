@@ -984,18 +984,17 @@ export async function createBizMailAccount(opts: {
   }
 
   // ── Generate a unique human-name email and create the account ────────────
-  const MAX_ATTEMPTS = 50; // safety guard against unlikely repeated server conflicts
-  // Build a set of all emails known to DB (checked locally before hitting server)
-  const allAccounts  = await storage.getAllBizMailAccounts();
-  const usedEmails   = new Set(allAccounts.map(a => a.email.toLowerCase()));
-  const nums         = allAccounts.map(a => a.accountNum).filter((n): n is number => n !== null);
-  let   nextNum      = (nums.length > 0 ? Math.max(...nums) : 0) + 1;
+  // accountNum is left null for human-name accounts (like custom accounts) to
+  // avoid unique-constraint races. Creation order is captured by `id` and `createdAt`.
+  const MAX_ATTEMPTS = 50;
+  // Seed the exclusion set from the DB so we don't try names already registered
+  const allAccounts = await storage.getAllBizMailAccounts();
+  const usedEmails  = new Set(allAccounts.map(a => a.email.toLowerCase()));
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const password   = genBizPassword();
-    const username   = await generateHumanUsername(usedEmails);
-    const email      = `${username}@${MAILBUX_DOMAIN}`;
-    const accountNum = nextNum++;
+    const password = genBizPassword();
+    const username = await generateHumanUsername(usedEmails);
+    const email    = `${username}@${MAILBUX_DOMAIN}`;
 
     const res = await fetch(`${MAILBUX_API}/principal`, {
       method: "POST",
@@ -1018,19 +1017,20 @@ export async function createBizMailAccount(opts: {
     const detail: string = (json.details || json.detail || json.error || "").toLowerCase();
 
     if (json.data && typeof json.data === "number") {
-      // Fresh account created successfully
+      // Fresh account created successfully — accountNum=null, ordering via id/createdAt
       console.log(`[BizMail] Created ${email} (Stalwart ID: ${json.data})`);
-      await storage.registerBizMailAccount(accountNum, email, password);
-      return { email, password, accountNum, isCustom: false, recycled };
+      await storage.registerBizMailAccount(null, email, password);
+      return { email, password, accountNum: null, isCustom: false, recycled };
     }
 
     if (detail.includes("already") || detail.includes("exists") || detail.includes("duplicate")) {
-      // Name collision on the server — add to local exclusion set and try a new name
+      // Name collision on the server — add to exclusion set and pick a different name
       console.log(`[BizMail] ${email} already exists on server — trying a different name`);
       usedEmails.add(email.toLowerCase());
       const existing = await storage.getBizMailByEmail(email);
       if (!existing) {
-        await storage.registerBizMailAccount(accountNum, email, "orphaned");
+        // Register as orphaned placeholder (accountNum=null, no unique conflict risk)
+        await storage.registerBizMailAccount(null, email, "orphaned");
         await storage.markBizMailDeletedByEmail(email);
       }
       continue;

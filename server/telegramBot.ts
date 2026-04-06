@@ -1420,7 +1420,7 @@ export function startTelegramBot(config: BotConfig) {
          Markup.button.callback("🆕 New Account", "biz_mail_new"),
          Markup.button.callback("✏️ Custom Name", "biz_mail_custom")],
       ]);
-      const recoverHint = session.isCustom
+      const recoverHint = (session.isCustom || session.accountNum === null)
         ? `Or type <code>${username}</code> in chat to recreate it anytime.`
         : `Or type <code>account${session.accountNum}</code> in chat to recreate it anytime.`;
 
