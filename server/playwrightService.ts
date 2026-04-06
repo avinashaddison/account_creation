@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
-import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink } from "./mailService";
+import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink, pollGmailForReplitVerificationLink } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import * as https from "https";
 import * as http from "http";
@@ -10556,7 +10556,8 @@ export async function registerReplitAccount(
   outlookPassword: string,
   log: (msg: string) => void,
   couponCode?: string,
-  cardDetails?: CardDetails
+  cardDetails?: CardDetails,
+  mailProvider?: "outlook" | "gmail"
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
@@ -11088,15 +11089,27 @@ export async function registerReplitAccount(
       log(`Current URL after submit: ${currentUrl}`);
     }
 
-    log("Now waiting 20s before checking Outlook inbox for verification email...");
-    await page.waitForTimeout(20000);
+    const verifyEmailSince = new Date(Date.now() - 30_000);
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
-    log("Reading Replit verification email via Outlook Web Access...");
-    let owaBrowser: any = null;
-    try {
+    if (mailProvider === "gmail") {
+      log("📧 Biz-mail path: polling Gmail for Replit verification email...");
+      const gmailLink = await pollGmailForReplitVerificationLink(verifyEmailSince, log, 8, 10000);
+      if (gmailLink) {
+        verificationLink = gmailLink;
+        log(`✅ Gmail: Replit verification link extracted`);
+      } else {
+        log("⚠️ Gmail: no Replit verification link found — account may be unverified");
+      }
+    } else {
+      log("Now waiting 20s before checking Outlook inbox for verification email...");
+      await page.waitForTimeout(20000);
+
+      log("Reading Replit verification email via Outlook Web Access...");
+      let owaBrowser: any = null;
+      try {
       const { chromium: chrm } = await import("playwright");
       owaBrowser = await chrm.launch({
         headless: true,
@@ -11268,11 +11281,12 @@ export async function registerReplitAccount(
     } finally {
       if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
+    } // end else (OWA path)
 
     if (verificationLink) {
       log(`Navigating to verification link...`);
       await page.goto(verificationLink, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(4000);
+      await page.waitForTimeout(10000);
       const verifyUrl = page.url();
       const verifyContent = await page.content();
       if (verifyContent.toLowerCase().includes("verified") || verifyContent.toLowerCase().includes("success") || verifyUrl.includes("home") || verifyUrl.includes("dashboard") || verifyUrl === "https://replit.com/~" || verifyUrl.includes("replit.com/@")) {

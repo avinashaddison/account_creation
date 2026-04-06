@@ -3387,7 +3387,8 @@ export async function registerRoutes(
               bizPassword,
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
               couponCode || undefined,
-              bulkCardDetails
+              bulkCardDetails,
+              "gmail"
             );
             if (result.success) {
               try {

@@ -170,6 +170,81 @@ export async function pollGmailForVerificationCode(
   return null;
 }
 
+export async function pollGmailForReplitVerificationLink(
+  since: Date,
+  log: (msg: string) => void = console.log,
+  maxAttempts: number = 8,
+  intervalMs: number = 10000,
+): Promise<string | null> {
+  if (!_gmailAddress || !_gmailAppPassword) {
+    log("[Gmail] No credentials configured — cannot poll for Replit verification email");
+    return null;
+  }
+
+  const { ImapFlow } = await import("imapflow");
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    log(`[Gmail] Polling for Replit verification email... attempt ${attempt}/${maxAttempts}`);
+    let client: any = null;
+    try {
+      client = new ImapFlow({
+        host: "imap.gmail.com",
+        port: 993,
+        secure: true,
+        auth: { user: _gmailAddress, pass: _gmailAppPassword },
+        logger: false,
+      });
+      await client.connect();
+
+      const mailboxes = ["[Gmail]/All Mail", "INBOX", "[Gmail]/Spam"];
+      let link: string | null = null;
+
+      for (const box of mailboxes) {
+        let lock: any = null;
+        try {
+          lock = await client.getMailboxLock(box);
+          const uids = await client.search({ from: "@replit.com", since }, { uid: true });
+          log(`[Gmail] ${box}: found ${uids.length} Replit message(s) since ${since.toISOString()}`);
+          if (uids.length === 0) continue;
+
+          for await (const msg of client.fetch(uids.join(","), { source: true }, { uid: true })) {
+            const raw = msg.source?.toString() || "";
+            // Try href-quoted link first (most reliable), then bare URL
+            const m = raw.match(/href="(https?:\/\/[^"]*replit\.com[^"]*(?:verify|confirm|token)[^"]*)"/i)
+              || raw.match(/(https?:\/\/replit\.com\/verify[^\s"'<>\r\n)]+)/i)
+              || raw.match(/(https?:\/\/replit\.com\/[^\s"'<>\r\n)]*token=[^\s"'<>\r\n)]+)/i);
+            if (m) {
+              link = (m[1] || m[0]).replace(/&amp;/g, "&").replace(/=\r?\n/g, "=").trim();
+              break;
+            }
+          }
+        } finally {
+          if (lock) lock.release();
+        }
+        if (link) break;
+      }
+
+      await client.logout();
+
+      if (link) {
+        log(`[Gmail] Found Replit verification link: ${link.substring(0, 100)}...`);
+        return link;
+      }
+    } catch (err: any) {
+      log(`[Gmail] IMAP error on attempt ${attempt}: ${(err.message || "").substring(0, 80)}`);
+      try { await client?.logout(); } catch {}
+    }
+
+    if (attempt < maxAttempts) {
+      log(`[Gmail] No Replit email yet — waiting ${intervalMs / 1000}s before retry ${attempt + 1}/${maxAttempts}...`);
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+  }
+
+  log("[Gmail] Replit verification email not found after all attempts");
+  return null;
+}
+
 export async function pollGmailForElevenLabsLink(
   targetAddress: string,
   maxWaitMs: number = 120000,
