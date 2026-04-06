@@ -3591,8 +3591,8 @@ export async function registerRoutes(
               await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Already has Core subscription — moved to sold_out, will be skipped as target`, userId);
             } else if (result.error?.includes("banned_account")) {
-              await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
-              broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
+              await storage.updateReplitAccountStatus(acct.id, "banned").catch(() => {});
+              broadcastLog(batchId, jobId, `  🚫 Account is banned by Replit — marked as banned`, userId);
             } else if (result.error?.includes("no_password_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Account has no password (social auth only) — marked as error, will be skipped`, userId);
@@ -3783,10 +3783,14 @@ export async function registerRoutes(
           // Mark source so it won't be selected again on next run
           const srcErr = couponResult.error || "";
           const srcErrLower = srcErr.toLowerCase();
-          if (srcErrLower.includes("banned") || srcErrLower.includes("disabled") || srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password") || srcErrLower.includes("wrong password") || srcErrLower.includes("invalid username") || srcErrLower.includes("incorrect password")) {
+          if (srcErrLower.includes("banned") || srcErrLower.includes("disabled")) {
+            await storage.updateReplitAccountStatus(sourceAccount.id, "banned").catch(() => {});
+            await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
+            broadcastLog(batchId, jobId, `  🚫 Source account is banned — marked as banned, skipping permanently`, userId);
+          } else if (srcErrLower.includes("bad_credentials") || srcErrLower.includes("no_password") || srcErrLower.includes("wrong password") || srcErrLower.includes("invalid username") || srcErrLower.includes("incorrect password")) {
             await storage.updateReplitAccountStatus(sourceAccount.id, "error").catch(() => {});
             await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
-            broadcastLog(batchId, jobId, `  🚫 Source account banned/invalid/bad-creds — marked as error, skipping permanently`, userId);
+            broadcastLog(batchId, jobId, `  ⚠️ Source account bad credentials — marked as error, skipping permanently`, userId);
           } else if (srcErr.includes("__NO_FEATURE__")) {
             // Page showed no referral panel at all — account genuinely lacks the feature
             await storage.markReplitCouponExtracted(sourceAccount.id, "").catch(() => {});
@@ -3904,8 +3908,8 @@ export async function registerRoutes(
               await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  Already has Core subscription — moved to sold_out`, userId);
             } else if (result.error?.includes("banned_account")) {
-              await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
-              broadcastLog(batchId, jobId, `  🚫 Account banned — marked as error`, userId);
+              await storage.updateReplitAccountStatus(acct.id, "banned").catch(() => {});
+              broadcastLog(batchId, jobId, `  🚫 Account banned — marked as banned`, userId);
             } else if (result.error?.includes("no_password_account")) {
               await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               broadcastLog(batchId, jobId, `  ⚠️  No password set (social auth only) — marked as error`, userId);
@@ -4104,7 +4108,9 @@ export async function registerRoutes(
               broadcastLog(batchId, jobId, `  ❌ ${acct.email}: ${result.error}`, userId);
               if (result.error?.includes("already has an active Replit")) {
                 await storage.updateReplitAccountStatus(acct.id, "sold_out").catch(() => {});
-              } else if (result.error?.includes("banned_account") || result.error?.includes("bad_credentials") || result.error?.includes("no_password_account")) {
+              } else if (result.error?.includes("banned_account")) {
+                await storage.updateReplitAccountStatus(acct.id, "banned").catch(() => {});
+              } else if (result.error?.includes("bad_credentials") || result.error?.includes("no_password_account")) {
                 await storage.updateReplitAccountStatus(acct.id, "error").catch(() => {});
               } else {
                 // Retriable error — reset so future jobs can pick it up
@@ -4268,8 +4274,8 @@ export async function registerRoutes(
                 await storage.updateReplitAccountStatus(target.id, "sold_out").catch(() => {});
                 broadcastLog(batchId, jobId, `${tag} ⚠️  Already has Core subscription — moved to sold_out, will be skipped as target`, userId);
               } else if (result.error?.includes("banned_account")) {
-                await storage.updateReplitAccountStatus(target.id, "error").catch(() => {});
-                broadcastLog(batchId, jobId, `${tag} 🚫 Account is banned by Replit — marked as error, will be skipped permanently`, userId);
+                await storage.updateReplitAccountStatus(target.id, "banned").catch(() => {});
+                broadcastLog(batchId, jobId, `${tag} 🚫 Account is banned by Replit — marked as banned`, userId);
               } else if (result.error?.includes("no_password_account")) {
                 await storage.updateReplitAccountStatus(target.id, "error").catch(() => {});
                 broadcastLog(batchId, jobId, `${tag} ⚠️  Account has no password (social auth only) — marked as error, will be skipped`, userId);
