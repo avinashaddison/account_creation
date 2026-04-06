@@ -77,10 +77,10 @@ function platformEmoji(account_type: string): string {
 }
 
 function stockBadge(stock: number): string {
-  if (stock === 0) return "🔴 Sold Out";
-  if (stock <= 3)  return `🟠 Only ${stock} left!`;
+  if (stock === 0) return "🔴 Sold out";
+  if (stock <= 3)  return `🔥 Only ${stock} left — grab it fast!`;
   if (stock <= 10) return `🟡 ${stock} in stock`;
-  return `🟢 ${stock} available`;
+  return `🟢 ${stock} in stock`;
 }
 
 function stockLine(stock: number): string {
@@ -359,37 +359,32 @@ async function editMsg(ctx: any, msg: any, text: string, extra: any = {}) {
 
 // ── UI builders ──────────────────────────────────────────────────────────────
 function divider(): string {
-  return "─────────────────────────────────────";
+  return "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 }
 
 function header(title: string, sub?: string): string {
-  const line = `[ ${title} ]`;
   return sub
-    ? `<b>${line}</b>\n<i>${escHtml(sub)}</i>\n${divider()}`
-    : `<b>${line}</b>\n${divider()}`;
+    ? `<b>${title}</b>\n<i>${escHtml(sub)}</i>`
+    : `<b>${title}</b>`;
 }
 
 function buildProductCard(p: ProductWithStock): string {
-  const emoji   = platformEmoji(p.account_type);
-  const plat    = platformLabel(p.account_type);
-  const badge   = stockBadge(p.stock);
-  const desc    = p.description ? `\n<i>  ${escHtml(p.description)}</i>` : "";
+  const emoji = platformEmoji(p.account_type);
+  const plat  = platformLabel(p.account_type);
+  const badge = stockBadge(p.stock);
+  const desc  = p.description ? `\n<i>${escHtml(p.description)}</i>` : "";
   return (
-    `${emoji} <b>${escHtml(p.name)}</b>${desc}\n` +
-    `<code>` +
-    `  Platform  ›  ${plat}\n` +
-    `  Price     ›  ${fmt$(p.price)} / account\n` +
-    `  Stock     ›  ${badge}` +
-    `</code>`
+    `${emoji} <b>${escHtml(p.name)}</b>${desc}\n\n` +
+    `   💵 <b>${fmt$(p.price)}</b>  ·  ${plat}  ·  ${badge}`
   );
 }
 
 function buildProductButtons(products: ProductWithStock[]) {
   return products.map((p) => {
-    const emoji     = platformEmoji(p.account_type);
-    const inStock   = p.stock > 0;
-    const stockTag  = inStock ? `${p.stock} left` : "SOLD OUT";
-    const label     = `${emoji}  ${p.name}  ·  ${fmt$(p.price)}  ·  ${stockTag}`;
+    const emoji   = platformEmoji(p.account_type);
+    const inStock = p.stock > 0;
+    const icon    = inStock ? "⚡" : "🔴";
+    const label   = `${icon}  ${p.name}  —  ${fmt$(p.price)}`;
     return [Markup.button.callback(label, `shop_product_${p.id}`)];
   });
 }
@@ -496,13 +491,16 @@ export function startShopBot(token: string) {
 
     const cards = products
       .map((p) => buildProductCard(p))
-      .join(`\n${divider()}\n`);
+      .join(`\n\n${divider()}\n\n`);
 
+    const count = products.length;
     const text =
-      `${header("🛍 LIVE MARKETPLACE", "Tap a product below to view details & buy")}\n\n` +
+      `⚡ <b>LIVE MARKETPLACE</b>\n` +
+      `<i>${count} product${count !== 1 ? "s" : ""} available  ·  Instant delivery  ·  Prices in USD</i>\n\n` +
+      `${divider()}\n\n` +
       `${cards}\n\n` +
       `${divider()}\n` +
-      `<i>Prices in USD · Instant delivery after purchase</i>`;
+      `<i>Tap a product below to view details and buy ↓</i>`;
 
     const keyboard = Markup.inlineKeyboard([
       ...buildProductButtons(products),
@@ -529,12 +527,15 @@ export function startShopBot(token: string) {
         { parse_mode: "HTML" }
       );
     }
-    const cards = products.map((p) => buildProductCard(p)).join(`\n${divider()}\n`);
-    const text =
-      `${header("🛍 LIVE MARKETPLACE", "Tap a product below to view details & buy")}\n\n` +
+    const cards = products.map((p) => buildProductCard(p)).join(`\n\n${divider()}\n\n`);
+    const cnt   = products.length;
+    const text  =
+      `⚡ <b>LIVE MARKETPLACE</b>\n` +
+      `<i>${cnt} product${cnt !== 1 ? "s" : ""} available  ·  Instant delivery  ·  Prices in USD</i>\n\n` +
+      `${divider()}\n\n` +
       `${cards}\n\n` +
       `${divider()}\n` +
-      `<i>Prices in USD · Instant delivery after purchase</i>`;
+      `<i>Tap a product below to view details and buy ↓</i>`;
     await safeEdit(ctx, text, {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
@@ -575,17 +576,16 @@ export function startShopBot(token: string) {
       : "";
 
     const text =
-      `${header(`${emoji} PRODUCT DETAILS`)}\n\n` +
-      `<b>${escHtml(prod.name)}</b>${desc}\n` +
-      `<code>` +
-      `  Platform   ›  ${plat}\n` +
-      `  Price      ›  ${fmt$(prod.price)} / account\n` +
-      `  Stock      ›  ${stockBadge(prod.stock)}\n` +
-      `  Delivery   ›  Instant` +
-      `</code>\n\n` +
+      `${emoji} <b>${escHtml(prod.name)}</b>${desc}\n\n` +
+      `${divider()}\n\n` +
+      `💵 <b>${fmt$(prod.price)}</b> per account\n` +
+      `📦 Platform: ${plat}\n` +
+      `📊 Stock: ${stockBadge(prod.stock)}\n` +
+      `⚡ Delivery: Instant\n\n` +
+      `${divider()}\n\n` +
       (inStock
-        ? `✅ <b>In stock.</b> Ready to deliver instantly after purchase.`
-        : `❌ <b>Currently out of stock.</b> Check back soon.`
+        ? `✅ <b>Ready to buy.</b> Account delivered immediately after payment.`
+        : `❌ <b>Out of stock.</b> Check back soon.`
       );
 
     const buttons = [
@@ -615,12 +615,15 @@ export function startShopBot(token: string) {
         { parse_mode: "HTML" }
       );
     }
-    const cards = products.map((p) => buildProductCard(p)).join(`\n${divider()}\n`);
-    const text =
-      `${header("🛍 LIVE MARKETPLACE", "Tap a product below to view details & buy")}\n\n` +
+    const cards = products.map((p) => buildProductCard(p)).join(`\n\n${divider()}\n\n`);
+    const cnt   = products.length;
+    const text  =
+      `⚡ <b>LIVE MARKETPLACE</b>\n` +
+      `<i>${cnt} product${cnt !== 1 ? "s" : ""} available  ·  Instant delivery  ·  Prices in USD</i>\n\n` +
+      `${divider()}\n\n` +
       `${cards}\n\n` +
       `${divider()}\n` +
-      `<i>Prices in USD · Instant delivery after purchase</i>`;
+      `<i>Tap a product below to view details and buy ↓</i>`;
 
     await safeEdit(ctx, text, {
       parse_mode: "HTML",
@@ -662,14 +665,13 @@ export function startShopBot(token: string) {
     if (balance < price) {
       const shortfall = (price - balance).toFixed(2);
       return safeEdit(ctx,
-        `${header("💳 INSUFFICIENT FUNDS")}\n\n` +
-        `<code>` +
-        `  Product    ›  ${escHtml(prod.name)}\n` +
-        `  Required   ›  ${fmt$(price)}\n` +
-        `  Balance    ›  ${fmt$(balance)}\n` +
-        `  Shortfall  ›  $${shortfall}` +
-        `</code>\n\n` +
-        `To top up your wallet, contact:\n${escHtml(SUPPORT_CONTACT)}`,
+        `💳 <b>Insufficient Funds</b>\n\n` +
+        `${divider()}\n\n` +
+        `📦 ${escHtml(prod.name)}\n` +
+        `💵 Required: <b>${fmt$(price)}</b>  ·  Your balance: <b>${fmt$(balance)}</b>\n` +
+        `⚠️ You need <b>$${shortfall}</b> more\n\n` +
+        `${divider()}\n\n` +
+        `To top up, contact ${escHtml(SUPPORT_CONTACT)}`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -731,15 +733,14 @@ export function startShopBot(token: string) {
     // ── Success ──────────────────────────────────────────────────────────────
     const emoji = platformEmoji(prod.account_type);
     await safeEdit(ctx,
-      `${header("✅ PURCHASE SUCCESSFUL")}\n\n` +
+      `✅ <b>Purchase Successful!</b>\n\n` +
       `${emoji} <b>${escHtml(prod.name)}</b>\n\n` +
-      `<code>` +
-      `  Email      ›  ${escHtml(result.accountEmail)}\n` +
-      `  Password   ›  ${escHtml(result.accountPassword)}` +
-      `</code>\n\n` +
-      `${divider()}\n` +
-      `<code>  New Balance  ›  ${fmt$(result.newBalance)}</code>\n\n` +
-      `<i>Credentials saved — view anytime via My Orders.</i>`,
+      `${divider()}\n\n` +
+      `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
+      `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
+      `${divider()}\n\n` +
+      `💰 New balance: <b>${fmt$(result.newBalance)}</b>\n` +
+      `<i>Credentials saved — access anytime in My Orders.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -755,13 +756,12 @@ export function startShopBot(token: string) {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
     await safeEdit(ctx,
-      `${header("➕ DEPOSIT")}\n\n` +
-      `To add funds to your wallet, message the support contact and include your User ID.\n\n` +
-      `<code>` +
-      `  Support  ›  ${SUPPORT_CONTACT}\n` +
-      `  Your ID  ›  ${uid}` +
-      `</code>\n\n` +
-      `<i>Deposits are processed manually and confirmed within minutes.</i>`,
+      `➕ <b>Add Funds</b>\n\n` +
+      `${divider()}\n\n` +
+      `Message support with your User ID to deposit funds.\n\n` +
+      `💬 Contact: <b>${SUPPORT_CONTACT}</b>\n` +
+      `🪪 Your ID: <code>${uid}</code>\n\n` +
+      `<i>Deposits confirmed within minutes.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
@@ -775,12 +775,11 @@ export function startShopBot(token: string) {
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
     await safeReply(ctx,
-      `${header("💰 MY WALLET")}\n\n` +
-      `<code>` +
-      `  Balance   ›  ${fmt$(balance)}\n` +
-      `  User ID   ›  ${uid}` +
-      `</code>\n\n` +
-      `<i>To top up, contact: ${escHtml(SUPPORT_CONTACT)}</i>`,
+      `💰 <b>My Wallet</b>\n\n` +
+      `${divider()}\n\n` +
+      `💵 Balance: <b>${fmt$(balance)}</b>\n` +
+      `🪪 User ID: <code>${uid}</code>\n\n` +
+      `<i>To add funds, contact ${escHtml(SUPPORT_CONTACT)}</i>`,
       { parse_mode: "HTML" }
     );
   });
@@ -789,12 +788,11 @@ export function startShopBot(token: string) {
   bot.hears(BTN.DEPOSIT, async (ctx) => {
     const uid = ctx.from.id;
     await safeReply(ctx,
-      `${header("➕ DEPOSIT FUNDS")}\n\n` +
-      `Message our support contact with your User ID to add funds to your wallet.\n\n` +
-      `<code>` +
-      `  Contact  ›  ${SUPPORT_CONTACT}\n` +
-      `  Your ID  ›  ${uid}` +
-      `</code>\n\n` +
+      `➕ <b>Add Funds</b>\n\n` +
+      `${divider()}\n\n` +
+      `Message support with your User ID to top up your wallet.\n\n` +
+      `💬 Contact: <b>${SUPPORT_CONTACT}</b>\n` +
+      `🪪 Your ID: <code>${uid}</code>\n\n` +
       `<i>Deposits are confirmed within minutes.</i>`,
       { parse_mode: "HTML" }
     );
@@ -803,13 +801,15 @@ export function startShopBot(token: string) {
   // ── Support ───────────────────────────────────────────────────────────────
   bot.hears(BTN.SUPPORT, async (ctx) => {
     await safeReply(ctx,
-      `${header("💬 SUPPORT")}\n\n` +
-      `Our team is available to help with:\n` +
-      `  • Account issues or questions\n` +
-      `  • Deposits and balance top-ups\n` +
-      `  • Order problems or disputes\n\n` +
-      `<code>  Agent   ›  ${SUPPORT_CONTACT}</code>\n\n` +
-      `<i>Please include your User ID: <b>${ctx.from.id}</b></i>`,
+      `💬 <b>Support</b>\n\n` +
+      `${divider()}\n\n` +
+      `We can help with:\n` +
+      `  · Account access issues\n` +
+      `  · Balance top-ups & deposits\n` +
+      `  · Order problems or disputes\n\n` +
+      `💬 Contact: <b>${SUPPORT_CONTACT}</b>\n` +
+      `🪪 Your ID: <code>${ctx.from.id}</code>\n\n` +
+      `<i>Include your User ID when reaching out.</i>`,
       { parse_mode: "HTML" }
     );
   });
@@ -819,12 +819,11 @@ export function startShopBot(token: string) {
     const uid   = ctx.from.id;
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await safeReply(ctx,
-      `${header("🪪 MY IDENTITY")}\n\n` +
-      `<code>` +
-      `  Username  ›  ${uname}\n` +
-      `  User ID   ›  ${uid}` +
-      `</code>\n\n` +
-      `<i>Share your User ID when contacting support.</i>`,
+      `🪪 <b>My Profile</b>\n\n` +
+      `${divider()}\n\n` +
+      `👤 Username: <b>${uname}</b>\n` +
+      `🆔 User ID: <code>${uid}</code>\n\n` +
+      `<i>Share your ID when contacting support.</i>`,
       { parse_mode: "HTML" }
     );
   });
@@ -911,14 +910,12 @@ export function startShopBot(token: string) {
     });
 
     await safeEdit(ctx,
-      `${header("🔑 CREDENTIALS")}\n\n` +
-      `${emoji} <b>${escHtml(o.product_name)}</b>\n\n` +
-      `<code>` +
-      `  Purchased  ›  ${date}\n` +
-      `  Amount     ›  ${fmt$(o.amount)}\n\n` +
-      `  Email      ›  ${escHtml(o.account_email)}\n` +
-      `  Password   ›  ${escHtml(o.account_password)}` +
-      `</code>`,
+      `🔑 <b>Credentials</b>\n\n` +
+      `${emoji} <b>${escHtml(o.product_name)}</b>\n` +
+      `<i>Purchased ${date}  ·  ${fmt$(o.amount)}</i>\n\n` +
+      `${divider()}\n\n` +
+      `📧 <b>Email</b>\n<code>${escHtml(o.account_email)}</code>\n\n` +
+      `🔑 <b>Password</b>\n<code>${escHtml(o.account_password)}</code>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[Markup.button.callback("◀  My Orders", "shop_view_orders")]]),
