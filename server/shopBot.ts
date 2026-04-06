@@ -133,6 +133,18 @@ async function getBalance(uid: number): Promise<number> {
   return parseFloat(r.rows[0]?.balance ?? "0");
 }
 
+const REQUIRED_CHANNEL = "@projectaddison";
+const CHANNEL_URL      = "https://t.me/projectaddison";
+
+async function isChannelMember(bot: any, uid: number): Promise<boolean> {
+  try {
+    const m = await bot.telegram.getChatMember(REQUIRED_CHANNEL, uid);
+    return ["member", "administrator", "creator"].includes(m.status);
+  } catch {
+    return false;
+  }
+}
+
 interface ProductWithStock {
   id: string;
   name: string;
@@ -648,6 +660,27 @@ export function startShopBot(token: string) {
 
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
 
+    // ── Channel membership gate ───────────────────────────────────────────────
+    const isMember = await isChannelMember(bot, uid);
+    if (!isMember) {
+      return safeEdit(ctx,
+        `🔒 <b>Channel Access Required</b>\n\n` +
+        `${divider()}\n\n` +
+        `To purchase from our shop, you must be a member of our official channel.\n\n` +
+        `1️⃣  Join the channel below\n` +
+        `2️⃣  Come back and tap <b>✅ I've Joined</b> to verify\n\n` +
+        `<i>Membership is free and gives you access to deals, restocks, and announcements.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📢  Join @projectaddison", CHANNEL_URL)],
+            [Markup.button.callback("✅  I've Joined — Verify", `shop_verify_${productId}`)],
+            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          ]),
+        }
+      );
+    }
+
     const prod = await getProductById(productId);
     if (!prod || !prod.active) {
       return safeEdit(ctx,
@@ -747,6 +780,108 @@ export function startShopBot(token: string) {
           [Markup.button.callback("📦  My Orders", "shop_view_orders")],
           [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
         ]),
+      }
+    );
+  });
+
+  // ── Channel verify — triggered after user joins @projectaddison ──────────
+  bot.action(/^shop_verify_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Checking membership…").catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+
+    const isMember = await isChannelMember(bot, uid);
+    if (!isMember) {
+      return safeEdit(ctx,
+        `🔒 <b>Not Verified Yet</b>\n\n` +
+        `${divider()}\n\n` +
+        `We couldn't confirm your membership in ${REQUIRED_CHANNEL}.\n\n` +
+        `Make sure you've joined the channel, then tap <b>✅ I've Joined</b> again.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📢  Join @projectaddison", CHANNEL_URL)],
+            [Markup.button.callback("✅  I've Joined — Verify", `shop_verify_${productId}`)],
+            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          ]),
+        }
+      );
+    }
+
+    // Member confirmed — proceed with purchase
+    await safeEdit(ctx,
+      `✅ <b>Membership Verified!</b>\n\n` +
+      `<i>Processing your purchase…</i>`,
+      { parse_mode: "HTML" }
+    );
+
+    const prod = await getProductById(productId);
+    if (!prod || !prod.active) {
+      return safeEdit(ctx,
+        `⚠️ <b>Product Unavailable</b>\n\nThis product is no longer available.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        }
+      );
+    }
+
+    const balance = await getBalance(uid);
+    const price   = parseFloat(prod.price);
+    if (balance < price) {
+      const shortfall = (price - balance).toFixed(2);
+      return safeEdit(ctx,
+        `💳 <b>Insufficient Funds</b>\n\n` +
+        `${divider()}\n\n` +
+        `📦 ${escHtml(prod.name)}\n` +
+        `💵 Required: <b>${fmt$(price)}</b>  ·  Your balance: <b>${fmt$(balance)}</b>\n` +
+        `⚠️ You need <b>$${shortfall}</b> more\n\n` +
+        `${divider()}\n\n` +
+        `To top up, contact ${escHtml(SUPPORT_CONTACT)}`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          ]),
+        }
+      );
+    }
+
+    if (prod.stock === 0) {
+      return safeEdit(ctx,
+        `❌ <b>Out of Stock</b>\n\n<b>${escHtml(prod.name)}</b> just sold out.\n<i>Check back soon.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        }
+      );
+    }
+
+    const result = await purchaseProduct(uid, productId);
+    if (!result.success) {
+      return safeEdit(ctx,
+        `⚠️ <b>Purchase Failed</b>\n\nSomething went wrong. Your balance was not charged.\n\n→ Contact ${escHtml(SUPPORT_CONTACT)}`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+        }
+      );
+    }
+
+    const acc   = result.account!;
+    const emoji = platformEmoji(prod.accountType ?? "");
+    await safeEdit(ctx,
+      `🎉 <b>Purchase Successful!</b>\n\n` +
+      `${emoji} <b>${escHtml(prod.name)}</b>\n\n` +
+      `${divider()}\n\n` +
+      `📧 <b>Email</b>\n<code>${escHtml(acc.email)}</code>\n\n` +
+      `🔑 <b>Password</b>\n<code>${escHtml(acc.password)}</code>\n\n` +
+      `${divider()}\n\n` +
+      `<i>Save these credentials safely. For issues, contact ${escHtml(SUPPORT_CONTACT)}</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("📦  My Orders", "shop_view_orders")]]),
       }
     );
   });
