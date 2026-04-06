@@ -298,15 +298,15 @@ function statusEmoji(s: string) {
 
 // ── Reply keyboard — shown on /start and after completing actions ──────────────
 const KB = {
-  STATS:    "⚡ Database Status",
-  ACCOUNTS: "🗄 Available Accounts",
-  COPY:     "📋 Copy Accounts",
-  CHECKOUT: "🔗 Checkout Link Generator",
-  CREATE:   "🏗 Create New Accounts",
-  MAIL:     "📧 Mail Generator",
-  MOVIES:   "🎬 Movies Server",
-  SHOP:     "🛒 Marketplace",
-  PAYMENT:  "💳 Payment Gateway",
+  STATS:    "📊 Database Status",
+  ACCOUNTS: "🔑 Available Accounts",
+  COPY:     "📤 Copy Accounts",
+  CHECKOUT: "🛒 Checkout Link",
+  CREATE:   "🤖 Create Accounts",
+  MAIL:     "📮 Mail Generator",
+  MOVIES:   "🎥 Movies Server",
+  SHOP:     "🏪 Marketplace",
+  PAYMENT:  "💎 Payment Gateway",
 } as const;
 
 const MAIN_KEYBOARD = Markup.keyboard([
