@@ -7,7 +7,8 @@ import {
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
 
-const SUPPORT_CONTACT = "@avinashaddison";
+const SUPPORT_CONTACT   = "@avinashaddison";
+const REFERRAL_REWARD   = 0.50;
 
 const pool = new Pool({
   connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
@@ -105,6 +106,7 @@ const BTN = {
   DEPOSIT:      "➕  𝗔𝗗𝗗  𝗙𝗨𝗡𝗗𝗦",
   IDENTITY:     "🪪  𝗠𝗬  𝗣𝗥𝗢𝗙𝗜𝗟𝗘",
   SUPPORT:      "💬  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
+  REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
 } as const;
 
 const SHOP_KEYBOARD = Markup.keyboard([
@@ -112,7 +114,7 @@ const SHOP_KEYBOARD = Markup.keyboard([
   [BTN.ACCOUNTS],
   [BTN.BALANCE,   BTN.ORDERS],
   [BTN.DEPOSIT,   BTN.SUPPORT],
-  [BTN.IDENTITY],
+  [BTN.IDENTITY,  BTN.REFER],
 ]).resize().oneTime();
 
 // ── Per-user state ───────────────────────────────────────────────────────────
@@ -137,20 +139,75 @@ const activationFlows = new Map<number, ActivationFlow>();
 const ACTIVATION_PRICE = 2.00;
 
 // ── DB helpers ───────────────────────────────────────────────────────────────
-async function upsertCustomer(uid: number, username?: string, firstName?: string) {
-  await dbQuery(
-    `INSERT INTO shop_customers (telegram_id, username, first_name)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (telegram_id) DO UPDATE
-       SET username   = EXCLUDED.username,
-           first_name = EXCLUDED.first_name`,
-    [uid, username ?? null, firstName ?? null]
-  );
+async function upsertCustomer(uid: number, username?: string, firstName?: string, referredBy?: number) {
+  if (referredBy && referredBy !== uid) {
+    await dbQuery(
+      `INSERT INTO shop_customers (telegram_id, username, first_name, referred_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (telegram_id) DO UPDATE
+         SET username   = EXCLUDED.username,
+             first_name = EXCLUDED.first_name`,
+      [uid, username ?? null, firstName ?? null, referredBy]
+    );
+  } else {
+    await dbQuery(
+      `INSERT INTO shop_customers (telegram_id, username, first_name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (telegram_id) DO UPDATE
+         SET username   = EXCLUDED.username,
+             first_name = EXCLUDED.first_name`,
+      [uid, username ?? null, firstName ?? null]
+    );
+  }
+}
+
+async function isNewCustomer(uid: number): Promise<boolean> {
+  const r = await dbQuery(`SELECT 1 FROM shop_customers WHERE telegram_id = $1`, [uid]);
+  return r.rows.length === 0;
 }
 
 async function getBalance(uid: number): Promise<number> {
   const r = await dbQuery(`SELECT balance FROM shop_customers WHERE telegram_id = $1`, [uid]);
   return parseFloat(r.rows[0]?.balance ?? "0");
+}
+
+async function processReferralReward(newUid: number, bot: any) {
+  const res = await dbQuery(
+    `SELECT referred_by, referral_rewarded FROM shop_customers WHERE telegram_id = $1`,
+    [newUid]
+  );
+  const row = res.rows[0];
+  if (!row?.referred_by || row.referral_rewarded) return;
+
+  const referrerId = parseInt(row.referred_by);
+
+  // Reward referrer and mark as rewarded
+  await dbQuery(
+    `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
+    [REFERRAL_REWARD.toFixed(2), referrerId]
+  );
+  await dbQuery(
+    `UPDATE shop_customers SET referral_rewarded = true WHERE telegram_id = $1`,
+    [newUid]
+  );
+
+  // Notify referrer
+  const newUserRes = await dbQuery(
+    `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`,
+    [newUid]
+  );
+  const u = newUserRes.rows[0];
+  const newName = u?.username ? `@${u.username}` : (u?.first_name ? escHtml(u.first_name) : `User ${newUid}`);
+
+  bot.telegram.sendMessage(
+    referrerId,
+    `🎉 <b>Referral Reward!</b>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `👤 <b>${newName}</b> just joined via your referral link.\n\n` +
+    `💰 <b>+$${REFERRAL_REWARD.toFixed(2)}</b> added to your wallet!\n\n` +
+    `<i>Keep sharing your link to earn more rewards.</i>`,
+    { parse_mode: "HTML" }
+  ).catch(() => {});
 }
 
 const REQUIRED_CHANNEL = "@projectaddison";
@@ -466,12 +523,28 @@ export function startShopBot(token: string) {
 
   // ── /start ─────────────────────────────────────────────────────────────────
   bot.start(async (ctx) => {
-    const uid = ctx.from.id;
+    const uid     = ctx.from.id;
+    const payload = ctx.startPayload ?? "";
+
+    // Parse referral deep link: /start ref_<referrerId>
+    let referredBy: number | undefined;
+    if (payload.startsWith("ref_")) {
+      const refId = parseInt(payload.slice(4));
+      if (!isNaN(refId) && refId !== uid) referredBy = refId;
+    }
+
+    const isNew = await isNewCustomer(uid);
     bot.telegram.setChatMenuButton({
       chatId: ctx.chat.id,
       menuButton: { type: "commands" },
     }).catch(() => {});
-    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name, referredBy);
+
+    // Credit referrer $0.50 when new user joins
+    if (isNew && referredBy) {
+      processReferralReward(uid, bot).catch(() => {});
+    }
+
     const balance = await getBalance(uid);
     const name    = ctx.from.first_name || ctx.from.username || "User";
     const uname   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
@@ -1448,6 +1521,41 @@ export function startShopBot(token: string) {
       `🆔 User ID: <code>${uid}</code>\n\n` +
       `<i>Share your ID when contacting support.</i>`,
       { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Refer & Earn ──────────────────────────────────────────────────────────
+  bot.hears(BTN.REFER, async (ctx) => {
+    const uid         = ctx.from.id;
+    const botUsername = ctx.botInfo.username;
+    const referralLink = `https://t.me/${botUsername}?start=ref_${uid}`;
+    const shareUrl     = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("Join Project Addison — AI Tools Marketplace! Get AI tools at the best prices.")}`;
+
+    const [totalRes, rewardedRes] = await Promise.all([
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1`, [uid]),
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`, [uid]),
+    ]);
+    const totalReferred  = parseInt(totalRes.rows[0]?.cnt ?? "0");
+    const rewardedCount  = parseInt(rewardedRes.rows[0]?.cnt ?? "0");
+    const totalEarned    = rewardedCount * REFERRAL_REWARD;
+
+    await safeReply(ctx,
+      `🔗 <b>REFER & EARN</b>\n` +
+      `${divider()}\n\n` +
+      `Invite friends and earn <b>$${REFERRAL_REWARD.toFixed(2)}</b> for every new user who joins using your link.\n\n` +
+      `${divider()}\n\n` +
+      `🔗 <b>Your Referral Link</b>\n` +
+      `<code>${referralLink}</code>\n\n` +
+      `${divider()}\n\n` +
+      `<code>Friends referred:   ${totalReferred}\n` +
+      `Rewards earned:     $${totalEarned.toFixed(2)}</code>\n\n` +
+      `<i>Reward is credited instantly when your friend joins.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📤  Share My Link", shareUrl)],
+        ]),
+      }
     );
   });
 
