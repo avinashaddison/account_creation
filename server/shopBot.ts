@@ -446,7 +446,27 @@ export function startShopBot(token: string) {
   });
 
   bot.command("menu", async (ctx) => {
-    await ctx.reply("Menu restored.", SHOP_KEYBOARD);
+    const uid   = ctx.from.id;
+    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    const balance = await getBalance(uid);
+    // Dismiss any hidden keyboard first, then show fresh
+    const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
+    if (dismiss) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, dismiss.message_id).catch(() => {});
+    }
+    await ctx.reply(
+      truncate(
+        `${header("⚡ MAIN MENU", "Project Addison v2 — AI Tools Marketplace")}\n\n` +
+        `<code>` +
+        `  Balance   ›  ${fmt$(balance)}\n` +
+        `  User      ›  ${uname}\n` +
+        `  ID        ›  ${uid}` +
+        `</code>\n\n` +
+        `<i>Select an option from the menu below.</i>`
+      ),
+      { parse_mode: "HTML", ...SHOP_KEYBOARD }
+    );
   });
 
   // ── Product list ──────────────────────────────────────────────────────────
@@ -943,11 +963,11 @@ export function startShopBot(token: string) {
   async function registerCommands() {
     try {
       await bot.telegram.setMyCommands([
-        { command: "start",   description: "Open the marketplace" },
-        { command: "shop",    description: "Browse AI tools" },
+        { command: "start",   description: "Start & open main menu" },
+        { command: "menu",    description: "Open main menu keyboard" },
+        { command: "shop",    description: "Browse AI tools marketplace" },
         { command: "balance", description: "Check my wallet balance" },
         { command: "id",      description: "My Telegram user ID" },
-        { command: "menu",    description: "Show keyboard" },
       ]);
       await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
       console.log("[ShopBot] Commands registered");
