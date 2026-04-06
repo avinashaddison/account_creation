@@ -129,7 +129,7 @@ interface ShopAdminFlow {
   step?: "name" | "description" | "price" | "account_type" | "status_filter"
        | "topup_uid" | "topup_amount"
        | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter"
-       | "activation_time";
+       | "activation_time" | "refer_amount";
   name?: string;
   description?: string;
   price?: string;
@@ -2541,18 +2541,20 @@ export function startTelegramBot(config: BotConfig) {
   const SHOP_ACCOUNT_TYPES = ["replit", "lovable", "v0", "adobe", "chatgpt", "eleven", "outlook", "gmail"];
 
   async function showShopAdminMenu(ctx: any, edit = false) {
-    const [prodRes, custRes, orderRes, pendingRes, revenueRes] = await Promise.all([
+    const [prodRes, custRes, orderRes, pendingRes, revenueRes, referSettingRes] = await Promise.all([
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_products WHERE active = true`),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_orders`),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_activation_orders WHERE status = 'pending'`),
       dbQuery(`SELECT COALESCE(SUM(amount),0) as total FROM shop_orders`),
+      dbQuery(`SELECT value FROM shop_settings WHERE key = 'referral_reward'`),
     ]);
     const activeProd    = parseInt(prodRes.rows[0]?.cnt ?? "0");
     const totalCust     = parseInt(custRes.rows[0]?.cnt ?? "0");
     const totalOrds     = parseInt(orderRes.rows[0]?.cnt ?? "0");
     const pendingAct    = parseInt(pendingRes.rows[0]?.cnt ?? "0");
     const revenue       = parseFloat(revenueRes.rows[0]?.total ?? "0");
+    const referAmount   = parseFloat(referSettingRes.rows[0]?.value ?? "0.50");
     const pendingBadge  = pendingAct > 0 ? ` 🔴 ${pendingAct}` : " ✅ 0";
 
     const text =
@@ -2563,7 +2565,8 @@ export function startTelegramBot(config: BotConfig) {
       `👥  Total Customers      ${String(totalCust).padStart(5)}\n` +
       `🧾  Completed Orders     ${String(totalOrds).padStart(5)}\n` +
       `⏳  Pending Activations  ${String(pendingAct).padStart(5)}\n` +
-      `💵  Total Revenue      $${revenue.toFixed(2).padStart(7)}` +
+      `💵  Total Revenue      $${revenue.toFixed(2).padStart(7)}\n` +
+      `🔗  Refer Reward        $${referAmount.toFixed(2).padStart(6)}` +
       `</code>\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `› Choose a module:`;
@@ -2579,6 +2582,9 @@ export function startTelegramBot(config: BotConfig) {
       ],
       [
         Markup.button.callback(`📋  ACTIVATION ORDERS${pendingBadge}`, "shop_admin_act_orders"),
+      ],
+      [
+        Markup.button.callback(`🔗  REFER REWARD  ·  $${referAmount.toFixed(2)}`, "shop_admin_refer_amount"),
       ],
     ]);
 
@@ -2940,6 +2946,21 @@ export function startTelegramBot(config: BotConfig) {
     );
   });
 
+  // ── Refer reward amount ───────────────────────────────────────────────────
+  bot.action("shop_admin_refer_amount", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    const cur = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'referral_reward'`);
+    const current = parseFloat(cur.rows[0]?.value ?? "0.50");
+    getState(uid).shopAdminFlow = { step: "refer_amount" };
+    await ctx.reply(
+      `\n🔗 <b>REFER REWARD AMOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>Current reward:  $${current.toFixed(2)}</code>\n\n` +
+      `› Enter the new reward amount in USD:\n<code>  e.g. 0.50 · 1.00 · 2.00</code>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── Activation orders list ────────────────────────────────────────────────
   bot.action("shop_admin_act_orders", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
@@ -3227,6 +3248,25 @@ export function startTelegramBot(config: BotConfig) {
           st.shopAdminFlow = undefined;
           return ctx.reply(`🔴  Top-up failed: <code>${err.message}</code>`, { parse_mode: "HTML" });
         }
+      }
+
+      if (flow.step === "refer_amount") {
+        const amount = parseFloat(text.trim());
+        if (isNaN(amount) || amount < 0) {
+          return ctx.reply(`🔴  Invalid amount. Enter a number like <code>0.50</code>:`, { parse_mode: "HTML" });
+        }
+        await dbQuery(
+          `INSERT INTO shop_settings (key, value) VALUES ('referral_reward', $1)
+           ON CONFLICT (key) DO UPDATE SET value = $1`,
+          [amount.toFixed(2)]
+        );
+        st.shopAdminFlow = undefined;
+        return ctx.reply(
+          `\n🟢 <b>REFER REWARD UPDATED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `<code>New reward per referral:  $${amount.toFixed(2)}</code>\n\n` +
+          `<i>All new referrals will now earn $${amount.toFixed(2)} per invite.</i>`,
+          { parse_mode: "HTML" }
+        );
       }
 
       return;

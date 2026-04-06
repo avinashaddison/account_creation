@@ -8,7 +8,6 @@ import {
 } from "./activationStore";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
-const REFERRAL_REWARD   = 0.50;
 
 const pool = new Pool({
   connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
@@ -171,6 +170,11 @@ async function getBalance(uid: number): Promise<number> {
   return parseFloat(r.rows[0]?.balance ?? "0");
 }
 
+async function getReferralReward(): Promise<number> {
+  const r = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'referral_reward'`);
+  return parseFloat(r.rows[0]?.value ?? "0.50");
+}
+
 async function processReferralReward(newUid: number, bot: any) {
   const res = await dbQuery(
     `SELECT referred_by, referral_rewarded FROM shop_customers WHERE telegram_id = $1`,
@@ -179,12 +183,13 @@ async function processReferralReward(newUid: number, bot: any) {
   const row = res.rows[0];
   if (!row?.referred_by || row.referral_rewarded) return;
 
-  const referrerId = parseInt(row.referred_by);
+  const referrerId   = parseInt(row.referred_by);
+  const rewardAmount = await getReferralReward();
 
   // Reward referrer and mark as rewarded
   await dbQuery(
     `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
-    [REFERRAL_REWARD.toFixed(2), referrerId]
+    [rewardAmount.toFixed(2), referrerId]
   );
   await dbQuery(
     `UPDATE shop_customers SET referral_rewarded = true WHERE telegram_id = $1`,
@@ -204,7 +209,7 @@ async function processReferralReward(newUid: number, bot: any) {
     `🎉 <b>Referral Reward!</b>\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `👤 <b>${newName}</b> just joined via your referral link.\n\n` +
-    `💰 <b>+$${REFERRAL_REWARD.toFixed(2)}</b> added to your wallet!\n\n` +
+    `💰 <b>+$${rewardAmount.toFixed(2)}</b> added to your wallet!\n\n` +
     `<i>Keep sharing your link to earn more rewards.</i>`,
     { parse_mode: "HTML" }
   ).catch(() => {});
@@ -1531,18 +1536,20 @@ export function startShopBot(token: string) {
     const referralLink = `https://t.me/${botUsername}?start=ref_${uid}`;
     const shareUrl     = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("Join Project Addison — AI Tools Marketplace! Get AI tools at the best prices.")}`;
 
-    const [totalRes, rewardedRes] = await Promise.all([
+    const [totalRes, rewardedRes, rewardSetting] = await Promise.all([
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1`, [uid]),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`, [uid]),
+      getReferralReward(),
     ]);
     const totalReferred  = parseInt(totalRes.rows[0]?.cnt ?? "0");
     const rewardedCount  = parseInt(rewardedRes.rows[0]?.cnt ?? "0");
-    const totalEarned    = rewardedCount * REFERRAL_REWARD;
+    const referReward    = rewardSetting as number;
+    const totalEarned    = rewardedCount * referReward;
 
     await safeReply(ctx,
       `🔗 <b>REFER & EARN</b>\n` +
       `${divider()}\n\n` +
-      `Invite friends and earn <b>$${REFERRAL_REWARD.toFixed(2)}</b> for every new user who joins using your link.\n\n` +
+      `Invite friends and earn <b>$${referReward.toFixed(2)}</b> for every new user who joins using your link.\n\n` +
       `${divider()}\n\n` +
       `🔗 <b>Your Referral Link</b>\n` +
       `<code>${referralLink}</code>\n\n` +
