@@ -104,7 +104,7 @@ const SHOP_KEYBOARD = Markup.keyboard([
   [BTN.BALANCE,   BTN.ORDERS],
   [BTN.DEPOSIT,   BTN.SUPPORT],
   [BTN.IDENTITY],
-]).resize();
+]).resize().oneTime();
 
 // ── Per-user state ───────────────────────────────────────────────────────────
 interface ShopUserState {
