@@ -249,8 +249,12 @@ export async function pollForReplitVerificationEmail(
   log: (msg: string) => void,
   smtpDevId?: string,
 ): Promise<{ link?: string; code?: string } | null> {
-  const deadline = Date.now() + timeoutMs;
+  const startTime = Date.now();
+  const deadline = startTime + timeoutMs;
   const pollIntervalMs = 15_000;
+  // Only accept emails that arrived within 10 minutes BEFORE the poll started or after.
+  // This prevents stale verification emails from previous attempts being matched.
+  const cutoffMs = startTime - 10 * 60 * 1000;
 
   log(`[smtp.dev] Polling inbox of ${emailAddress} for Replit verification email...`);
 
@@ -300,6 +304,13 @@ export async function pollForReplitVerificationEmail(
     try {
       const messages = await listMessages(smtpAccountId, inboxMailboxId, 20);
       for (const msg of messages) {
+        // Skip emails that arrived before the registration started (stale from previous attempts)
+        const msgTime = msg.date ? new Date(msg.date).getTime() : 0;
+        if (msgTime > 0 && msgTime < cutoffMs) {
+          log(`[smtp.dev] Skipping old email "${msg.subject}" (${msg.date}) — predates registration`);
+          continue;
+        }
+
         const sub = (msg.subject || "").toLowerCase();
         const from = (msg.from || "").toLowerCase();
         const intro = (msg.intro || "").toLowerCase();

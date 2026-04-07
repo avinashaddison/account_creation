@@ -9719,7 +9719,7 @@ function generateStrongPassword(): string {
   const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
   const lower = "abcdefghjkmnpqrstuvwxyz";
   const digits = "23456789";
-  const special = "!@#$%&*";
+  const special = "!@#$*^";
   let pw = randomItem([...upper]) + randomItem([...upper]) + randomItem([...lower]) + randomItem([...lower]) + randomItem([...digits]) + randomItem([...digits]) + randomItem([...special]);
   for (let i = 0; i < 5; i++) pw += randomItem([...lower + digits]);
   return pw.split("").sort(() => Math.random() - 0.5).join("");
@@ -10564,7 +10564,7 @@ export async function registerReplitAccount(
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   const rand = (n: number) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   const randUpper = (n: number) => Array.from({ length: n }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
-  const randSym = () => ["!", "@", "#", "$", "%"][Math.floor(Math.random() * 5)];
+  const randSym = () => ["!", "@", "#", "$", "*"][Math.floor(Math.random() * 5)];
 
   // Natural-looking usernames — avoid predictable emailprefix+random pattern
   const FIRST_NAMES = ["alex","james","ryan","chris","matt","jake","tyler","jordan","taylor","morgan","casey","drew","blake","riley","quinn","cameron","logan","mason","hunter","parker","avery","peyton","skyler","reese","rowan","sage","river","phoenix","dakota","hayden","kendall","charlie","sam","jamie","lee","ash","max","jesse","kai","ray"];
