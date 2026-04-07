@@ -1436,7 +1436,7 @@ export function startTelegramBot(config: BotConfig) {
     await bot.telegram.sendMessage(chatId,
       `📦 <b>Bulk Business Mail Creator</b>\n\n` +
       `How many <code>@addison.asia</code> email accounts do you want to create?\n\n` +
-      `• Min: <b>1</b> &nbsp;•&nbsp; Max: <b>1000</b>\n` +
+      `• Min: <b>1</b> &nbsp;•&nbsp; Max: <b>100,000</b>\n` +
       `• Accounts are created in parallel (10 at a time)\n` +
       `• Results delivered as a <code>.txt</code> file\n\n` +
       `<i>Reply with a number, e.g.</i> <code>50</code>`,
@@ -3979,8 +3979,8 @@ export function startTelegramBot(config: BotConfig) {
     if (st.awaitingText === "biz_bulk_count") {
       st.awaitingText = undefined;
       const count = parseInt(text.trim());
-      if (isNaN(count) || count < 1 || count > 1000) {
-        await ctx.reply("⚠️ Please enter a number between <b>1</b> and <b>1000</b>.", { parse_mode: "HTML" }).catch(() => {});
+      if (isNaN(count) || count < 1 || count > 100000) {
+        await ctx.reply("⚠️ Please enter a number between <b>1</b> and <b>100,000</b>.", { parse_mode: "HTML" }).catch(() => {});
         return;
       }
       await runBizBulkCreate(ctx.chat!.id, uid, count);
