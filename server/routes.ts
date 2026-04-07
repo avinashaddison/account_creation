@@ -15,7 +15,7 @@ import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
 import { listDomains, listAccounts, createAccount, deleteAccount, getFullInbox } from "./smtpDevService";
 import { activateOutlookSession, stopOutlookSession, getOutlookMessages, getOutlookSessionInfo } from "./outlookWorkspaceService";
-import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
+import { getCapSolverBalance, clearCapsolverApiKeyCache, getNopeCHABalance } from "./capsolverService";
 import { getFivesimBalance } from "./fivesimService";
 import { clearZenrowsApiKeyCache } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
@@ -1282,6 +1282,29 @@ export async function registerRoutes(
     try {
       const result = await getCapSolverBalance();
       res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/nopecha/balance", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("nopecha_api_key");
+      if (!key) return res.json({ credits: 0, balance: 0, error: "No key configured" });
+      const result = await getNopeCHABalance(key);
+      // $1 = 90,000 solves; expose balance in dollars so the UI renders "$X.XX"
+      res.json({ credits: result.credits, balance: result.credits / 90000, error: result.error });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/nopecha/balance-2", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("nopecha_api_key_2");
+      if (!key) return res.json({ credits: 0, balance: 0, error: "No key configured" });
+      const result = await getNopeCHABalance(key);
+      res.json({ credits: result.credits, balance: result.credits / 90000, error: result.error });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

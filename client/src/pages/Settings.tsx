@@ -107,6 +107,8 @@ const apiKeyFields: ApiKeyField[] = [
     placeholder: "Enter NopeCHA API key 1...",
     borderColor: "rgba(234,179,8,0.22)",
     iconColor: "text-yellow-400",
+    balanceEndpoint: "/api/nopecha/balance",
+    balanceLabel: "Credits ($)",
   },
   {
     id: "nopecha2",
@@ -119,6 +121,8 @@ const apiKeyFields: ApiKeyField[] = [
     placeholder: "Enter NopeCHA API key 2...",
     borderColor: "rgba(234,179,8,0.22)",
     iconColor: "text-yellow-400",
+    balanceEndpoint: "/api/nopecha/balance-2",
+    balanceLabel: "Credits ($)",
   },
   {
     id: "anticaptcha",

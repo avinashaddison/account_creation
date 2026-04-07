@@ -330,6 +330,30 @@ export async function solveHCaptchaViaNopeCHA(
   }
 }
 
+// ─── NopeCHA balance ────────────────────────────────────────────────────────
+
+/**
+ * Fetch remaining credits for a NopeCHA API key.
+ * GET https://api.nopecha.com/v1/credit  →  { data: <credits> }
+ * $1 = ~90,000 solves.
+ */
+export async function getNopeCHABalance(apiKey: string): Promise<{ credits: number; error?: string }> {
+  try {
+    const resp = await axios.get("https://api.nopecha.com/v1/credit", {
+      headers: { "Authorization": `Basic ${apiKey}` },
+      timeout: 10000,
+    });
+    if (resp.data?.error) {
+      return { credits: 0, error: `NopeCHA error ${resp.data.error}: ${resp.data.message || "unknown"}` };
+    }
+    const credits = typeof resp.data?.data === "number" ? resp.data.data : 0;
+    return { credits };
+  } catch (err: any) {
+    const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 100) : "";
+    return { credits: 0, error: `${err.message}${body ? ` — ${body}` : ""}` };
+  }
+}
+
 // ─── Dual-key NopeCHA helpers ───────────────────────────────────────────────
 
 /** Returns [key1, key2] from settings; empty string when not configured. */
