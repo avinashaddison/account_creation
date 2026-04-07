@@ -162,6 +162,88 @@ export async function getMessage(accountId: string, mailboxId: string, messageId
   }
 }
 
+export async function pollForReplitVerificationEmail(
+  emailAddress: string,
+  timeoutMs: number,
+  log: (msg: string) => void
+): Promise<{ link?: string; code?: string } | null> {
+  const deadline = Date.now() + timeoutMs;
+  const pollIntervalMs = 15_000;
+
+  log(`[smtp.dev] Polling inbox of ${emailAddress} for Replit verification email...`);
+
+  let smtpAccountId: string | null = null;
+  let inboxMailboxId: string | null = null;
+
+  try {
+    const accounts = await listAccounts();
+    const acct = accounts.find(a => a.address.toLowerCase() === emailAddress.toLowerCase() && !a.isDeleted);
+    if (!acct) {
+      log(`[smtp.dev] ⚠️ Could not find smtp.dev account for ${emailAddress}`);
+      return null;
+    }
+    smtpAccountId = acct.id;
+    const inbox = acct.mailboxes.find(m => m.path === "INBOX") ?? acct.mailboxes[0];
+    if (!inbox) {
+      log(`[smtp.dev] ⚠️ No mailbox found for ${emailAddress}`);
+      return null;
+    }
+    inboxMailboxId = inbox.id;
+    log(`[smtp.dev] Found account id=${smtpAccountId}, inbox id=${inboxMailboxId}`);
+  } catch (err: any) {
+    log(`[smtp.dev] ⚠️ Account lookup failed: ${err.message}`);
+    return null;
+  }
+
+  while (Date.now() < deadline) {
+    try {
+      const messages = await listMessages(smtpAccountId, inboxMailboxId, 20);
+      for (const msg of messages) {
+        const sub = (msg.subject || "").toLowerCase();
+        const from = (msg.from || "").toLowerCase();
+        const intro = (msg.intro || "").toLowerCase();
+        const isReplit = from.includes("replit") || sub.includes("replit") || sub.includes("verify") || sub.includes("confirm") || intro.includes("replit");
+        if (!isReplit) continue;
+
+        log(`[smtp.dev] Found Replit email: "${msg.subject}" from ${msg.from}`);
+
+        const detail = await getMessage(smtpAccountId, inboxMailboxId, msg.id);
+        if (!detail) continue;
+
+        const body = detail.html || detail.text || detail.intro || "";
+
+        const linkMatch =
+          body.match(/href="(https?:\/\/[^"]*replit\.com[^"]*)"/i) ||
+          body.match(/(https?:\/\/replit\.com\/[^\s"'<>\r\n)]+)/i);
+        if (linkMatch) {
+          const link = linkMatch[1].trim();
+          log(`[smtp.dev] ✅ Extracted verification link: ${link.substring(0, 100)}...`);
+          return { link };
+        }
+
+        const plainText = detail.text || body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const codeMatch = plainText.match(/\b([0-9]{6})\b/);
+        if (codeMatch) {
+          log(`[smtp.dev] ✅ Extracted verification code: ${codeMatch[1]}`);
+          return { code: codeMatch[1] };
+        }
+
+        log(`[smtp.dev] Email found but could not extract link or code — retrying...`);
+      }
+    } catch (err: any) {
+      log(`[smtp.dev] Poll error: ${err.message}`);
+    }
+
+    const remaining = Math.round((deadline - Date.now()) / 1000);
+    if (remaining <= 0) break;
+    log(`[smtp.dev] No Replit email yet — waiting ${Math.floor(pollIntervalMs / 1000)}s... (${remaining}s remaining)`);
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+  }
+
+  log(`[smtp.dev] ⚠️ Timed out waiting for Replit verification email`);
+  return null;
+}
+
 export async function getFullInbox(accountId: string): Promise<Array<{ id: string; from: string; subject: string; text: string; createdAt: string }>> {
   // Get account with embedded mailboxes in a single call
   const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}`);

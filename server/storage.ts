@@ -114,6 +114,9 @@ export interface IStorage {
   getDeletedBizMailAccounts(): Promise<BizMailAccount[]>;
   getActiveBizMailAccounts(): Promise<BizMailAccount[]>;
   getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]>;
+  getUnusedBizMailForReplit(): Promise<BizMailAccount | undefined>;
+  markBizMailUsedForReplit(email: string): Promise<void>;
+  countUnusedBizMailForReplit(): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -752,6 +755,26 @@ export class DatabaseStorage implements IStorage {
       .where(isNull(bizMailAccounts.deletedAt))
       .orderBy(bizMailAccounts.createdAt)
       .limit(limit);
+  }
+
+  async getUnusedBizMailForReplit(): Promise<BizMailAccount | undefined> {
+    const [row] = await db.select().from(bizMailAccounts)
+      .where(and(isNull(bizMailAccounts.deletedAt), eq(bizMailAccounts.usedForReplit, false), eq(bizMailAccounts.isActive, true)))
+      .orderBy(bizMailAccounts.createdAt)
+      .limit(1);
+    return row;
+  }
+
+  async markBizMailUsedForReplit(email: string): Promise<void> {
+    await db.update(bizMailAccounts)
+      .set({ usedForReplit: true })
+      .where(eq(bizMailAccounts.email, email));
+  }
+
+  async countUnusedBizMailForReplit(): Promise<number> {
+    const rows = await db.select({ id: bizMailAccounts.id }).from(bizMailAccounts)
+      .where(and(isNull(bizMailAccounts.deletedAt), eq(bizMailAccounts.usedForReplit, false), eq(bizMailAccounts.isActive, true)));
+    return rows.length;
   }
 }
 

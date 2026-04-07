@@ -10556,7 +10556,8 @@ export async function registerReplitAccount(
   outlookPassword: string,
   log: (msg: string) => void,
   couponCode?: string,
-  cardDetails?: CardDetails
+  cardDetails?: CardDetails,
+  bizMailOptions?: { emailAddress: string }
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
@@ -11094,6 +11095,13 @@ export async function registerReplitAccount(
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
+    if (bizMailOptions) {
+      log("Reading Replit verification email via smtp.dev API (Business Mail)...");
+      const { pollForReplitVerificationEmail } = await import("./smtpDevService");
+      const verResult = await pollForReplitVerificationEmail(bizMailOptions.emailAddress, 120_000, log);
+      if (verResult?.link) verificationLink = verResult.link;
+      if (verResult?.code) verificationCode = verResult.code;
+    } else {
     log("Reading Replit verification email via Outlook Web Access...");
     let owaBrowser: any = null;
     try {
@@ -11268,6 +11276,7 @@ export async function registerReplitAccount(
     } finally {
       if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
+    } // end else (Outlook OWA branch)
 
     if (verificationLink) {
       log(`Navigating to verification link...`);

@@ -3305,21 +3305,32 @@ export async function registerRoutes(
 
   app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { count = 1, couponCode, cardId } = req.body;
+      const { count = 1, couponCode, cardId, emailProvider = "outlook" } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
-      const allOutlook = await storage.getAllPrivateOutlooks();
-      const replitAccts = await storage.getAllReplitAccounts();
-      const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
-      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+      type BulkAccount = { email: string; password: string; isBizMail?: boolean };
+      let toUse: BulkAccount[] = [];
 
-      if (available.length === 0) {
-        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
+      if (emailProvider === "bizmail") {
+        const activeBiz = await storage.getActiveBizMailAccounts();
+        const available = activeBiz.filter(a => !a.usedForReplit);
+        if (available.length === 0) {
+          return res.status(400).json({ error: "No available Business Mail accounts — all have been used for Replit" });
+        }
+        const shuffled = [...available].sort(() => Math.random() - 0.5);
+        toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length)).map(a => ({ email: a.email, password: a.password, isBizMail: true }));
+      } else {
+        const allOutlook = await storage.getAllPrivateOutlooks();
+        const replitAccts = await storage.getAllReplitAccounts();
+        const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+        const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+        if (available.length === 0) {
+          return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
+        }
+        const shuffled = [...available].sort(() => Math.random() - 0.5);
+        toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length)).map(a => ({ email: a.email, password: a.password }));
       }
-
-      const shuffled = [...available].sort(() => Math.random() - 0.5);
-      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
 
       const bulkId = randomUUID().substring(0, 8);
       const batchId = `replit-bulk-${bulkId}`;
@@ -3339,21 +3350,26 @@ export async function registerRoutes(
       res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
 
       (async () => {
-        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) queued`, userId);
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) queued (${emailProvider === "bizmail" ? "Business Mail" : "Outlook"})`, userId);
         let successCount = 0;
         let failCount = 0;
 
         for (let i = 0; i < toUse.length; i++) {
           const acc = toUse[i];
 
-          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
+          if (acc.isBizMail) {
+            await storage.markBizMailUsedForReplit(acc.email);
+          }
+
+          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email}${acc.isBizMail ? " (BizMail)" : ""} ━━━`, userId);
           try {
             const result = await registerReplitAccount(
               acc.email,
               acc.password,
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
               couponCode || undefined,
-              bulkCardDetails
+              bulkCardDetails,
+              acc.isBizMail ? { emailAddress: acc.email } : undefined
             );
             if (result.success) {
               try {
@@ -3361,7 +3377,7 @@ export async function registerRoutes(
                   username: result.username!,
                   email: result.email!,
                   password: result.password!,
-                  outlookEmail: acc.email,
+                  outlookEmail: acc.isBizMail ? null : acc.email,
                   status: "processing",
                   createdBy: userId,
                 });
@@ -3391,19 +3407,44 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/bizmail/replit-available-count", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const count = await storage.countUnusedBizMailForReplit();
+      res.json({ count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword, couponCode, cardId } = req.body;
-      if (!outlookEmail || !outlookPassword) {
-        return res.status(400).json({ error: "Outlook email and password are required" });
-      }
+      const { outlookEmail, outlookPassword, couponCode, cardId, emailProvider = "outlook" } = req.body;
 
-      const existingAccts = await storage.getAllReplitAccounts();
-      const alreadyUsed = existingAccts.some(
-        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
-      );
-      if (alreadyUsed) {
-        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
+      let resolvedEmail: string;
+      let resolvedPassword: string;
+      let bizMailRecord: import("@shared/schema").BizMailAccount | null = null;
+
+      if (emailProvider === "bizmail") {
+        const biz = await storage.getUnusedBizMailForReplit();
+        if (!biz) {
+          return res.status(400).json({ error: "No available Business Mail accounts — all have been used for Replit" });
+        }
+        bizMailRecord = biz;
+        resolvedEmail = biz.email;
+        resolvedPassword = biz.password;
+      } else {
+        if (!outlookEmail || !outlookPassword) {
+          return res.status(400).json({ error: "Outlook email and password are required" });
+        }
+        const existingAccts = await storage.getAllReplitAccounts();
+        const alreadyUsed = existingAccts.some(
+          (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
+        );
+        if (alreadyUsed) {
+          return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
+        }
+        resolvedEmail = outlookEmail;
+        resolvedPassword = outlookPassword;
       }
 
       const userId = req.session.userId;
@@ -3421,18 +3462,23 @@ export async function registerRoutes(
         }
       }
 
+      if (bizMailRecord) {
+        await storage.markBizMailUsedForReplit(bizMailRecord.email);
+      }
+
       batchOwners.set(batchId, userId);
       res.json({ success: true, createId, batchId, message: "Replit account creation started" });
 
       (async () => {
-        broadcastLog(batchId, createId, `Starting Replit account creation for ${outlookEmail}...`, userId);
+        broadcastLog(batchId, createId, `Starting Replit account creation for ${resolvedEmail}${emailProvider === "bizmail" ? " (Business Mail)" : ""}...`, userId);
         try {
           const result = await registerReplitAccount(
-            outlookEmail,
-            outlookPassword,
+            resolvedEmail,
+            resolvedPassword,
             (msg) => broadcastLog(batchId, createId, msg, userId),
             couponCode || undefined,
-            singleCardDetails
+            singleCardDetails,
+            emailProvider === "bizmail" ? { emailAddress: resolvedEmail } : undefined
           );
 
           if (result.success) {
@@ -3441,7 +3487,7 @@ export async function registerRoutes(
                 username: result.username!,
                 email: result.email!,
                 password: result.password!,
-                outlookEmail,
+                outlookEmail: emailProvider === "bizmail" ? null : resolvedEmail,
                 status: "processing",
                 createdBy: userId,
               });
