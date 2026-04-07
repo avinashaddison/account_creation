@@ -92,6 +92,42 @@ export async function listAccounts(): Promise<SmtpDevAccount[]> {
   return members(data).map(parseAccount);
 }
 
+// Paginate through all pages of /accounts until the given address is found.
+// smtp.dev uses Hydra JSON-LD pagination (hydra:view → hydra:next).
+export async function findAccountByAddress(address: string): Promise<SmtpDevAccount | null> {
+  const normalised = address.toLowerCase();
+  let path: string | null = "/accounts";
+
+  while (path) {
+    const data: any = await call("GET", path);
+    const page = members(data);
+    const match = page.find((a: any) => {
+      const addr = (a.address ?? a.email ?? "").toLowerCase();
+      return addr === normalised;
+    });
+    if (match) return parseAccount(match);
+
+    // Follow hydra:next if present
+    const view = data?.["hydra:view"] ?? data?.view ?? null;
+    const next: string | undefined =
+      view?.["hydra:next"] ?? view?.next ?? undefined;
+
+    if (next) {
+      // next is either a full URL or just a path+query
+      try {
+        const url = new URL(next, SMTP_DEV_BASE);
+        path = url.pathname + url.search;
+      } catch {
+        path = null;
+      }
+    } else {
+      path = null;
+    }
+  }
+
+  return null;
+}
+
 function parseAccount(a: any): SmtpDevAccount {
   const mailboxes: SmtpDevMailbox[] = (a.mailboxes ?? []).map((m: any) => ({
     id: String(m.id ?? ""),
@@ -176,10 +212,10 @@ export async function pollForReplitVerificationEmail(
   let inboxMailboxId: string | null = null;
 
   try {
-    const accounts = await listAccounts();
-    const acct = accounts.find(a => a.address.toLowerCase() === emailAddress.toLowerCase() && !a.isDeleted);
-    if (!acct) {
-      log(`[smtp.dev] ⚠️ Could not find smtp.dev account for ${emailAddress}`);
+    log(`[smtp.dev] Looking up account for ${emailAddress} (paginated search)...`);
+    const acct = await findAccountByAddress(emailAddress);
+    if (!acct || acct.isDeleted) {
+      log(`[smtp.dev] ⚠️ Could not find smtp.dev account for ${emailAddress} — address may not be on smtp.dev`);
       return null;
     }
     smtpAccountId = acct.id;

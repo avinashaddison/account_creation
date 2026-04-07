@@ -201,6 +201,13 @@ app.use((req, res, next) => {
       EXCEPTION WHEN others THEN NULL;
       END $$;
     `);
+    // Add used_for_replit column if missing (idempotent)
+    await startupDb.execute(sqlRaw`
+      DO $$ BEGIN
+        ALTER TABLE biz_mail_accounts ADD COLUMN used_for_replit BOOLEAN NOT NULL DEFAULT false;
+      EXCEPTION WHEN duplicate_column THEN NULL;
+      END $$;
+    `);
     console.log("[Migration] Ensured biz_mail_accounts table exists");
   } catch (err: any) {
     console.warn("[Migration] biz_mail_accounts bootstrap warning:", err.message);

@@ -212,6 +212,7 @@ export default function ReplitCreate() {
               sounds.complete();
               qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
               qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
+              qc.invalidateQueries({ queryKey: ["/api/bizmail/replit-available-count"] });
             } else if (data.type === "replit_create_result") {
               if (data.success) {
                 setCompletedCount((p) => p + 1);
