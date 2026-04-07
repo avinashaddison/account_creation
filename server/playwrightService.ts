@@ -11011,6 +11011,126 @@ export async function registerReplitAccount(
 
     await page.waitForTimeout(500);
 
+    // ── hCaptcha pre-solve for signup (Replit embeds invisible hCaptcha on signup forms) ──
+    try {
+      const signupHtml = await page.content().catch(() => "");
+      if (signupHtml.includes("hcaptcha") || signupHtml.includes("h-captcha")) {
+        log("🔒 hCaptcha detected on signup page — solving via NopeCHA/CapSolver...");
+        const siteKey = await page.evaluate(() => {
+          const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], #h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
+          return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
+        }).catch(() => null) as string | null;
+        const keyToUse = siteKey || "4c672d35-0701-42b2-88c3-78380b0db560";
+        log(`  → sitekey: ${keyToUse.substring(0, 20)}...`);
+
+        // ── Step A: Try browser-native hcaptcha execute (stealth browser may pass fingerprint check) ──
+        log("  → Attempting browser-native hcaptcha.execute() (stealth fingerprint)...");
+        const browserToken = await page.evaluate(async () => {
+          const w = window as any;
+          if (!w.hcaptcha) return null;
+          try {
+            // Trigger hcaptcha to execute (auto-solve if browser fingerprint passes)
+            await w.hcaptcha.execute();
+          } catch {}
+          // Poll for response for up to 10 seconds
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            let token = "";
+            try { token = w.hcaptcha.getResponse() || ""; } catch {}
+            if (token.length > 50) return token;
+          }
+          return null;
+        }).catch(() => null) as string | null;
+
+        let solvedToken: string | null = null;
+
+        if (browserToken && browserToken.length > 50) {
+          log(`  ✅ Browser-native hcaptcha solved! (token ${browserToken.length} chars) — no external solver needed`);
+          solvedToken = browserToken;
+        } else {
+          log("  ⚠️ Browser-native solve failed (bot-detected?) — falling back to NopeCHA/CapSolver...");
+
+          // ── Step B: External solve via NopeCHA + CapSolver ──
+          const nopeKeysDual = await getNopeCHAKeys();
+          const nopeKey = nopeKeysDual[0] || nopeKeysDual[1] || null;
+          let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
+
+          if (nopeKey) {
+            log("  → Using NopeCHA solver (dual-key)... (this takes 30–60s)");
+            const nopeStart = Date.now();
+            const nopeTicker = setInterval(() => {
+              const elapsed = Math.round((Date.now() - nopeStart) / 1000);
+              log(`  ⏳ Captcha solving in progress... (${elapsed}s elapsed)`);
+            }, 12000);
+            try {
+              capResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual, "https://replit.com/signup", keyToUse, undefined, 150);
+            } finally {
+              clearInterval(nopeTicker);
+            }
+            if (!capResult.success) {
+              log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"} — trying CapSolver fallback...`);
+              capResult = await solveHCaptcha("https://replit.com/signup", keyToUse);
+            }
+          } else {
+            log("  ⚠️ NopeCHA key not configured — using CapSolver...");
+            capResult = await solveHCaptcha("https://replit.com/signup", keyToUse);
+          }
+
+          if (capResult.success && capResult.token) {
+            solvedToken = capResult.token;
+            log(`  ✅ External hCaptcha solved (token ${solvedToken.length} chars)`);
+          } else {
+            log(`  ⚠️ All captcha solvers failed: ${capResult.error || "unknown"} — submitting anyway`);
+          }
+        }
+
+        if (solvedToken) {
+          // ── Route intercept: inject token into signup API POST if body has no captcha ──
+          // Only targets real replit.com API calls (not Segment analytics /v1/t)
+          await page.route("**/*", async (route) => {
+            const req = route.request();
+            const url = req.url();
+            try {
+              const urlObj = new URL(url);
+              const isReplitApi = (urlObj.hostname === "replit.com" || urlObj.hostname.endsWith(".replit.com"))
+                && urlObj.pathname.startsWith("/api/");
+              if (req.method() === "POST" && isReplitApi) {
+                const postData = req.postData();
+                if (postData) {
+                  try {
+                    const body = JSON.parse(postData);
+                    const bodyKeys = Object.keys(body);
+                    const existingCap = body["recaptchaToken"] || body["h-captcha-response"] || body["captcha"] || body["hcaptchaToken"] || body["captchaToken"] || "";
+                    const existingCapLen = String(existingCap).length;
+                    log(`  → [route-intercept] POST ${urlObj.pathname} | keys:[${bodyKeys.join(",")}] | existing-cap-len:${existingCapLen}`);
+                    // ALWAYS inject NopeCHA token — browser-generated tokens fail bot detection
+                    // (hcaptcha detects headless and generates invalid tokens for our browser)
+                    body["recaptchaToken"] = solvedToken;
+                    body["captcha"] = solvedToken;
+                    body["h-captcha-response"] = solvedToken;
+                    body["hcaptchaToken"] = solvedToken;
+                    body["captchaToken"] = solvedToken;
+                    log(`  → [route-intercept] Force-injecting NopeCHA token (overwriting browser token len ${existingCapLen})`);
+                    await route.continue({ postData: JSON.stringify(body) });
+                    return;
+                  } catch {
+                    log(`  → [route-intercept] POST ${urlObj.pathname} | non-JSON body`);
+                  }
+                }
+              }
+            } catch {}
+            await route.continue();
+          });
+
+          await page.waitForTimeout(1000);
+        }
+      } else {
+        log("No hCaptcha detected on signup page — submitting directly");
+      }
+    } catch (capErr: any) {
+      log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — proceeding`);
+    }
+
     log("Submitting signup form...");
     const submitSelectors = [
       'button[type="submit"]',
@@ -11057,6 +11177,8 @@ export async function registerReplitAccount(
       page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => {}),
       page.waitForTimeout(6000),
     ]);
+    // Remove route interceptor after form submission is processed
+    await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
     // Extra settle time in case of redirect chains
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1000);
@@ -11068,9 +11190,15 @@ export async function registerReplitAccount(
       return page.content().catch(() => "");
     });
     const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists")) {
+    if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists") || pageText.toLowerCase().includes("captcha")) {
       const firstLine = pageText.split("\n").filter(l => l.trim().length > 5).slice(0, 5).join(" | ");
       log(`⚠️ Possible form error text: ${firstLine.substring(0, 200)}`);
+    }
+    // ── Fast bail: pageText says captcha invalid — don't even bother with DOM lookup ──
+    if (pageText.toLowerCase().includes("captcha token is invalid") || pageText.toLowerCase().includes("captcha") && pageText.toLowerCase().includes("invalid") && currentUrl.includes("signup")) {
+      log("❌ Captcha rejected (pageText) — aborting immediately (account not created)");
+      try { await browser.close(); } catch {}
+      return { success: false, error: "Replit rejected the captcha token — account not created" };
     }
 
     if (pageContent.toLowerCase().includes("verify") || pageContent.toLowerCase().includes("check your email") || pageContent.toLowerCase().includes("verification") || currentUrl.includes("verify") || currentUrl.includes("confirm")) {
@@ -11084,6 +11212,12 @@ export async function registerReplitAccount(
       log(`Current URL: ${currentUrl}`);
       if (errText && errText.toLowerCase().includes("already taken")) {
         log("Username already taken — this account may have been partially created");
+      }
+      // ── Early bail: captcha was rejected — account was never created, no point polling ──
+      if (errText && (errText.toLowerCase().includes("captcha") || errText.toLowerCase().includes("token is invalid"))) {
+        log("❌ Captcha rejected by Replit — aborting (no account was created, skipping inbox poll)");
+        try { await browser.close(); } catch {}
+        return { success: false, error: "Replit rejected the captcha token — account not created" };
       }
     } else {
       log(`Current URL after submit: ${currentUrl}`);
