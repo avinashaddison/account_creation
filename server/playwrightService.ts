@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, solveHCaptchaViaNopeCHADual, getNopeCHAKeys, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -16382,13 +16382,13 @@ export async function checkoutExistingReplitAccount(
     log(`🤖 Pre-solving hCaptcha x2 (no rqdata) — both tokens in parallel...`);
     let preSolvedToken2: string | null = null;
 
-    const nopeKeyRowPre = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-    const nopeKeyPre = nopeKeyRowPre.rows.length > 0 ? (nopeKeyRowPre.rows[0].value as string) : "";
+    const nopeKeysPre = await getNopeCHAKeys();
+    const nopeKeyPre = nopeKeysPre[0] || nopeKeysPre[1];
 
     const solveOneNope = async (label: string): Promise<string | null> => {
-      if (!nopeKeyPre) return null;
+      if (!nopeKeysPre[0] && !nopeKeysPre[1]) return null;
       try {
-        const r = await solveHCaptchaViaNopeCHA(nopeKeyPre, HCAP_URL, HCAP_SITE_KEY, undefined, 120);
+        const r = await solveHCaptchaViaNopeCHADual(nopeKeysPre, HCAP_URL, HCAP_SITE_KEY, undefined, 120);
         if (r.success && r.token) {
           log(`✅ Pre-solved token ${label} (len=${r.token.length})`);
           return r.token;
@@ -16536,12 +16536,11 @@ export async function checkoutExistingReplitAccount(
       // NopeCHA solves in ~35s when not rate-limited — much better than using a stale pre-solved token.
       // Race NopeCHA (90s timeout) against a pre-solved fallback.
       let finalResult: { success: boolean; token?: string; error?: string };
-      const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-      const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0].value as string) : "";
-      const freshSolvePromise = nopeKey
-        ? solveHCaptchaViaNopeCHA(nopeKey, HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
+      const nopeKeysRow = await getNopeCHAKeys();
+      const freshSolvePromise = (nopeKeysRow[0] || nopeKeysRow[1])
+        ? solveHCaptchaViaNopeCHADual(nopeKeysRow, HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
         : Promise.resolve({ success: false, error: "no NopeCHA key" } as { success: false; error: string });
-      log(`  🔄 Starting fresh NopeCHA solve for visible challenge (90s timeout)...`);
+      log(`  🔄 Starting fresh NopeCHA solve for visible challenge (90s timeout, dual-key)...`);
       const freshResult = await freshSolvePromise;
       if (freshResult.success && freshResult.token) {
         log(`  ✅ Fresh live solve succeeded (len=${freshResult.token.length})`);
@@ -17922,13 +17921,13 @@ export async function onboardingCheckoutReplitAccount(
 
     log(`🤖 Pre-solving hCaptcha x2 (parallel)...`);
     let preSolvedToken2b: string | null = null;
-    const nopeKeyRowPre2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-    const nopeKeyPre2 = nopeKeyRowPre2.rows.length > 0 ? (nopeKeyRowPre2.rows[0].value as string) : "";
+    const nopeKeysPre2 = await getNopeCHAKeys();
+    const nopeKeyPre2 = nopeKeysPre2[0] || nopeKeysPre2[1];
 
     const solveOneNope2 = async (label: string): Promise<string | null> => {
-      if (!nopeKeyPre2) return null;
+      if (!nopeKeysPre2[0] && !nopeKeysPre2[1]) return null;
       try {
-        const r = await solveHCaptchaViaNopeCHA(nopeKeyPre2, HCAP_URL2, HCAP_SITE_KEY, undefined, 120);
+        const r = await solveHCaptchaViaNopeCHADual(nopeKeysPre2, HCAP_URL2, HCAP_SITE_KEY, undefined, 120);
         if (r.success && r.token) { log(`✅ Pre-solved token ${label} (len=${r.token.length})`); return r.token; }
       } catch (e: any) { log(`⚠️ Pre-solve ${label} failed: ${e.message}`); }
       return null;
@@ -18063,12 +18062,11 @@ export async function onboardingCheckoutReplitAccount(
       log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found (will solve without)"}`);
 
       let finalResult2: { success: boolean; token?: string; error?: string };
-      const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-      const nopeKey2 = nopeKeyRow2.rows.length > 0 ? (nopeKeyRow2.rows[0].value as string) : "";
-      const freshSolvePromise2 = nopeKey2
-        ? solveHCaptchaViaNopeCHA(nopeKey2, HCAP_URL2, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
+      const nopeKeysRow2 = await getNopeCHAKeys();
+      const freshSolvePromise2 = (nopeKeysRow2[0] || nopeKeysRow2[1])
+        ? solveHCaptchaViaNopeCHADual(nopeKeysRow2, HCAP_URL2, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
         : Promise.resolve({ success: false, error: "no NopeCHA key" } as { success: false; error: string });
-      log(`  🔄 Starting fresh NopeCHA solve (90s)...`);
+      log(`  🔄 Starting fresh NopeCHA solve (90s, dual-key)...`);
       const freshResult2 = await freshSolvePromise2;
       if (freshResult2.success && freshResult2.token) {
         log(`  ✅ Fresh solve succeeded (len=${freshResult2.token.length})`);
@@ -19153,21 +19151,21 @@ export async function generateSingleCheckoutLink(
         const keyToUse = siteKey || "4c672d35-0701-42b2-88c3-78380b0db560"; // Replit's known hCaptcha sitekey fallback
         log(`  → sitekey: ${keyToUse.substring(0, 20)}...`);
 
-        // Fetch NopeCHA API key from settings; fall back to CapSolver if not configured
-        const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-        const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
+        // Fetch NopeCHA API keys from settings (dual-key support)
+        const nopeKeysDual = await getNopeCHAKeys();
+        const nopeKey = nopeKeysDual[0] || nopeKeysDual[1] || null;
 
         let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
 
         if (nopeKey) {
-          log(`  → Using NopeCHA solver... (this takes 30–60s)`);
+          log(`  → Using NopeCHA solver (dual-key)... (this takes 30–60s)`);
           const nopeStart = Date.now();
           const nopeTicker = setInterval(() => {
             const elapsed = Math.round((Date.now() - nopeStart) / 1000);
             log(`  ⏳ Captcha solving in progress... (${elapsed}s elapsed)`);
           }, 12000);
           try {
-            capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 150);
+            capResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual, "https://replit.com/login", keyToUse, undefined, 150);
           } finally {
             clearInterval(nopeTicker);
           }
@@ -19349,15 +19347,14 @@ export async function generateSingleCheckoutLink(
         if (hasNewCaptcha && stuckUrl.includes("replit.com/login")) {
           log(`🔄 Replit presented a new hCaptcha — solving again (retry #2)...`);
           try {
-            const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-            const nopeKey2 = nopeKeyRow2.rows.length > 0 ? (nopeKeyRow2.rows[0] as any).value as string : null;
+            const nopeKeysDual2 = await getNopeCHAKeys();
             let retryResult = { success: false, token: undefined as string | undefined, error: "no solver" };
-            if (nopeKey2) {
-              log(`  → Solving retry captcha via NopeCHA...`);
+            if (nopeKeysDual2[0] || nopeKeysDual2[1]) {
+              log(`  → Solving retry captcha via NopeCHA (dual-key)...`);
               const retryStart = Date.now();
               const retryTicker = setInterval(() => log(`  ⏳ Retry captcha solving... (${Math.round((Date.now() - retryStart) / 1000)}s)`), 12000);
               try {
-                retryResult = await solveHCaptchaViaNopeCHA(nopeKey2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 150);
+                retryResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 150);
               } finally {
                 clearInterval(retryTicker);
               }
@@ -20456,12 +20453,9 @@ export async function registerNanoBananaAccount(
 
   try {
     // Get NopeCHA key for hCaptcha solving
-    let nopeKey = "";
-    try {
-      const r = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`);
-      if (r.rows.length > 0 && r.rows[0].value) nopeKey = r.rows[0].value as string;
-    } catch {}
-    log(`NopeCHA key loaded: ${nopeKey ? "yes" : "none"}`);
+    const nopeKeysFinal = await getNopeCHAKeys().catch(() => ["", ""] as [string, string]);
+    const nopeKey = nopeKeysFinal[0] || nopeKeysFinal[1];
+    log(`NopeCHA key loaded: ${nopeKey ? "yes (dual-key enabled)" : "none"}`);
 
     // Use ZenRows browser — handles fingerprint randomisation, TLS masking, and proxy routing
     // so Microsoft does not flag the session as automation on every login

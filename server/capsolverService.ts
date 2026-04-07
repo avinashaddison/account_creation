@@ -36,6 +36,7 @@ export interface CapSolverTaskResult {
   error?: string;
   taskId?: string;
   cost?: number;
+  rateLimited?: boolean; // true when NopeCHA key has hit its daily/credit limit
 }
 
 export async function getCapSolverBalance(): Promise<{ balance: number; error?: string }> {
@@ -264,7 +265,12 @@ export async function solveHCaptchaViaNopeCHA(
     console.log(`[NopeCHA] Submit response: ${JSON.stringify(submitResp.data).substring(0, 200)}`);
 
     if (submitResp.data.error) {
-      return { success: false, error: `NopeCHA error ${submitResp.data.error}: ${submitResp.data.message || "submission failed"}` };
+      const errCode = submitResp.data.error;
+      const errMsg = submitResp.data.message || "submission failed";
+      // Error codes 4 (credit exhausted), 28 (daily limit), 29 (request limit) = rate limited
+      const isRateLimit = [4, 28, 29].includes(errCode) ||
+        /limit|credit|quota|exceeded|insufficient/i.test(errMsg);
+      return { success: false, rateLimited: isRateLimit, error: `NopeCHA error ${errCode}: ${errMsg}` };
     }
 
     const taskId = submitResp.data.data;
@@ -324,18 +330,72 @@ export async function solveHCaptchaViaNopeCHA(
   }
 }
 
+// ─── Dual-key NopeCHA helpers ───────────────────────────────────────────────
+
+/** Returns [key1, key2] from settings; empty string when not configured. */
+export async function getNopeCHAKeys(): Promise<[string, string]> {
+  const [r1, r2] = await Promise.all([
+    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] })),
+    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key_2'`).catch(() => ({ rows: [] })),
+  ]);
+  const k1 = r1.rows.length > 0 ? (r1.rows[0].value as string) || "" : "";
+  const k2 = r2.rows.length > 0 ? (r2.rows[0].value as string) || "" : "";
+  return [k1, k2];
+}
+
+/**
+ * Solve hCaptcha using two NopeCHA API keys.
+ * Tries key1 first. If key1 returns a rate-limit / credit-limit error,
+ * automatically retries with key2 (if configured).
+ */
+export async function solveHCaptchaViaNopeCHADual(
+  keys: [string, string],
+  websiteURL: string,
+  websiteKey: string,
+  rqdata?: string | null,
+  maxWaitSec: number = 300
+): Promise<CapSolverTaskResult> {
+  const [key1, key2] = keys;
+  if (!key1 && !key2) return { success: false, error: "No NopeCHA key configured" };
+
+  if (key1) {
+    const result = await solveHCaptchaViaNopeCHA(key1, websiteURL, websiteKey, rqdata, maxWaitSec);
+    if (result.success) return result;
+    if (result.rateLimited && key2) {
+      console.log(`[NopeCHA] Key 1 rate limited — switching to Key 2...`);
+    } else if (!key2) {
+      return result;
+    } else if (!result.rateLimited) {
+      // Non-limit error on key1 — still try key2 as a safety net
+      console.log(`[NopeCHA] Key 1 failed (${result.error}) — trying Key 2...`);
+    }
+  }
+
+  if (key2) {
+    console.log(`[NopeCHA] Attempting solve with Key 2...`);
+    return solveHCaptchaViaNopeCHA(key2, websiteURL, websiteKey, rqdata, maxWaitSec);
+  }
+
+  return { success: false, error: "Both NopeCHA keys exhausted" };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 export async function solveHCaptchaWith2Captcha(
   websiteURL: string,
   websiteKey: string,
   rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   // Fetch all solver keys from DB in parallel
-  const [nopeRow, acRow, tcRow] = await Promise.all([
+  const [nopeRow, nopeRow2, acRow, tcRow] = await Promise.all([
     db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`),
+    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key_2'`),
     db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`),
     db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`),
   ]);
-  const nopeKey = nopeRow.rows.length > 0 ? (nopeRow.rows[0].value as string) : "";
+  const nopeKey  = nopeRow.rows.length  > 0 ? (nopeRow.rows[0].value  as string) : "";
+  const nopeKey2 = nopeRow2.rows.length > 0 ? (nopeRow2.rows[0].value as string) : "";
+  const nopeKeys: [string, string] = [nopeKey, nopeKey2];
   const acKey   = acRow.rows.length > 0   ? (acRow.rows[0].value as string)   : "";
   const tcKey   = tcRow.rows.length > 0   ? (tcRow.rows[0].value as string)   : "";
 
@@ -345,13 +405,13 @@ export async function solveHCaptchaWith2Captcha(
   if (rqdata) {
     const solvers: Array<{ name: string; promise: Promise<CapSolverTaskResult> }> = [];
 
-    if (nopeKey) {
+    if (nopeKey || nopeKey2) {
       // Cap NopeCHA at 50s — it hangs forever on bad keys / slow queues
       const nopeTimeout = new Promise<CapSolverTaskResult>(r =>
         setTimeout(() => r({ success: false, error: "NopeCHA race timeout (50s)" }), 50000)
       );
-      console.log(`[NopeCHA] Starting enterprise hCaptcha race (rqdata, 50s cap)...`);
-      solvers.push({ name: "NopeCHA", promise: Promise.race([solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata), nopeTimeout]) });
+      console.log(`[NopeCHA] Starting enterprise hCaptcha race (rqdata, 50s cap, dual-key)...`);
+      solvers.push({ name: "NopeCHA", promise: Promise.race([solveHCaptchaViaNopeCHADual(nopeKeys, websiteURL, websiteKey, rqdata), nopeTimeout]) });
     }
     if (acKey) {
       console.log(`[AntiCaptcha] Starting enterprise hCaptcha race (rqdata present)...`);
@@ -393,9 +453,9 @@ export async function solveHCaptchaWith2Captcha(
   }
 
   // Without rqdata: try sequentially (cheapest → fallback → CapSolver)
-  if (nopeKey) {
-    console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com...`);
-    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata);
+  if (nopeKey || nopeKey2) {
+    console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com (dual-key)...`);
+    const result = await solveHCaptchaViaNopeCHADual(nopeKeys, websiteURL, websiteKey, rqdata);
     if (result.success) return result;
     console.log(`[NopeCHA] Failed: ${result.error} — trying next solver...`);
   }
@@ -412,9 +472,9 @@ export async function solveHCaptchaWith2Captcha(
     console.log(`[2captcha] Failed: ${result.error} — retrying NopeCHA as last resort...`);
   }
   // Final attempt: retry NopeCHA with a fresh task (ElevenLabs hCaptcha is NopeCHA-exclusive)
-  if (nopeKey) {
-    console.log(`[NopeCHA] Final retry — submitting fresh task (last resort)...`);
-    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata, 300);
+  if (nopeKey || nopeKey2) {
+    console.log(`[NopeCHA] Final retry — submitting fresh task via dual-key (last resort)...`);
+    const result = await solveHCaptchaViaNopeCHADual(nopeKeys, websiteURL, websiteKey, rqdata, 300);
     if (result.success) return result;
     console.log(`[NopeCHA] Final retry failed: ${result.error}`);
     return result;

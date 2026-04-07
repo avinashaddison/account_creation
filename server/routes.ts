@@ -1077,6 +1077,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/settings/nopecha-api-key-2", requireAuth, requireSuperAdmin, async (_req, res) => {
+    try {
+      const key = await storage.getSetting("nopecha_api_key_2");
+      res.json({ key: key || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/nopecha-api-key-2", requireAuth, requireSuperAdmin, async (req, res) => {
+    try {
+      const { key } = req.body;
+      if (!key || typeof key !== "string" || key.trim().length < 5) {
+        return res.status(400).json({ error: "Valid NopeCHA API Key 2 is required" });
+      }
+      await storage.setSetting("nopecha_api_key_2", key.trim());
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/settings/replit-checkout-delay", requireAuth, async (_req, res) => {
     try {
       const value = await storage.getSetting("replit_checkout_delay_minutes");
