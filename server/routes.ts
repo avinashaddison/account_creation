@@ -3309,17 +3309,19 @@ export async function registerRoutes(
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
-      type BulkAccount = { email: string; password: string; isBizMail?: boolean };
+      type BulkAccount = { email: string; password: string; isBizMail?: boolean; smtpDevId?: string | null };
       let toUse: BulkAccount[] = [];
 
       if (emailProvider === "bizmail") {
         const activeBiz = await storage.getActiveBizMailAccounts();
-        const available = activeBiz.filter(a => !a.usedForReplit);
+        // Prefer smtp.dev accounts (smtpDevId set) so verification works
+        const available = activeBiz
+          .filter(a => !a.usedForReplit)
+          .sort((a, b) => (b.smtpDevId ? 1 : 0) - (a.smtpDevId ? 1 : 0));
         if (available.length === 0) {
           return res.status(400).json({ error: "No available Business Mail accounts — all have been used for Replit" });
         }
-        const shuffled = [...available].sort(() => Math.random() - 0.5);
-        toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length)).map(a => ({ email: a.email, password: a.password, isBizMail: true }));
+        toUse = available.slice(0, Math.min(actualCount, available.length)).map(a => ({ email: a.email, password: a.password, isBizMail: true, smtpDevId: a.smtpDevId }));
       } else {
         const allOutlook = await storage.getAllPrivateOutlooks();
         const replitAccts = await storage.getAllReplitAccounts();
@@ -3369,7 +3371,7 @@ export async function registerRoutes(
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
               couponCode || undefined,
               bulkCardDetails,
-              acc.isBizMail ? { emailAddress: acc.email } : undefined
+              acc.isBizMail ? { emailAddress: acc.email, smtpDevId: acc.smtpDevId ?? undefined } : undefined
             );
             if (result.success) {
               try {
@@ -3411,6 +3413,37 @@ export async function registerRoutes(
     try {
       const count = await storage.countUnusedBizMailForReplit();
       res.json({ count });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Paginate all smtp.dev accounts and bulk-upsert them into biz_mail_accounts.
+  // Long-running — streams progress via SSE or returns summary JSON.
+  app.post("/api/bizmail/import-smtp-dev", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { listAllAccounts } = await import("./smtpDevService");
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders?.();
+
+      const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+      send({ type: "start", message: "Fetching all smtp.dev accounts (this may take a minute)..." });
+
+      const accounts = await listAllAccounts();
+      send({ type: "progress", message: `Fetched ${accounts.length} accounts from smtp.dev. Importing into database...` });
+
+      const toImport = accounts
+        .filter(a => !a.isDeleted && a.isActive)
+        .map(a => ({ smtpDevId: a.id, email: a.address }));
+
+      const inserted = await storage.importSmtpDevAccounts(toImport);
+      const updated = toImport.length - inserted;
+
+      send({ type: "done", message: `Import complete — ${inserted} new accounts added, ${updated} existing records updated with smtp.dev ID.`, total: toImport.length, inserted, updated });
+      res.end();
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3478,7 +3511,7 @@ export async function registerRoutes(
             (msg) => broadcastLog(batchId, createId, msg, userId),
             couponCode || undefined,
             singleCardDetails,
-            emailProvider === "bizmail" ? { emailAddress: resolvedEmail } : undefined
+            emailProvider === "bizmail" ? { emailAddress: resolvedEmail, smtpDevId: bizMailRecord?.smtpDevId ?? undefined } : undefined
           );
 
           if (result.success) {

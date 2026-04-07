@@ -208,6 +208,13 @@ app.use((req, res, next) => {
       EXCEPTION WHEN duplicate_column THEN NULL;
       END $$;
     `);
+    // Add smtp_dev_id column if missing (idempotent)
+    await startupDb.execute(sqlRaw`
+      DO $$ BEGIN
+        ALTER TABLE biz_mail_accounts ADD COLUMN smtp_dev_id TEXT;
+      EXCEPTION WHEN duplicate_column THEN NULL;
+      END $$;
+    `);
     console.log("[Migration] Ensured biz_mail_accounts table exists");
   } catch (err: any) {
     console.warn("[Migration] biz_mail_accounts bootstrap warning:", err.message);

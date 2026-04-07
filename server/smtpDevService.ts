@@ -145,6 +145,34 @@ function parseAccount(a: any): SmtpDevAccount {
   };
 }
 
+// Direct account lookup by smtp.dev UUID — O(1), no pagination needed.
+export async function getAccountById(accountId: string): Promise<SmtpDevAccount | null> {
+  try {
+    const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}`);
+    return parseAccount(data);
+  } catch (err: any) {
+    console.error("[smtp.dev] getAccountById error:", err.message);
+    return null;
+  }
+}
+
+// Paginate ALL accounts (page=1,2,3…) and return them all.
+// smtp.dev returns 30/page and has no hydra:next link — we must increment page until empty.
+export async function listAllAccounts(): Promise<SmtpDevAccount[]> {
+  const all: SmtpDevAccount[] = [];
+  let page = 1;
+  while (true) {
+    const data: any = await call("GET", `/accounts?page=${page}`);
+    const items = members(data).map(parseAccount);
+    if (items.length === 0) break;
+    all.push(...items);
+    page++;
+    // Safety cap — 10 000 accounts = ~334 pages
+    if (page > 400) break;
+  }
+  return all;
+}
+
 export async function createAccount(address: string, password: string): Promise<{ account: SmtpDevAccount; password: string }> {
   const data: any = await call("POST", "/accounts", { address, password });
   return { account: parseAccount(data), password };
@@ -201,7 +229,8 @@ export async function getMessage(accountId: string, mailboxId: string, messageId
 export async function pollForReplitVerificationEmail(
   emailAddress: string,
   timeoutMs: number,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  smtpDevId?: string,            // when provided, skip search and use direct ID lookup
 ): Promise<{ link?: string; code?: string } | null> {
   const deadline = Date.now() + timeoutMs;
   const pollIntervalMs = 15_000;
@@ -212,8 +241,16 @@ export async function pollForReplitVerificationEmail(
   let inboxMailboxId: string | null = null;
 
   try {
-    log(`[smtp.dev] Looking up account for ${emailAddress} (paginated search)...`);
-    const acct = await findAccountByAddress(emailAddress);
+    let acct: SmtpDevAccount | null = null;
+
+    if (smtpDevId) {
+      log(`[smtp.dev] Direct lookup by ID: ${smtpDevId}`);
+      acct = await getAccountById(smtpDevId);
+    } else {
+      log(`[smtp.dev] Looking up account for ${emailAddress} (paginated search)...`);
+      acct = await findAccountByAddress(emailAddress);
+    }
+
     if (!acct || acct.isDeleted) {
       log(`[smtp.dev] ⚠️ Could not find smtp.dev account for ${emailAddress} — address may not be on smtp.dev`);
       return null;

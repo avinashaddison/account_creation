@@ -145,6 +145,44 @@ export default function ReplitCreate() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  // ── smtp.dev sync ──
+  const [smtpSyncing, setSmtpSyncing] = useState(false);
+  const [smtpSyncMsg, setSmtpSyncMsg] = useState<string | null>(null);
+
+  async function runSmtpDevSync() {
+    if (smtpSyncing) return;
+    setSmtpSyncing(true);
+    setSmtpSyncMsg("Connecting to smtp.dev...");
+    try {
+      const res = await fetch("/api/bizmail/import-smtp-dev", { method: "POST", credentials: "include" });
+      if (!res.ok || !res.body) { setSmtpSyncMsg("Request failed"); setSmtpSyncing(false); return; }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const ln of lines) {
+          if (!ln.startsWith("data: ")) continue;
+          try {
+            const ev = JSON.parse(ln.slice(6));
+            if (ev.message) setSmtpSyncMsg(ev.message);
+            if (ev.type === "done") {
+              qc.invalidateQueries({ queryKey: ["/api/bizmail/replit-available-count"] });
+            }
+          } catch {}
+        }
+      }
+    } catch (e: any) {
+      setSmtpSyncMsg(`Error: ${e.message}`);
+    } finally {
+      setSmtpSyncing(false);
+    }
+  }
+
   // ── Shared ──
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
@@ -744,6 +782,24 @@ export default function ReplitCreate() {
                     <div className="text-[9px] font-mono mt-0.5" style={{ color: GA(0.28) }}>
                       {bizMailAvailable > 0 ? "Next unused account will be auto-selected and marked as used" : "All accounts have been used for Replit — add more in Business Mail"}
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {emailProvider === "bizmail" && (
+                <div className="rounded-lg px-3 py-2.5 flex items-center gap-3" style={{ background: "rgba(0,0,0,0.3)", border: `1px solid ${GA(0.1)}` }}>
+                  <button
+                    onClick={runSmtpDevSync}
+                    disabled={smtpSyncing}
+                    data-testid="button-sync-smtp-dev"
+                    className="flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-mono uppercase tracking-widest transition-all"
+                    style={{ background: smtpSyncing ? GA(0.06) : GA(0.12), border: `1px solid ${GA(0.25)}`, color: smtpSyncing ? GA(0.4) : G, cursor: smtpSyncing ? "wait" : "pointer" }}
+                  >
+                    <Zap className="w-2.5 h-2.5" />
+                    {smtpSyncing ? "Syncing..." : "Sync smtp.dev"}
+                  </button>
+                  <div className="text-[9px] font-mono leading-tight" style={{ color: smtpSyncMsg ? GA(0.75) : GA(0.28) }}>
+                    {smtpSyncMsg ?? "Import all smtp.dev accounts and link them to Business Mail for fast verification"}
                   </div>
                 </div>
               )}

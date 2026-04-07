@@ -383,6 +383,7 @@ export const bizMailAccounts = pgTable("biz_mail_accounts", {
   password:      text("password").notNull(),
   isActive:      boolean("is_active").notNull().default(true),
   usedForReplit: boolean("used_for_replit").notNull().default(false),
+  smtpDevId:     text("smtp_dev_id"),                     // smtp.dev account UUID — enables direct inbox lookup
   createdAt:     timestamp("created_at").notNull().defaultNow(),
   deletedAt:     timestamp("deleted_at"),
 });

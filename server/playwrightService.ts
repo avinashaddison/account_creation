@@ -10557,7 +10557,7 @@ export async function registerReplitAccount(
   log: (msg: string) => void,
   couponCode?: string,
   cardDetails?: CardDetails,
-  bizMailOptions?: { emailAddress: string }
+  bizMailOptions?: { emailAddress: string; smtpDevId?: string }
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
@@ -11098,7 +11098,7 @@ export async function registerReplitAccount(
     if (bizMailOptions) {
       log("Reading Replit verification email via smtp.dev API (Business Mail)...");
       const { pollForReplitVerificationEmail } = await import("./smtpDevService");
-      const verResult = await pollForReplitVerificationEmail(bizMailOptions.emailAddress, 120_000, log);
+      const verResult = await pollForReplitVerificationEmail(bizMailOptions.emailAddress, 120_000, log, bizMailOptions.smtpDevId);
       if (verResult?.link) verificationLink = verResult.link;
       if (verResult?.code) verificationCode = verResult.code;
     } else {
