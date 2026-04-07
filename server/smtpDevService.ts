@@ -1,3 +1,11 @@
+// smtp.dev API service
+// Docs: https://smtp.dev/docs/api/
+// Base URL: https://api.smtp.dev
+// Auth: X-API-KEY header
+// Pagination: { member: [...], view: { first, last, previous, next } }
+//   — follow view.next (a path+query string) until it is null/empty.
+// Rate limit: 4096 req/min sliding window.
+
 const SMTP_DEV_BASE = "https://api.smtp.dev";
 
 function apiKey(): string {
@@ -50,7 +58,7 @@ export interface SmtpDevAccount {
   address: string;   // full email, e.g. "john@addison.asia"
   isActive: boolean;
   isDeleted: boolean;
-  mailboxes: SmtpDevMailbox[];
+  mailboxes: SmtpDevMailbox[];  // only populated from GET /accounts/{id} — empty from list endpoint
   createdAt: string;
 }
 
@@ -69,64 +77,48 @@ export interface SmtpDevMessageDetail extends SmtpDevMessage {
   html: string;      // HTML body
 }
 
-// ── Hydra JSON-LD helpers ───────────────────────────────────────
+// ── Pagination helper ───────────────────────────────────────────
+// The API returns: { member: [...], view: { first, last, previous, next } }
+// "next" is a path+query string like "/accounts?page=2" or null when on last page.
 
 function members(data: any): any[] {
-  return Array.isArray(data) ? data : (data?.member ?? data?.["hydra:member"] ?? []);
+  // Response is always { member: [...] } per the API docs.
+  // Guard against plain arrays just in case.
+  return Array.isArray(data) ? data : (data?.member ?? []);
 }
 
-// ── Public API ──────────────────────────────────────────────────
+function nextPagePath(data: any): string | null {
+  const view = data?.view ?? null;
+  const next: string | undefined = view?.next ?? undefined;
+  if (!next) return null;
+  try {
+    // next may be a full URL or a path+query string
+    const url = new URL(next, SMTP_DEV_BASE);
+    return url.pathname + url.search;
+  } catch {
+    return null;
+  }
+}
+
+// ── Domain API ──────────────────────────────────────────────────
 
 export async function listDomains(): Promise<SmtpDevDomain[]> {
-  const data: any = await call("GET", "/domains");
-  return members(data).map((d: any) => ({
-    id: String(d.id ?? ""),
-    name: d.domain ?? d.name ?? "",
-    isActive: d.isActive ?? true,
-    createdAt: d.createdAt ?? new Date().toISOString(),
-  }));
-}
-
-export async function listAccounts(): Promise<SmtpDevAccount[]> {
-  const data: any = await call("GET", "/accounts");
-  return members(data).map(parseAccount);
-}
-
-// Paginate through all pages of /accounts until the given address is found.
-// smtp.dev uses Hydra JSON-LD pagination (hydra:view → hydra:next).
-export async function findAccountByAddress(address: string): Promise<SmtpDevAccount | null> {
-  const normalised = address.toLowerCase();
-  let path: string | null = "/accounts";
-
+  const all: SmtpDevDomain[] = [];
+  let path: string | null = "/domains";
   while (path) {
     const data: any = await call("GET", path);
-    const page = members(data);
-    const match = page.find((a: any) => {
-      const addr = (a.address ?? a.email ?? "").toLowerCase();
-      return addr === normalised;
-    });
-    if (match) return parseAccount(match);
-
-    // Follow hydra:next if present
-    const view = data?.["hydra:view"] ?? data?.view ?? null;
-    const next: string | undefined =
-      view?.["hydra:next"] ?? view?.next ?? undefined;
-
-    if (next) {
-      // next is either a full URL or just a path+query
-      try {
-        const url = new URL(next, SMTP_DEV_BASE);
-        path = url.pathname + url.search;
-      } catch {
-        path = null;
-      }
-    } else {
-      path = null;
-    }
+    members(data).forEach((d: any) => all.push({
+      id: String(d.id ?? ""),
+      name: d.domain ?? d.name ?? "",
+      isActive: d.isActive ?? true,
+      createdAt: d.createdAt ?? new Date().toISOString(),
+    }));
+    path = nextPagePath(data);
   }
-
-  return null;
+  return all;
 }
+
+// ── Account parsers ─────────────────────────────────────────────
 
 function parseAccount(a: any): SmtpDevAccount {
   const mailboxes: SmtpDevMailbox[] = (a.mailboxes ?? []).map((m: any) => ({
@@ -145,7 +137,58 @@ function parseAccount(a: any): SmtpDevAccount {
   };
 }
 
-// Direct account lookup by smtp.dev UUID — O(1), no pagination needed.
+// ── Account API ─────────────────────────────────────────────────
+
+// Returns first page only (30 accounts). Use listAllAccounts() for full list.
+export async function listAccounts(): Promise<SmtpDevAccount[]> {
+  const data: any = await call("GET", "/accounts");
+  return members(data).map(parseAccount);
+}
+
+// Find an account by its exact email address.
+// Uses GET /accounts?address=... filter (partial match on the API side),
+// then verifies the exact address in the result — avoids paginating all accounts.
+export async function findAccountByAddress(address: string): Promise<SmtpDevAccount | null> {
+  const normalised = address.toLowerCase();
+  // The address filter does a partial/prefix match — retrieve filtered results
+  // and follow view.next if the exact match hasn't appeared yet (rare edge case).
+  let path: string | null = `/accounts?address=${encodeURIComponent(address)}`;
+
+  while (path) {
+    const data: any = await call("GET", path);
+    const page = members(data);
+
+    const match = page.find((a: any) =>
+      (a.address ?? "").toLowerCase() === normalised
+    );
+    if (match) return parseAccount(match);
+
+    // If there's a next page in the filtered results, keep looking
+    path = nextPagePath(data);
+  }
+
+  return null;
+}
+
+// Paginate ALL accounts and return every one.
+// Follows view.next links until exhausted (proper API pagination).
+// Note: list response does NOT include mailboxes — call getAccountById() for those.
+export async function listAllAccounts(): Promise<SmtpDevAccount[]> {
+  const all: SmtpDevAccount[] = [];
+  let path: string | null = "/accounts";
+
+  while (path) {
+    const data: any = await call("GET", path);
+    const items = members(data);
+    if (items.length === 0) break;
+    all.push(...items.map(parseAccount));
+    path = nextPagePath(data);
+  }
+
+  return all;
+}
+
+// Direct account lookup by smtp.dev UUID — O(1), returns full account with mailboxes.
 export async function getAccountById(accountId: string): Promise<SmtpDevAccount | null> {
   try {
     const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}`);
@@ -156,23 +199,6 @@ export async function getAccountById(accountId: string): Promise<SmtpDevAccount 
   }
 }
 
-// Paginate ALL accounts (page=1,2,3…) and return them all.
-// smtp.dev returns 30/page and has no hydra:next link — we must increment page until empty.
-export async function listAllAccounts(): Promise<SmtpDevAccount[]> {
-  const all: SmtpDevAccount[] = [];
-  let page = 1;
-  while (true) {
-    const data: any = await call("GET", `/accounts?page=${page}`);
-    const items = members(data).map(parseAccount);
-    if (items.length === 0) break;
-    all.push(...items);
-    page++;
-    // Safety cap — 10 000 accounts = ~334 pages
-    if (page > 400) break;
-  }
-  return all;
-}
-
 export async function createAccount(address: string, password: string): Promise<{ account: SmtpDevAccount; password: string }> {
   const data: any = await call("POST", "/accounts", { address, password });
   return { account: parseAccount(data), password };
@@ -181,6 +207,8 @@ export async function createAccount(address: string, password: string): Promise<
 export async function deleteAccount(accountId: string): Promise<void> {
   await call("DELETE", `/accounts/${encodeURIComponent(accountId)}`);
 }
+
+// ── Message helpers ─────────────────────────────────────────────
 
 function parseFrom(raw: any): string {
   if (!raw) return "unknown";
@@ -211,6 +239,8 @@ function parseMsg(m: any): SmtpDevMessageDetail {
   };
 }
 
+// ── Mailbox / Message API ───────────────────────────────────────
+
 export async function listMessages(accountId: string, mailboxId: string, limit = 30): Promise<SmtpDevMessage[]> {
   const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}/mailboxes/${encodeURIComponent(mailboxId)}/messages`);
   return members(data).slice(0, limit).map(parseMsg);
@@ -226,11 +256,13 @@ export async function getMessage(accountId: string, mailboxId: string, messageId
   }
 }
 
+// ── Replit verification polling ─────────────────────────────────
+
 export async function pollForReplitVerificationEmail(
   emailAddress: string,
   timeoutMs: number,
   log: (msg: string) => void,
-  smtpDevId?: string,            // when provided, skip search and use direct ID lookup
+  smtpDevId?: string,            // when provided, skip address search and use direct ID lookup
 ): Promise<{ link?: string; code?: string } | null> {
   const deadline = Date.now() + timeoutMs;
   const pollIntervalMs = 15_000;
@@ -247,7 +279,7 @@ export async function pollForReplitVerificationEmail(
       log(`[smtp.dev] Direct lookup by ID: ${smtpDevId}`);
       acct = await getAccountById(smtpDevId);
     } else {
-      log(`[smtp.dev] Looking up account for ${emailAddress} (paginated search)...`);
+      log(`[smtp.dev] Looking up account for ${emailAddress} via address filter...`);
       acct = await findAccountByAddress(emailAddress);
     }
 
@@ -255,8 +287,19 @@ export async function pollForReplitVerificationEmail(
       log(`[smtp.dev] ⚠️ Could not find smtp.dev account for ${emailAddress} — address may not be on smtp.dev`);
       return null;
     }
+
     smtpAccountId = acct.id;
-    const inbox = acct.mailboxes.find(m => m.path === "INBOX") ?? acct.mailboxes[0];
+
+    // Mailboxes are included in the single-account response (GET /accounts/{id}).
+    // If we searched by address and got a list-item (no mailboxes), fetch full account.
+    let mailboxes = acct.mailboxes;
+    if (mailboxes.length === 0) {
+      log(`[smtp.dev] Fetching full account details for mailbox list...`);
+      const full = await getAccountById(acct.id);
+      mailboxes = full?.mailboxes ?? [];
+    }
+
+    const inbox = mailboxes.find(m => m.path === "INBOX") ?? mailboxes[0];
     if (!inbox) {
       log(`[smtp.dev] ⚠️ No mailbox found for ${emailAddress}`);
       return null;
@@ -317,14 +360,15 @@ export async function pollForReplitVerificationEmail(
   return null;
 }
 
+// ── Inbox helper ────────────────────────────────────────────────
+
 export async function getFullInbox(accountId: string): Promise<Array<{ id: string; from: string; subject: string; text: string; createdAt: string }>> {
-  // Get account with embedded mailboxes in a single call
-  const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}`);
-  const account = parseAccount(data);
-  const inbox = account.mailboxes.find(m => m.path === "INBOX") ?? account.mailboxes[0];
+  // Fetch the full account (with mailboxes) via single-account endpoint
+  const acct = await getAccountById(accountId);
+  if (!acct) return [];
+  const inbox = acct.mailboxes.find(m => m.path === "INBOX") ?? acct.mailboxes[0];
   if (!inbox) return [];
 
-  // text/html are already in the list response — no extra per-message call needed
   const messages = await listMessages(accountId, inbox.id, 50);
   return messages.map(m => ({
     id: m.id,

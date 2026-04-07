@@ -3421,31 +3421,98 @@ export async function registerRoutes(
   // Paginate all smtp.dev accounts and bulk-upsert them into biz_mail_accounts.
   // Long-running — streams progress via SSE or returns summary JSON.
   app.post("/api/bizmail/import-smtp-dev", requireAuth, async (req: Request, res: Response) => {
+    // Stream SSE progress while paginating the smtp.dev account list and importing in chunks.
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+    // Heartbeat every 15s to prevent proxy / browser timeout during long fetch
+    const heartbeat = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 15_000);
+
     try {
-      const { listAllAccounts } = await import("./smtpDevService");
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.flushHeaders?.();
+      const SMTP_DEV_BASE = "https://api.smtp.dev";
+      const apiKey = process.env.SMTP_DEV_API_KEY;
+      if (!apiKey) throw new Error("SMTP_DEV_API_KEY is not configured");
 
-      const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+      send({ type: "start", message: "Connecting to smtp.dev and paginating accounts..." });
 
-      send({ type: "start", message: "Fetching all smtp.dev accounts (this may take a minute)..." });
+      let path: string | null = "/accounts";
+      let pageNum = 0;
+      let totalFetched = 0;
+      let totalInserted = 0;
+      let totalUpdated = 0;
+      const IMPORT_CHUNK = 200;
+      const pending: { smtpDevId: string; email: string }[] = [];
 
-      const accounts = await listAllAccounts();
-      send({ type: "progress", message: `Fetched ${accounts.length} accounts from smtp.dev. Importing into database...` });
+      const flushPending = async () => {
+        if (pending.length === 0) return;
+        const chunk = pending.splice(0, pending.length);
+        const ins = await storage.importSmtpDevAccounts(chunk);
+        totalInserted += ins;
+        totalUpdated += chunk.length - ins;
+      };
 
-      const toImport = accounts
-        .filter(a => !a.isDeleted && a.isActive)
-        .map(a => ({ smtpDevId: a.id, email: a.address }));
+      while (path) {
+        const url = path.startsWith("http") ? path : `${SMTP_DEV_BASE}${path}`;
+        const res2 = await fetch(url, {
+          headers: { "X-API-KEY": apiKey, "Accept": "application/json" },
+        });
+        if (!res2.ok) {
+          const txt = await res2.text().catch(() => "");
+          throw new Error(`smtp.dev GET ${path} → ${res2.status}: ${txt.slice(0, 200)}`);
+        }
+        const data: any = await res2.json();
+        const items: any[] = Array.isArray(data) ? data : (data?.member ?? []);
+        pageNum++;
 
-      const inserted = await storage.importSmtpDevAccounts(toImport);
-      const updated = toImport.length - inserted;
+        if (items.length === 0) break;
 
-      send({ type: "done", message: `Import complete — ${inserted} new accounts added, ${updated} existing records updated with smtp.dev ID.`, total: toImport.length, inserted, updated });
+        for (const a of items) {
+          if (!a.isDeleted && a.isActive !== false && a.address) {
+            pending.push({ smtpDevId: String(a.id), email: String(a.address) });
+          }
+        }
+        totalFetched += items.length;
+
+        // Flush to DB every IMPORT_CHUNK accounts
+        if (pending.length >= IMPORT_CHUNK) {
+          await flushPending();
+          send({ type: "progress", message: `Page ${pageNum} — fetched ${totalFetched} accounts, imported ${totalInserted} new, updated ${totalUpdated}` });
+        } else {
+          send({ type: "progress", message: `Page ${pageNum} — fetched ${totalFetched} accounts so far...` });
+        }
+
+        // Follow view.next link
+        const view = data?.view ?? null;
+        const next: string | undefined = view?.next ?? undefined;
+        if (!next) break;
+        try {
+          const nextUrl = new URL(next, SMTP_DEV_BASE);
+          path = nextUrl.pathname + nextUrl.search;
+        } catch {
+          break;
+        }
+      }
+
+      // Flush any remaining
+      await flushPending();
+
+      clearInterval(heartbeat);
+      send({
+        type: "done",
+        message: `Import complete — ${totalInserted} new accounts added, ${totalUpdated} existing updated. (${totalFetched} total fetched across ${pageNum} page${pageNum !== 1 ? "s" : ""})`,
+        total: totalFetched,
+        inserted: totalInserted,
+        updated: totalUpdated,
+      });
       res.end();
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      clearInterval(heartbeat);
+      send({ type: "error", message: `Import failed: ${err.message}` });
+      res.end();
     }
   });
 
