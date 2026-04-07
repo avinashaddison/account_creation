@@ -155,7 +155,7 @@ interface ShopAdminFlow {
 }
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count";
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
@@ -1241,7 +1241,7 @@ export function startTelegramBot(config: BotConfig) {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📨 Temp Mail", "mail_temp"), Markup.button.callback("💼 Business Mail", "biz_mail_new")],
-          [Markup.button.callback("♻️ Restore Biz Mail", "biz_mail_restore")],
+          [Markup.button.callback("📦 Bulk Create", "biz_bulk_create"), Markup.button.callback("♻️ Restore Biz Mail", "biz_mail_restore")],
         ]),
       }
     );
@@ -1427,7 +1427,119 @@ export function startTelegramBot(config: BotConfig) {
     }
   });
 
-  // ── Custom username entry ──────────────────────────────────────────────────
+  // ── Bulk Business Mail Creation ───────────────────────────────────────────
+  bot.action("biz_bulk_create", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    getState(uid).awaitingText = "biz_bulk_count";
+    await bot.telegram.sendMessage(chatId,
+      `📦 <b>Bulk Business Mail Creator</b>\n\n` +
+      `How many <code>@addison.asia</code> email accounts do you want to create?\n\n` +
+      `• Min: <b>1</b> &nbsp;•&nbsp; Max: <b>1000</b>\n` +
+      `• Accounts are created in parallel (10 at a time)\n` +
+      `• Results delivered as a <code>.txt</code> file\n\n` +
+      `<i>Reply with a number, e.g.</i> <code>50</code>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+  });
+
+  async function runBizBulkCreate(chatId: number, uid: number, total: number) {
+    const progressMsg = await bot.telegram.sendMessage(chatId,
+      `📦 <b>Bulk Creating ${total} Business Email(s)...</b>\n\n⏳ Starting...`,
+      { parse_mode: "HTML" }
+    ).catch(() => null);
+
+    const BATCH = 10;
+    const results: { email: string; password: string; ok: boolean; err?: string }[] = [];
+    let done = 0;
+
+    const updateProgress = async () => {
+      if (!progressMsg) return;
+      const ok  = results.filter(r => r.ok).length;
+      const fail = results.filter(r => !r.ok).length;
+      const pct  = Math.round((done / total) * 100);
+      const bar  = "█".repeat(Math.floor(pct / 5)) + "░".repeat(20 - Math.floor(pct / 5));
+      await bot.telegram.editMessageText(chatId, progressMsg.message_id, undefined,
+        `📦 <b>Bulk Creating ${total} Business Email(s)...</b>\n\n` +
+        `${bar} ${pct}%\n\n` +
+        `✅ Created: <b>${ok}</b>\n` +
+        `❌ Failed: <b>${fail}</b>\n` +
+        `⏳ Remaining: <b>${total - done}</b>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+    };
+
+    // Process in batches of BATCH
+    for (let i = 0; i < total; i += BATCH) {
+      const batchSize = Math.min(BATCH, total - i);
+      await Promise.all(
+        Array.from({ length: batchSize }, async (_, j) => {
+          const username = genRealisticUsername();
+          const address  = `${username}@addison.asia`;
+          const password = genBizPassword();
+          try {
+            await smtpDevCreate(address, password);
+            results.push({ email: address, password, ok: true });
+          } catch (err: any) {
+            results.push({ email: address, password, ok: false, err: err.message?.substring(0, 80) });
+          }
+          done++;
+        })
+      );
+      await updateProgress();
+    }
+
+    // Build result file
+    const okList   = results.filter(r => r.ok);
+    const failList = results.filter(r => !r.ok);
+    const lines: string[] = [
+      `# Bulk Business Mail — ${new Date().toISOString()}`,
+      `# Total: ${total} | Created: ${okList.length} | Failed: ${failList.length}`,
+      ``,
+      `# ── Credentials (email:password) ──`,
+      ...okList.map(r => `${r.email}:${r.password}`),
+    ];
+    if (failList.length > 0) {
+      lines.push(``, `# ── Failed ──`);
+      failList.forEach(r => lines.push(`# ${r.email} — ${r.err || "unknown error"}`));
+    }
+    const fileContent = lines.join("\n");
+    const fileBuffer  = Buffer.from(fileContent, "utf8");
+
+    // Edit progress to final summary
+    if (progressMsg) {
+      await bot.telegram.editMessageText(chatId, progressMsg.message_id, undefined,
+        `✅ <b>Bulk Create Complete!</b>\n\n` +
+        `📧 Total requested: <b>${total}</b>\n` +
+        `✅ Successfully created: <b>${okList.length}</b>\n` +
+        `❌ Failed: <b>${failList.length}</b>\n\n` +
+        `<i>Sending credentials file...</i>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+    }
+
+    // Send the credentials as a file
+    await bot.telegram.sendDocument(chatId, {
+      source: fileBuffer,
+      filename: `biz_mail_bulk_${total}_${Date.now()}.txt`,
+    }, {
+      caption: `📦 <b>${okList.length} Business Email Account(s) Created</b>\n` +
+               `🌐 Webmail: <a href="https://app.smtp.dev">app.smtp.dev</a>\n` +
+               `📮 IMAP: <code>imap.smtp.dev:993 (SSL)</code>\n` +
+               `📤 SMTP: <code>smtp.smtp.dev:587 (STARTTLS)</code>`,
+      parse_mode: "HTML",
+    }).catch(async (e: any) => {
+      // Fallback: send as plain text if file send fails
+      console.error("[BizBulk] File send error:", e.message);
+      const chunk = okList.slice(0, 50).map(r => `<code>${r.email}:${r.password}</code>`).join("\n");
+      await bot.telegram.sendMessage(chatId,
+        `📦 <b>Created ${okList.length} accounts</b> (showing first 50):\n\n${chunk}`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+    });
+  }
+
   bot.action("biz_mail_custom", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid    = ctx.from!.id;
@@ -3861,6 +3973,17 @@ export function startTelegramBot(config: BotConfig) {
       } else {
         await startBizMailSession(ctx.chat!.id, uid, { customUsername: raw });
       }
+      return;
+    }
+
+    if (st.awaitingText === "biz_bulk_count") {
+      st.awaitingText = undefined;
+      const count = parseInt(text.trim());
+      if (isNaN(count) || count < 1 || count > 1000) {
+        await ctx.reply("⚠️ Please enter a number between <b>1</b> and <b>1000</b>.", { parse_mode: "HTML" }).catch(() => {});
+        return;
+      }
+      await runBizBulkCreate(ctx.chat!.id, uid, count);
       return;
     }
   });
