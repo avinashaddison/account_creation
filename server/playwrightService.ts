@@ -19567,18 +19567,71 @@ export async function generateSingleCheckoutLink(
     if (finalUrl.includes("/verify")) {
       log(`📧 Checkout blocked by email verification — auto-handling via Outlook...`);
       await handleReplitEmailVerification(page, email, log);
-      // Retry the checkout URL after verification
+      // After verification, Replit may redirect to home, verify again, or login — navigate to checkout explicitly
       log(`🔄 Retrying checkout after verification...`);
-      await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await page.goto(checkoutUrl, { waitUntil: "commit", timeout: 60000 })
+        .catch((gotoErr3: Error) => {
+          const cur3 = page.url();
+          if (!cur3.includes("checkout.stripe.com")) {
+            log(`  ⚠️ Retry goto error: ${(gotoErr3.message || "").substring(0, 60)} — current: ${cur3.substring(0, 80)}`);
+          }
+        });
       await waitForCf("checkout-retry");
       await page.waitForURL(
         (u: URL) =>
           u.href.includes("checkout.stripe.com") ||
           u.href.includes("billing.stripe.com") ||
-          u.href.includes("stripe-checkout-error"),
-        { timeout: 45000 }
+          u.href.includes("stripe-checkout-error") ||
+          u.href.includes("/verify") ||
+          u.href.includes("replit.com/login") ||
+          u.href.includes("replit.com/signup") ||
+          u.href.match(/replit\.com\/(~|home|dashboard|\s*$)/),
+        { timeout: 90000 }
       );
-      const retriedUrl = page.url();
+      let retriedUrl = page.url();
+      log(`📍 URL after retry: ${retriedUrl.substring(0, 120)}`);
+
+      // Second verify round — handle it too
+      if (retriedUrl.includes("/verify")) {
+        log(`📧 Second verification wall hit — handling again...`);
+        await handleReplitEmailVerification(page, email, log);
+        await glSleep(2000);
+        await page.goto(checkoutUrl, { waitUntil: "commit", timeout: 60000 }).catch(() => {});
+        await waitForCf("checkout-retry2");
+        await page.waitForURL(
+          (u: URL) =>
+            u.href.includes("checkout.stripe.com") ||
+            u.href.includes("billing.stripe.com") ||
+            u.href.includes("stripe-checkout-error"),
+          { timeout: 90000 }
+        );
+        retriedUrl = page.url();
+        log(`📍 URL after second retry: ${retriedUrl.substring(0, 120)}`);
+      }
+
+      // Session dropped — re-auth and navigate to checkout
+      if (retriedUrl.includes("replit.com/login") || retriedUrl.includes("replit.com/signup")) {
+        log(`⚠️  Session dropped after verification — this account will need a fresh run`);
+        throw new Error(`Session expired after email verification — retriable`);
+      }
+
+      // Home/dashboard after verification — navigate to checkout directly
+      if (!retriedUrl.includes("checkout.stripe.com") && !retriedUrl.includes("billing.stripe.com") && !retriedUrl.includes("stripe-checkout-error")) {
+        log(`📍 Landed on home/other page — navigating to checkout directly...`);
+        await glSleep(2000);
+        await page.goto(checkoutUrl, { waitUntil: "commit", timeout: 60000 }).catch(() => {});
+        await waitForCf("checkout-home-retry");
+        await page.waitForURL(
+          (u: URL) =>
+            u.href.includes("checkout.stripe.com") ||
+            u.href.includes("billing.stripe.com") ||
+            u.href.includes("stripe-checkout-error"),
+          { timeout: 90000 }
+        );
+        retriedUrl = page.url();
+        log(`📍 URL after home retry: ${retriedUrl.substring(0, 120)}`);
+      }
+
       if (retriedUrl.includes("stripe-checkout-error")) {
         let errMsg = "Stripe checkout error";
         try { errMsg = new URL(retriedUrl).searchParams.get("message") || errMsg; } catch {}
