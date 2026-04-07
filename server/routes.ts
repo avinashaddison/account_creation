@@ -3437,9 +3437,10 @@ export async function registerRoutes(
       const apiKey = process.env.SMTP_DEV_API_KEY;
       if (!apiKey) throw new Error("SMTP_DEV_API_KEY is not configured");
 
+      // smtp.dev returns plain JSON arrays — paginate with ?page=N until empty page.
+      // No view.next / hydra:next links are present in the actual API response.
       send({ type: "start", message: "Connecting to smtp.dev and paginating accounts..." });
 
-      let path: string | null = "/accounts";
       let pageNum = 0;
       let totalFetched = 0;
       let totalInserted = 0;
@@ -3455,20 +3456,20 @@ export async function registerRoutes(
         totalUpdated += chunk.length - ins;
       };
 
-      while (path) {
-        const url = path.startsWith("http") ? path : `${SMTP_DEV_BASE}${path}`;
-        const res2 = await fetch(url, {
+      while (true) {
+        pageNum++;
+        const res2 = await fetch(`${SMTP_DEV_BASE}/accounts?page=${pageNum}`, {
           headers: { "X-API-KEY": apiKey, "Accept": "application/json" },
         });
         if (!res2.ok) {
           const txt = await res2.text().catch(() => "");
-          throw new Error(`smtp.dev GET ${path} → ${res2.status}: ${txt.slice(0, 200)}`);
+          throw new Error(`smtp.dev GET /accounts?page=${pageNum} → ${res2.status}: ${txt.slice(0, 200)}`);
         }
         const data: any = await res2.json();
+        // API returns plain array; guard against JSON-LD member wrapper just in case
         const items: any[] = Array.isArray(data) ? data : (data?.member ?? []);
-        pageNum++;
 
-        if (items.length === 0) break;
+        if (items.length === 0) break; // last page reached
 
         for (const a of items) {
           if (!a.isDeleted && a.isActive !== false && a.address) {
@@ -3480,21 +3481,12 @@ export async function registerRoutes(
         // Flush to DB every IMPORT_CHUNK accounts
         if (pending.length >= IMPORT_CHUNK) {
           await flushPending();
-          send({ type: "progress", message: `Page ${pageNum} — fetched ${totalFetched} accounts, imported ${totalInserted} new, updated ${totalUpdated}` });
+          send({ type: "progress", message: `Page ${pageNum} — ${totalFetched} fetched | ${totalInserted} new | ${totalUpdated} updated` });
         } else {
-          send({ type: "progress", message: `Page ${pageNum} — fetched ${totalFetched} accounts so far...` });
+          send({ type: "progress", message: `Page ${pageNum} — ${totalFetched} accounts fetched so far...` });
         }
 
-        // Follow view.next link
-        const view = data?.view ?? null;
-        const next: string | undefined = view?.next ?? undefined;
-        if (!next) break;
-        try {
-          const nextUrl = new URL(next, SMTP_DEV_BASE);
-          path = nextUrl.pathname + nextUrl.search;
-        } catch {
-          break;
-        }
+        if (pageNum >= 400) break; // safety cap ~12 000 accounts
       }
 
       // Flush any remaining
