@@ -17,6 +17,50 @@ import fs from "fs";
 const BROWSERS_PATH = path.join(process.cwd(), ".cache/ms-playwright");
 process.env.PLAYWRIGHT_BROWSERS_PATH = BROWSERS_PATH;
 
+/** Ensure Xvfb virtual display is running for headed-Chrome captcha bypass */
+function ensureXvfbRunning(display: number = 99): void {
+  try {
+    const lockFile = `/tmp/.X${display}-lock`;
+    // Check if a live Xvfb process owns the lock
+    let needsStart = true;
+    if (fs.existsSync(lockFile)) {
+      try {
+        const pid = parseInt(fs.readFileSync(lockFile, "utf8").trim(), 10);
+        execSync(`kill -0 ${pid}`, { stdio: "ignore" }); // throws if PID is dead
+        needsStart = false; // PID is alive → Xvfb already running
+        console.log(`[startup] Xvfb already running on :${display} (PID ${pid})`);
+      } catch {
+        // Stale lock file — remove it so Xvfb can start
+        fs.unlinkSync(lockFile);
+        console.log(`[startup] Removed stale Xvfb lock file for :${display}`);
+      }
+    }
+    if (needsStart) {
+      const xvfbPath = (() => {
+        try { return execSync("which Xvfb", { encoding: "utf8" }).trim(); } catch {}
+        try { return execSync("find /nix/store -name Xvfb -type f 2>/dev/null | head -1", { encoding: "utf8" }).trim(); } catch {}
+        return "";
+      })();
+      if (!xvfbPath) { console.log("[startup] Xvfb not found — headed browser unavailable"); return; }
+      const xvfbProc = exec(`${xvfbPath} -nolisten tcp :${display} -screen 0 1280x960x24`);
+      xvfbProc.unref?.();
+      // Wait briefly then verify lock file appeared
+      setTimeout(() => {
+        if (fs.existsSync(lockFile)) {
+          process.env.XVFB_DISPLAY = `:${display}`;
+          console.log(`[startup] Xvfb started on :${display} — headed browser ready`);
+        } else {
+          console.log(`[startup] ⚠️ Xvfb may not have started on :${display}`);
+        }
+      }, 2000);
+    } else {
+      process.env.XVFB_DISPLAY = `:${display}`;
+    }
+  } catch (e: any) {
+    console.log(`[startup] Xvfb setup failed: ${e.message?.substring(0, 80)}`);
+  }
+}
+
 function ensurePlaywrightBrowsersAsync() {
   const playwrightBin = path.join(process.cwd(), "node_modules/.bin/playwright");
   const installEnv = { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS_PATH };
@@ -312,6 +356,8 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
       // Install Playwright browsers in the background after server is up
       ensurePlaywrightBrowsersAsync();
+      // Start Xvfb virtual display for headed-Chrome hcaptcha bypass
+      ensureXvfbRunning(99);
       // Set up JMAP routing so all @addison.asia biz mail arrives in admin inbox
       import("./mailService").then(({ setupAllBizMailJmapRouting }) => {
         setupAllBizMailJmapRouting().catch((e: any) =>
