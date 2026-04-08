@@ -11011,79 +11011,73 @@ export async function registerReplitAccount(
 
     await page.waitForTimeout(800);
 
-    // ── Solve hCaptcha on signup page (Replit uses invisible hCaptcha on signup too) ──
-    {
-      const signupHtml = await page.content().catch(() => "");
+    // ── Solve hCaptcha on signup page ──
+    // Replit loads hCaptcha via JS — always solve regardless of HTML content
+    try {
       const REPLIT_SIGNUP_SITEKEY = "4c672d35-0701-42b2-88c3-78380b0db560";
-      const hasCap = signupHtml.includes("hcaptcha") || signupHtml.includes("h-captcha");
-      if (hasCap) {
-        log(`🔒 hCaptcha detected on signup page — solving...`);
-        try {
-          const dynKey = await page.evaluate(() => {
-            const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
-            return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
-          }).catch(() => null) as string | null;
-          const capKey = dynKey || REPLIT_SIGNUP_SITEKEY;
-          log(`  → sitekey: ${capKey.substring(0, 20)}...`);
+      log(`🔒 Solving hCaptcha for Replit signup (NopeCHA)...`);
+      const dynKey = await page.evaluate(() => {
+        const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
+        return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
+      }).catch(() => null) as string | null;
+      if (dynKey) log(`  → Dynamic sitekey: ${dynKey.substring(0, 20)}...`);
+      const capKey = dynKey || REPLIT_SIGNUP_SITEKEY;
+      log(`  → Using sitekey: ${capKey.substring(0, 20)}...`);
 
-          const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-          const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
+      const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+      const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
 
-          let capResult = { success: false, token: undefined as string | undefined, error: "no solver" };
-          if (nopeKey) {
-            log(`  → NopeCHA solver (30–60s)...`);
-            const ticker = setInterval(() => log(`  ⏳ Captcha solving...`), 15000);
-            try { capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 150); }
-            finally { clearInterval(ticker); }
-            if (!capResult.success) {
-              log(`  ⚠️ NopeCHA failed: ${capResult.error} — cannot proceed without hCaptcha token`);
-            }
-          } else {
-            log(`  ⚠️ NopeCHA key not configured — cannot solve hCaptcha`);
-            capResult = { success: false, token: undefined, error: "NopeCHA key not set" };
-          }
-
-          if (capResult.success && capResult.token) {
-            log(`  ✅ hCaptcha solved — injecting token...`);
-            await page.evaluate((token: string) => {
-              const textareaSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-              const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-              document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[name='g-recaptcha-response']").forEach(el => {
-                if (textareaSetter) textareaSetter.call(el, token); else el.value = token;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-                el.dispatchEvent(new Event("change", { bubbles: true }));
-              });
-              document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
-                if (inputSetter) inputSetter.call(el, token); else el.value = token;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-                el.dispatchEvent(new Event("change", { bubbles: true }));
-              });
-              const w = window as any;
-              if (w.hcaptcha) {
-                try {
-                  const widgets = document.querySelectorAll("[data-hcaptcha-widget-id]");
-                  if (widgets.length > 0) {
-                    widgets.forEach(wEl => {
-                      const wid = (wEl as HTMLElement).getAttribute("data-hcaptcha-widget-id");
-                      if (wid) { try { w.hcaptcha.setResponse(wid, token); } catch {} }
-                    });
-                  } else { w.hcaptcha.setResponse(token); }
-                } catch {}
-              }
-              ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess"].forEach(name => {
-                if (typeof w[name] === "function") { try { w[name](token); } catch {} }
-              });
-            }, capResult.token);
-            await page.waitForTimeout(800);
-          } else {
-            log(`  ⚠️ hCaptcha solve failed: ${capResult.error} — submitting anyway`);
-          }
-        } catch (capErr: any) {
-          log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — submitting anyway`);
-        }
+      if (!nopeKey) {
+        log(`  ⚠️ NopeCHA key not configured — skipping hCaptcha solve`);
       } else {
-        log("No hCaptcha detected on signup page — proceeding directly");
+        const ticker = setInterval(() => log(`  ⏳ Captcha solving in progress...`), 15000);
+        let capResult: { success: boolean; token?: string; error?: string };
+        try {
+          capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 150);
+        } finally {
+          clearInterval(ticker);
+        }
+
+        if (capResult.success && capResult.token) {
+          log(`  ✅ hCaptcha solved — injecting token...`);
+          await page.evaluate((token: string) => {
+            const textareaSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+            const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[name='g-recaptcha-response']").forEach(el => {
+              if (textareaSetter) textareaSetter.call(el, token); else el.value = token;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+            document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
+              if (inputSetter) inputSetter.call(el, token); else el.value = token;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+            const w = window as any;
+            if (w.hcaptcha) {
+              try {
+                const widgets = document.querySelectorAll("[data-hcaptcha-widget-id]");
+                if (widgets.length > 0) {
+                  widgets.forEach(wEl => {
+                    const wid = (wEl as HTMLElement).getAttribute("data-hcaptcha-widget-id");
+                    if (wid) { try { w.hcaptcha.setResponse(wid, token); } catch {} }
+                  });
+                } else {
+                  w.hcaptcha.setResponse(token);
+                }
+              } catch {}
+            }
+            ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess"].forEach(name => {
+              if (typeof (w as any)[name] === "function") { try { (w as any)[name](token); } catch {} }
+            });
+          }, capResult.token);
+          await page.waitForTimeout(800);
+        } else {
+          log(`  ⚠️ NopeCHA failed: ${capResult.error} — submitting without token`);
+        }
       }
+    } catch (capErr: any) {
+      log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — continuing`);
     }
 
     log("Submitting signup form...");
