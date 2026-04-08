@@ -11009,7 +11009,83 @@ export async function registerReplitAccount(
     }
     if (!passwordFilled) log("⚠️ Could not find password field");
 
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(800);
+
+    // ── Solve hCaptcha on signup page (Replit uses invisible hCaptcha on signup too) ──
+    {
+      const signupHtml = await page.content().catch(() => "");
+      const REPLIT_SIGNUP_SITEKEY = "4c672d35-0701-42b2-88c3-78380b0db560";
+      const hasCap = signupHtml.includes("hcaptcha") || signupHtml.includes("h-captcha");
+      if (hasCap) {
+        log(`🔒 hCaptcha detected on signup page — solving...`);
+        try {
+          const dynKey = await page.evaluate(() => {
+            const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
+            return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
+          }).catch(() => null) as string | null;
+          const capKey = dynKey || REPLIT_SIGNUP_SITEKEY;
+          log(`  → sitekey: ${capKey.substring(0, 20)}...`);
+
+          const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+          const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
+
+          let capResult = { success: false, token: undefined as string | undefined, error: "no solver" };
+          if (nopeKey) {
+            log(`  → NopeCHA solver (30–60s)...`);
+            const ticker = setInterval(() => log(`  ⏳ Captcha solving...`), 15000);
+            try { capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 150); }
+            finally { clearInterval(ticker); }
+            if (!capResult.success) {
+              log(`  ⚠️ NopeCHA failed: ${capResult.error} — trying CapSolver...`);
+              capResult = await solveHCaptcha("https://replit.com/signup", capKey);
+            }
+          } else {
+            log(`  → CapSolver...`);
+            capResult = await solveHCaptcha("https://replit.com/signup", capKey);
+          }
+
+          if (capResult.success && capResult.token) {
+            log(`  ✅ hCaptcha solved — injecting token...`);
+            await page.evaluate((token: string) => {
+              const textareaSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+              const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+              document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[name='g-recaptcha-response']").forEach(el => {
+                if (textareaSetter) textareaSetter.call(el, token); else el.value = token;
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+              });
+              document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
+                if (inputSetter) inputSetter.call(el, token); else el.value = token;
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+                el.dispatchEvent(new Event("change", { bubbles: true }));
+              });
+              const w = window as any;
+              if (w.hcaptcha) {
+                try {
+                  const widgets = document.querySelectorAll("[data-hcaptcha-widget-id]");
+                  if (widgets.length > 0) {
+                    widgets.forEach(wEl => {
+                      const wid = (wEl as HTMLElement).getAttribute("data-hcaptcha-widget-id");
+                      if (wid) { try { w.hcaptcha.setResponse(wid, token); } catch {} }
+                    });
+                  } else { w.hcaptcha.setResponse(token); }
+                } catch {}
+              }
+              ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess"].forEach(name => {
+                if (typeof w[name] === "function") { try { w[name](token); } catch {} }
+              });
+            }, capResult.token);
+            await page.waitForTimeout(800);
+          } else {
+            log(`  ⚠️ hCaptcha solve failed: ${capResult.error} — submitting anyway`);
+          }
+        } catch (capErr: any) {
+          log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — submitting anyway`);
+        }
+      } else {
+        log("No hCaptcha detected on signup page — proceeding directly");
+      }
+    }
 
     log("Submitting signup form...");
     const submitSelectors = [
@@ -11068,7 +11144,16 @@ export async function registerReplitAccount(
       return page.content().catch(() => "");
     });
     const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists")) {
+    const pageTextLc = pageText.toLowerCase();
+
+    // ── Hard-fail: captcha/form errors — account was never created, abort immediately ──
+    if (pageTextLc.includes("captcha") || pageTextLc.includes("captcha token") || pageTextLc.includes("code:1")) {
+      const firstLine = pageText.split("\n").filter(l => l.trim().length > 5).slice(0, 3).join(" | ");
+      log(`❌ Signup blocked by captcha: ${firstLine.substring(0, 200)}`);
+      return { success: false, error: "Signup blocked by Replit captcha — try again later" };
+    }
+
+    if (pageTextLc.includes("already") || pageTextLc.includes("in use") || pageTextLc.includes("taken") || pageTextLc.includes("exists")) {
       const firstLine = pageText.split("\n").filter(l => l.trim().length > 5).slice(0, 5).join(" | ");
       log(`⚠️ Possible form error text: ${firstLine.substring(0, 200)}`);
     }
@@ -11082,8 +11167,15 @@ export async function registerReplitAccount(
       });
       log(`⚠️ Page error detected: ${errText || "unknown error"}`);
       log(`Current URL: ${currentUrl}`);
-      if (errText && errText.toLowerCase().includes("already taken")) {
-        log("Username already taken — this account may have been partially created");
+      if (errText) {
+        const errLc = errText.toLowerCase();
+        if (errLc.includes("captcha") || errLc.includes("token is invalid") || errLc.includes("code:1")) {
+          log(`❌ Captcha error on signup form — aborting`);
+          return { success: false, error: `Signup captcha error: ${errText.substring(0, 120)}` };
+        }
+        if (errLc.includes("already taken")) {
+          log("Username already taken — this account may have been partially created");
+        }
       }
     } else {
       log(`Current URL after submit: ${currentUrl}`);

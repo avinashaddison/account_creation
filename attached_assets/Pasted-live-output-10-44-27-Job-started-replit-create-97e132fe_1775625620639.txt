@@ -1,0 +1,204 @@
+live_output
+10:44:27
+·
+Job started: replit-create-97e132fe
+10:44:29
+·
+🌐 nsocks connected — session: 3twhqz0c1mp0 | endpoint: proxy.nsocks.com:2312
+10:44:30
+·
+┌─── WEBSHARE RESIDENTIAL ACTIVE ───────────────────────────
+10:44:30
+·
+│ Exit IP : 107.203.129.14
+10:44:30
+·
+│ Location : Dallas, Texas, US
+10:44:30
+·
+│ Provider : AS7018 AT&T Enterprises, LLC
+10:44:30
+·
+└────────────────────────────────────────────────
+10:44:30
+>
+Using stealth headless browser
+10:44:30
+·
+Visiting Replit homepage before signup...
+10:44:49
+>
+Homepage visited — navigating to signup...
+10:44:49
+>
+Navigating to https://replit.com/signup ...
+10:45:00
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+10:45:00
+·
+Page title: Sign Up - Replit
+10:45:00
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+10:45:00
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+10:45:08
+·
+Network idle timeout — waiting 4s instead
+10:45:12
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+10:45:12
+·
+Waiting for signup form fields to appear...
+10:45:12
+·
+Form fields detected
+10:45:12
+·
+Filling signup form...
+10:45:12
+~
+⚠️ Could not find username field
+10:45:14
+·
+Typed email into input[name="email"]
+10:45:15
+»
+Typed password into input[name="password"]
+10:45:15
+·
+Submitting signup form...
+10:45:15
+·
+Clicked submit button "Create Account" (button[type="submit"])
+10:45:15
+·
+Waiting for signup response...
+10:45:19
+!
+⚠️ Possible form error text: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google | Continue with GitHub | Continue with X
+10:45:19
+!
+⚠️ Page error detected: Your captcha token is invalid. Please refresh the page and try again. (code:1)
+10:45:19
+·
+Current URL: https://replit.com/signup
+10:45:19
+·
+Now waiting 20s before checking Outlook inbox for verification email...
+10:45:39
+·
+Reading Replit verification email via Outlook Web Access...
+10:45:39
+>
+Navigating to Outlook Web login...
+10:45:42
+·
+Entered Outlook email on login page
+10:45:43
+»
+Entered Outlook password on login page
+10:45:48
+·
+After login URL: https://account.live.com/proofs/Add?mkt=EN-US&uiflavor=web&id=292841&mpcxt=CATB&sn=604800&posturl=ht
+10:45:48
+·
+Microsoft security proofs / confirmation page — skipping directly to inbox...
+10:45:48
+·
+posturl points to non-Outlook host — skipping straight to inbox
+10:45:48
+>
+Navigating directly to: https://outlook.live.com/mail/0/inbox
+10:45:50
+>
+URL after skip navigation: https://outlook.live.com/mail/0/inbox
+10:45:50
++
+✅ Logged into Outlook Web — searching inbox for Replit email...
+10:45:57
+·
+[Attempt 1/4] Found 1 email items in inbox
+10:45:57
+·
+No Replit email yet — waiting 20s before retry 2/4...
+10:46:21
+·
+[Attempt 2/4] Found 1 email items in inbox
+10:46:21
+·
+No Replit email yet — waiting 20s before retry 3/4...
+10:46:45
+·
+[Attempt 3/4] Found 1 email items in inbox
+10:46:45
+·
+No Replit email yet — waiting 20s before retry 4/4...
+10:47:10
+·
+[Attempt 4/4] Found 1 email items in inbox
+10:47:10
+·
+📁 Checking Junk folder for Replit email...
+10:47:14
+·
+Junk folder: 0 items
+10:47:14
+~
+⚠️ No Replit verification email found after 4 attempts + Junk check — continuing without verification
+10:47:14
+~
+⚠️ No verification link or code found in inbox — account may still verify automatically or email was delayed
+10:47:17
+·
+No onboarding wizard detected — skipping
+10:47:17
+>
+🔐 Login(email): navigating to Replit login...
+10:47:28
+·
+Login(email): entered identifier "shellyphillips6341@outlook.com"
+PROCESSING
+10:47:29
+·
+Login(email): clicked step-1 button
+10:47:30
+»
+Login(email): entered password
+10:47:31
+·
+Login(email): clicked submit button
+10:47:38
+!
+⚠️ Login(email): login may have failed — URL: https://replit.com/login
+10:47:38
+>
+🔐 Login(username): navigating to Replit login...
+10:47:46
+»
+Login(username): entered identifier "james4567"
+10:47:47
+»
+Login(username): clicked step-1 button
+10:47:48
+»
+Login(username): entered password
+10:47:49
+»
+Login(username): clicked submit button
+10:47:56
+!
+⚠️ Login(username): login may have failed — URL: https://replit.com/login
+10:47:56
++
+⚠️ All Replit login attempts failed — checkout may not complete
+10:47:56
++
+✅ Replit account creation complete: username=james4567 email=shellyphillips6341@outlook.com password=NMuu967j%22
+PROCESSING
+10:47:56
++
+✅ Account saved to database
