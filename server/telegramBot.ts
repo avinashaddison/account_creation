@@ -139,7 +139,8 @@ interface ShopAdminFlow {
        | "activation_time" | "refer_amount"
        | "broadcast_text" | "search_uid"
        | "promo_code" | "promo_discount" | "promo_maxuses"
-       | "dep_approve_amount";
+       | "dep_approve_amount"
+       | "stock_add_creds";
   name?: string;
   description?: string;
   price?: string;
@@ -152,6 +153,9 @@ interface ShopAdminFlow {
   promoDiscount?: string;
   depRequestId?: number;
   depUserId?: number;
+  stockProductId?: string;
+  stockTableName?: string;
+  stockStatusFilter?: string;
 }
 interface UserState {
   lastCopiedIds?: string[];
@@ -2706,6 +2710,16 @@ export function startTelegramBot(config: BotConfig) {
 
   // ── Shop admin helpers ────────────────────────────────────────────────────
   const SHOP_ACCOUNT_TYPES = ["replit", "lovable", "v0", "adobe", "chatgpt", "eleven", "outlook", "gmail"];
+  const SHOP_TABLE_MAP: Record<string, string> = {
+    replit:   "replit_accounts",
+    lovable:  "lovable_accounts",
+    v0:       "v0_accounts",
+    adobe:    "adobe_accounts",
+    chatgpt:  "chatgpt_accounts",
+    eleven:   "eleven_labs_accounts",
+    outlook:  "private_outlook_accounts",
+    gmail:    "private_gmail_accounts",
+  };
 
   async function showShopAdminMenu(ctx: any, edit = false) {
     const [prodRes, custRes, orderRes, pendingRes, revenueRes, referSettingRes] = await Promise.all([
@@ -2771,6 +2785,9 @@ export function startTelegramBot(config: BotConfig) {
       [
         Markup.button.callback(`📦  PROMO CODES`,         "shop_admin_promos"),
         Markup.button.callback(`🔔  RESTOCK NOTIFY${subsBadge}`, "shop_admin_restock"),
+      ],
+      [
+        Markup.button.callback("🗄  STOCK MANAGER",       "shop_admin_stock"),
       ],
     ]);
 
@@ -3446,6 +3463,209 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.reply(`✅ Notified <b>${sent}</b> subscriber${sent !== 1 ? "s" : ""} for <b>${productName}</b>. Subscribers cleared.`, { parse_mode: "HTML" });
   });
 
+  // ── Stock Manager ────────────────────────────────────────────────────────
+
+  // Helper: build stock overview for one product
+  async function getProductStockInfo(p: any) {
+    const table = SHOP_TABLE_MAP[p.account_type];
+    if (!table) return { avail: 0, sold: 0, total: 0 };
+    const sf = p.status_filter ?? "available";
+    const r = await dbQuery(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = $1) AS avail,
+         COUNT(*) FILTER (WHERE status = 'sold_out') AS sold,
+         COUNT(*) AS total
+       FROM ${table}`,
+      [sf]
+    );
+    return {
+      avail: parseInt(r.rows[0]?.avail ?? "0"),
+      sold:  parseInt(r.rows[0]?.sold  ?? "0"),
+      total: parseInt(r.rows[0]?.total ?? "0"),
+    };
+  }
+
+  // 🗄 STOCK MANAGER — overview of all products with live counts
+  bot.action("shop_admin_stock", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No products exist yet. Create a product first.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
+      );
+    }
+    let text = `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>  Product                  Avail  Sold  Total\n` +
+      `  ─────────────────────────────────────────────\n`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const p of res.rows) {
+      const info = await getProductStockInfo(p);
+      const name = p.name.slice(0, 22).padEnd(22);
+      const statusIcon = p.active ? "🟢" : "🔴";
+      text += `  ${statusIcon} ${name}  ${String(info.avail).padStart(4)}   ${String(info.sold).padStart(4)}   ${String(info.total).padStart(4)}\n`;
+      buttons.push([Markup.button.callback(
+        `${info.avail > 0 ? "🟢" : "🔴"} ${p.name.slice(0, 28)}  (${info.avail} avail)`,
+        `shop_stock_${p.id}`
+      )]);
+    }
+    text += `</code>`;
+    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
+    await safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  // Per-product stock management page
+  bot.action(/^shop_stock_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+
+    const table = SHOP_TABLE_MAP[p.account_type];
+    const sf    = p.status_filter ?? "available";
+    const info  = await getProductStockInfo(p);
+
+    const text =
+      `\n🗄 <b>STOCK: ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>` +
+      `Account type   :  ${p.account_type}\n` +
+      `DB table       :  ${table ?? "⚠️ unmapped"}\n` +
+      `Status filter  :  ${sf}\n` +
+      `─────────────────────────────────\n` +
+      `Available      :  ${info.avail}\n` +
+      `Sold out       :  ${info.sold}\n` +
+      `Total entries  :  ${info.total}\n` +
+      `</code>\n\n` +
+      `› What would you like to do?`;
+
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("➕  Add Credentials",     `shop_stock_add_${productId}`)],
+        [Markup.button.callback("📋  View Credentials",    `shop_stock_view_${productId}_0`)],
+        [Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
+         Markup.button.callback("♻  Reset All Available", `shop_stock_resetavail_${productId}`)],
+        [Markup.button.callback("↩  Back to Stock",       "shop_admin_stock")],
+      ]),
+    });
+  });
+
+  // Start add-credentials flow for a product
+  bot.action(/^shop_stock_add_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name, account_type, status_filter FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+
+    const table = SHOP_TABLE_MAP[p.account_type];
+    if (!table) {
+      return ctx.reply(`⚠️ Account type <code>${p.account_type}</code> has no mapped table. Cannot add credentials.`, { parse_mode: "HTML" });
+    }
+
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = {
+      step: "stock_add_creds",
+      stockProductId: productId,
+      stockTableName: table,
+      stockStatusFilter: p.status_filter ?? "available",
+    };
+
+    await ctx.reply(
+      `\n🗄 <b>ADD CREDENTIALS — ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<b>Table:</b> <code>${table}</code>  ·  <b>Status:</b> <code>${p.status_filter ?? "available"}</code>\n\n` +
+      `Paste credentials — one per line:\n` +
+      `<code>email:password\nemail:password\n...</code>\n\n` +
+      `<i>Duplicates are skipped automatically.</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // View credentials paginated (10 per page)
+  bot.action(/^shop_stock_view_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const [, productId, offsetStr] = ctx.match as RegExpExecArray;
+    const offset = parseInt(offsetStr, 10);
+    const PAGE   = 10;
+
+    const r = await dbQuery(`SELECT name, account_type, status_filter FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+
+    const table = SHOP_TABLE_MAP[p.account_type];
+    if (!table) return safeEdit(ctx, `⚠️ No table mapped for <code>${p.account_type}</code>`, { parse_mode: "HTML" });
+
+    const countRes  = await dbQuery(`SELECT COUNT(*) as cnt FROM ${table}`);
+    const total     = parseInt(countRes.rows[0]?.cnt ?? "0");
+    const rows      = await dbQuery(
+      `SELECT email, password, status FROM ${table} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      [PAGE, offset]
+    );
+
+    if (total === 0) {
+      return safeEdit(ctx,
+        `\n📋 <b>${p.name} — Credentials</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No credentials in database yet.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", `shop_stock_${productId}`)]])}
+      );
+    }
+
+    const page      = Math.floor(offset / PAGE) + 1;
+    const totalPages = Math.ceil(total / PAGE);
+    let text = `\n📋 <b>${p.name.slice(0, 25)}</b>  (p.${page}/${totalPages})\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    for (const row of rows.rows) {
+      const st  = row.status === (p.status_filter ?? "available") ? "✓" : row.status === "sold_out" ? "✗" : "?";
+      const em  = (row.email ?? "—").slice(0, 28);
+      const pw  = (row.password ?? "—").slice(0, 16);
+      text += `${st}  ${em.padEnd(28)}  ${pw}\n`;
+    }
+    text += `</code>`;
+
+    const nav: ReturnType<typeof Markup.button.callback>[] = [];
+    if (offset > 0)             nav.push(Markup.button.callback("◀  Prev", `shop_stock_view_${productId}_${offset - PAGE}`));
+    if (offset + PAGE < total)  nav.push(Markup.button.callback("Next  ▶", `shop_stock_view_${productId}_${offset + PAGE}`));
+
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        ...(nav.length ? [nav] : []),
+        [Markup.button.callback("↩  Back", `shop_stock_${productId}`)],
+      ]),
+    });
+  });
+
+  // Clear sold-out entries for a product
+  bot.action(/^shop_stock_clearsold_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery("Clearing…").catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name, account_type FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    const table = p ? SHOP_TABLE_MAP[p.account_type] : null;
+    if (!table) return ctx.reply("⚠️ Product or table not found.", { parse_mode: "HTML" });
+    const del = await dbQuery(`DELETE FROM ${table} WHERE status = 'sold_out' RETURNING id`);
+    await ctx.answerCbQuery(`🗑 Deleted ${del.rowCount} sold-out entries`).catch(() => {});
+    await ctx.reply(`✅ Removed <b>${del.rowCount}</b> sold-out entries from <code>${table}</code>.`, { parse_mode: "HTML" });
+  });
+
+  // Reset all non-sold entries to "available"
+  bot.action(/^shop_stock_resetavail_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery("Resetting…").catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name, account_type, status_filter FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    const table = p ? SHOP_TABLE_MAP[p.account_type] : null;
+    if (!table) return ctx.reply("⚠️ Product or table not found.", { parse_mode: "HTML" });
+    const sf = p.status_filter ?? "available";
+    const upd = await dbQuery(
+      `UPDATE ${table} SET status = $1 WHERE status != 'sold_out' RETURNING id`,
+      [sf]
+    );
+    await ctx.reply(
+      `✅ Reset <b>${upd.rowCount}</b> entries to <code>${sf}</code> in <code>${table}</code>.`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── Quick topup from search results ──────────────────────────────────────
   bot.action(/^topup_found_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
@@ -3849,6 +4069,74 @@ export function startTelegramBot(config: BotConfig) {
           `Max uses:  ${maxUses === 0 ? "Unlimited" : maxUses}\n` +
           `</code>`,
           { parse_mode: "HTML" }
+        );
+      }
+
+      // ── Stock: Add credentials (bulk paste) ─────────────────────────────────
+      if (flow.step === "stock_add_creds") {
+        const table   = flow.stockTableName!;
+        const sf      = flow.stockStatusFilter ?? "available";
+        const prodId  = flow.stockProductId!;
+        st.shopAdminFlow = undefined;
+
+        // Parse lines — accept "email:password" or "email password"
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const parsed: { email: string; password: string }[] = [];
+        const skipped: string[] = [];
+
+        for (const line of lines) {
+          const sep = line.includes(":") ? ":" : " ";
+          const parts = line.split(sep);
+          if (parts.length < 2) { skipped.push(line.slice(0, 30)); continue; }
+          const email    = parts[0].trim().toLowerCase();
+          const password = parts.slice(1).join(sep).trim();
+          if (!email.includes("@") || !password) { skipped.push(line.slice(0, 30)); continue; }
+          parsed.push({ email, password });
+        }
+
+        if (parsed.length === 0) {
+          return ctx.reply(
+            `🔴 No valid credentials found.\n\nFormat required:\n<code>email:password\nemail:password</code>`,
+            { parse_mode: "HTML" }
+          );
+        }
+
+        let added = 0, dupes = 0;
+        for (const cred of parsed) {
+          try {
+            const res2 = await dbQuery(
+              `INSERT INTO ${table} (email, password, status)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (email) DO NOTHING`,
+              [cred.email, cred.password, sf]
+            );
+            if ((res2.rowCount ?? 0) > 0) added++;
+            else dupes++;
+          } catch {
+            dupes++;
+          }
+        }
+
+        // Get new stock count
+        const countRes = await dbQuery(
+          `SELECT COUNT(*) as cnt FROM ${table} WHERE status = $1`,
+          [sf]
+        );
+        const newStock = parseInt(countRes.rows[0]?.cnt ?? "0");
+
+        return ctx.reply(
+          `\n✅ <b>CREDENTIALS ADDED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `<code>` +
+          `Parsed          :  ${lines.length}\n` +
+          `Added           :  ${added}\n` +
+          `Skipped/invalid :  ${skipped.length + dupes}\n` +
+          `New stock count :  ${newStock}\n` +
+          `</code>` +
+          (skipped.length ? `\n⚠️ Skipped:\n<code>${skipped.join("\n")}</code>` : ""),
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${prodId}`)]]),
+          }
         );
       }
 
