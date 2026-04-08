@@ -83,6 +83,15 @@ function ae(id: string, fallback: string): string {
   return `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>`;
 }
 
+/**
+ * Clips a plain-text string to maxLen visible characters.
+ * Used to keep product card content within the fixed-width box.
+ */
+function boxClip(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 1) + "…";
+}
+
 function fmt$(n: number | string) {
   return `$${parseFloat(String(n)).toFixed(2)}`;
 }
@@ -629,11 +638,17 @@ function header(title: string, sub?: string): string {
     : `<b>${title}</b>`;
 }
 
+// Inner visible width for box cards (chars after "║  " prefix and before "  ║" suffix)
+const BOX_INNER_WIDTH = 30;
+
 function buildProductCard(p: ProductWithStock): string {
-  const emoji = platformEmoji(p.account_type);
-  const name  = escHtml(p.name);
-  const desc  = p.description ? escHtml(p.description) : `${platformLabel(p.account_type)} · Instant delivery`;
-  const badge = stockBadge(p.stock);
+  const emoji   = platformEmoji(p.account_type);
+  const rawName = p.name;
+  // Clip to BOX_INNER_WIDTH (3 chars used by "emoji + 2 spaces")
+  const name    = escHtml(boxClip(rawName, BOX_INNER_WIDTH - 3));
+  const rawDesc = p.description ?? `${platformLabel(p.account_type)} · Instant delivery`;
+  const desc    = escHtml(boxClip(rawDesc, BOX_INNER_WIDTH));
+  const badge   = stockBadge(p.stock);
   return (
     `╔══════════════════════════════════════╗\n` +
     `║  ${emoji}  <b>${name}</b>  ║\n` +
@@ -1119,12 +1134,14 @@ export function startShopBot(token: string) {
 
     const pEmoji = platformEmoji(prod.account_type);
     await safeEdit(ctx,
-      `✅ <b>Purchase Successful!</b>\n\n` +
+      `╔══════════════════════════════════════╗\n` +
+      `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PURCHASE SUCCESSFUL!</b>  ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
       `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
-      `${divider()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
       `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
-      `${divider()}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `${discountLine}` +
       `💵 Paid: <b>${fmt$(result.finalPrice)}</b>\n` +
       `💰 New balance: <b>${fmt$(result.newBalance)}</b>\n` +
@@ -1838,10 +1855,11 @@ export function startShopBot(token: string) {
     const reqId = insRes.rows[0]?.id;
 
     await safeReply(ctx,
-      `✅ <b>Proof Submitted!</b>\n\n` +
-      `${divider()}\n\n` +
-      `📋 Request ID: <code>${reqId}</code>\n` +
-      `🪪 Your ID: <code>${uid}</code>\n\n` +
+      `╔══════════════════════════════════════╗\n` +
+      `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PROOF SUBMITTED!</b>  ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
+      `<code>  📋 Request ID  ›  ${reqId}\n` +
+      `  🆔 Your ID     ›  ${uid}</code>\n\n` +
       `Our team will review and credit your balance shortly.\n` +
       `<i>Average confirmation: under 15 minutes.</i>`,
       { parse_mode: "HTML" }
