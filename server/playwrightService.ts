@@ -11157,10 +11157,14 @@ export async function registerReplitAccount(
       // CapSolver produces a Google-accepted token with correct action → should pass Replit.
       let capsolverToken: string | null = null;
       if (recaptchaEnterpriseSiteKey) {
-        // Try CapSolver with action "signup" first, then "submit" as fallback
-        for (const action of ["signup", "submit"]) {
+        // Try CapSolver without action first (matches Replit's actual call if they use no/null action),
+        // then fall back to named actions if no-action produces code:2.
+        // "not captured" in logs = action is null/undefined in Replit's grecaptcha.enterprise.execute call.
+        const actionsToTry: (string | undefined)[] = [undefined, "signup", "submit", "create_account"];
+        for (const action of actionsToTry) {
           try {
-            log(`  🤖 CapSolver: solving reCAPTCHA Enterprise (action="${action}", sitekey=${recaptchaEnterpriseSiteKey.substring(0, 20)}...)...`);
+            const actionLabel = action ?? "(none)";
+            log(`  🤖 CapSolver: solving reCAPTCHA Enterprise (action=${actionLabel}, sitekey=${recaptchaEnterpriseSiteKey.substring(0, 20)}...)...`);
             const capResult = await solveRecaptchaV3Enterprise(
               "https://replit.com/signup",
               recaptchaEnterpriseSiteKey,
@@ -11170,13 +11174,13 @@ export async function registerReplitAccount(
             );
             if (capResult.success && capResult.token) {
               capsolverToken = capResult.token;
-              log(`  ✅ CapSolver token obtained (action="${action}", len=${capsolverToken.length})`);
+              log(`  ✅ CapSolver token obtained (action=${actionLabel}, len=${capsolverToken.length})`);
               break;
             } else {
-              log(`  ⚠️ CapSolver failed for action="${action}": ${capResult.error || "unknown"}`);
+              log(`  ⚠️ CapSolver failed for action=${actionLabel}: ${capResult.error || "unknown"}`);
             }
           } catch (capErr: any) {
-            log(`  ⚠️ CapSolver error (action="${action}"): ${(capErr.message || "").substring(0, 60)}`);
+            log(`  ⚠️ CapSolver error: ${(capErr.message || "").substring(0, 60)}`);
           }
         }
         if (!capsolverToken) {
