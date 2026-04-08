@@ -11085,76 +11085,34 @@ export async function registerReplitAccount(
       }).catch(() => null) as string | null;
     }
 
-    // ── Solve reCAPTCHA Enterprise using the action captured by our page-load hook ──
-    // execute() fires at page load (auto-render), our defineProperty trap captures the action.
-    // We solve with CapSolver, then intercept the sign-up POST to replace the token.
-    let captchaFailed = false;
-    let capturedRequests: string[] = [];
-    try {
-      if (!recaptchaEnterpriseSiteKey) {
-        log(`  ⚠️ reCAPTCHA Enterprise site key not detected — proceeding without solve (may fail)`);
-      } else {
-        // Read action captured when execute() fired during page load
-        const capturedAction = await page.evaluate(() => (window as any).__recaptcha_last_action || null).catch(() => null) as string | null;
-        const actionToUse = capturedAction || "signup";
-        log(`  🔑 sitekey: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... | action: "${actionToUse}"${capturedAction ? " (observed)" : " (fallback)"}`);
-        log(`  🔒 Solving reCAPTCHA Enterprise with CapSolver...`);
-
-        const ticker = setInterval(() => log(`  ⏳ reCAPTCHA solve in progress...`), 15000);
-        let capResult: { success: boolean; token?: string; error?: string };
-        try {
-          capResult = await solveRecaptchaV3Enterprise("https://replit.com/signup", recaptchaEnterpriseSiteKey, actionToUse, 0.7);
-        } finally {
-          clearInterval(ticker);
-        }
-
-        if (capResult.success && capResult.token) {
-          log(`  ✅ reCAPTCHA solved! Token: ${capResult.token.substring(0, 30)}...`);
-          const solvedToken = capResult.token;
-
-          // Intercept the signup POST and replace recaptchaToken with our CapSolver token
-          const routeHandler = async (route: any) => {
-            const req = route.request();
-            const url: string = req.url();
-            const method: string = req.method();
-            if (method === "POST" && url.includes("replit.com/api/v1/auth/sign-up")) {
-              try {
-                const origBody = req.postData() || "{}";
-                let parsed: any = {};
-                try { parsed = JSON.parse(origBody); } catch {}
-                const origToken = (parsed.recaptchaToken || "(none)").substring(0, 30);
-                parsed.recaptchaToken = solvedToken;
-                const modBody = JSON.stringify(parsed);
-                capturedRequests.push(`INTERCEPTED sign-up → replaced recaptchaToken (was: ${origToken}...) with CapSolver token`);
-                await route.continue({
-                  postData: modBody,
-                  headers: { ...req.headers(), "content-type": "application/json", "content-length": Buffer.byteLength(modBody).toString() },
-                });
-                return;
-              } catch (intErr: any) {
-                capturedRequests.push(`Intercept error: ${intErr.message}`);
-              }
-            }
-            if (method === "POST" && url.includes("replit.com")) {
-              capturedRequests.push(`${method} ${url.split("?")[0].replace("https://", "")}`);
-            }
-            await route.continue();
-          };
-          await page.route("**", routeHandler).catch(() => {});
-          await page.waitForTimeout(300);
-        } else {
-          log(`  ❌ CapSolver failed: ${capResult.error} — aborting`);
-          captchaFailed = true;
-        }
+    // ── reCAPTCHA: intercept sign-up POST to LOG the real token (no replacement) ──
+    // The stealth browser generates its own real reCAPTCHA token via auto-render.
+    // Test: let the real token pass through — if stealth mode scores well it will succeed.
+    // If it fails (code:2), we know we need CapSolver; if it passes, no CapSolver needed.
+    const capturedRequests: string[] = [];
+    {
+      const capturedAction = await page.evaluate(() => (window as any).__recaptcha_last_action || null).catch(() => null) as string | null;
+      if (recaptchaEnterpriseSiteKey) {
+        log(`  🔑 reCAPTCHA sitekey: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... | observed action: "${capturedAction || "not captured"}"`);
       }
-    } catch (capErr: any) {
-      log(`  ⚠️ reCAPTCHA solve error: ${(capErr.message || "").substring(0, 80)} — aborting`);
-      captchaFailed = true;
-    }
-
-    if (captchaFailed) {
-      log("❌ reCAPTCHA solve failed — returning failure");
-      return { success: false, error: "recaptcha_enterprise_solve_failed" };
+      const routeHandler = async (route: any) => {
+        const req = route.request();
+        const url: string = req.url();
+        const method: string = req.method();
+        if (method === "POST" && url.includes("replit.com/api/v1/auth/sign-up")) {
+          try {
+            const origBody = req.postData() || "{}";
+            let parsed: any = {};
+            try { parsed = JSON.parse(origBody); } catch {}
+            const realToken = (parsed.recaptchaToken || "(none)").substring(0, 40);
+            capturedRequests.push(`PASSTHROUGH sign-up POST — real browser token: ${realToken}...`);
+          } catch {}
+        } else if (method === "POST" && url.includes("replit.com")) {
+          capturedRequests.push(`${method} ${url.split("?")[0].replace("https://", "")}`);
+        }
+        await route.continue();
+      };
+      await page.route("**", routeHandler).catch(() => {});
     }
 
     log("Submitting signup form...");
