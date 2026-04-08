@@ -78,9 +78,14 @@ const ANIM_EMOJI = {
   bell:    "5361541227376957276",  // 🔔
 } as const;
 
-/** Renders a Telegram Premium animated custom emoji with a plain-text fallback */
-function ae(id: string, fallback: string): string {
-  return `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>`;
+/**
+ * Animated custom emoji helper.
+ * NOTE: <tg-emoji> requires verified document IDs from real Telegram sticker packs.
+ * Until valid IDs are sourced via the API, this returns the plain fallback emoji
+ * so messages render correctly without DOCUMENT_INVALID errors.
+ */
+function ae(_id: string, fallback: string): string {
+  return fallback;
 }
 
 /**
