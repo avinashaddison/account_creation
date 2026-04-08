@@ -11036,12 +11036,11 @@ export async function registerReplitAccount(
             try { capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 150); }
             finally { clearInterval(ticker); }
             if (!capResult.success) {
-              log(`  ⚠️ NopeCHA failed: ${capResult.error} — trying CapSolver...`);
-              capResult = await solveHCaptcha("https://replit.com/signup", capKey);
+              log(`  ⚠️ NopeCHA failed: ${capResult.error} — cannot proceed without hCaptcha token`);
             }
           } else {
-            log(`  → CapSolver...`);
-            capResult = await solveHCaptcha("https://replit.com/signup", capKey);
+            log(`  ⚠️ NopeCHA key not configured — cannot solve hCaptcha`);
+            capResult = { success: false, token: undefined, error: "NopeCHA key not set" };
           }
 
           if (capResult.success && capResult.token) {
@@ -19265,12 +19264,11 @@ export async function generateSingleCheckoutLink(
             clearInterval(nopeTicker);
           }
           if (!capResult.success) {
-            log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"} — trying CapSolver fallback...`);
-            capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
+            log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"} — cannot proceed without hCaptcha token`);
           }
         } else {
-          log(`  ⚠️ NopeCHA key not configured — using CapSolver...`);
-          capResult = await solveHCaptcha("https://replit.com/login", keyToUse);
+          log(`  ⚠️ NopeCHA key not configured — cannot solve hCaptcha`);
+          capResult = { success: false, token: undefined, error: "NopeCHA key not set" };
         }
 
         if (capResult.success && capResult.token) {
