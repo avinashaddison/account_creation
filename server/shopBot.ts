@@ -69,7 +69,7 @@ const ANIM_EMOJI = {
   diamond: "5471952986970267627",  // 💎
   robot:   "5392571666582032261",  // 🤖
   money:   "5371260806527499265",  // 💰
-  star:    "5368324170671202286",  // ⭐
+  star:    "5376425420038527205",  // ⭐ (distinct ID from fire)
   rocket:  "5380004077456738553",  // 🚀
   check:   "5404870433004043254",  // ✅
   crown:   "5379748062124056162",  // 👑
@@ -636,9 +636,9 @@ function buildProductCard(p: ProductWithStock): string {
   const badge = stockBadge(p.stock);
   return (
     `╔══════════════════════════════════════╗\n` +
-    `║  ${emoji}  <b>${name}</b>\n` +
-    `║  <i>${desc}</i>\n` +
-    `║  💵 <b>${fmt$(p.price)}</b>  ·  ${badge}\n` +
+    `║  ${emoji}  <b>${name}</b>  ║\n` +
+    `║  <i>${desc}</i>  ║\n` +
+    `║  💵 <b>${fmt$(p.price)}</b>  ·  ${badge}  ║\n` +
     `╚══════════════════════════════════════╝`
   );
 }
@@ -702,10 +702,10 @@ export function startShopBot(token: string) {
     await ctx.reply(
       truncate(
         `╔══════════════════════════════════════╗\n` +
-        `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <b>PROJECT ADDISON  v2</b>\n` +
-        `║  <i>Global AI Tools Marketplace</i>\n` +
+        `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <b>PROJECT ADDISON  v2</b>  ║\n` +
+        `║  <i>Global AI Tools Marketplace</i>  ║\n` +
         `╚══════════════════════════════════════╝\n\n` +
-        `${ae(ANIM_EMOJI.star, "👋")} Welcome back, <b>${escHtml(name)}</b>!\n\n` +
+        `👋 Welcome back, <b>${escHtml(name)}</b>!\n\n` +
         `<code>  💰 Balance   ›  ${fmt$(balance)}\n` +
         `  🔖 User      ›  ${uname}\n` +
         `  🆔 ID        ›  ${uid}</code>\n\n` +
@@ -732,8 +732,8 @@ export function startShopBot(token: string) {
     await ctx.reply(
       truncate(
         `╔══════════════════════════════════════╗\n` +
-        `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <b>PROJECT ADDISON  v2</b>\n` +
-        `║  <i>Global AI Tools Marketplace</i>\n` +
+        `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <b>PROJECT ADDISON  v2</b>  ║\n` +
+        `║  <i>Global AI Tools Marketplace</i>  ║\n` +
         `╚══════════════════════════════════════╝\n\n` +
         `<code>  💰 Balance   ›  ${fmt$(balance)}\n` +
         `  🔖 User      ›  ${uname}\n` +
@@ -776,8 +776,8 @@ export function startShopBot(token: string) {
     const count = products.length;
     const text =
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.bolt, "⚡")} <b>LIVE MARKETPLACE</b>\n` +
-      `║  <i>${count} product${count !== 1 ? "s" : ""}  ·  Instant delivery  ·  USD</i>\n` +
+      `║  ${ae(ANIM_EMOJI.bolt, "⚡")} <b>LIVE MARKETPLACE</b>  ║\n` +
+      `║  <i>${count} product${count !== 1 ? "s" : ""}  ·  Instant delivery  ·  USD</i>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `${cards}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -812,8 +812,8 @@ export function startShopBot(token: string) {
     const cnt   = products.length;
     const text  =
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.bolt, "⚡")} <b>LIVE MARKETPLACE</b>\n` +
-      `║  <i>${cnt} product${cnt !== 1 ? "s" : ""}  ·  Instant delivery  ·  USD</i>\n` +
+      `║  ${ae(ANIM_EMOJI.bolt, "⚡")} <b>LIVE MARKETPLACE</b>  ║\n` +
+      `║  <i>${cnt} product${cnt !== 1 ? "s" : ""}  ·  Instant delivery  ·  USD</i>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `${cards}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -1750,7 +1750,7 @@ export function startShopBot(token: string) {
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend  <i>(${fmt$(spend)} so far)</i>`;
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.money, "💰")}  <b>MY WALLET</b>\n` +
+      `║  ${ae(ANIM_EMOJI.money, "💰")}  <b>MY WALLET</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  💵 Balance    ›  ${fmt$(balance)}\n` +
       `  🆔 User ID    ›  ${uid}</code>\n\n` +
@@ -1767,7 +1767,7 @@ export function startShopBot(token: string) {
   function depositText(uid: number): string {
     return (
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.card, "💳")}  <b>ADD FUNDS</b>\n` +
+      `║  ${ae(ANIM_EMOJI.card, "💳")}  <b>ADD FUNDS</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `🟡  <b>Binance ID</b>\n<code>510120124</code>\n\n` +
       `${divider()}\n\n` +
@@ -1882,7 +1882,7 @@ export function startShopBot(token: string) {
   bot.hears(BTN.SUPPORT, async (ctx) => {
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  🎧  <b>SUPPORT</b>\n` +
+      `║  🎧  <b>SUPPORT</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `We can help with:\n` +
       `  · Account access issues\n` +
@@ -1910,7 +1910,7 @@ export function startShopBot(token: string) {
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend`;
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae(ANIM_EMOJI.crown, "👑")}` : ""}\n` +
+      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae(ANIM_EMOJI.crown, "👑")}` : ""}  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  🔖 Username    ›  ${uname}\n` +
       `  🆔 User ID     ›  ${uid}\n` +
@@ -1953,7 +1953,7 @@ export function startShopBot(token: string) {
 
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  🔗  <b>REFER &amp; EARN</b>\n` +
+      `║  🔗  <b>REFER &amp; EARN</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `Invite friends and earn <b>${fmt$(referReward)}</b> for every new user who joins using your link.\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
@@ -1998,7 +1998,7 @@ export function startShopBot(token: string) {
     if (res.rows.length === 0) {
       const text =
         `╔══════════════════════════════════════╗\n` +
-        `║  📋  <b>ORDER HISTORY</b>\n` +
+        `║  📋  <b>ORDER HISTORY</b>  ║\n` +
         `╚══════════════════════════════════════╝\n\n` +
         `<i>No purchases yet.</i>\n\n` +
         `Browse the marketplace to get started:`;
@@ -2009,8 +2009,8 @@ export function startShopBot(token: string) {
 
     const lines: string[] = [
       `╔══════════════════════════════════════╗\n` +
-      `║  📋  <b>ORDER HISTORY</b>\n` +
-      `║  <i>Last ${res.rows.length} purchase${res.rows.length !== 1 ? "s" : ""}</i>\n` +
+      `║  📋  <b>ORDER HISTORY</b>  ║\n` +
+      `║  <i>Last ${res.rows.length} purchase${res.rows.length !== 1 ? "s" : ""}</i>  ║\n` +
       `╚══════════════════════════════════════╝\n`
     ];
 
@@ -2079,7 +2079,7 @@ export function startShopBot(token: string) {
     const balance = await getBalance(uid);
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.money, "💰")}  <b>MY WALLET</b>\n` +
+      `║  ${ae(ANIM_EMOJI.money, "💰")}  <b>MY WALLET</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  💵 Balance   ›  ${fmt$(balance)}\n` +
       `  🆔 User ID   ›  ${uid}</code>\n\n` +
