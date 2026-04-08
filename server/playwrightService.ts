@@ -11076,43 +11076,34 @@ export async function registerReplitAccount(
         // The hcaptcha widget often auto-solves in the background via its `onVerify` React callback.
         // This produces a 2400+ char token that is IP-matched to our nsocks proxy — ideal.
         // We give it up to 35 seconds to auto-solve before falling back to external solvers.
-        log("  → Polling for browser-native hcaptcha token (hiddenTA / widget, up to 90s)...");
-        // Poll server-side — avoids Playwright evaluate() timeout issues with long async loops.
-        // Each call is a short synchronous snapshot of the DOM, retried every 500ms for 90s.
+        log("  → Waiting 15s for hcaptcha passive assessment (then submit with browser's own token)...");
+        // Short wait: let hcaptcha initialize and do its passive fingerprint assessment.
+        // Waiting too long (90s) can make the hcaptcha session stale.
+        // The real token scoring happens at form-submit time (execute()), not pre-load.
         const readBrowserToken = async (): Promise<string | null> =>
           page.evaluate(() => {
             const w = window as any;
-            // Check hidden textarea first (browser generates this from correct proxy IP)
             const ta = document.querySelector<HTMLTextAreaElement>(
               'textarea[name="h-captcha-response"], textarea[name="g-recaptcha-response"], textarea[id="h-captcha-response"]'
             );
             const hidden = ta?.value || "";
-            if (hidden.length > 50) return hidden;
-            // Check widget API if available
+            if (hidden.length > 200) return hidden;
             if (!w.hcaptcha) return null;
             try {
               const t = w.hcaptcha.getResponse();
-              if (t && t.length > 50) return t;
+              if (t && t.length > 200) return t;
             } catch {}
             for (let wid = 0; wid <= 5; wid++) {
               try {
                 const t = w.hcaptcha.getResponse(wid);
-                if (t && t.length > 50) return t;
+                if (t && t.length > 200) return t;
               } catch {}
             }
             return null;
           }).catch(() => null);
 
-        // Trigger execute() once hcaptcha widget is ready (after short wait)
-        setTimeout(async () => {
-          await page.evaluate(() => {
-            const w = window as any;
-            if (w.hcaptcha) { try { w.hcaptcha.execute(); } catch {} }
-          }).catch(() => {});
-        }, 5000);
-
         let browserToken: string | null = null;
-        for (let i = 0; i < 180; i++) {
+        for (let i = 0; i < 30; i++) {
           await page.waitForTimeout(500);
           browserToken = await readBrowserToken();
           if (browserToken) break;
@@ -11223,15 +11214,17 @@ export async function registerReplitAccount(
                     const allHeaders = req.headers();
                     const interestingHeaders = ["content-type","x-requested-with","x-csrf-token","authorization","cookie","origin","referer","x-replit-clientid","x-replit-pkce-challenge","x-nonce"].filter(h => allHeaders[h]).map(h => `${h}:${String(allHeaders[h]).substring(0,50)}`).join("|");
                     log(`  → [route-intercept] POST ${urlObj.pathname} | keys:[${bodyKeys.join(",")}] | existing-cap-len:${existingCapLen} | hdrs:[${interestingHeaders}]`);
-                    if (usedNativeToken) {
-                      // Browser's own IP-matched token — let it pass through completely unchanged
-                      log(`  → [route-intercept] Native token mode — browser's ${existingCapLen}-char token passes through unchanged`);
+                    // Smart passthrough: if browser already generated a long proper hcaptcha token
+                    // (2000+ chars), it's IP-matched from the correct proxy — pass through unchanged.
+                    // Only inject external solver token when browser has no/short token.
+                    if (existingCapLen >= 1500) {
+                      log(`  → [route-intercept] Browser has long token (${existingCapLen} chars) — passing through unchanged (IP-matched, no injection)`);
                       await route.continue();
                       return;
                     }
-                    // External solver token — inject it over the browser's token
+                    // Browser has short/missing token — inject external solver token
                     body["recaptchaToken"] = solvedToken;
-                    log(`  → [route-intercept] Injecting solver token (${solvedToken.length} chars) over browser token (${existingCapLen} chars)`);
+                    log(`  → [route-intercept] Browser short token (${existingCapLen} chars) — injecting solver token (${solvedToken.length} chars)`);
                     await route.continue({ postData: JSON.stringify(body) });
                     return;
                   } catch {
