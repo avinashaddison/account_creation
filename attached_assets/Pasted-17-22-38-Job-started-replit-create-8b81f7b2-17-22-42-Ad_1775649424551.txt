@@ -1,0 +1,444 @@
+17:22:38
+·
+Job started: replit-create-8b81f7b2
+17:22:42
+·
+Addison Proxy connected.
+17:22:42
++
+✅ ZenRows cloud browser connected — bypasses bot detection & browser integrity checks
+17:22:42
+·
+Visiting Replit homepage before signup...
+17:22:55
+>
+Homepage visited — navigating to signup...
+17:22:55
+>
+Navigating to https://replit.com/signup ...
+17:23:09
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:23:10
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+17:23:10
+·
+Page title: Sign Up - Replit
+17:23:10
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+17:23:11
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+17:23:19
+·
+Network idle timeout — waiting 4s instead
+17:23:23
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+17:23:23
+·
+Waiting for signup form fields to appear...
+17:23:24
+·
+Form fields detected
+17:23:24
+·
+Filling signup form...
+17:23:24
+~
+⚠️ Could not find username field
+17:23:28
+·
+Typed email into input[name="email"]
+17:23:31
+»
+Typed password into input[name="password"]
+17:23:32
+~
+🔑 reCAPTCHA sitekey: 6LfyLYUsAAAAAP0Xmu-h... | observed action: "not captured"
+17:23:32
+·
+Submitting signup form...
+17:23:32
+·
+Clicked submit button "Create Account" (button[type="submit"])
+17:23:32
+·
+Waiting for signup response...
+17:23:38
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:53:32.688Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649182"},"Actio
+17:23:38
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:53:35.209Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649182"},"Actio
+17:23:38
+»
+📡 Captured: sign-up POST body fields: email, rawPassword, clientType, recaptchaToken, source
+17:23:38
+>
+📡 Captured: PASSTHROUGH sign-up POST — real browser token (len=2340): 0cAFcWeA6gSbJTzpenDnrCoNwwNQq5uv0K75Rf1BWVoFZOlakGhgiUrsi2g7...
+17:23:38
+~
+📡 Captured: sign-up RESPONSE (400): {"message":"Your captcha token is invalid. Please refresh the page and try again. (code:1)"}
+17:23:38
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:53:36.943Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649182"},"Actio
+17:23:38
+·
+📡 Captured: POST sp.replit.com/v1/p
+17:23:38
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:53:37.085Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649182"},"Actio
+17:23:38
+!
+❌ Signup blocked by captcha: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google
+17:23:38
+~
+⚠️ Captcha blocked (attempt 1) — will retry with fresh IP
+17:23:38
+~
+🔄 Captcha retry 2/4 — rotating IP via new nsocks session...
+17:23:41
+»
+Generated username: hayden9634
+17:23:41
+»
+Generated password: TC6hep2v%50
+17:23:41
+>
+🌐 Connecting via ZenRows cloud browser for Replit signup...
+17:23:41
+·
+Connecting via Addison Proxy...
+17:23:45
+·
+Addison Proxy connected.
+17:23:45
++
+✅ ZenRows cloud browser connected — bypasses bot detection & browser integrity checks
+17:23:45
+·
+Visiting Replit homepage before signup...
+17:24:00
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:24:13
+>
+Homepage visited — navigating to signup...
+17:24:13
+>
+🌐 Using real browser reCAPTCHA token (residential IP: direct)
+17:24:13
+>
+Navigating to https://replit.com/signup ...
+17:24:19
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+17:24:19
+·
+Page title: Sign Up - Replit
+17:24:19
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+17:24:21
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+17:24:29
+·
+Network idle timeout — waiting 4s instead
+17:24:33
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+17:24:33
+·
+Waiting for signup form fields to appear...
+17:24:33
+·
+Form fields detected
+17:24:33
+·
+Filling signup form...
+17:24:33
+~
+⚠️ Could not find username field
+17:24:34
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:24:38
+·
+Typed email into input[name="email"]
+17:24:41
+»
+Typed password into input[name="password"]
+17:24:42
+~
+🔑 reCAPTCHA sitekey: 6LfyLYUsAAAAAP0Xmu-h... | observed action: "not captured"
+17:24:42
+·
+Submitting signup form...
+17:24:43
+·
+Clicked submit button "Create Account" (button[type="submit"])
+17:24:43
+·
+Waiting for signup response...
+17:24:48
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:54:42.961Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649230"},"Actio
+17:24:48
+·
+📡 Captured: POST sp.replit.com/v1/m
+17:24:48
+»
+📡 Captured: sign-up POST body fields: email, rawPassword, clientType, recaptchaToken, source
+17:24:48
+>
+📡 Captured: PASSTHROUGH sign-up POST — real browser token (len=2468): 0cAFcWeA4FqaD69RqaRJj6yqEz1PdxwVev1H6MuC9xMBRCJ92aZHxj4AyURn...
+17:24:48
+~
+📡 Captured: sign-up RESPONSE (400): {"message":"Your captcha token is invalid. Please refresh the page and try again. (code:1)"}
+17:24:48
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:54:47.576Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649230"},"Actio
+17:24:48
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:54:47.687Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649230"},"Actio
+17:24:48
+·
+📡 Captured: POST sp.replit.com/v1/p
+17:24:48
+!
+❌ Signup blocked by captcha: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google
+17:24:48
+~
+⚠️ Captcha blocked (attempt 2) — will retry with fresh IP
+17:24:48
+~
+🔄 Captcha retry 3/4 — rotating IP via new nsocks session...
+17:24:51
+»
+Generated username: jakecore99
+17:24:51
+»
+Generated password: EF8uhxh4$58
+17:24:51
+>
+🌐 Connecting via ZenRows cloud browser for Replit signup...
+17:24:52
+·
+Connecting via Addison Proxy...
+17:24:53
+·
+Addison Proxy connected.
+17:24:53
++
+✅ ZenRows cloud browser connected — bypasses bot detection & browser integrity checks
+17:24:53
+·
+Visiting Replit homepage before signup...
+17:25:15
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:25:19
+>
+Homepage visited — navigating to signup...
+17:25:19
+>
+🌐 Using real browser reCAPTCHA token (residential IP: direct)
+17:25:19
+>
+Navigating to https://replit.com/signup ...
+17:25:22
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:25:25
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+17:25:25
+·
+Page title: Sign Up - Replit
+17:25:26
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+17:25:27
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+17:25:35
+·
+Network idle timeout — waiting 4s instead
+17:25:39
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+17:25:39
+·
+Waiting for signup form fields to appear...
+17:25:39
+·
+Form fields detected
+17:25:39
+·
+Filling signup form...
+17:25:39
+~
+⚠️ Could not find username field
+17:25:44
+·
+Typed email into input[name="email"]
+17:25:46
+»
+Typed password into input[name="password"]
+17:25:47
+~
+🔑 reCAPTCHA sitekey: 6LfyLYUsAAAAAP0Xmu-h... | observed action: "not captured"
+17:25:47
+·
+Submitting signup form...
+17:25:48
+·
+Clicked submit button "Create Account" (button[type="submit"])
+17:25:48
+·
+Waiting for signup response...
+17:25:51
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:55:48.256Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649308"},"Actio
+17:25:51
+»
+📡 Captured: sign-up POST body fields: email, rawPassword, clientType, recaptchaToken, source
+17:25:51
+>
+📡 Captured: PASSTHROUGH sign-up POST — real browser token (len=2468): 0cAFcWeA5XJXQbORzjkALfaeLxYMyoRRk8Z4G-PTsJGcQ5NxzvgZ6NhzdX9K...
+17:25:51
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:55:50.501Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649308"},"Actio
+17:25:51
+~
+📡 Captured: sign-up RESPONSE (400): {"message":"Your captcha token is invalid. Please refresh the page and try again. (code:1)"}
+17:25:51
+·
+📡 Captured: POST sp.replit.com/v1/p
+17:25:51
+!
+❌ Signup blocked by captcha: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google
+17:25:51
+~
+⚠️ Captcha blocked (attempt 3) — will retry with fresh IP
+17:25:51
+~
+🔄 Captcha retry 4/4 — rotating IP via new nsocks session...
+17:25:54
+»
+Generated username: charlieui51
+17:25:54
+»
+Generated password: AGj6v4y6%11
+17:25:54
+>
+🌐 Connecting via ZenRows cloud browser for Replit signup...
+17:25:55
+·
+Connecting via Addison Proxy...
+17:25:55
+·
+Addison Proxy connected.
+17:25:56
++
+✅ ZenRows cloud browser connected — bypasses bot detection & browser integrity checks
+17:25:56
+·
+Visiting Replit homepage before signup...
+17:26:16
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:26:19
+>
+Homepage visited — navigating to signup...
+17:26:19
+>
+🌐 Using real browser reCAPTCHA token (residential IP: direct)
+17:26:19
+>
+Navigating to https://replit.com/signup ...
+17:26:23
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+17:26:26
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+17:26:26
+·
+Page title: Sign Up - Replit
+17:26:26
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+17:26:27
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+17:26:35
+·
+Network idle timeout — waiting 4s instead
+17:26:39
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+17:26:39
+·
+Waiting for signup form fields to appear...
+17:26:40
+·
+Form fields detected
+17:26:40
+·
+Filling signup form...
+17:26:40
+~
+⚠️ Could not find username field
+17:26:44
+·
+Typed email into input[name="email"]
+17:26:47
+»
+Typed password into input[name="password"]
+17:26:48
+~
+🔑 reCAPTCHA sitekey: 6LfyLYUsAAAAAP0Xmu-h... | observed action: "not captured"
+17:26:48
+·
+Submitting signup form...
+17:26:49
+·
+Clicked submit button "Create Account" (button[type="submit"])
+17:26:49
+·
+Waiting for signup response...
+17:26:52
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:56:48.949Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649370"},"Actio
+17:26:53
+»
+📡 Captured: sign-up POST body fields: email, rawPassword, clientType, recaptchaToken, source
+17:26:53
+>
+📡 Captured: PASSTHROUGH sign-up POST — real browser token (len=2468): 0cAFcWeA6aecekuoeyOpFKQ8f3vsITfdBUf6mcdAn5jvwlJ0qY4E0wJkm71T...
+17:26:53
+·
+📡 Captured: POST sp.replit.com/v1/m
+17:26:53
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:56:51.857Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649370"},"Actio
+17:26:53
+~
+📡 Captured: sign-up RESPONSE (400): {"message":"Your captcha token is invalid. Please refresh the page and try again. (code:1)"}
+17:26:53
+·
+📡 Captured: POST sp.replit.com/v1/p
+17:26:53
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T11:56:52.324Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775649370"},"Actio
+17:26:53
+!
+❌ Signup blocked by captcha: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google
+17:26:53
+!
+❌ Replit creation failed: Signup blocked by Replit captcha — try again later
