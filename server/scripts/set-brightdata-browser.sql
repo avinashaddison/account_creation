@@ -6,11 +6,15 @@
 --   - Residential IP routing natively (no external proxy= param needed)
 --   - Browser integrity fingerprint hardening
 --
--- This replaces the previous Addison Proxy CDP endpoint.
+-- Replace <YOUR_BRIGHT_DATA_WSS_URL> with the actual WebSocket URL from
+-- your Bright Data account: Proxies & Scraping > Scraping Browser > Connection settings
+-- Format: wss://brd-customer-<CUSTOMER_ID>-zone-<ZONE_NAME>:<PASSWORD>@brd.superproxy.io:9222
+--
+-- Alternatively, set this via the admin UI: Settings > Proxy Browser URL
 
 INSERT INTO settings (key, value)
 VALUES (
   'zenrows_api_url',
-  'wss://brd-customer-hl_86b34e68-zone-scraping_browser1:xov21cay1g29@brd.superproxy.io:9222'
+  '<YOUR_BRIGHT_DATA_WSS_URL>'
 )
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
