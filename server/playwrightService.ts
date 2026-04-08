@@ -10596,93 +10596,115 @@ export async function registerReplitAccount(
   let capsolverProxyUrl: string | undefined = undefined;
 
   try {
-    let zenrowsApiKey = "";
-    try {
-      zenrowsApiKey = await getZenRowsApiKey();
-      log(`ZenRows browser mode enabled`);
-    } catch {
-      log("⚠️ No ZenRows API key — using stealth headless browser");
-    }
-
-    // Always use stealth browser for Replit signup/login (ZenRows is only used for Stripe)
-    log("Launching stealth browser for Replit...");
-    const { chromium } = await import("playwright");
-
-    // ── nsocks residential proxy — unique IP per account to prevent ban ──────────
-    // Use Playwright native proxy (no ProxyChain) to avoid ERR_TUNNEL_CONNECTION_FAILED
-    try {
-      const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
-      if (rawProxy) {
-        // Fresh session ID = fresh residential IP for every account created
-        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
-        let rotatedProxy = rawProxy;
-        if (rawProxy.includes("sessionid-")) {
-          rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
-        } else if (rawProxy.includes("sessid=")) {
-          rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
-        } else if (rawProxy.includes("session-")) {
-          rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
-        }
-        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
-        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
-        const cleanPassword = decodeURIComponent(pUrl.password || "");
-        // Pass credentials natively — Playwright handles HTTPS CONNECT auth internally
-        // ── Proxy health check: CONNECT test before committing to this proxy ──
-        const proxyHealthy = await Promise.race([
-          new Promise<boolean>((resolve) => {
-            const req = http.request({
-              host: pUrl.hostname, port: Number(pUrl.port),
-              method: "CONNECT", path: "replit.com:443",
-              headers: { "Proxy-Authorization": "Basic " + Buffer.from(`${cleanUser}:${cleanPassword}`).toString("base64") },
-              timeout: 8000,
-            });
-            req.on("connect", (_res: any, socket: any) => { socket.destroy(); resolve(_res.statusCode === 200); });
-            req.on("error", () => resolve(false));
-            req.on("timeout", () => { req.destroy(); resolve(false); });
-            req.end();
-          }),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 12000)),
-        ]);
-
-        if (!proxyHealthy) {
-          log(`❌ nsocks proxy rejected CONNECT (package may be suspended/expired) — falling back to DIRECT connection`);
-          log(`   ⚠  Check dashboard.soax.com for package-${pUrl.hostname.includes("soax") ? cleanUser.match(/package-(\d+)/)?.[1] || "?" : "?"} status`);
-          // replitNativeProxy stays null → browser launches without proxy
-        } else {
-          replitNativeProxy = {
-            server: `http://${pUrl.hostname}:${pUrl.port}`,
-            username: cleanUser,
-            password: cleanPassword,
-          };
-          capsolverProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
-          log(`🌐 nsocks connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
-        }
-        const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
-        await resolveProxyIp(rawForIp, log, "WEBSHARE RESIDENTIAL");
-      } else {
-        log("⚠️ No nsocks proxy configured — using direct connection (higher ban risk)");
-      }
-    } catch (proxyErr: any) {
-      log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
-    }
-
-    // ── Randomise fingerprint so each account looks like a different device ────
-    const VIEWPORTS = [
-      { width: 1280, height: 800 }, { width: 1366, height: 768 },
-      { width: 1440, height: 900 }, { width: 1536, height: 864 },
-      { width: 1920, height: 1080 },
-    ];
-    const TIMEZONES = [
-      "America/New_York", "America/Chicago", "America/Los_Angeles",
-      "America/Denver", "America/Phoenix", "America/Detroit",
-    ];
-    const CHROME_VERSIONS = ["120", "121", "122", "123", "124"];
-    const vp = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
-    const tz = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
-    const cv = CHROME_VERSIONS[Math.floor(Math.random() * CHROME_VERSIONS.length)];
-
+    // ── Try ZenRows cloud browser first (hardened, passes reCAPTCHA & browser integrity) ──
+    let useZenRowsBrowser = false;
     let context: any;
-    {
+
+    try {
+      log(`🌐 Connecting via ZenRows cloud browser for Replit signup...`);
+      browser = await connectViaZenRows(log);
+      useZenRowsBrowser = true;
+      log(`✅ ZenRows cloud browser connected — bypasses bot detection & browser integrity checks`);
+
+      const VIEWPORTS = [
+        { width: 1280, height: 800 }, { width: 1366, height: 768 },
+        { width: 1440, height: 900 }, { width: 1536, height: 864 },
+        { width: 1920, height: 1080 },
+      ];
+      const TIMEZONES = [
+        "America/New_York", "America/Chicago", "America/Los_Angeles",
+        "America/Denver", "America/Phoenix", "America/Detroit",
+      ];
+      const vp = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+      const tz = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
+
+      context = browser.contexts()[0] || await browser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        viewport: vp,
+        locale: "en-US",
+        timezoneId: tz,
+        javaScriptEnabled: true,
+        acceptDownloads: false,
+        extraHTTPHeaders: {
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate, br",
+        },
+      });
+    } catch (zrErr: any) {
+      log(`⚠️ ZenRows unavailable: ${(zrErr.message || "").substring(0, 80)} — falling back to stealth browser`);
+    }
+
+    if (!useZenRowsBrowser) {
+      // ── Fallback: nsocks residential proxy + local stealth Playwright browser ──
+      log("Launching stealth browser for Replit...");
+      const { chromium } = await import("playwright");
+
+      // nsocks residential proxy — unique IP per account to prevent ban
+      try {
+        const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+        if (rawProxy) {
+          const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+          let rotatedProxy = rawProxy;
+          if (rawProxy.includes("sessionid-")) {
+            rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+          } else if (rawProxy.includes("sessid=")) {
+            rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+          } else if (rawProxy.includes("session-")) {
+            rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+          }
+          const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+          const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+          const cleanPassword = decodeURIComponent(pUrl.password || "");
+          const proxyHealthy = await Promise.race([
+            new Promise<boolean>((resolve) => {
+              const req = http.request({
+                host: pUrl.hostname, port: Number(pUrl.port),
+                method: "CONNECT", path: "replit.com:443",
+                headers: { "Proxy-Authorization": "Basic " + Buffer.from(`${cleanUser}:${cleanPassword}`).toString("base64") },
+                timeout: 8000,
+              });
+              req.on("connect", (_res: any, socket: any) => { socket.destroy(); resolve(_res.statusCode === 200); });
+              req.on("error", () => resolve(false));
+              req.on("timeout", () => { req.destroy(); resolve(false); });
+              req.end();
+            }),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 12000)),
+          ]);
+
+          if (!proxyHealthy) {
+            log(`❌ nsocks proxy rejected CONNECT — falling back to DIRECT connection`);
+          } else {
+            replitNativeProxy = {
+              server: `http://${pUrl.hostname}:${pUrl.port}`,
+              username: cleanUser,
+              password: cleanPassword,
+            };
+            capsolverProxyUrl = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
+            log(`🌐 nsocks connected — session: ${sessionId.substring(0, 12)} | endpoint: ${pUrl.hostname}:${pUrl.port}`);
+          }
+          const rawForIp = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
+          await resolveProxyIp(rawForIp, log, "WEBSHARE RESIDENTIAL");
+        } else {
+          log("⚠️ No nsocks proxy configured — using direct connection (higher ban risk)");
+        }
+      } catch (proxyErr: any) {
+        log(`⚠️ Proxy setup failed: ${(proxyErr.message || "").substring(0, 80)} — continuing without proxy`);
+      }
+
+      const VIEWPORTS = [
+        { width: 1280, height: 800 }, { width: 1366, height: 768 },
+        { width: 1440, height: 900 }, { width: 1536, height: 864 },
+        { width: 1920, height: 1080 },
+      ];
+      const TIMEZONES = [
+        "America/New_York", "America/Chicago", "America/Los_Angeles",
+        "America/Denver", "America/Phoenix", "America/Detroit",
+      ];
+      const CHROME_VERSIONS = ["120", "121", "122", "123", "124"];
+      const vp = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+      const tz = TIMEZONES[Math.floor(Math.random() * TIMEZONES.length)];
+      const cv = CHROME_VERSIONS[Math.floor(Math.random() * CHROME_VERSIONS.length)];
+
       const launchArgs = [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -10716,7 +10738,10 @@ export async function registerReplitAccount(
           "Sec-Ch-Ua-Platform": '"Windows"',
         },
       });
-      await context.addInitScript(() => {
+    } // end if (!useZenRowsBrowser)
+
+    // ── Apply init scripts to context regardless of which browser path was taken ──
+    await context.addInitScript(() => {
         // Core webdriver spoofing
         Object.defineProperty(navigator, "webdriver", { get: () => undefined });
         Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
@@ -10850,8 +10875,6 @@ export async function registerReplitAccount(
           }, true);
         })();
       });
-      log("Using stealth headless browser");
-    }
     page = await context.newPage();
     page.setDefaultTimeout(30000);
 

@@ -1,0 +1,369 @@
+live_output
+16:23:48
+·
+Job started: replit-create-c6a2d2b6
+16:23:48
+·
+🌐 nsocks connected — session: ddrakjeqe4s0 | endpoint: proxy.nsocks.com:2312
+16:23:50
+·
+┌─── WEBSHARE RESIDENTIAL ACTIVE ───────────────────────────
+16:23:50
+·
+│ Exit IP : 69.24.160.85
+16:23:50
+·
+│ Location : Mankato, Minnesota, US
+16:23:50
+·
+│ Provider : AS12042 Fidium
+16:23:50
+·
+└────────────────────────────────────────────────
+16:23:52
+>
+Using stealth headless browser
+16:23:52
+·
+Visiting Replit homepage before signup...
+16:24:07
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+16:24:10
+>
+Homepage visited — navigating to signup...
+16:24:10
+>
+🌐 Using real browser reCAPTCHA token (residential IP: nsocks)
+16:24:10
+>
+Navigating to https://replit.com/signup ...
+16:24:16
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+16:24:19
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+16:24:19
+·
+Page title: Sign Up - Replit
+16:24:19
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+16:24:20
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+16:24:28
+·
+Network idle timeout — waiting 4s instead
+16:24:32
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+16:24:32
+·
+Waiting for signup form fields to appear...
+16:24:32
+·
+Form fields detected
+16:24:32
+·
+Filling signup form...
+16:24:32
+~
+⚠️ Could not find username field
+16:24:34
+·
+Typed email into input[name="email"]
+16:24:35
+»
+Typed password into input[name="password"]
+16:24:36
+~
+🔑 reCAPTCHA sitekey: 6LfyLYUsAAAAAP0Xmu-h... | observed action: "not captured"
+16:24:36
+·
+Submitting signup form...
+16:24:36
+·
+Clicked submit button "Create Account" (button[type="submit"])
+16:24:36
+·
+Waiting for signup response...
+16:24:41
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T10:54:36.018Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775645640"},"Actio
+16:24:41
+»
+📡 Captured: sign-up POST body fields: email, rawPassword, clientType, recaptchaToken, source
+16:24:41
+>
+📡 Captured: PASSTHROUGH sign-up POST — real browser token (len=2446): 0cAFcWeA6gRWKXjQeZmh61yYCTA4ITXtZQ5qYQCKR-YI-5qAtbLOirdLUOMo...
+16:24:41
+~
+📡 Captured: sign-up RESPONSE (400): {"message":"Your captcha token is invalid. Please refresh the page and try again. (code:1)"}
+16:24:41
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T10:54:40.832Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775645640"},"Actio
+16:24:41
+·
+📡 Captured: POST sp.replit.com/v1/p
+16:24:41
+·
+📡 Captured: POST analytics.google.com/g/collect
+16:24:41
+·
+📡 Captured: POST analytics.google.com/g/collect
+16:24:41
+·
+📡 Captured: POST analytics.google.com/g/collect
+16:24:41
+·
+📡 Captured: POST analytics.google.com/g/collect
+16:24:42
+!
+❌ Signup blocked by captcha: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google
+16:24:42
+~
+⚠️ Captcha blocked (attempt 1) — will retry with fresh IP
+16:24:42
+~
+🔄 Captcha retry 2/4 — rotating IP via new nsocks session...
+16:24:45
+»
+Generated username: cameron5230
+16:24:45
+»
+Generated password: UG8f8veg#47
+16:24:45
+>
+ZenRows browser mode enabled
+16:24:45
+>
+Launching stealth browser for Replit...
+16:24:45
+·
+🌐 nsocks connected — session: b6hc6p8r6vnn | endpoint: proxy.nsocks.com:2312
+16:24:47
+·
+┌─── WEBSHARE RESIDENTIAL ACTIVE ───────────────────────────
+16:24:47
+·
+│ Exit IP : 68.4.241.143
+16:24:47
+·
+│ Location : Rancho Santa Margarita, California, US
+16:24:47
+·
+│ Provider : AS22773 Cox Communications Inc.
+16:24:47
+·
+└────────────────────────────────────────────────
+16:24:47
+>
+Using stealth headless browser
+16:24:47
+·
+Visiting Replit homepage before signup...
+16:25:00
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+16:25:04
+>
+Homepage visited — navigating to signup...
+16:25:04
+>
+🌐 Using real browser reCAPTCHA token (residential IP: nsocks)
+16:25:04
+>
+Navigating to https://replit.com/signup ...
+16:25:11
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+16:25:15
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+16:25:15
+·
+Page title: Sign Up - Replit
+16:25:15
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+16:25:15
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+16:25:23
+·
+Network idle timeout — waiting 4s instead
+16:25:27
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+16:25:27
+·
+Waiting for signup form fields to appear...
+16:25:27
+·
+Form fields detected
+16:25:27
+·
+Filling signup form...
+16:25:27
+~
+⚠️ Could not find username field
+16:25:29
+·
+Typed email into input[name="email"]
+16:25:30
+»
+Typed password into input[name="password"]
+16:25:31
+~
+🔑 reCAPTCHA sitekey: 6LfyLYUsAAAAAP0Xmu-h... | observed action: "not captured"
+16:25:31
+·
+Submitting signup form...
+16:25:31
+·
+Clicked submit button "Create Account" (button[type="submit"])
+16:25:31
+·
+Waiting for signup response...
+16:25:38
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T10:55:30.942Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775645694"},"Actio
+16:25:38
+·
+📡 Captured: sp.replit.com/v1/t body: {"timestamp":"2026-04-08T10:55:30.953Z","integrations":{"Segment.io":true,"Amplitude":{"session_id":"1775645694"},"Actio
+16:25:38
+·
+📡 Captured: POST sp.replit.com/v1/p
+16:25:38
+!
+⚠️ Possible form error text: Create a Replit account | We failed to evaluate your browser integrity. Please refresh the page and try again. If the problem persists, check your browser and network configuration. | Continue with Go
+16:25:38
+!
+⚠️ Page error detected: We failed to evaluate your browser integrity. Please refresh the page and try again. If the problem persists, check your browser and network configuration.
+16:25:38
+·
+Current URL: https://replit.com/signup
+16:25:38
+·
+Now waiting 20s before checking Outlook inbox for verification email...
+16:25:58
+·
+Reading Replit verification email via Outlook Web Access...
+16:25:58
+>
+Navigating to Outlook Web login...
+16:26:00
+·
+Entered Outlook email on login page
+16:26:01
+»
+Entered Outlook password on login page
+16:26:06
+·
+After login URL: https://account.live.com/proofs/Add?mkt=EN-US&uiflavor=web&id=292841&mpcxt=CATB&sn=604800&posturl=ht
+16:26:06
+·
+Microsoft security proofs / confirmation page — skipping directly to inbox...
+16:26:06
+·
+posturl points to non-Outlook host — skipping straight to inbox
+16:26:06
+>
+Navigating directly to: https://outlook.live.com/mail/0/inbox
+16:26:09
+>
+URL after skip navigation: https://outlook.live.com/mail/0/inbox
+16:26:09
++
+✅ Logged into Outlook Web — searching inbox for Replit email...
+16:26:16
+·
+[Attempt 1/4] Found 1 email items in inbox
+16:26:16
+·
+No Replit email yet — waiting 20s before retry 2/4...
+16:26:40
+·
+[Attempt 2/4] Found 1 email items in inbox
+16:26:40
+·
+No Replit email yet — waiting 20s before retry 3/4...
+16:27:04
+·
+[Attempt 3/4] Found 1 email items in inbox
+16:27:04
+·
+No Replit email yet — waiting 20s before retry 4/4...
+16:27:28
+·
+[Attempt 4/4] Found 1 email items in inbox
+16:27:28
+·
+📁 Checking Junk folder for Replit email...
+16:27:32
+·
+Junk folder: 0 items
+16:27:32
+~
+⚠️ No Replit verification email found after 4 attempts + Junk check — continuing without verification
+16:27:32
+~
+⚠️ No verification link or code found in inbox — account may still verify automatically or email was delayed
+16:27:35
+·
+No onboarding wizard detected — skipping
+16:27:36
+>
+🔐 Login(email): navigating to Replit login...
+16:27:42
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+16:27:46
+·
+Login(email): entered identifier "gregorygreen1415@outlook.com"
+PROCESSING
+16:27:47
+·
+Login(email): clicked step-1 button
+16:27:48
+»
+Login(email): entered password
+16:27:49
+·
+Login(email): clicked submit button
+16:27:56
+!
+⚠️ Login(email): login may have failed — URL: https://replit.com/login
+16:27:56
+>
+🔐 Login(username): navigating to Replit login...
+16:28:02
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+16:28:05
+»
+Login(username): entered identifier "cameron5230"
+16:28:06
+»
+Login(username): clicked step-1 button
+16:28:07
+»
+Login(username): entered password
+16:28:08
+»
+Login(username): clicked submit button
+16:28:15
+!
+⚠️ Login(username): login may have failed — URL: https://replit.com/login
+16:28:15
++
+⚠️ All Replit login attempts failed — checkout may not complete
+16:28:15
++
+✅ Replit account creation complete: username=cameron5230 email=gregorygreen1415@outlook.com password=UG8f8veg#47
+PROCESSING
+16:28:15
++
+✅ Account saved to database
