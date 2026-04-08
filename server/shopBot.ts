@@ -43,7 +43,7 @@ const PLATFORM_EMOJI: Record<string, string> = {
   lovable:  "💜",
   v0:       "⚡",
   adobe:    "🅰️",
-  chatgpt:  "🤖",
+  chatgpt:  "֎",
   eleven:   "🎙",
   outlook:  "📧",
   gmail:    "📬",
@@ -134,7 +134,7 @@ function stockLine(stock: number): string {
 
 // ── Main reply keyboard ──────────────────────────────────────────────────────
 const BTN = {
-  CHATGPT_PLUS: "🤖  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2",
+  CHATGPT_PLUS: "֎  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2",
   REPLIT_CORE:  "🔵  𝗥𝗲𝗽𝗹𝗶𝘁  𝗖𝗼𝗿𝗲  ·  $2",
   ACCOUNTS:     "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
   BALANCE:      "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
