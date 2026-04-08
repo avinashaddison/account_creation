@@ -11126,64 +11126,58 @@ export async function registerReplitAccount(
           solvedToken = browserToken;
           usedNativeToken = true;
         } else {
-          log("  ⚠️ Browser-native auto-solve timed out — trying external IP-matched solvers...");
+          log("  ⚠️ Browser-native auto-solve timed out — falling back to NopeCHA/2captcha...");
 
-          // ── Step B: External IP-matched solve ──
-          // hcaptcha Enterprise binds tokens to the client IP.  The external solver MUST
-          // solve through the same nsocks proxy as our browser so the token is IP-matched.
-          // NopeCHA: does NOT support proxy on /v1/token/hcaptcha — always gives 400 error.
-          // CapSolver: blocked for Replit's sitekey.
-          // Best options: Anti-Captcha (anti-captcha.com) or 2captcha — both support HCaptchaTask with proxy.
+          // ── Step B: External captcha solve (same approach as Outlook hcaptcha) ──
+          // NopeCHA works for Outlook hcaptcha and should work for Replit too.
+          // We never confirmed code:2 IP mismatch from NopeCHA — that was an assumption.
+          // The previous failure (code:1) was the browser passive token being bot-detected,
+          // NOT a NopeCHA IP mismatch. NopeCHA human-solve token is different from passive.
+          let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
+
           const capsolverProxyUrl = replitNativeProxy
             ? `http://${encodeURIComponent(replitNativeProxy.username)}:${encodeURIComponent(replitNativeProxy.password)}@${replitNativeProxy.server.replace(/^https?:\/\//, "")}`
             : undefined;
-          let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
 
-          const [tcRow, acRow] = await Promise.all([
-            db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`),
-            db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`),
-          ]);
+          const tcRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`);
           const tcKey = tcRow.rows.length > 0 ? (tcRow.rows[0].value as string) : "";
-          const acKey = acRow.rows.length > 0 ? (acRow.rows[0].value as string) : "";
           const browserUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
 
-          if (!capsolverProxyUrl) {
-            log(`  ⚠️ No nsocks proxy configured — cannot do IP-matched solve (would give code:2)`);
-          }
-
-          // ── Step B1: Anti-Captcha WITH proxy (PRIMARY — best rate for Replit hcaptcha) ──
-          if (!capResult.success && acKey && capsolverProxyUrl) {
-            log(`  → Anti-Captcha HCaptchaTask WITH nsocks proxy (IP-matched solve)...`);
-            const acStart = Date.now();
-            const acTicker = setInterval(() => log(`  ⏳ Anti-Captcha+proxy solving... (${Math.round((Date.now()-acStart)/1000)}s)`), 12000);
+          // ── Step B1: NopeCHA (PRIMARY — same as Outlook hcaptcha, works proxyless) ──
+          const nopeKeysDual = await getNopeCHAKeys();
+          const nopeKey = nopeKeysDual[0] || nopeKeysDual[1] || null;
+          if (nopeKey) {
+            log(`  → NopeCHA solver (same as Outlook flow)... (30–60s)`);
+            const nopeStart = Date.now();
+            const nopeTicker = setInterval(() => log(`  ⏳ NopeCHA solving... (${Math.round((Date.now()-nopeStart)/1000)}s)`), 12000);
             try {
-              capResult = await solveHCaptchaViaJsonApi(acKey, "https://api.anti-captcha.com", "AntiCaptcha", "https://replit.com/signup", keyToUse, null, capsolverProxyUrl, browserUA);
+              capResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual, "https://replit.com/signup", keyToUse, undefined, 150);
             } finally {
-              clearInterval(acTicker);
+              clearInterval(nopeTicker);
             }
             if (capResult.success) {
-              log(`  ✅ Anti-Captcha+proxy solved (IP-matched token)`);
+              log(`  ✅ NopeCHA solved Replit hcaptcha!`);
             } else {
-              log(`  ⚠️ Anti-Captcha+proxy failed: ${capResult.error || "unknown"}`);
+              log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"}`);
             }
-          } else if (!acKey) {
-            log(`  ⚠️ Anti-Captcha key not configured — skipping (add anticaptcha_api_key in Settings)`);
+          } else {
+            log(`  ⚠️ No NopeCHA key configured`);
           }
 
-          // ── Step B2: 2captcha WITH proxy (SECONDARY) ──
-          if (!capResult.success && tcKey && capsolverProxyUrl) {
-            log(`  → 2captcha HCaptchaTask WITH nsocks proxy (IP-matched solve)...`);
+          // ── Step B2: 2captcha WITH proxy as fallback ──
+          if (!capResult.success && tcKey) {
+            log(`  → 2captcha fallback${capsolverProxyUrl ? " with proxy" : " proxyless"}...`);
             const tcStart = Date.now();
-            const tcTicker = setInterval(() => log(`  ⏳ 2captcha+proxy solving... (${Math.round((Date.now()-tcStart)/1000)}s)`), 12000);
+            const tcTicker = setInterval(() => log(`  ⏳ 2captcha solving... (${Math.round((Date.now()-tcStart)/1000)}s)`), 12000);
             try {
               capResult = await solveHCaptchaViaJsonApi(tcKey, "https://api.2captcha.com", "2captcha", "https://replit.com/signup", keyToUse, null, capsolverProxyUrl, browserUA);
             } finally {
               clearInterval(tcTicker);
             }
             if (capResult.success) {
-              log(`  ✅ 2captcha+proxy solved (IP-matched token)`);
+              log(`  ✅ 2captcha solved!`);
             } else {
-              log(`  ⚠️ 2captcha+proxy failed: ${capResult.error || "unknown"}`);
+              log(`  ⚠️ 2captcha failed: ${capResult.error || "unknown"}`);
             }
           }
 
