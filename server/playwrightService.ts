@@ -3586,7 +3586,7 @@ export async function completeDrawViaGigyaBrowser(
             throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
           }
           zenrowsUrl = zenrowsUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-          if (!zenrowsUrl.includes("browser.zenrows.com")) {
+          if (!zenrowsUrl.includes("browser.zenrows.com") && !zenrowsUrl.includes("brd.superproxy.io")) {
             const resProxy1 = await getResidentialProxyUrl();
             zenrowsUrl = buildCDPUrlWithProxy(zenrowsUrl, resProxy1);
           }
@@ -4155,7 +4155,7 @@ export async function completeDrawViaGigyaBrowser(
             throw new Error("Addison Proxy Browser URL not configured. Set it in Settings.");
           }
           zenrowsUrl2 = zenrowsUrl2.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-          if (!zenrowsUrl2.includes("browser.zenrows.com")) {
+          if (!zenrowsUrl2.includes("browser.zenrows.com") && !zenrowsUrl2.includes("brd.superproxy.io")) {
             const resProxy2 = await getResidentialProxyUrl();
             zenrowsUrl2 = buildCDPUrlWithProxy(zenrowsUrl2, resProxy2);
           }
@@ -5503,11 +5503,12 @@ export async function retryDrawRegistration(
     }
   } catch {}
   var connectUrl = zenrowsUrl || proxyUrl;
-  if (connectUrl.includes('zenrows.com')) {
+  const isManagedCdp = connectUrl.includes('zenrows.com') || connectUrl.includes('brd.superproxy.io');
+  if (isManagedCdp) {
     connectUrl = connectUrl.replace(/[&?]proxy_country=[^&]*/g, '').replace(/\?$/, '');
-    // ZenRows does not accept a proxy= parameter — skip buildCDPUrlWithProxy for ZenRows URLs
+    // Managed browsers (ZenRows, Bright Data) do not accept a proxy= parameter
   }
-  log("Connecting to " + (zenrowsUrl ? "Addison Proxy" : "proxy") + " browser...");
+  log("Connecting to " + (zenrowsUrl ? "CDP browser" : "proxy") + " browser...");
   const browser = await chromium.connectOverCDP(connectUrl, { timeout: 60000 });
   try {
     const page = await browser.newPage();
