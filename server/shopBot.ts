@@ -1303,17 +1303,18 @@ export function startShopBot(token: string) {
   async function showActivationMenu(ctx: any, service: ActivationService) {
     const emoji = ACTIVATION_EMOJI[service];
     const name  = ACTIVATION_LABEL[service];
+    const price = ACTIVATION_PRICE.toFixed(2);
+
     await safeReply(ctx,
-      `${emoji} <b>${name} — $${ACTIVATION_PRICE.toFixed(2)}</b>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `Choose how you'd like to receive your upgrade:\n\n` +
-      `🔑  <b>Activate at my Mail</b>\n` +
-      `<i>You provide your account — we upgrade it to ${name}.\n` +
-      `Your credentials stay on your device.</i>\n\n` +
-      `📦  <b>Send Account by your side</b>\n` +
-      `<i>We send you a ready-made ${name} account instantly.</i>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `💵 Both options: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>`,
+      `${emoji} <b>${name}</b>\n\n` +
+      `Price: <b>$${price}</b>\n\n` +
+      `<blockquote expandable>🔑 <b>Activate at my Mail</b>\n` +
+      `You provide your account — we upgrade it to ${name}.\n` +
+      `Your credentials stay on your device.</blockquote>\n\n` +
+      `<blockquote expandable>📦 <b>Send Account by your side</b>\n` +
+      `We send you a ready-made ${name} account instantly.\n` +
+      `Full access credentials delivered right here in chat.</blockquote>\n\n` +
+      `<i>Delivery is confirmed within minutes of payment.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
