@@ -10850,6 +10850,19 @@ export async function registerReplitAccount(
     page = await context.newPage();
     page.setDefaultTimeout(30000);
 
+    // ── Capture reCAPTCHA Enterprise site key from network requests ──
+    let recaptchaEnterpriseSiteKey: string | null = null;
+    page.on("request", (req: any) => {
+      const url: string = req.url();
+      if (url.includes("recaptcha/enterprise.js") && url.includes("render=")) {
+        const match = url.match(/render=([^&\s]+)/);
+        if (match && match[1] && match[1] !== "explicit") {
+          recaptchaEnterpriseSiteKey = match[1];
+          log(`  🔑 Captured reCAPTCHA Enterprise sitekey from network: ${match[1].substring(0, 20)}...`);
+        }
+      }
+    });
+
     // ── Pre-signup organic browsing — look like a real user discovering the site ──
     log("Visiting Replit homepage before signup...");
     try {
@@ -11011,109 +11024,45 @@ export async function registerReplitAccount(
 
     await page.waitForTimeout(800);
 
-    // ── Solve hCaptcha on signup page ──
-    // Replit loads hCaptcha via JS — always solve regardless of HTML content
+    // ── Solve reCAPTCHA Enterprise with CapSolver, inject into recaptchaToken ──
+    // Replit's API sends `recaptchaToken` (reCAPTCHA Enterprise) — NOT hCaptcha
     let captchaFailed = false;
     let capturedRequests: string[] = [];
     try {
-      const REPLIT_SIGNUP_SITEKEY = "4c672d35-0701-42b2-88c3-78380b0db560";
-      log(`🔒 Solving hCaptcha for Replit signup (NopeCHA)...`);
-      const dynKey = await page.evaluate(() => {
-        const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
-        return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
-      }).catch(() => null) as string | null;
-      if (dynKey) log(`  → Dynamic sitekey: ${dynKey.substring(0, 20)}...`);
-      const capKey = dynKey || REPLIT_SIGNUP_SITEKEY;
-      log(`  → Using sitekey: ${capKey.substring(0, 20)}...`);
+      // Fallback: scan already-loaded script tags for the site key
+      if (!recaptchaEnterpriseSiteKey) {
+        recaptchaEnterpriseSiteKey = await page.evaluate(() => {
+          const scripts = Array.from(document.querySelectorAll("script[src]")) as HTMLScriptElement[];
+          for (const s of scripts) {
+            if (s.src && s.src.includes("enterprise.js") && s.src.includes("render=")) {
+              const m = s.src.match(/render=([^&\s]+)/);
+              if (m && m[1] !== "explicit") return m[1];
+            }
+          }
+          // Also check window.__recaptcha_site_key or similar
+          const w = window as any;
+          return w.__recaptchaSiteKey || w.RECAPTCHA_SITE_KEY || null;
+        }).catch(() => null) as string | null;
+      }
 
-      const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
-      const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
-
-      if (!nopeKey) {
-        log(`  ⚠️ NopeCHA key not configured — skipping hCaptcha solve`);
+      if (!recaptchaEnterpriseSiteKey) {
+        log(`  ⚠️ reCAPTCHA Enterprise site key not detected — proceeding without solve (may fail)`);
       } else {
-        const ticker = setInterval(() => log(`  ⏳ Captcha solving in progress...`), 15000);
+        log(`  🔑 reCAPTCHA Enterprise site key: ${recaptchaEnterpriseSiteKey.substring(0, 20)}...`);
+        log(`  🔒 Solving reCAPTCHA Enterprise with CapSolver...`);
+        const ticker = setInterval(() => log(`  ⏳ reCAPTCHA Enterprise solve in progress...`), 15000);
         let capResult: { success: boolean; token?: string; error?: string };
         try {
-          capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 240);
+          capResult = await solveRecaptchaV3Enterprise("https://replit.com/signup", recaptchaEnterpriseSiteKey, "signup", 0.7);
         } finally {
           clearInterval(ticker);
         }
 
         if (capResult.success && capResult.token) {
-          log(`  ✅ hCaptcha solved — injecting token...`);
-          const injectionResult = await page.evaluate((token: string) => {
-            const debug: string[] = [];
-            const textareaSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-            const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+          log(`  ✅ reCAPTCHA Enterprise solved! Token: ${capResult.token.substring(0, 30)}...`);
+          const solvedToken = capResult.token;
 
-            // 1) Set DOM textarea/input fields
-            let textareaCount = 0;
-            document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[name='g-recaptcha-response']").forEach(el => {
-              if (textareaSetter) textareaSetter.call(el, token); else el.value = token;
-              el.dispatchEvent(new Event("input", { bubbles: true }));
-              el.dispatchEvent(new Event("change", { bubbles: true }));
-              textareaCount++;
-            });
-            document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
-              if (inputSetter) inputSetter.call(el, token); else el.value = token;
-              el.dispatchEvent(new Event("input", { bubbles: true }));
-              el.dispatchEvent(new Event("change", { bubbles: true }));
-              textareaCount++;
-            });
-            debug.push(`textareas/inputs set: ${textareaCount}`);
-
-            // 2) hCaptcha SDK methods
-            const w = window as any;
-            if (w.hcaptcha) {
-              debug.push("hcaptcha SDK present");
-              try {
-                const widgets = document.querySelectorAll("[data-hcaptcha-widget-id]");
-                debug.push(`widget elements: ${widgets.length}`);
-                if (widgets.length > 0) {
-                  widgets.forEach(wEl => {
-                    const wid = (wEl as HTMLElement).getAttribute("data-hcaptcha-widget-id");
-                    if (wid) {
-                      try { w.hcaptcha.setResponse(wid, token); debug.push(`setResponse(${wid}) ok`); } catch(e:any) { debug.push(`setResponse(${wid}) err: ${e.message}`); }
-                    }
-                  });
-                } else {
-                  try { w.hcaptcha.setResponse(token); debug.push("setResponse(no-id) ok"); } catch(e:any) { debug.push(`setResponse(no-id) err: ${e.message}`); }
-                }
-              } catch(e:any) { debug.push(`hcaptcha block err: ${e.message}`); }
-            } else {
-              debug.push("hcaptcha SDK NOT present");
-            }
-
-            // 3) Simulate postMessage from hCaptcha iframe (what react-hcaptcha listens for)
-            try {
-              const widgetEl = document.querySelector("[data-hcaptcha-widget-id]") as HTMLElement | null;
-              const widgetId = widgetEl?.getAttribute("data-hcaptcha-widget-id") || "0";
-              // react-hcaptcha listens to window messages with specific formats
-              window.dispatchEvent(new MessageEvent("message", {
-                data: JSON.stringify({ event: "challenge-passed", expiredToken: false, token, id: widgetId }),
-                origin: "https://hcaptcha.com",
-              }));
-              window.dispatchEvent(new MessageEvent("message", {
-                data: { event: "challenge-passed", expiredToken: false, token, id: widgetId },
-                origin: "https://hcaptcha.com",
-              }));
-              debug.push("postMessage dispatched");
-            } catch(e:any) { debug.push(`postMessage err: ${e.message}`); }
-
-            // 4) Try known global callback names
-            ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess", "__hcaptcha_callback", "hcaptchaSuccess"].forEach(name => {
-              if (typeof (w as any)[name] === "function") {
-                try { (w as any)[name](token); debug.push(`called ${name}()`); } catch {}
-              }
-            });
-
-            return debug.join(" | ");
-          }, capResult.token);
-          log(`  🔧 Injection debug: ${injectionResult}`);
-
-          // Intercept the signup POST and inject our NopeCHA token into recaptchaToken
-          const solvedToken = capResult.token!;
+          // Intercept the signup POST and replace recaptchaToken with CapSolver token
           const routeHandler = async (route: any) => {
             const req = route.request();
             const url: string = req.url();
@@ -11126,7 +11075,7 @@ export async function registerReplitAccount(
                 const origToken = parsed.recaptchaToken || "(none)";
                 parsed.recaptchaToken = solvedToken;
                 const modBody = JSON.stringify(parsed);
-                capturedRequests.push(`INTERCEPTED sign-up → replaced recaptchaToken (was: ${origToken.substring(0, 30)}...) with NopeCHA token`);
+                capturedRequests.push(`INTERCEPTED sign-up → replaced recaptchaToken (was: ${origToken.substring(0, 30)}...) with CapSolver Enterprise token`);
                 await route.continue({
                   postData: modBody,
                   headers: { ...req.headers(), "content-type": "application/json", "content-length": Buffer.byteLength(modBody).toString() },
@@ -11143,20 +11092,20 @@ export async function registerReplitAccount(
             await route.continue();
           };
           await page.route("**", routeHandler).catch(() => {});
-          await page.waitForTimeout(800);
+          await page.waitForTimeout(500);
         } else {
-          log(`  ❌ NopeCHA failed: ${capResult.error} — aborting (will not submit without token)`);
+          log(`  ❌ CapSolver reCAPTCHA Enterprise failed: ${capResult.error} — aborting`);
           captchaFailed = true;
         }
       }
     } catch (capErr: any) {
-      log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — aborting`);
+      log(`  ⚠️ reCAPTCHA Enterprise solve error: ${(capErr.message || "").substring(0, 80)} — aborting`);
       captchaFailed = true;
     }
 
     if (captchaFailed) {
-      log("❌ hCaptcha solve failed — returning failure (no token to submit)");
-      return { success: false, error: "hcaptcha_solve_failed" };
+      log("❌ reCAPTCHA Enterprise solve failed — returning failure");
+      return { success: false, error: "recaptcha_enterprise_solve_failed" };
     }
 
     log("Submitting signup form...");
