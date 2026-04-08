@@ -11151,8 +11151,40 @@ export async function registerReplitAccount(
         }
       }
 
-      // CapSolver disabled — browser handles reCAPTCHA natively via residential IP
-      const capsolverToken: string | null = null;
+      // ── CapSolver reCAPTCHA Enterprise — hardcoded action "signup" fixes code:2 ──
+      // Previous code:2 error was caused by missing/wrong action name (intercept wasn't firing).
+      // Real browser through Addison Proxy gives code:1 (fingerprint scored too low by Google).
+      // CapSolver produces a Google-accepted token with correct action → should pass Replit.
+      let capsolverToken: string | null = null;
+      if (recaptchaEnterpriseSiteKey) {
+        // Try CapSolver with action "signup" first, then "submit" as fallback
+        for (const action of ["signup", "submit"]) {
+          try {
+            log(`  🤖 CapSolver: solving reCAPTCHA Enterprise (action="${action}", sitekey=${recaptchaEnterpriseSiteKey.substring(0, 20)}...)...`);
+            const capResult = await solveRecaptchaV3Enterprise(
+              "https://replit.com/signup",
+              recaptchaEnterpriseSiteKey,
+              action,
+              0.7,
+              capsolverProxyUrl || undefined
+            );
+            if (capResult.success && capResult.token) {
+              capsolverToken = capResult.token;
+              log(`  ✅ CapSolver token obtained (action="${action}", len=${capsolverToken.length})`);
+              break;
+            } else {
+              log(`  ⚠️ CapSolver failed for action="${action}": ${capResult.error || "unknown"}`);
+            }
+          } catch (capErr: any) {
+            log(`  ⚠️ CapSolver error (action="${action}"): ${(capErr.message || "").substring(0, 60)}`);
+          }
+        }
+        if (!capsolverToken) {
+          log("  ⚠️ CapSolver could not produce a token — falling back to real browser token");
+        }
+      } else {
+        log("  ⚠️ No reCAPTCHA sitekey captured — skipping CapSolver, using browser token");
+      }
 
       const routeHandler = async (route: any) => {
         const req = route.request();
