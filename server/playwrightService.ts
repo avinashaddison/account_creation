@@ -10850,6 +10850,36 @@ export async function registerReplitAccount(
     page = await context.newPage();
     page.setDefaultTimeout(30000);
 
+    // ── Hook grecaptcha.enterprise.execute early to capture real action name ──
+    // This runs before any page script so we intercept the real action Replit uses
+    await page.addInitScript(() => {
+      (window as any).__recaptcha_last_action = null;
+      (window as any).__recaptcha_last_sitekey = null;
+      (window as any).__recaptcha_exec_hooked = false;
+      function hookExec() {
+        const g = (window as any).grecaptcha;
+        if (g?.enterprise?.execute && !(window as any).__recaptcha_exec_hooked) {
+          (window as any).__recaptcha_exec_hooked = true;
+          const orig = g.enterprise.execute.bind(g.enterprise);
+          g.enterprise.execute = function(siteKey: string, opts: any) {
+            (window as any).__recaptcha_last_action = (opts && opts.action) || null;
+            (window as any).__recaptcha_last_sitekey = siteKey;
+            // If we have a pre-injected token, return it directly
+            if ((window as any).__capsolver_token) {
+              return Promise.resolve((window as any).__capsolver_token);
+            }
+            return orig(siteKey, opts);
+          };
+          return true;
+        }
+        return false;
+      }
+      if (!hookExec()) {
+        const iv = setInterval(() => { if (hookExec()) clearInterval(iv); }, 50);
+        setTimeout(() => clearInterval(iv), 20000);
+      }
+    }).catch(() => {});
+
     // ── Capture reCAPTCHA Enterprise site key from network requests ──
     let recaptchaEnterpriseSiteKey: string | null = null;
     page.on("request", (req: any) => {
@@ -11048,12 +11078,19 @@ export async function registerReplitAccount(
       if (!recaptchaEnterpriseSiteKey) {
         log(`  ⚠️ reCAPTCHA Enterprise site key not detected — proceeding without solve (may fail)`);
       } else {
-        log(`  🔑 reCAPTCHA Enterprise site key: ${recaptchaEnterpriseSiteKey.substring(0, 20)}...`);
+        // Read the real action name captured by our initScript hook (Replit may use something other than "signup")
+        const capturedAction = await page.evaluate(() => (window as any).__recaptcha_last_action || null).catch(() => null) as string | null;
+        const actionToUse = capturedAction || "signup";
+        if (capturedAction) {
+          log(`  🔑 reCAPTCHA Enterprise site key: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... (action: "${actionToUse}")`);
+        } else {
+          log(`  🔑 reCAPTCHA Enterprise site key: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... (action: "signup" fallback)`);
+        }
         log(`  🔒 Solving reCAPTCHA Enterprise with CapSolver...`);
         const ticker = setInterval(() => log(`  ⏳ reCAPTCHA Enterprise solve in progress...`), 15000);
         let capResult: { success: boolean; token?: string; error?: string };
         try {
-          capResult = await solveRecaptchaV3Enterprise("https://replit.com/signup", recaptchaEnterpriseSiteKey, "signup", 0.7);
+          capResult = await solveRecaptchaV3Enterprise("https://replit.com/signup", recaptchaEnterpriseSiteKey, actionToUse, 0.7);
         } finally {
           clearInterval(ticker);
         }
@@ -11062,37 +11099,29 @@ export async function registerReplitAccount(
           log(`  ✅ reCAPTCHA Enterprise solved! Token: ${capResult.token.substring(0, 30)}...`);
           const solvedToken = capResult.token;
 
-          // Intercept the signup POST and replace recaptchaToken with CapSolver token
-          const routeHandler = async (route: any) => {
-            const req = route.request();
-            const url: string = req.url();
-            const method: string = req.method();
-            if (method === "POST" && url.includes("replit.com/api/v1/auth/sign-up")) {
-              try {
-                const origBody = req.postData() || "{}";
-                let parsed: any = {};
-                try { parsed = JSON.parse(origBody); } catch {}
-                const origToken = parsed.recaptchaToken || "(none)";
-                parsed.recaptchaToken = solvedToken;
-                const modBody = JSON.stringify(parsed);
-                capturedRequests.push(`INTERCEPTED sign-up → replaced recaptchaToken (was: ${origToken.substring(0, 30)}...) with CapSolver Enterprise token`);
-                await route.continue({
-                  postData: modBody,
-                  headers: { ...req.headers(), "content-type": "application/json", "content-length": Buffer.byteLength(modBody).toString() },
-                });
-                return;
-              } catch (intErr: any) {
-                capturedRequests.push(`Intercept error: ${intErr.message}`);
+          // Inject token directly into the browser via grecaptcha.enterprise.execute override.
+          // This is more reliable than network interception — Replit's own JS receives the token
+          // natively from its execute() call, so the backend sees it as a legitimate token.
+          await page.evaluate((tok: string) => {
+            // Store token so our hooked execute() returns it immediately
+            (window as any).__capsolver_token = tok;
+            // Also directly override execute in case the hook ran before we set the token
+            const inject = (token: string) => {
+              const g = (window as any).grecaptcha;
+              if (g?.enterprise) {
+                g.enterprise.execute = () => Promise.resolve(token);
+                return true;
               }
+              return false;
+            };
+            if (!inject(tok)) {
+              const iv = setInterval(() => { if (inject(tok)) clearInterval(iv); }, 50);
+              setTimeout(() => clearInterval(iv), 8000);
             }
-            if (method === "POST" && url.includes("replit.com")) {
-              const body = req.postData() || "";
-              capturedRequests.push(`${method} ${url.split("?")[0].replace("https://", "")} → ${body.substring(0, 200)}`);
-            }
-            await route.continue();
-          };
-          await page.route("**", routeHandler).catch(() => {});
-          await page.waitForTimeout(500);
+          }, solvedToken).catch(() => {});
+
+          capturedRequests.push(`Token injected into grecaptcha.enterprise.execute (${solvedToken.substring(0, 30)}...)`);
+          await page.waitForTimeout(300);
         } else {
           log(`  ❌ CapSolver reCAPTCHA Enterprise failed: ${capResult.error} — aborting`);
           captchaFailed = true;
