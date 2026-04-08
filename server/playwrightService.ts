@@ -11076,17 +11076,20 @@ export async function registerReplitAccount(
         // The hcaptcha widget often auto-solves in the background via its `onVerify` React callback.
         // This produces a 2400+ char token that is IP-matched to our nsocks proxy — ideal.
         // We give it up to 35 seconds to auto-solve before falling back to external solvers.
-        log("  → Waiting for browser-native hcaptcha token (checking hiddenTA + widget)...");
-        const browserToken = await page.evaluate(async () => {
-          const w = window as any;
-          const getHiddenToken = (): string => {
+        log("  → Polling for browser-native hcaptcha token (hiddenTA / widget, up to 90s)...");
+        // Poll server-side — avoids Playwright evaluate() timeout issues with long async loops.
+        // Each call is a short synchronous snapshot of the DOM, retried every 500ms for 90s.
+        const readBrowserToken = async (): Promise<string | null> =>
+          page.evaluate(() => {
+            const w = window as any;
+            // Check hidden textarea first (browser generates this from correct proxy IP)
             const ta = document.querySelector<HTMLTextAreaElement>(
               'textarea[name="h-captcha-response"], textarea[name="g-recaptcha-response"], textarea[id="h-captcha-response"]'
             );
-            return ta?.value || "";
-          };
-          const getWidgetToken = (): string => {
-            if (!w.hcaptcha) return "";
+            const hidden = ta?.value || "";
+            if (hidden.length > 50) return hidden;
+            // Check widget API if available
+            if (!w.hcaptcha) return null;
             try {
               const t = w.hcaptcha.getResponse();
               if (t && t.length > 50) return t;
@@ -11097,30 +11100,23 @@ export async function registerReplitAccount(
                 if (t && t.length > 50) return t;
               } catch {}
             }
-            return "";
-          };
+            return null;
+          }).catch(() => null);
 
-          // ── Priority 1: hiddenTA already has a token (browser generated it from correct IP) ──
-          // This happens even before window.hcaptcha is accessible.
-          // ALWAYS prefer this — it is IP-matched to our proxy/direct connection.
-          const earlyHidden = getHiddenToken();
-          if (earlyHidden.length > 50) return earlyHidden;
+        // Trigger execute() once hcaptcha widget is ready (after short wait)
+        setTimeout(async () => {
+          await page.evaluate(() => {
+            const w = window as any;
+            if (w.hcaptcha) { try { w.hcaptcha.execute(); } catch {} }
+          }).catch(() => {});
+        }, 5000);
 
-          // ── Priority 2: wait up to 90s for hiddenTA or widget token to appear ──
-          // hcaptcha loads asynchronously — window.hcaptcha may not exist yet.
-          for (let i = 0; i < 180; i++) {
-            await new Promise(r => setTimeout(r, 500));
-            const hidden = getHiddenToken();
-            if (hidden.length > 50) return hidden;
-            const widget = getWidgetToken();
-            if (widget.length > 50) return widget;
-            // Once hcaptcha widget is available, try triggering execute()
-            if (i === 10 && w.hcaptcha) {
-              try { await w.hcaptcha.execute(); } catch {}
-            }
-          }
-          return null;
-        }).catch(() => null) as string | null;
+        let browserToken: string | null = null;
+        for (let i = 0; i < 180; i++) {
+          await page.waitForTimeout(500);
+          browserToken = await readBrowserToken();
+          if (browserToken) break;
+        }
 
         let solvedToken: string | null = null;
         let usedNativeToken = false;
@@ -11204,8 +11200,11 @@ export async function registerReplitAccount(
           }, solvedToken).catch(() => {});
           log(`  → Patched hcaptcha.execute/getResponse in browser to return our token`);
 
-          // ── Route intercept: inject token into signup API POST (backup belt-and-suspenders) ──
-          // Only targets real replit.com API calls (not Segment analytics /v1/t)
+          // ── Route intercept: inject token into signup API POST ──
+          // When using native browser token: pass through unchanged (browser's own form-submit
+          // token is IP-matched and generated during real submission — don't replace it).
+          // When using external solver token: inject it (NopeCHA etc may produce wrong-IP token,
+          // but we still try as a last resort).
           await page.route("**/*", async (route) => {
             const req = route.request();
             const url = req.url();
@@ -11224,6 +11223,12 @@ export async function registerReplitAccount(
                     const allHeaders = req.headers();
                     const interestingHeaders = ["content-type","x-requested-with","x-csrf-token","authorization","cookie","origin","referer","x-replit-clientid","x-replit-pkce-challenge","x-nonce"].filter(h => allHeaders[h]).map(h => `${h}:${String(allHeaders[h]).substring(0,50)}`).join("|");
                     log(`  → [route-intercept] POST ${urlObj.pathname} | keys:[${bodyKeys.join(",")}] | existing-cap-len:${existingCapLen} | hdrs:[${interestingHeaders}]`);
+                    if (usedNativeToken) {
+                      // Browser's own IP-matched token — let it pass through completely unchanged
+                      log(`  → [route-intercept] Native token mode — browser's ${existingCapLen}-char token passes through unchanged`);
+                      await route.continue();
+                      return;
+                    }
                     // External solver token — inject it over the browser's token
                     body["recaptchaToken"] = solvedToken;
                     log(`  → [route-intercept] Injecting solver token (${solvedToken.length} chars) over browser token (${existingCapLen} chars)`);

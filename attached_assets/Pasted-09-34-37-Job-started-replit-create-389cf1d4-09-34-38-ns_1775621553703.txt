@@ -1,0 +1,276 @@
+09:34:37
+·
+Job started: replit-create-389cf1d4
+09:34:38
+·
+🌐 nsocks connected — session: btq4cozs39t9 | endpoint: proxy.nsocks.com:2312
+09:34:40
+·
+┌─── WEBSHARE RESIDENTIAL ACTIVE ───────────────────────────
+09:34:40
+·
+│ Exit IP : 71.62.231.34
+09:34:40
+·
+│ Location : Lynchburg, Virginia, US
+09:34:40
+·
+│ Provider : AS7922 Comcast Cable Communications, LLC
+09:34:40
+·
+└────────────────────────────────────────────────
+09:34:40
+>
+Using Xvfb display :99 (PID 2495) — headed browser mode active
+09:34:40
+>
+Using headed browser (Xvfb) — --enable-automation stripped
+09:34:40
+·
+Visiting Replit homepage before signup...
+09:34:57
+>
+Homepage visited — navigating to signup...
+09:34:57
+>
+Navigating to https://replit.com/signup ...
+09:35:06
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+09:35:06
+·
+Page title: Sign Up - Replit
+09:35:06
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+09:35:06
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+09:35:14
+·
+Network idle timeout — waiting 4s instead
+09:35:18
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+09:35:18
+·
+Waiting for signup form fields to appear...
+09:35:18
+·
+Form fields detected
+09:35:18
+·
+Filling signup form...
+09:35:18
+~
+⚠️ Could not find username field
+09:35:20
+·
+Typed email into input[name="email"]
+09:35:21
+»
+Typed password into input[name="password"]
+09:35:21
+~
+🔒 hCaptcha detected on signup page — solving via NopeCHA/CapSolver...
+09:35:21
+·
+→ sitekey: 4c672d35-0701-42b2-8...
+09:35:21
+>
+→ Waiting for browser-native hcaptcha token (checking hiddenTA + widget)...
+09:35:21
+~
+⚠️ Browser-native auto-solve timed out — falling back to NopeCHA...
+09:35:21
+~
+→ NopeCHA solving hcaptcha... (30–60s)
+09:35:33
+·
+⏳ NopeCHA solving... (12s)
+09:35:45
+·
+⏳ NopeCHA solving... (24s)
+09:35:57
+·
+⏳ NopeCHA solving... (36s)
+09:35:58
++
+✅ NopeCHA solved hcaptcha!
+09:35:58
++
+✅ External hCaptcha solved (token 2306 chars)
+09:35:58
+>
+→ Patched hcaptcha.execute/getResponse in browser to return our token
+09:35:59
+~
+→ Pre-submit captcha state: widgetToken=2306 chars (P1_eyJ0eXA…), hiddenTA=2297 chars (0cAFcWeA4V…)
+09:35:59
+·
+Submitting signup form...
+09:35:59
+·
+Clicked submit button "Create Account" (button[type="submit"])
+09:35:59
+·
+Waiting for signup response...
+09:36:01
+»
+→ [route-intercept] POST /api/v1/auth/sign-up | keys:[email,rawPassword,clientType,recaptchaToken,source] | existing-cap-len:2468 | hdrs:[content-type:application/json|x-requested-with:XMLHttpRequest|cookie:_cfuvid=3tZ.U_UUBwyygt11_lOLOC9ID.DPIvS46ykJhqHeaK|referer:https://replit.com/signup]
+09:36:01
+>
+→ [route-intercept] Injecting solver token (2306 chars) over browser token (2468 chars)
+09:36:02
+!
+⚠️ Possible form error text: Create a Replit account | Invalid email address. | Continue with Google | Continue with GitHub | Continue with X
+09:36:02
+!
+⚠️ Page error detected: Invalid email address.
+09:36:02
+·
+Current URL: https://replit.com/signup
+09:36:02
+·
+Now waiting 20s before checking Outlook inbox for verification email...
+09:36:22
+·
+Reading Replit verification email via smtp.dev API (Business Mail)...
+09:36:22
+·
+[smtp.dev] Polling inbox of jeetu@addison.asia for Replit verification email...
+PROCESSING
+09:36:22
+·
+[smtp.dev] Direct lookup by ID: 69d4bf36a9bdcfe1af0f062e
+09:36:23
+·
+[smtp.dev] Found account id=69d4bf36a9bdcfe1af0f062e, inbox id=69d4bf36a9bdcfe1af0f062f
+09:36:23
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:36:23
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:36:23
+·
+[smtp.dev] No Replit email yet — waiting 15s... (119s remaining)
+09:36:39
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:36:39
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:36:39
+·
+[smtp.dev] No Replit email yet — waiting 15s... (104s remaining)
+09:36:54
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:36:54
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:36:54
+·
+[smtp.dev] No Replit email yet — waiting 15s... (88s remaining)
+09:37:09
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:37:09
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:37:09
+·
+[smtp.dev] No Replit email yet — waiting 15s... (73s remaining)
+09:37:25
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:37:25
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:37:25
+·
+[smtp.dev] No Replit email yet — waiting 15s... (58s remaining)
+09:37:40
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:37:40
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:37:40
+·
+[smtp.dev] No Replit email yet — waiting 15s... (42s remaining)
+09:37:56
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:37:56
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:37:56
+·
+[smtp.dev] No Replit email yet — waiting 15s... (27s remaining)
+09:38:11
+·
+[smtp.dev] Skipping old email "Your ChatGPT code is 159507" (2026-04-07T10:34:24+00:00) — predates registration
+09:38:11
+·
+[smtp.dev] Skipping old email "aqswdc" (2026-04-07T10:33:15+00:00) — predates registration
+09:38:11
+·
+[smtp.dev] No Replit email yet — waiting 15s... (11s remaining)
+09:38:26
+~
+[smtp.dev] ⚠️ Timed out waiting for Replit verification email
+09:38:26
+~
+⚠️ No verification link or code found in inbox — account may still verify automatically or email was delayed
+09:38:29
+·
+No onboarding wizard detected — skipping
+09:38:29
+>
+🔐 Login(email): navigating to Replit login...
+09:38:40
+·
+Login(email): entered identifier "jeetu@addison.asia"
+PROCESSING
+09:38:40
+·
+Login(email): clicked step-1 button
+09:38:42
+»
+Login(email): entered password
+09:38:43
+·
+Login(email): clicked submit button
+09:38:50
+!
+⚠️ Login(email): login may have failed — URL: https://replit.com/login
+09:38:50
+>
+🔐 Login(username): navigating to Replit login...
+09:38:58
+»
+Login(username): entered identifier "riley6775"
+09:38:58
+»
+Login(username): clicked step-1 button
+09:39:00
+»
+Login(username): entered password
+09:39:01
+»
+Login(username): clicked submit button
+09:39:08
+!
+⚠️ Login(username): login may have failed — URL: https://replit.com/login
+09:39:08
++
+⚠️ All Replit login attempts failed — checkout may not complete
+09:39:08
++
+✅ Replit account creation complete: username=riley6775 email=jeetu@addison.asia password=OW69oemz!11
+PROCESSING
+09:39:08
++
+✅ Account saved to database
