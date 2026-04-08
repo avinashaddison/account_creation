@@ -135,17 +135,18 @@ function buildCDPUrlWithProxy(cdpUrl: string, proxyUrl: string | null): string {
 
 export async function connectViaZenRows(log?: (msg: string) => void, customProxy?: string): Promise<Browser> {
   let cdpUrl = await getZenRowsCDPUrl();
-  // ZenRows handles proxy routing internally — do NOT append a proxy= parameter
-  // (doing so causes REQS004: Unexpected 'proxy' parameter error)
-  if (!cdpUrl.includes("browser.zenrows.com")) {
+  // ZenRows and Bright Data handle proxy routing internally — do NOT append a proxy= parameter
+  // (ZenRows: causes REQS004 error; Bright Data: handles residential routing natively)
+  const isManagedBrowser = cdpUrl.includes("browser.zenrows.com") || cdpUrl.includes("brd.superproxy.io");
+  if (!isManagedBrowser) {
     const residentialProxy = customProxy || await getResidentialProxyUrl();
     cdpUrl = buildCDPUrlWithProxy(cdpUrl, residentialProxy);
   }
-  if (log) log("Connecting via Addison Proxy...");
+  if (log) log("Connecting via CDP browser...");
   console.log("[Proxy] Connecting to CDP...");
   const browser = await vanillaChromium.connectOverCDP(cdpUrl, { timeout: 60000 });
   console.log("[Proxy] Connected!");
-  if (log) log("Addison Proxy connected.");
+  if (log) log("CDP browser connected.");
   return browser;
 }
 
