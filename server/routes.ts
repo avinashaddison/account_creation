@@ -3314,34 +3314,46 @@ export async function registerRoutes(
           const acc = toUse[i];
           broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
           try {
-            const result = await registerReplitAccount(
-              acc.email,
-              acc.password,
-              (msg) => broadcastLog(batchId, bulkId, msg, userId),
-              couponCode || undefined,
-              bulkCardDetails,
-              acc.bizAccount
-            );
-            if (result.success) {
+            const BULK_CAPTCHA_RETRIES = 3;
+            let result: Awaited<ReturnType<typeof registerReplitAccount>> | null = null;
+            for (let bAttempt = 1; bAttempt <= BULK_CAPTCHA_RETRIES; bAttempt++) {
+              if (bAttempt > 1) {
+                broadcastLog(batchId, bulkId, `  🔄 Captcha retry ${bAttempt}/${BULK_CAPTCHA_RETRIES} — switching to nsocks residential IP...`, userId);
+                await new Promise(r => setTimeout(r, 3000));
+              }
+              result = await registerReplitAccount(
+                acc.email,
+                acc.password,
+                (msg) => broadcastLog(batchId, bulkId, msg, userId),
+                couponCode || undefined,
+                bulkCardDetails,
+                acc.bizAccount,
+                bAttempt > 1
+              );
+              if (result.success) break;
+              const isCaptchaFail = /captcha|code:1|code:2|browser integrity/i.test(result.error || "");
+              if (!isCaptchaFail) break;
+            }
+            if (result!.success) {
               try {
                 await storage.createReplitAccount({
-                  username: result.username!,
-                  email: result.email!,
-                  password: result.password!,
+                  username: result!.username!,
+                  email: result!.email!,
+                  password: result!.password!,
                   outlookEmail: acc.email,
                   status: "processing",
                   createdBy: userId,
                 });
                 successCount++;
-                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — @${result.username}`, userId);
+                broadcastLog(batchId, bulkId, `✅ [${i + 1}/${toUse.length}] Saved — @${result!.username}`, userId);
               } catch (dbErr: any) {
                 broadcastLog(batchId, bulkId, `⚠️ DB save error: ${dbErr.message}`, userId);
               }
-              broadcast({ type: "replit_create_result", bulkId, batchId, success: true, username: result.username, email: result.email, password: result.password, index: i + 1, total: toUse.length }, userId);
+              broadcast({ type: "replit_create_result", bulkId, batchId, success: true, username: result!.username, email: result!.email, password: result!.password, index: i + 1, total: toUse.length }, userId);
             } else {
               failCount++;
-              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result.error || "Unknown"}`, userId);
-              broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: result.error, index: i + 1, total: toUse.length }, userId);
+              broadcastLog(batchId, bulkId, `❌ [${i + 1}/${toUse.length}] Failed: ${result!.error || "Unknown"}`, userId);
+              broadcast({ type: "replit_create_result", bulkId, batchId, success: false, error: result!.error, index: i + 1, total: toUse.length }, userId);
             }
           } catch (err: any) {
             failCount++;
@@ -3436,7 +3448,8 @@ export async function registerRoutes(
               (msg) => broadcastLog(batchId, createId, msg, userId),
               couponCode || undefined,
               singleCardDetails,
-              bizAccountParam
+              bizAccountParam,
+              attempt > 1 // forceNsocks on retries — rotates to residential stealth browser
             );
             if (result.success) break;
             const isCaptchaFail = /captcha|code:1|code:2|browser integrity/i.test(result.error || "");

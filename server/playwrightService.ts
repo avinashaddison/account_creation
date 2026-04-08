@@ -10559,7 +10559,8 @@ export async function registerReplitAccount(
   log: (msg: string) => void,
   couponCode?: string,
   cardDetails?: CardDetails,
-  bizAccount?: { id: string; address: string; inboxId: string }
+  bizAccount?: { id: string; address: string; inboxId: string },
+  forceNsocks?: boolean
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
@@ -10597,13 +10598,44 @@ export async function registerReplitAccount(
   let zenrowsStripeBrowser: any = null; // separate ZenRows browser for Stripe checkout
   let replitNativeProxy: { server: string; username: string; password: string } | null = null;
   let capsolverProxyUrl: string | undefined = undefined;
+  // capsolverResidentialProxy: nsocks proxy URL passed to CapSolver V3 Enterprise task
+  // so the reCAPTCHA token is generated from a residential IP (high score) even when
+  // the browser itself runs via Bright Data CDP (which can't share its IP with CapSolver).
+  let capsolverResidentialProxy: string | undefined = undefined;
 
   try {
+    // ── Fetch nsocks residential proxy for CapSolver (needed even on Bright Data path) ──
+    try {
+      const rawProxy = await db.execute(sql`SELECT value FROM settings WHERE key = 'residential_proxy_url'`).then(r => r.rows[0]?.value as string || "").catch(() => "");
+      if (rawProxy) {
+        const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 8);
+        let rotatedProxy = rawProxy;
+        if (rawProxy.includes("sessionid-")) {
+          rotatedProxy = rawProxy.replace(/sessionid-[^-@]+/, `sessionid-${sessionId}`);
+        } else if (rawProxy.includes("sessid=")) {
+          rotatedProxy = rawProxy.replace(/sessid=[^&:@]+/, `sessid=${sessionId}`);
+        } else if (rawProxy.includes("session-")) {
+          rotatedProxy = rawProxy.replace(/session-[^:@-]+/, `session-${sessionId}`);
+        }
+        const pUrl = new URL(rotatedProxy.startsWith("http") ? rotatedProxy : `http://${rotatedProxy}`);
+        const cleanUser = (pUrl.username || "").replace(/-opt-wb$/i, "").replace(/-opt-[a-z]+$/i, "");
+        const cleanPassword = decodeURIComponent(pUrl.password || "");
+        capsolverResidentialProxy = `http://${encodeURIComponent(cleanUser)}:${encodeURIComponent(cleanPassword)}@${pUrl.hostname}:${pUrl.port}`;
+        log(`  🏠 Residential proxy for CapSolver: ${pUrl.hostname}:${pUrl.port} (session=${sessionId.substring(0, 10)})`);
+      }
+    } catch (proxyErr: any) {
+      log(`  ⚠️ Could not fetch residential proxy for CapSolver: ${proxyErr.message?.substring(0, 60)}`);
+    }
+
     // ── Try ZenRows cloud browser first (hardened, passes reCAPTCHA & browser integrity) ──
     let useZenRowsBrowser = false;
     let context: any;
 
     try {
+      if (forceNsocks) {
+        log(`🔄 Forcing nsocks residential path (Bright Data skipped for IP rotation)...`);
+        throw new Error("forceNsocks");
+      }
       log(`🌐 Connecting via ZenRows cloud browser for Replit signup...`);
       browser = await connectViaZenRows(log);
       useZenRowsBrowser = true;
@@ -10882,12 +10914,13 @@ export async function registerReplitAccount(
     page.setDefaultTimeout(30000);
 
     // ── Intercept window.grecaptcha the moment Google's script assigns it ──
-    // Object.defineProperty traps the assignment so we hook execute() before it's ever called.
-    // We let it run naturally — residential IP token passes Replit's Enterprise reCAPTCHA.
-    // We capture the action name for diagnostic logging.
+    // We intercept execute() and return our CapSolver token when available.
+    // This bypasses browser integrity failures in execute() while still submitting
+    // the token naturally as part of Replit's form flow.
     await page.addInitScript(() => {
       (window as any).__recaptcha_last_action = null;
       (window as any).__recaptcha_last_sitekey = null;
+      (window as any).__injectedCapsolverToken = null; // Set from Node.js before button click
 
       let _g: any = undefined;
       function wrapEnterprise(g: any) {
@@ -10897,7 +10930,14 @@ export async function registerReplitAccount(
         g.enterprise.execute = function(siteKey: string, opts: any) {
           (window as any).__recaptcha_last_action = (opts && opts.action) || null;
           (window as any).__recaptcha_last_sitekey = siteKey;
-          // Let browser solve naturally — residential IP token passes Replit's verification
+          // If a CapSolver token was pre-injected, return it directly
+          // This bypasses the native execute() which can fail on non-residential IPs
+          const injected = (window as any).__injectedCapsolverToken;
+          if (injected && typeof injected === "string" && injected.length > 100) {
+            console.error("[reCAPTCHA] Returning CapSolver-injected token (len=" + injected.length + ") for action=" + (opts && opts.action));
+            return Promise.resolve(injected);
+          }
+          console.error("[reCAPTCHA] No injected token — using native execute() for action=" + (opts && opts.action));
           return orig(siteKey, opts);
         };
       }
@@ -10941,13 +10981,28 @@ export async function registerReplitAccount(
       }
     });
 
-    // Placeholder — CapSolver disabled, browser token used instead
-    let capsolverStarted = false;
+    // CapSolver promise — started as soon as sitekey is captured, runs in background
+    const REPLIT_CORRECT_SITEKEY = "6LfyLYUsAAAAAP0Xmu-hJvZOYJLSL7E410qvKyII";
+    let capsolverEarlyPromise: Promise<{ success: boolean; token?: string; error?: string }> | null = null;
 
     // ── Pre-signup organic browsing — look like a real user discovering the site ──
     log("Visiting Replit homepage before signup...");
     try {
       await page.goto("https://replit.com", { waitUntil: "domcontentloaded", timeout: 30000 });
+      // ── Start CapSolver in background right away so token is ready before form submit ──
+      // This gives CapSolver ~30-40s to run while we navigate, fill form, etc.
+      // CRITICAL: Pass nsocks residential proxy so token gets a HIGH reCAPTCHA score (not code:2).
+      const sitekeyForCapsolver = recaptchaEnterpriseSiteKey || REPLIT_CORRECT_SITEKEY;
+      const capsolverProxy = capsolverResidentialProxy || capsolverProxyUrl;
+      const proxyMode = capsolverProxy ? "ReCaptchaV3EnterpriseTask (residential)" : "ReCaptchaV3EnterpriseTaskProxyLess (datacenter)";
+      log(`  🚀 Starting CapSolver early (${proxyMode}, sitekey=${sitekeyForCapsolver.substring(0, 20)}...) — will be ready by submit time`);
+      capsolverEarlyPromise = solveRecaptchaV3Enterprise(
+        "https://replit.com/signup",
+        sitekeyForCapsolver,
+        "signup",
+        0.5,
+        capsolverProxy
+      );
       await page.waitForTimeout(2000 + Math.random() * 2000);
       // Scroll down naturally then back up
       await page.evaluate(() => window.scrollBy({ top: 300 + Math.random() * 400, behavior: "smooth" }));
@@ -10960,13 +11015,22 @@ export async function registerReplitAccount(
       log("Homepage visited — navigating to signup...");
     } catch {
       log("Homepage visit skipped — going directly to signup");
+      // Still start CapSolver even if homepage visit failed
+      if (!capsolverEarlyPromise) {
+        const sitekeyForCapsolver = recaptchaEnterpriseSiteKey || REPLIT_CORRECT_SITEKEY;
+        const capsolverProxy = capsolverResidentialProxy || capsolverProxyUrl;
+        capsolverEarlyPromise = solveRecaptchaV3Enterprise(
+          "https://replit.com/signup",
+          sitekeyForCapsolver,
+          "signup",
+          0.5,
+          capsolverProxy
+        );
+      }
     }
 
-    // ── CapSolver disabled: real browser token from residential IP passes Replit's reCAPTCHA ──
-    // Testing showed CapSolver tokens always get code:2 (score/action mismatch) while real
-    // browser tokens from Charter residential IPs pass. Rely on browser native token only.
     if (recaptchaEnterpriseSiteKey) {
-      log(`  🌐 Using real browser reCAPTCHA token (residential IP: ${capsolverProxyUrl ? "nsocks" : "direct"})`);
+      log(`  🌐 Using real browser + CapSolver token (residential IP: ${capsolverProxyUrl ? "nsocks" : "direct"})`);
     }
 
     log("Navigating to https://replit.com/signup ...");
@@ -11129,6 +11193,8 @@ export async function registerReplitAccount(
 
     // ── reCAPTCHA: await CapSolver token (started in background), inject into sign-up POST ──
     const capturedRequests: string[] = [];
+    // Declare capsolverToken OUTSIDE the scoped block so pre-submit code can update it.
+    let capsolverToken: string | null = null;
     {
       const capturedAction = await page.evaluate(() => (window as any).__recaptcha_last_action || null).catch(() => null) as string | null;
       if (recaptchaEnterpriseSiteKey) {
@@ -11155,50 +11221,27 @@ export async function registerReplitAccount(
       }
 
       // ── reCAPTCHA Enterprise token strategy ──
-      // Bright Data's Scraping Browser generates high-scoring real tokens natively
-      // (premium residential IPs + hardened Chrome fingerprint) — no CapSolver needed.
-      // CapSolver is only used as fallback when NOT on Bright Data (e.g. legacy proxy).
-      let capsolverToken: string | null = null;
-      let cdpUrlForCheck = "";
+      // ── Await the CapSolver token that was started early during homepage visit ──
+      // CapSolver was started ~30-40s ago (during homepage browsing + form filling),
+      // so it should already be done (or very close). Minimal blocking wait expected.
+      log(`  ⏳ Awaiting pre-started CapSolver token (started during homepage visit)...`);
       try {
-        const cdpRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
-        if (cdpRow.rows.length > 0 && cdpRow.rows[0].value) cdpUrlForCheck = cdpRow.rows[0].value as string;
-      } catch {}
-      const usingBrightData = cdpUrlForCheck.includes("brd.superproxy.io");
-
-      if (usingBrightData) {
-        log("  🌟 Bright Data browser detected — using real browser reCAPTCHA token (skipping CapSolver)");
-      } else if (recaptchaEnterpriseSiteKey) {
-        // Non-Bright Data path: use CapSolver to generate token
-        // Try no-action first (matches Replit's actual call), then named actions as fallback.
-        const actionsToTry: (string | undefined)[] = [undefined, "signup", "submit", "create_account"];
-        for (const action of actionsToTry) {
-          try {
-            const actionLabel = action ?? "(none)";
-            log(`  🤖 CapSolver: solving reCAPTCHA Enterprise (action=${actionLabel}, sitekey=${recaptchaEnterpriseSiteKey.substring(0, 20)}...)...`);
-            const capResult = await solveRecaptchaV3Enterprise(
-              "https://replit.com/signup",
-              recaptchaEnterpriseSiteKey,
-              action,
-              0.7,
-              capsolverProxyUrl || undefined
-            );
-            if (capResult.success && capResult.token) {
-              capsolverToken = capResult.token;
-              log(`  ✅ CapSolver token obtained (action=${actionLabel}, len=${capsolverToken.length})`);
-              break;
-            } else {
-              log(`  ⚠️ CapSolver failed for action=${actionLabel}: ${capResult.error || "unknown"}`);
-            }
-          } catch (capErr: any) {
-            log(`  ⚠️ CapSolver error: ${(capErr.message || "").substring(0, 60)}`);
-          }
+        const capsolverSource = capsolverEarlyPromise || solveRecaptchaV3Enterprise(
+          "https://replit.com/signup",
+          recaptchaEnterpriseSiteKey || REPLIT_CORRECT_SITEKEY,
+          "signup",
+          0.5,
+          capsolverResidentialProxy || capsolverProxyUrl
+        );
+        const capResult = await capsolverSource;
+        if (capResult.success && capResult.token) {
+          capsolverToken = capResult.token;
+          log(`  ✅ CapSolver token ready (len=${capsolverToken.length}) — injecting into sign-up POST`);
+        } else {
+          log(`  ⚠️ CapSolver failed: ${capResult.error?.substring(0, 100)} — using PASSTHROUGH`);
         }
-        if (!capsolverToken) {
-          log("  ⚠️ CapSolver could not produce a token — falling back to real browser token");
-        }
-      } else {
-        log("  ⚠️ No reCAPTCHA sitekey captured — using real browser token");
+      } catch (capErr: any) {
+        log(`  ⚠️ CapSolver error: ${capErr.message?.substring(0, 80)} — using PASSTHROUGH`);
       }
 
       const routeHandler = async (route: any) => {
@@ -11262,6 +11305,21 @@ export async function registerReplitAccount(
           }
         } catch {}
       });
+    }
+
+    // ── Inject CapSolver token directly into browser's grecaptcha.enterprise.execute() ──
+    // This bypasses browser integrity failures in native execute() (Bright Data/nsocks).
+    // The initScript already wraps execute() to check window.__injectedCapsolverToken.
+    if (capsolverToken) {
+      try {
+        await page.evaluate((t: string) => {
+          (window as any).__injectedCapsolverToken = t;
+          console.error("[CapSolver] Token injected into window.__injectedCapsolverToken (len=" + t.length + ")");
+        }, capsolverToken);
+        log(`  💉 CapSolver token injected into browser execute() override (len=${capsolverToken.length})`);
+      } catch (injErr: any) {
+        log(`  ⚠️ Failed to inject token into browser: ${injErr.message?.substring(0, 60)}`);
+      }
     }
 
     log("Submitting signup form...");
