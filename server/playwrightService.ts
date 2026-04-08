@@ -11076,25 +11076,21 @@ export async function registerReplitAccount(
         // The hcaptcha widget often auto-solves in the background via its `onVerify` React callback.
         // This produces a 2400+ char token that is IP-matched to our nsocks proxy — ideal.
         // We give it up to 35 seconds to auto-solve before falling back to external solvers.
-        log("  → Waiting for browser-native hcaptcha auto-solve (widget onVerify callback)...");
+        log("  → Waiting for browser-native hcaptcha token (checking hiddenTA + widget)...");
         const browserToken = await page.evaluate(async () => {
           const w = window as any;
           const getHiddenToken = (): string => {
-            // Check hidden textarea that hcaptcha/React stores the response in
             const ta = document.querySelector<HTMLTextAreaElement>(
               'textarea[name="h-captcha-response"], textarea[name="g-recaptcha-response"], textarea[id="h-captcha-response"]'
             );
             return ta?.value || "";
           };
           const getWidgetToken = (): string => {
-            // getResponse(widgetId) — try all known widget IDs (hcaptcha stores widgets by ID)
             if (!w.hcaptcha) return "";
             try {
-              // Try without ID first (some versions)
               const t = w.hcaptcha.getResponse();
               if (t && t.length > 50) return t;
             } catch {}
-            // Try widget IDs 0..5
             for (let wid = 0; wid <= 5; wid++) {
               try {
                 const t = w.hcaptcha.getResponse(wid);
@@ -11103,17 +11099,25 @@ export async function registerReplitAccount(
             }
             return "";
           };
-          if (!w.hcaptcha) return null;
-          // First: check if already solved (widget may have auto-solved on load)
-          const preExisting = getWidgetToken() || getHiddenToken();
-          if (preExisting.length > 50) return preExisting;
-          // Then: call execute() to trigger solve and poll for result
-          try { await w.hcaptcha.execute(); } catch {}
-          // Poll for up to 90s in headed mode (browser may take longer to auto-solve)
+
+          // ── Priority 1: hiddenTA already has a token (browser generated it from correct IP) ──
+          // This happens even before window.hcaptcha is accessible.
+          // ALWAYS prefer this — it is IP-matched to our proxy/direct connection.
+          const earlyHidden = getHiddenToken();
+          if (earlyHidden.length > 50) return earlyHidden;
+
+          // ── Priority 2: wait up to 90s for hiddenTA or widget token to appear ──
+          // hcaptcha loads asynchronously — window.hcaptcha may not exist yet.
           for (let i = 0; i < 180; i++) {
             await new Promise(r => setTimeout(r, 500));
-            const token = getWidgetToken() || getHiddenToken();
-            if (token.length > 50) return token;
+            const hidden = getHiddenToken();
+            if (hidden.length > 50) return hidden;
+            const widget = getWidgetToken();
+            if (widget.length > 50) return widget;
+            // Once hcaptcha widget is available, try triggering execute()
+            if (i === 10 && w.hcaptcha) {
+              try { await w.hcaptcha.execute(); } catch {}
+            }
           }
           return null;
         }).catch(() => null) as string | null;

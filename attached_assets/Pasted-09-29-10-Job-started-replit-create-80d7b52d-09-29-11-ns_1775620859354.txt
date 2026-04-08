@@ -1,0 +1,132 @@
+09:29:10
+·
+Job started: replit-create-80d7b52d
+09:29:11
+·
+🌐 nsocks connected — session: ngzqcocrj7la | endpoint: proxy.nsocks.com:2312
+09:29:14
+·
+┌─── WEBSHARE RESIDENTIAL ACTIVE ───────────────────────────
+09:29:14
+·
+│ Exit IP : 216.183.105.24
+09:29:14
+·
+│ Location : Chicago, Illinois, US
+09:29:14
+·
+│ Provider : AS136787 PacketHub S.A.
+09:29:14
+·
+└────────────────────────────────────────────────
+09:29:14
+>
+Using Xvfb display :99 (PID 1844) — headed browser mode active
+09:29:21
+>
+Using headed browser (Xvfb) — --enable-automation stripped
+09:29:21
+·
+Visiting Replit homepage before signup...
+09:29:38
+>
+Homepage visited — navigating to signup...
+09:29:38
+>
+Navigating to https://replit.com/signup ...
+09:29:47
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+09:29:47
+·
+Page title: Sign Up - Replit
+09:29:47
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+09:29:47
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+09:29:55
+·
+Network idle timeout — waiting 4s instead
+09:29:59
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+09:29:59
+·
+Waiting for signup form fields to appear...
+09:29:59
+·
+Form fields detected
+09:29:59
+·
+Filling signup form...
+09:29:59
+~
+⚠️ Could not find username field
+09:30:01
+·
+Typed email into input[name="email"]
+09:30:02
+»
+Typed password into input[name="password"]
+09:30:02
+~
+🔒 hCaptcha detected on signup page — solving via NopeCHA/CapSolver...
+09:30:02
+·
+→ sitekey: 4c672d35-0701-42b2-8...
+09:30:02
+>
+→ Waiting for browser-native hcaptcha auto-solve (widget onVerify callback)...
+09:30:02
+~
+⚠️ Browser-native auto-solve timed out — falling back to NopeCHA...
+09:30:03
+~
+→ NopeCHA solving hcaptcha... (30–60s)
+09:30:15
+·
+⏳ NopeCHA solving... (12s)
+09:30:27
+·
+⏳ NopeCHA solving... (24s)
+09:30:39
+·
+⏳ NopeCHA solving... (36s)
+09:30:39
++
+✅ NopeCHA solved hcaptcha!
+09:30:39
++
+✅ External hCaptcha solved (token 2266 chars)
+09:30:39
+>
+→ Patched hcaptcha.execute/getResponse in browser to return our token
+09:30:40
+~
+→ Pre-submit captcha state: widgetToken=2266 chars (P1_eyJ0eXA…), hiddenTA=2340 chars (0cAFcWeA6Q…)
+09:30:40
+·
+Submitting signup form...
+09:30:40
+·
+Clicked submit button "Create Account" (button[type="submit"])
+09:30:40
+·
+Waiting for signup response...
+09:30:40
+»
+→ [route-intercept] POST /api/v1/auth/sign-up | keys:[email,rawPassword,clientType,recaptchaToken,source] | existing-cap-len:2468 | hdrs:[content-type:application/json|x-requested-with:XMLHttpRequest|cookie:_cfuvid=kE6kFAokLMrzzF4lFCG41YBTahCHyliJtaFIV8evXZ|referer:https://replit.com/signup]
+09:30:41
+>
+→ [route-intercept] Injecting solver token (2266 chars) over browser token (2468 chars)
+09:30:44
+!
+⚠️ Possible form error text: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:2) | Continue with Google | Continue with GitHub | Continue with X
+09:30:44
++
+❌ Captcha rejected (pageText) — aborting immediately (account not created)
+09:30:45
++
+❌ Replit creation failed: Replit rejected the captcha token — account not created
