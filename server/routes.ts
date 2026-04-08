@@ -13,7 +13,7 @@ import { tmFullRegistrationFlow } from "./ticketmasterService";
 import { uefaFullRegistrationFlow } from "./uefaService";
 import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
-import { listDomains, listAccounts, createAccount, deleteAccount, getFullInbox } from "./smtpDevService";
+import { listDomains, listAccounts, createAccount, deleteAccount, getFullInbox, pickAvailableBizAccounts } from "./smtpDevService";
 import { activateOutlookSession, stopOutlookSession, getOutlookMessages, getOutlookSessionInfo } from "./outlookWorkspaceService";
 import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
 import { getFivesimBalance } from "./fivesimService";
@@ -3260,26 +3260,38 @@ export async function registerRoutes(
 
   app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { count = 1, couponCode, cardId } = req.body;
+      const { count = 1, couponCode, cardId, emailMode = "outlook" } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
-      const allOutlook = await storage.getAllPrivateOutlooks();
       const replitAccts = await storage.getAllReplitAccounts();
-      const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
-      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
 
-      if (available.length === 0) {
-        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
+      let toUse: Array<{ email: string; password: string; bizAccount?: { id: string; address: string; inboxId: string } }> = [];
+
+      if (emailMode === "business") {
+        const usedBizEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+        const bizAccounts = await pickAvailableBizAccounts(usedBizEmails, actualCount);
+        if (bizAccounts.length === 0) {
+          return res.status(400).json({ error: "No available business mail accounts found" });
+        }
+        toUse = bizAccounts.map((biz) => {
+          const inbox = biz.mailboxes.find(m => m.path === "INBOX") ?? biz.mailboxes[0];
+          return { email: biz.address, password: "", bizAccount: { id: biz.id, address: biz.address, inboxId: inbox?.id ?? "" } };
+        });
+      } else {
+        const allOutlook = await storage.getAllPrivateOutlooks();
+        const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+        const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
+        if (available.length === 0) {
+          return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
+        }
+        const shuffled = [...available].sort(() => Math.random() - 0.5);
+        toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length)).map((acc) => ({ email: acc.email, password: acc.password }));
       }
-
-      const shuffled = [...available].sort(() => Math.random() - 0.5);
-      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
 
       const bulkId = randomUUID().substring(0, 8);
       const batchId = `replit-bulk-${bulkId}`;
 
-      // Fetch card details if provided
       let bulkCardDetails: import("./playwrightService").CardDetails | undefined;
       if (cardId) {
         const card = await storage.getSavedCard(cardId);
@@ -3294,13 +3306,12 @@ export async function registerRoutes(
       res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
 
       (async () => {
-        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) queued`, userId);
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) via ${emailMode === "business" ? "Business Mail" : "Outlook"}`, userId);
         let successCount = 0;
         let failCount = 0;
 
         for (let i = 0; i < toUse.length; i++) {
           const acc = toUse[i];
-
           broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
           try {
             const result = await registerReplitAccount(
@@ -3308,7 +3319,8 @@ export async function registerRoutes(
               acc.password,
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
               couponCode || undefined,
-              bulkCardDetails
+              bulkCardDetails,
+              acc.bizAccount
             );
             if (result.success) {
               try {
@@ -3346,26 +3358,55 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/smtpdev/available-for-replit", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const replitAccts = await storage.getAllReplitAccounts();
+      const usedBizEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+      const totalBizAccounts = 8599;
+      const available = totalBizAccounts - usedBizEmails.size;
+      res.json({ total: totalBizAccounts, used: usedBizEmails.size, available: Math.max(0, available) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword, couponCode, cardId } = req.body;
-      if (!outlookEmail || !outlookPassword) {
-        return res.status(400).json({ error: "Outlook email and password are required" });
-      }
+      const { outlookEmail, outlookPassword, couponCode, cardId, emailMode = "outlook" } = req.body;
 
-      const existingAccts = await storage.getAllReplitAccounts();
-      const alreadyUsed = existingAccts.some(
-        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
-      );
-      if (alreadyUsed) {
-        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
+      let registrationEmail = outlookEmail;
+      let registrationPassword = outlookPassword;
+      let bizAccountParam: { id: string; address: string; inboxId: string } | undefined;
+
+      if (emailMode === "business") {
+        const existingAccts = await storage.getAllReplitAccounts();
+        const usedBizEmails = new Set(existingAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+        const bizAccounts = await pickAvailableBizAccounts(usedBizEmails, 1);
+        if (bizAccounts.length === 0) {
+          return res.status(400).json({ error: "No available business mail accounts found" });
+        }
+        const biz = bizAccounts[0];
+        const inbox = biz.mailboxes.find(m => m.path === "INBOX") ?? biz.mailboxes[0];
+        registrationEmail = biz.address;
+        registrationPassword = "";
+        bizAccountParam = { id: biz.id, address: biz.address, inboxId: inbox?.id ?? "" };
+      } else {
+        if (!outlookEmail || !outlookPassword) {
+          return res.status(400).json({ error: "Outlook email and password are required" });
+        }
+        const existingAccts = await storage.getAllReplitAccounts();
+        const alreadyUsed = existingAccts.some(
+          (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
+        );
+        if (alreadyUsed) {
+          return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
+        }
       }
 
       const userId = req.session.userId;
       const createId = randomUUID().substring(0, 8);
       const batchId = `replit-create-${createId}`;
 
-      // Fetch card details if provided
       let singleCardDetails: import("./playwrightService").CardDetails | undefined;
       if (cardId) {
         const card = await storage.getSavedCard(cardId);
@@ -3380,23 +3421,23 @@ export async function registerRoutes(
       res.json({ success: true, createId, batchId, message: "Replit account creation started" });
 
       (async () => {
-        broadcastLog(batchId, createId, `Starting Replit account creation for ${outlookEmail}...`, userId);
+        broadcastLog(batchId, createId, `Starting Replit account creation via ${emailMode === "business" ? `Business Mail (${registrationEmail})` : registrationEmail}...`, userId);
         try {
           const MAX_CAPTCHA_RETRIES = 4;
           let result: Awaited<ReturnType<typeof registerReplitAccount>> | null = null;
           for (let attempt = 1; attempt <= MAX_CAPTCHA_RETRIES; attempt++) {
             if (attempt > 1) {
               broadcastLog(batchId, createId, `🔄 Captcha retry ${attempt}/${MAX_CAPTCHA_RETRIES} — rotating IP via new nsocks session...`, userId);
-              await new Promise(r => setTimeout(r, 3000)); // brief pause before retry
+              await new Promise(r => setTimeout(r, 3000));
             }
             result = await registerReplitAccount(
-              outlookEmail,
-              outlookPassword,
+              registrationEmail,
+              registrationPassword,
               (msg) => broadcastLog(batchId, createId, msg, userId),
               couponCode || undefined,
-              singleCardDetails
+              singleCardDetails,
+              bizAccountParam
             );
-            // Break out of retry loop if succeeded, or if failure is NOT captcha-related
             if (result.success) break;
             const isCaptchaFail = /captcha|code:1|code:2|browser integrity/i.test(result.error || "");
             const isRateLimit = /too quickly|rate.?limit|429/i.test(result.error || "");
@@ -3412,7 +3453,7 @@ export async function registerRoutes(
                 username: result!.username!,
                 email: result!.email!,
                 password: result!.password!,
-                outlookEmail,
+                outlookEmail: registrationEmail,
                 status: "processing",
                 createdBy: userId,
               });

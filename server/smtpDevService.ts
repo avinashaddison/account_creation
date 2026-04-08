@@ -179,3 +179,107 @@ export async function getFullInbox(accountId: string): Promise<Array<{ id: strin
     createdAt: m.date,
   }));
 }
+
+export async function listAccountsPage(page: number): Promise<SmtpDevAccount[]> {
+  const data: any = await call("GET", `/accounts?page=${page}`);
+  return members(data).map(parseAccount);
+}
+
+export async function getAccountById(accountId: string): Promise<SmtpDevAccount | null> {
+  try {
+    const data: any = await call("GET", `/accounts/${encodeURIComponent(accountId)}`);
+    return parseAccount(data);
+  } catch {
+    return null;
+  }
+}
+
+// Pick `count` biz accounts that are NOT in `usedAddresses` set.
+// Scans pages starting from a random offset to spread usage across the pool.
+export async function pickAvailableBizAccounts(
+  usedAddresses: Set<string>,
+  count: number
+): Promise<SmtpDevAccount[]> {
+  const result: SmtpDevAccount[] = [];
+  const seenIds = new Set<string>();
+
+  // Start from a random page so we don't always reuse page 1
+  const MAX_PAGES = 300; // 8599 / 30 ≈ 287 pages
+  const startPage = Math.floor(Math.random() * MAX_PAGES) + 1;
+
+  for (let offset = 0; offset < MAX_PAGES && result.length < count; offset++) {
+    const page = ((startPage - 1 + offset) % MAX_PAGES) + 1;
+    try {
+      const accounts = await listAccountsPage(page);
+      if (accounts.length === 0) break;
+      for (const acc of accounts) {
+        if (result.length >= count) break;
+        if (seenIds.has(acc.id)) continue;
+        seenIds.add(acc.id);
+        if (!usedAddresses.has(acc.address.toLowerCase()) && acc.isActive && !acc.isDeleted) {
+          result.push(acc);
+        }
+      }
+    } catch {
+      // Skip bad pages
+    }
+  }
+
+  return result;
+}
+
+// Poll a biz mailbox for a Replit verification email arriving after `afterMs` (Unix ms).
+// Returns { link, code } — at least one will be set if found.
+export async function pollReplitVerificationEmail(
+  accountId: string,
+  inboxId: string,
+  afterMs: number,
+  log: (msg: string) => void,
+  timeoutMs = 120_000
+): Promise<{ link: string | null; code: string | null }> {
+  const deadline = Date.now() + timeoutMs;
+  const seenIds = new Set<string>();
+  let attempt = 0;
+
+  while (Date.now() < deadline) {
+    attempt++;
+    try {
+      const messages = await listMessages(accountId, inboxId, 30);
+      for (const msg of messages) {
+        if (seenIds.has(msg.id)) continue;
+        seenIds.add(msg.id);
+
+        const msgDate = new Date(msg.date).getTime();
+        if (msgDate < afterMs - 30_000) continue; // too old
+
+        const fromStr = msg.from.toLowerCase();
+        const subjectStr = msg.subject.toLowerCase();
+        if (!fromStr.includes("replit") && !subjectStr.includes("replit") && !subjectStr.includes("verify") && !subjectStr.includes("confirm")) continue;
+
+        // Fetch full message to get body
+        const full = await getMessage(accountId, inboxId, msg.id);
+        const body = full?.html || full?.text || msg.intro || "";
+
+        const linkMatch = body.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
+        const link = linkMatch ? linkMatch[0].trim() : null;
+
+        const codeMatch = body.match(/\b([0-9]{6})\b/);
+        const code = !link && codeMatch ? codeMatch[1] : null;
+
+        if (link || code) {
+          log(`  📬 Biz mail: found Replit verification ${link ? "link" : "code"} in "${msg.subject}"`);
+          return { link, code };
+        }
+      }
+    } catch (err: any) {
+      log(`  ⚠️ Biz mail poll error: ${(err.message || "").substring(0, 60)}`);
+    }
+
+    if (Date.now() < deadline) {
+      log(`  📭 Biz mail: no verification email yet (attempt ${attempt}) — retrying in 8s...`);
+      await new Promise(r => setTimeout(r, 8000));
+    }
+  }
+
+  return { link: null, code: null };
+}

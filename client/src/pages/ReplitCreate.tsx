@@ -115,6 +115,7 @@ export default function ReplitCreate() {
   const [onbCardId, setOnbCardId] = useState("");
 
   // ── CREATE mode state ──
+  const [emailMode, setEmailMode] = useState<"outlook" | "business">("outlook");
   const [outlookEmail, setOutlookEmail] = useState("");
   const [outlookPassword, setOutlookPassword] = useState("");
   const [selectedOutlookId, setSelectedOutlookId] = useState("");
@@ -163,6 +164,10 @@ export default function ReplitCreate() {
   const { data: replitAccounts = [] } = useQuery<ReplitAccount[]>({
     queryKey: ["/api/replit-accounts"],
     refetchInterval: running ? 4000 : false,
+  });
+  const { data: bizStats } = useQuery<{ total: number; used: number; available: number }>({
+    queryKey: ["/api/smtpdev/available-for-replit"],
+    refetchInterval: mode === "create" ? 30000 : false,
   });
   const { data: nopeKeyData } = useQuery<{ key: string }>({
     queryKey: ["/api/settings/nopecha-api-key"],
@@ -266,12 +271,12 @@ export default function ReplitCreate() {
     if (count > 1) {
       setTotalCount(count);
       try {
-        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
+        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined, emailMode });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start bulk");
         activeBatchId.current = data.batchId;
         setTotalCount(data.count);
-        addLog(`🚀 Bulk job started — ${data.count} account(s) queued [${data.batchId}]`);
+        addLog(`🚀 Bulk job started — ${data.count} account(s) queued via ${emailMode === "business" ? "Business Mail" : "Outlook"} [${data.batchId}]`);
         if (couponCode.trim()) addLog(`🎟️ Coupon "${couponCode.trim()}" will be applied after each creation`);
       } catch (err: any) {
         sounds.error();
@@ -279,7 +284,7 @@ export default function ReplitCreate() {
         setRunning(false);
       }
     } else {
-      if (!outlookEmail || !outlookPassword) {
+      if (emailMode === "outlook" && (!outlookEmail || !outlookPassword)) {
         sounds.error();
         toast({ title: "Missing fields", description: "Select or enter an Outlook account", variant: "destructive" });
         setRunning(false);
@@ -287,7 +292,9 @@ export default function ReplitCreate() {
       }
       setTotalCount(1);
       try {
-        const res = await apiRequest("POST", "/api/replit-create", { outlookEmail, outlookPassword, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
+        const payload: any = { couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined, emailMode };
+        if (emailMode === "outlook") { payload.outlookEmail = outlookEmail; payload.outlookPassword = outlookPassword; }
+        const res = await apiRequest("POST", "/api/replit-create", payload);
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start");
         activeBatchId.current = data.batchId;
@@ -490,8 +497,13 @@ export default function ReplitCreate() {
   };
 
   const isBulk = count > 1;
-  const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
-  const maxCount = Math.min(1000, availableOutlookAccounts.length || 1);
+  const bizAvailable = bizStats?.available ?? 8599;
+  const canCreate = emailMode === "business"
+    ? bizAvailable > 0
+    : isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
+  const maxCount = emailMode === "business"
+    ? Math.min(1000, bizAvailable || 1)
+    : Math.min(1000, availableOutlookAccounts.length || 1);
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
   const selectedReplitAccount = replitAccounts.find((a) => a.id === selectedReplitId);
 
@@ -525,8 +537,10 @@ export default function ReplitCreate() {
         <div className="flex items-center gap-2.5 text-[10px] font-mono">
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: GA(0.05), border: `1px solid ${GA(0.18)}` }}>
             <Cpu className="w-3 h-3" style={{ color: GA(0.55) }} />
-            <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{availableOutlookAccounts.length}</span>
-            <span style={{ color: GA(0.3) }}>avail</span>
+            <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>
+              {emailMode === "business" ? bizAvailable : availableOutlookAccounts.length}
+            </span>
+            <span style={{ color: GA(0.3) }}>{emailMode === "business" ? "biz avail" : "avail"}</span>
           </div>
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
             <span style={{ color: "rgba(255,255,255,0.3)" }}>{usedEmails.size}</span>
@@ -623,6 +637,37 @@ export default function ReplitCreate() {
           {/* ══ CREATE MODE ══ */}
           {mode === "create" && (
             <>
+              {/* Email Mode Toggle */}
+              <div>
+                <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
+                  <Mail className="w-3 h-3" />
+                  Email Source
+                </label>
+                <div className="flex gap-2">
+                  {(["outlook", "business"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => { sounds.toggle(); setEmailMode(m); }}
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[10px] font-mono font-bold uppercase tracking-widest transition-all"
+                      style={{
+                        background: emailMode === m ? GA(0.12) : "rgba(0,0,0,0.3)",
+                        border: `1px solid ${emailMode === m ? GA(0.45) : GA(0.1)}`,
+                        color: emailMode === m ? G : GA(0.3),
+                        textShadow: emailMode === m ? `0 0 8px ${G}` : "none",
+                      }}
+                      data-testid={`button-email-mode-${m}`}
+                    >
+                      {m === "outlook" ? <><Mail className="w-3 h-3" /> Outlook</> : <><Cpu className="w-3 h-3" /> Business Mail</>}
+                      {m === "business" && bizStats && (
+                        <span className="ml-1 text-[8px] px-1 py-0.5 rounded" style={{ background: GA(0.08), border: `1px solid ${GA(0.2)}`, color: GA(0.6) }}>
+                          {bizStats.available.toLocaleString()} avail
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Count slider */}
               <div>
                 <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
@@ -649,12 +694,25 @@ export default function ReplitCreate() {
                 {isBulk && (
                   <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: GA(0.32) }}>
                     <Layers className="w-3 h-3" />
-                    bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
+                    bulk mode — picks {count} random from {emailMode === "business" ? `${bizAvailable} biz mail` : `${availableOutlookAccounts.length} outlook`} pool
                   </p>
                 )}
               </div>
 
-              {!isBulk && (
+              {!isBulk && emailMode === "business" && (
+                <div className="flex items-start gap-2.5 rounded-lg px-3 py-3" style={{ background: GA(0.05), border: `1px solid ${GA(0.15)}` }}>
+                  <Cpu className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: GA(0.5) }} />
+                  <div>
+                    <p className="text-[10px] font-mono font-bold" style={{ color: GA(0.8) }}>Business Mail Pool (addison.asia)</p>
+                    <p className="text-[10px] font-mono mt-0.5" style={{ color: GA(0.4) }}>
+                      Auto-picks an unused account from {bizStats ? `${bizStats.available.toLocaleString()} / ${bizStats.total.toLocaleString()}` : "8,599"} available.
+                      Verification is handled via API — no browser needed.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!isBulk && emailMode === "outlook" && (
                 <>
                   {availableOutlookAccounts.length > 0 && (
                     <div>

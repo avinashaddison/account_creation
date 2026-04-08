@@ -10558,7 +10558,8 @@ export async function registerReplitAccount(
   outlookPassword: string,
   log: (msg: string) => void,
   couponCode?: string,
-  cardDetails?: CardDetails
+  cardDetails?: CardDetails,
+  bizAccount?: { id: string; address: string; inboxId: string }
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
@@ -11373,185 +11374,203 @@ export async function registerReplitAccount(
       log(`Current URL after submit: ${currentUrl}`);
     }
 
-    log("Now waiting 20s before checking Outlook inbox for verification email...");
-    await page.waitForTimeout(20000);
+    const signupTimestamp = Date.now();
 
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
-    log("Reading Replit verification email via Outlook Web Access...");
-    let owaBrowser: any = null;
-    try {
-      const { chromium: chrm } = await import("playwright");
-      owaBrowser = await chrm.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
-      });
-      const owaContext = await owaBrowser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        viewport: { width: 1366, height: 768 },
-        locale: "en-US",
-      });
-      await owaContext.addInitScript(() => {
-        Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-        (window as any).chrome = { runtime: {} };
-      });
-      const owaPage = await owaContext.newPage();
-      owaPage.setDefaultTimeout(30000);
-
-      log("Navigating to Outlook Web login...");
-      await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await owaPage.waitForTimeout(2000);
-
-      const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
-      if (emailInput) {
-        await emailInput.fill(outlookEmail);
-        log("Entered Outlook email on login page");
-        const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (nextBtn) { await nextBtn.click(); }
-        else { await owaPage.keyboard.press("Enter"); }
-        // Wait for password field to appear (up to 12s — Microsoft login is slow)
-        try {
-          await owaPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 12000 });
-        } catch { await owaPage.waitForTimeout(4000); }
+    if (bizAccount) {
+      // ── Business Mail path: use smtp.dev API — no browser needed ──
+      log(`📬 Waiting for Replit verification email in business inbox ${bizAccount.address}...`);
+      log(`  (polling smtp.dev API — up to 120s)`);
+      const { pollReplitVerificationEmail } = await import("./smtpDevService");
+      const verResult = await pollReplitVerificationEmail(
+        bizAccount.id,
+        bizAccount.inboxId,
+        signupTimestamp,
+        log,
+        120_000
+      );
+      verificationLink = verResult.link;
+      verificationCode = verResult.code;
+      if (!verificationLink && !verificationCode) {
+        log("⚠️ No Replit verification email found in biz inbox — continuing without verification");
       }
+    } else {
+      // ── Outlook path: use OWA browser automation ──
+      log("Now waiting 20s before checking Outlook inbox for verification email...");
+      await page.waitForTimeout(20000);
 
-      const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
-      if (passInput) {
-        await passInput.fill(outlookPassword);
-        log("Entered Outlook password on login page");
-        const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
-        if (signInBtn) { await signInBtn.click(); }
-        else { await owaPage.keyboard.press("Enter"); }
-        await owaPage.waitForTimeout(5000);
-      } else {
-        log("⚠️ Password field not found — Microsoft login page may have changed");
-      }
+      log("Reading Replit verification email via Outlook Web Access...");
+      let owaBrowser: any = null;
+      try {
+        const { chromium: chrm } = await import("playwright");
+        owaBrowser = await chrm.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+        });
+        const owaContext = await owaBrowser.newContext({
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          viewport: { width: 1366, height: 768 },
+          locale: "en-US",
+        });
+        await owaContext.addInitScript(() => {
+          Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+          (window as any).chrome = { runtime: {} };
+        });
+        const owaPage = await owaContext.newPage();
+        owaPage.setDefaultTimeout(30000);
 
-      let currentLoginUrl = owaPage.url();
-      log(`After login URL: ${currentLoginUrl.substring(0, 100)}`);
+        log("Navigating to Outlook Web login...");
+        await owaPage.goto("https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=13&ct=1678285920&rver=7.0.6737.0&wp=MBI_SSL&wreply=https%3A%2F%2Foutlook.live.com%2Fowa%2F&id=292841&whr=&CBCXT=out&lc=1033&mkt=EN-US", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await owaPage.waitForTimeout(2000);
 
-      if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
-        log("Microsoft security proofs / confirmation page — skipping directly to inbox...");
-        let destUrl = "https://outlook.live.com/mail/0/inbox";
+        const emailInput = await owaPage.$('input[type="email"], input[name="loginfmt"]');
+        if (emailInput) {
+          await emailInput.fill(outlookEmail);
+          log("Entered Outlook email on login page");
+          const nextBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+          if (nextBtn) { await nextBtn.click(); }
+          else { await owaPage.keyboard.press("Enter"); }
+          try {
+            await owaPage.waitForSelector('input[type="password"], input[name="passwd"]', { timeout: 12000 });
+          } catch { await owaPage.waitForTimeout(4000); }
+        }
+
+        const passInput = await owaPage.$('input[type="password"], input[name="passwd"]');
+        if (passInput) {
+          await passInput.fill(outlookPassword);
+          log("Entered Outlook password on login page");
+          const signInBtn = await owaPage.$('input[type="submit"], button[type="submit"]');
+          if (signInBtn) { await signInBtn.click(); }
+          else { await owaPage.keyboard.press("Enter"); }
+          await owaPage.waitForTimeout(5000);
+        } else {
+          log("⚠️ Password field not found — Microsoft login page may have changed");
+        }
+
+        let currentLoginUrl = owaPage.url();
+        log(`After login URL: ${currentLoginUrl.substring(0, 100)}`);
+
+        if (currentLoginUrl.includes("account.live.com/proofs") || currentLoginUrl.includes("account.live.com/proof") || currentLoginUrl.includes("account.microsoft.com")) {
+          log("Microsoft security proofs / confirmation page — skipping directly to inbox...");
+          let destUrl = "https://outlook.live.com/mail/0/inbox";
+          try {
+            const parsedUrl = new URL(currentLoginUrl);
+            const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
+            if (posturl) {
+              const decoded = decodeURIComponent(posturl);
+              if (decoded.includes("outlook.live.com") || decoded.includes("outlook.office") || decoded.includes("outlook.com/mail")) {
+                destUrl = decoded;
+                log(`Extracted posturl (Outlook): ${destUrl.substring(0, 100)}`);
+              } else {
+                log(`posturl points to non-Outlook host — skipping straight to inbox`);
+              }
+            }
+          } catch {}
+          log(`Navigating directly to: ${destUrl.substring(0, 100)}`);
+          await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+          await owaPage.waitForTimeout(2000);
+          currentLoginUrl = owaPage.url();
+          log(`URL after skip navigation: ${currentLoginUrl.substring(0, 100)}`);
+        }
+
+        let isOnOutlookHost = false;
         try {
           const parsedUrl = new URL(currentLoginUrl);
-          const posturl = parsedUrl.searchParams.get("posturl") || parsedUrl.searchParams.get("wreply");
-          if (posturl) {
-            const decoded = decodeURIComponent(posturl);
-            // Only use the posturl if it goes to Outlook — ppsecure URLs require POST and will loop
-            if (decoded.includes("outlook.live.com") || decoded.includes("outlook.office") || decoded.includes("outlook.com/mail")) {
-              destUrl = decoded;
-              log(`Extracted posturl (Outlook): ${destUrl.substring(0, 100)}`);
-            } else {
-              log(`posturl points to non-Outlook host — skipping straight to inbox`);
-            }
-          }
+          isOnOutlookHost = parsedUrl.hostname.includes("outlook.live.com") || parsedUrl.hostname.includes("outlook.office") || parsedUrl.hostname === "outlook.com";
         } catch {}
-        log(`Navigating directly to: ${destUrl.substring(0, 100)}`);
-        await owaPage.goto(destUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(2000);
-        currentLoginUrl = owaPage.url();
-        log(`URL after skip navigation: ${currentLoginUrl.substring(0, 100)}`);
-      }
 
-      let isOnOutlookHost = false;
-      try {
-        const parsedUrl = new URL(currentLoginUrl);
-        isOnOutlookHost = parsedUrl.hostname.includes("outlook.live.com") || parsedUrl.hostname.includes("outlook.office") || parsedUrl.hostname === "outlook.com";
-      } catch {}
-
-      if (!isOnOutlookHost) {
-        log(`Not on Outlook yet (host: ${currentLoginUrl.substring(0, 50)}) — navigating directly to inbox`);
-        await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await owaPage.waitForTimeout(5000);
-        currentLoginUrl = owaPage.url();
-        try { const p2 = new URL(currentLoginUrl); isOnOutlookHost = p2.hostname.includes("outlook.live.com"); } catch {}
-        log(`URL after direct nav: ${currentLoginUrl.substring(0, 80)}`);
-      }
-
-      if (isOnOutlookHost) {
-        log("✅ Logged into Outlook Web — searching inbox for Replit email...");
-        await owaPage.waitForTimeout(3000);
-
-        // Retry inbox check up to 4 times (20s apart) — email may be delayed
-        let foundReplitEmail = false;
-        for (let attempt = 1; attempt <= 4 && !foundReplitEmail; attempt++) {
+        if (!isOnOutlookHost) {
+          log(`Not on Outlook yet (host: ${currentLoginUrl.substring(0, 50)}) — navigating directly to inbox`);
           await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
-          await owaPage.waitForTimeout(4000);
-
-          const emailItems = await owaPage.$$('[data-convid], [role="row"]');
-          log(`[Attempt ${attempt}/4] Found ${emailItems.length} email items in inbox`);
-          for (const item of emailItems.slice(0, 20)) {
-            const itemText = await item.innerText().catch(() => "");
-            if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
-              log(`Found Replit-related email: ${itemText.substring(0, 100)}`);
-              await item.evaluate((el: Element) => (el as HTMLElement).click());
-              await owaPage.waitForTimeout(3000);
-              foundReplitEmail = true;
-
-              const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
-              const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
-              if (linkMatch) {
-                verificationLink = linkMatch[0].trim();
-                log(`Extracted verification link from OWA: ${verificationLink.substring(0, 100)}...`);
-              }
-              const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
-              if (!verificationLink && codeMatch) {
-                verificationCode = codeMatch[1];
-                log(`Extracted verification code from OWA: ${verificationCode}`);
-              }
-              break;
-            }
-          }
-          if (!foundReplitEmail && attempt < 4) {
-            log(`No Replit email yet — waiting 20s before retry ${attempt + 1}/4...`);
-            await owaPage.waitForTimeout(20000);
-          }
+          await owaPage.waitForTimeout(5000);
+          currentLoginUrl = owaPage.url();
+          try { const p2 = new URL(currentLoginUrl); isOnOutlookHost = p2.hostname.includes("outlook.live.com"); } catch {}
+          log(`URL after direct nav: ${currentLoginUrl.substring(0, 80)}`);
         }
-        if (!foundReplitEmail) {
-          // Check Junk/Spam folder — Replit emails often end up there
-          log("📁 Checking Junk folder for Replit email...");
-          try {
-            await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
+
+        if (isOnOutlookHost) {
+          log("✅ Logged into Outlook Web — searching inbox for Replit email...");
+          await owaPage.waitForTimeout(3000);
+
+          let foundReplitEmail = false;
+          for (let attempt = 1; attempt <= 4 && !foundReplitEmail; attempt++) {
+            await owaPage.goto("https://outlook.live.com/mail/0/inbox", { waitUntil: "domcontentloaded", timeout: 30000 });
             await owaPage.waitForTimeout(4000);
-            const junkItems = await owaPage.$$('[data-convid], [role="row"]');
-            log(`  Junk folder: ${junkItems.length} items`);
-            for (const item of junkItems.slice(0, 30)) {
+
+            const emailItems = await owaPage.$$('[data-convid], [role="row"]');
+            log(`[Attempt ${attempt}/4] Found ${emailItems.length} email items in inbox`);
+            for (const item of emailItems.slice(0, 20)) {
               const itemText = await item.innerText().catch(() => "");
               if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
-                log(`Found Replit email in Junk: ${itemText.substring(0, 100)}`);
+                log(`Found Replit-related email: ${itemText.substring(0, 100)}`);
                 await item.evaluate((el: Element) => (el as HTMLElement).click());
                 await owaPage.waitForTimeout(3000);
                 foundReplitEmail = true;
+
                 const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
                 const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
                 if (linkMatch) {
                   verificationLink = linkMatch[0].trim();
-                  log(`Extracted verification link from Junk: ${verificationLink.substring(0, 100)}...`);
+                  log(`Extracted verification link from OWA: ${verificationLink.substring(0, 100)}...`);
                 }
                 const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
                 if (!verificationLink && codeMatch) {
                   verificationCode = codeMatch[1];
-                  log(`Extracted verification code from Junk: ${verificationCode}`);
+                  log(`Extracted verification code from OWA: ${verificationCode}`);
                 }
                 break;
               }
             }
-          } catch (junkErr: any) {
-            log(`⚠️ Junk check error: ${(junkErr.message || "").substring(0, 80)}`);
+            if (!foundReplitEmail && attempt < 4) {
+              log(`No Replit email yet — waiting 20s before retry ${attempt + 1}/4...`);
+              await owaPage.waitForTimeout(20000);
+            }
           }
           if (!foundReplitEmail) {
-            log("⚠️ No Replit verification email found after 4 attempts + Junk check — continuing without verification");
+            log("📁 Checking Junk folder for Replit email...");
+            try {
+              await owaPage.goto("https://outlook.live.com/mail/0/junkemail", { waitUntil: "domcontentloaded", timeout: 30000 });
+              await owaPage.waitForTimeout(4000);
+              const junkItems = await owaPage.$$('[data-convid], [role="row"]');
+              log(`  Junk folder: ${junkItems.length} items`);
+              for (const item of junkItems.slice(0, 30)) {
+                const itemText = await item.innerText().catch(() => "");
+                if (itemText.toLowerCase().includes("replit") || itemText.toLowerCase().includes("verify") || itemText.toLowerCase().includes("confirm")) {
+                  log(`Found Replit email in Junk: ${itemText.substring(0, 100)}`);
+                  await item.evaluate((el: Element) => (el as HTMLElement).click());
+                  await owaPage.waitForTimeout(3000);
+                  foundReplitEmail = true;
+                  const emailBody = await owaPage.evaluate(() => document.body?.innerText || "");
+                  const linkMatch = emailBody.match(/https?:\/\/replit\.com\/[^\s"'<>\r\n)]+/);
+                  if (linkMatch) {
+                    verificationLink = linkMatch[0].trim();
+                    log(`Extracted verification link from Junk: ${verificationLink.substring(0, 100)}...`);
+                  }
+                  const codeMatch = emailBody.match(/\b([0-9]{6})\b/);
+                  if (!verificationLink && codeMatch) {
+                    verificationCode = codeMatch[1];
+                    log(`Extracted verification code from Junk: ${verificationCode}`);
+                  }
+                  break;
+                }
+              }
+            } catch (junkErr: any) {
+              log(`⚠️ Junk check error: ${(junkErr.message || "").substring(0, 80)}`);
+            }
+            if (!foundReplitEmail) {
+              log("⚠️ No Replit verification email found after 4 attempts + Junk check — continuing without verification");
+            }
           }
+        } else {
+          log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
         }
-      } else {
-        log(`⚠️ OWA login may have failed — URL: ${currentLoginUrl.substring(0, 100)}`);
+      } catch (owaErr: any) {
+        log(`⚠️ Outlook web email check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
+      } finally {
+        if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
       }
-    } catch (owaErr: any) {
-      log(`⚠️ Outlook web email check failed: ${(owaErr.message || String(owaErr)).substring(0, 100)}`);
-    } finally {
-      if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
 
     if (verificationLink) {
