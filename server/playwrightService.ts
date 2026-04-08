@@ -7,7 +7,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaJsonApi, solveHCaptchaViaNopeCHADual, getNopeCHAKeys, classifyFunCaptchaImages } from "./capsolverService";
+import { solveRecaptchaV2Enterprise, solveRecaptchaV3Enterprise, solveRecaptchaV2, solveFunCaptcha, solveAntiTurnstile, solveHCaptcha, solveHCaptchaWith2Captcha, solveHCaptchaViaNopeCHA, classifyFunCaptchaImages } from "./capsolverService";
 import { orderSMSNumber, pollForSMSCode, cancelSMSOrder } from "./smspoolService";
 import { getAvailableDomain, getMailTmOnlyDomain, createTempEmail, getAuthToken, fetchMessages, fetchMessageContent, registerMailGwDomain, registerMailTmDomain, hasGmailCredentials, createGmailAddress, pollGmailForElevenLabsLink } from "./mailService";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -9719,7 +9719,7 @@ function generateStrongPassword(): string {
   const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
   const lower = "abcdefghjkmnpqrstuvwxyz";
   const digits = "23456789";
-  const special = "!@#$*^";
+  const special = "!@#$%&*";
   let pw = randomItem([...upper]) + randomItem([...upper]) + randomItem([...lower]) + randomItem([...lower]) + randomItem([...digits]) + randomItem([...digits]) + randomItem([...special]);
   for (let i = 0; i < 5; i++) pw += randomItem([...lower + digits]);
   return pw.split("").sort(() => Math.random() - 0.5).join("");
@@ -10556,15 +10556,14 @@ export async function registerReplitAccount(
   outlookPassword: string,
   log: (msg: string) => void,
   couponCode?: string,
-  cardDetails?: CardDetails,
-  bizMailOptions?: { emailAddress: string; smtpDevId?: string }
+  cardDetails?: CardDetails
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   const rand = (n: number) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   const randUpper = (n: number) => Array.from({ length: n }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
-  const randSym = () => ["!", "@", "#", "$", "*"][Math.floor(Math.random() * 5)];
+  const randSym = () => ["!", "@", "#", "$", "%"][Math.floor(Math.random() * 5)];
 
   // Natural-looking usernames — avoid predictable emailprefix+random pattern
   const FIRST_NAMES = ["alex","james","ryan","chris","matt","jake","tyler","jordan","taylor","morgan","casey","drew","blake","riley","quinn","cameron","logan","mason","hunter","parker","avery","peyton","skyler","reese","rowan","sage","river","phoenix","dakota","hayden","kendall","charlie","sam","jamie","lee","ash","max","jesse","kai","ray"];
@@ -10603,8 +10602,9 @@ export async function registerReplitAccount(
       log("⚠️ No ZenRows API key — using stealth headless browser");
     }
 
-    // Always use stealth browser for Replit signup/login (playwright-extra + StealthPlugin)
+    // Always use stealth browser for Replit signup/login (ZenRows is only used for Stripe)
     log("Launching stealth browser for Replit...");
+    const { chromium } = await import("playwright");
 
     // ── nsocks residential proxy — unique IP per account to prevent ban ──────────
     // Use Playwright native proxy (no ProxyChain) to avoid ERR_TUNNEL_CONNECTION_FAILED
@@ -10676,39 +10676,7 @@ export async function registerReplitAccount(
     const cv = CHROME_VERSIONS[Math.floor(Math.random() * CHROME_VERSIONS.length)];
 
     let context: any;
-    let useHeadless = true;   // declared here so hcaptcha block at ~line 11211 can access it
-    let xvfbDisplay = "";     // same — referenced in post-block captcha code
     {
-      // ── Xvfb headed-browser mode (bypasses hcaptcha Enterprise bot detection) ──
-      // Headless Chrome gets code:1 (headless fingerprint detected by hcaptcha Enterprise).
-      // A headed Chrome on Xvfb virtual display looks like a real browser — no code:1.
-      // XVFB_DISPLAY is set at server startup by ensureXvfbRunning() in server/index.ts.
-      try {
-        const { execSync: es } = await import("child_process");
-        const fs = await import("fs");
-        // Use server-startup-managed display if available
-        const envDisplay = process.env.XVFB_DISPLAY || "";
-        if (envDisplay) {
-          const displayNum = envDisplay.replace(":", "");
-          const lockFile = `/tmp/.X${displayNum}-lock`;
-          if (fs.existsSync(lockFile)) {
-            try {
-              const pid = parseInt(fs.readFileSync(lockFile, "utf8").trim(), 10);
-              es(`kill -0 ${pid}`, { stdio: "ignore" }); // throws if PID dead
-              xvfbDisplay = envDisplay;
-              log(`Using Xvfb display ${xvfbDisplay} (PID ${pid}) — headed browser mode active`);
-            } catch {
-              log(`⚠️ Xvfb on ${envDisplay} has stale lock (process dead) — falling back to headless`);
-            }
-          } else {
-            log(`⚠️ Xvfb lock file missing for ${envDisplay} — falling back to headless`);
-          }
-        }
-        if (xvfbDisplay) useHeadless = false;
-      } catch (xvfbErr: any) {
-        log(`⚠️ Xvfb check failed: ${(xvfbErr.message || "").substring(0, 60)} — using headless`);
-      }
-
       const launchArgs = [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -10721,29 +10689,11 @@ export async function registerReplitAccount(
         "--disable-site-isolation-trials",
         "--flag-switches-end",
       ];
-      if (!useHeadless) {
-        launchArgs.push("--start-maximized");
-      }
-      const launchOptions: any = { headless: useHeadless, args: launchArgs };
-      // In headed mode: strip Playwright's built-in --enable-automation flag so
-      // hcaptcha cannot detect Chrome is running under automation.
-      if (!useHeadless) {
-        launchOptions.ignoreDefaultArgs = ["--enable-automation"];
-      }
+      const launchOptions: any = { headless: true, args: launchArgs };
       if (replitNativeProxy) {
         launchOptions.proxy = replitNativeProxy;
       }
-      // Set DISPLAY in the process environment before launching so Chromium picks it up
-      const prevDisplay = process.env.DISPLAY;
-      if (!useHeadless && xvfbDisplay) {
-        process.env.DISPLAY = xvfbDisplay;
-      }
       browser = await chromium.launch(launchOptions);
-      // Restore previous DISPLAY
-      if (!useHeadless && xvfbDisplay) {
-        if (prevDisplay !== undefined) process.env.DISPLAY = prevDisplay;
-        else delete process.env.DISPLAY;
-      }
       const ua = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${cv}.0.0.0 Safari/537.36`;
       context = await browser.newContext({
         userAgent: ua,
@@ -10894,7 +10844,7 @@ export async function registerReplitAccount(
           }, true);
         })();
       });
-      log(useHeadless ? "Using stealth headless browser" : "Using headed browser (Xvfb) — --enable-automation stripped");
+      log("Using stealth headless browser");
     }
     page = await context.newPage();
     page.setDefaultTimeout(30000);
@@ -11060,211 +11010,6 @@ export async function registerReplitAccount(
 
     await page.waitForTimeout(500);
 
-    // ── hCaptcha pre-solve for signup (Replit embeds invisible hCaptcha on signup forms) ──
-    try {
-      const signupHtml = await page.content().catch(() => "");
-      if (signupHtml.includes("hcaptcha") || signupHtml.includes("h-captcha")) {
-        log("🔒 hCaptcha detected on signup page — solving via NopeCHA/CapSolver...");
-        const siteKey = await page.evaluate(() => {
-          const el = document.querySelector('[data-sitekey], .h-captcha[data-sitekey], #h-captcha[data-sitekey], [data-hcaptcha-sitekey]') as HTMLElement | null;
-          return el?.getAttribute("data-sitekey") || el?.getAttribute("data-hcaptcha-sitekey") || null;
-        }).catch(() => null) as string | null;
-        const keyToUse = siteKey || "4c672d35-0701-42b2-88c3-78380b0db560";
-        log(`  → sitekey: ${keyToUse.substring(0, 20)}...`);
-
-        // ── Step A: Wait for hcaptcha widget to auto-solve natively (stealth browser from correct IP) ──
-        // The hcaptcha widget often auto-solves in the background via its `onVerify` React callback.
-        // This produces a 2400+ char token that is IP-matched to our nsocks proxy — ideal.
-        // We give it up to 35 seconds to auto-solve before falling back to external solvers.
-        log("  → Waiting 15s for hcaptcha passive assessment (then submit with browser's own token)...");
-        // Short wait: let hcaptcha initialize and do its passive fingerprint assessment.
-        // Waiting too long (90s) can make the hcaptcha session stale.
-        // The real token scoring happens at form-submit time (execute()), not pre-load.
-        const readBrowserToken = async (): Promise<string | null> =>
-          page.evaluate(() => {
-            const w = window as any;
-            const ta = document.querySelector<HTMLTextAreaElement>(
-              'textarea[name="h-captcha-response"], textarea[name="g-recaptcha-response"], textarea[id="h-captcha-response"]'
-            );
-            const hidden = ta?.value || "";
-            if (hidden.length > 200) return hidden;
-            if (!w.hcaptcha) return null;
-            try {
-              const t = w.hcaptcha.getResponse();
-              if (t && t.length > 200) return t;
-            } catch {}
-            for (let wid = 0; wid <= 5; wid++) {
-              try {
-                const t = w.hcaptcha.getResponse(wid);
-                if (t && t.length > 200) return t;
-              } catch {}
-            }
-            return null;
-          }).catch(() => null);
-
-        let browserToken: string | null = null;
-        for (let i = 0; i < 30; i++) {
-          await page.waitForTimeout(500);
-          browserToken = await readBrowserToken();
-          if (browserToken) break;
-        }
-
-        let solvedToken: string | null = null;
-        let usedNativeToken = false;
-
-        if (browserToken && browserToken.length > 50) {
-          log(`  ✅ Browser-native hcaptcha solved! (token ${browserToken.length} chars) — skipping external solver`);
-          solvedToken = browserToken;
-          usedNativeToken = true;
-        } else {
-          log("  ⚠️ Browser-native auto-solve timed out — falling back to NopeCHA...");
-
-          // ── Step B: NopeCHA hcaptcha solve (same as Outlook flow) ──
-          let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
-
-          const nopeKeysDual = await getNopeCHAKeys();
-          const nopeKey = nopeKeysDual[0] || nopeKeysDual[1] || null;
-          if (nopeKey) {
-            log(`  → NopeCHA solving hcaptcha... (30–60s)`);
-            const nopeStart = Date.now();
-            const nopeTicker = setInterval(() => log(`  ⏳ NopeCHA solving... (${Math.round((Date.now()-nopeStart)/1000)}s)`), 12000);
-            try {
-              capResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual, "https://replit.com/signup", keyToUse, undefined, 150);
-            } finally {
-              clearInterval(nopeTicker);
-            }
-            if (capResult.success) {
-              log(`  ✅ NopeCHA solved hcaptcha!`);
-            } else {
-              log(`  ⚠️ NopeCHA failed: ${capResult.error || "unknown"}`);
-            }
-          } else {
-            log(`  ⚠️ No NopeCHA key configured — add nopecha_api_key in Settings`);
-          }
-
-          // ── Step B4: Last resort — re-check browser's hiddenTA token ──
-          // After external solver attempts (~60-120s), re-check the hidden textarea.
-          // In headless mode the browser may have generated a passive token in background.
-          // In headed mode the browser may have auto-verified during the wait time.
-          if (!capResult.success) {
-            log(`  → Re-checking browser hiddenTA token after solver attempts...`);
-            const lateToken = await page.evaluate(() => {
-              const ta = document.querySelector<HTMLTextAreaElement>('textarea[name="h-captcha-response"], textarea[name="g-recaptcha-response"]');
-              const val = ta?.value || "";
-              return val.length > 50 ? val : null;
-            }).catch(() => null);
-            if (lateToken) {
-              log(`  ✅ Browser hiddenTA token appeared after solvers (${lateToken.length} chars) — using it directly`);
-              solvedToken = lateToken;
-            }
-          }
-
-          if (!solvedToken) {
-            if (capResult.success && capResult.token) {
-              solvedToken = capResult.token;
-              log(`  ✅ External hCaptcha solved (token ${solvedToken.length} chars)`);
-            } else {
-              log(`  ⚠️ All captcha solvers failed: ${capResult.error || "unknown"} — submitting anyway`);
-            }
-          }
-        }
-
-        if (solvedToken) {
-          // ── Patch hcaptcha in browser so form submit uses OUR token ──
-          // When the "Create Account" button is clicked, Replit's React code calls
-          // hcaptcha.execute() / hcaptcha.getResponse(). We override both so they
-          // return our externally-solved token without triggering a new (bot-fail) solve.
-          await page.evaluate((token) => {
-            const w = window as any;
-            if (w.hcaptcha) {
-              w.hcaptcha.getResponse = () => token;
-              w.hcaptcha.execute = () => Promise.resolve(token);
-              w.hcaptcha.reset = () => {};
-            }
-            // Also inject directly into hidden textarea (belt-and-suspenders)
-            document.querySelectorAll('textarea').forEach((ta: HTMLTextAreaElement) => {
-              if (ta.name === 'h-captcha-response' || ta.id === 'h-captcha-response') {
-                const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-                if (setter) setter.call(ta, token);
-              }
-            });
-          }, solvedToken).catch(() => {});
-          log(`  → Patched hcaptcha.execute/getResponse in browser to return our token`);
-
-          // ── Route intercept: inject token into signup API POST ──
-          // When using native browser token: pass through unchanged (browser's own form-submit
-          // token is IP-matched and generated during real submission — don't replace it).
-          // When using external solver token: inject it (NopeCHA etc may produce wrong-IP token,
-          // but we still try as a last resort).
-          await page.route("**/*", async (route) => {
-            const req = route.request();
-            const url = req.url();
-            try {
-              const urlObj = new URL(url);
-              const isReplitApi = (urlObj.hostname === "replit.com" || urlObj.hostname.endsWith(".replit.com"))
-                && urlObj.pathname.startsWith("/api/");
-              if (req.method() === "POST" && isReplitApi) {
-                const postData = req.postData();
-                if (postData) {
-                  try {
-                    const body = JSON.parse(postData);
-                    const bodyKeys = Object.keys(body);
-                    const existingCap = body["recaptchaToken"] || body["h-captcha-response"] || body["captcha"] || body["hcaptchaToken"] || body["captchaToken"] || "";
-                    const existingCapLen = String(existingCap).length;
-                    const allHeaders = req.headers();
-                    const interestingHeaders = ["content-type","x-requested-with","x-csrf-token","authorization","cookie","origin","referer","x-replit-clientid","x-replit-pkce-challenge","x-nonce"].filter(h => allHeaders[h]).map(h => `${h}:${String(allHeaders[h]).substring(0,50)}`).join("|");
-                    log(`  → [route-intercept] POST ${urlObj.pathname} | keys:[${bodyKeys.join(",")}] | existing-cap-len:${existingCapLen} | hdrs:[${interestingHeaders}]`);
-                    // Smart passthrough: if browser already generated a long proper hcaptcha token
-                    // (2000+ chars), it's IP-matched from the correct proxy — pass through unchanged.
-                    // Only inject external solver token when browser has no/short token.
-                    if (existingCapLen >= 1500) {
-                      log(`  → [route-intercept] Browser has long token (${existingCapLen} chars) — passing through unchanged (IP-matched, no injection)`);
-                      await route.continue();
-                      return;
-                    }
-                    // Browser has short/missing token — inject external solver token
-                    body["recaptchaToken"] = solvedToken;
-                    log(`  → [route-intercept] Browser short token (${existingCapLen} chars) — injecting solver token (${solvedToken.length} chars)`);
-                    await route.continue({ postData: JSON.stringify(body) });
-                    return;
-                  } catch {
-                    log(`  → [route-intercept] POST ${urlObj.pathname} | non-JSON body`);
-                  }
-                }
-              }
-            } catch {}
-            await route.continue();
-          });
-
-          await page.waitForTimeout(500);
-        }
-      } else {
-        log("No hCaptcha detected on signup page — submitting directly");
-      }
-    } catch (capErr: any) {
-      log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — proceeding`);
-    }
-
-    // ── Pre-submit diagnostic: log what token state the browser has ──
-    try {
-      const preSubmitState = await page.evaluate(() => {
-        const w = window as any;
-        let widgetToken = "";
-        try { widgetToken = w.hcaptcha?.getResponse() || ""; } catch {}
-        for (let i = 0; i <= 5 && !widgetToken; i++) {
-          try { widgetToken = w.hcaptcha?.getResponse(i) || ""; } catch {}
-        }
-        const ta = document.querySelector<HTMLTextAreaElement>(
-          'textarea[name="h-captcha-response"], textarea[name="g-recaptcha-response"]'
-        );
-        const hiddenVal = ta?.value || "";
-        return { widgetLen: widgetToken.length, hiddenLen: hiddenVal.length, widgetStart: widgetToken.substring(0, 10), hiddenStart: hiddenVal.substring(0, 10) };
-      }).catch(() => null);
-      if (preSubmitState) {
-        log(`  → Pre-submit captcha state: widgetToken=${preSubmitState.widgetLen} chars (${preSubmitState.widgetStart}…), hiddenTA=${preSubmitState.hiddenLen} chars (${preSubmitState.hiddenStart}…)`);
-      }
-    } catch {}
-
     log("Submitting signup form...");
     const submitSelectors = [
       'button[type="submit"]',
@@ -11278,7 +11023,6 @@ export async function registerReplitAccount(
     ];
     let submitted = false;
     for (const sel of submitSelectors) {
-      if (submitted) break;
       try {
         const btns = await page.$$(sel);
         for (const btn of btns) {
@@ -11312,8 +11056,6 @@ export async function registerReplitAccount(
       page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => {}),
       page.waitForTimeout(6000),
     ]);
-    // Remove route interceptor after form submission is processed
-    await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
     // Extra settle time in case of redirect chains
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1000);
@@ -11325,15 +11067,9 @@ export async function registerReplitAccount(
       return page.content().catch(() => "");
     });
     const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists") || pageText.toLowerCase().includes("captcha")) {
+    if (pageText.toLowerCase().includes("already") || pageText.toLowerCase().includes("in use") || pageText.toLowerCase().includes("taken") || pageText.toLowerCase().includes("exists")) {
       const firstLine = pageText.split("\n").filter(l => l.trim().length > 5).slice(0, 5).join(" | ");
       log(`⚠️ Possible form error text: ${firstLine.substring(0, 200)}`);
-    }
-    // ── Fast bail: pageText says captcha invalid — don't even bother with DOM lookup ──
-    if (pageText.toLowerCase().includes("captcha token is invalid") || pageText.toLowerCase().includes("captcha") && pageText.toLowerCase().includes("invalid") && currentUrl.includes("signup")) {
-      log("❌ Captcha rejected (pageText) — aborting immediately (account not created)");
-      try { await browser.close(); } catch {}
-      return { success: false, error: "Replit rejected the captcha token — account not created" };
     }
 
     if (pageContent.toLowerCase().includes("verify") || pageContent.toLowerCase().includes("check your email") || pageContent.toLowerCase().includes("verification") || currentUrl.includes("verify") || currentUrl.includes("confirm")) {
@@ -11348,12 +11084,6 @@ export async function registerReplitAccount(
       if (errText && errText.toLowerCase().includes("already taken")) {
         log("Username already taken — this account may have been partially created");
       }
-      // ── Early bail: captcha was rejected — account was never created, no point polling ──
-      if (errText && (errText.toLowerCase().includes("captcha") || errText.toLowerCase().includes("token is invalid"))) {
-        log("❌ Captcha rejected by Replit — aborting (no account was created, skipping inbox poll)");
-        try { await browser.close(); } catch {}
-        return { success: false, error: "Replit rejected the captcha token — account not created" };
-      }
     } else {
       log(`Current URL after submit: ${currentUrl}`);
     }
@@ -11364,13 +11094,6 @@ export async function registerReplitAccount(
     let verificationLink: string | null = null;
     let verificationCode: string | null = null;
 
-    if (bizMailOptions) {
-      log("Reading Replit verification email via smtp.dev API (Business Mail)...");
-      const { pollForReplitVerificationEmail } = await import("./smtpDevService");
-      const verResult = await pollForReplitVerificationEmail(bizMailOptions.emailAddress, 120_000, log, bizMailOptions.smtpDevId);
-      if (verResult?.link) verificationLink = verResult.link;
-      if (verResult?.code) verificationCode = verResult.code;
-    } else {
     log("Reading Replit verification email via Outlook Web Access...");
     let owaBrowser: any = null;
     try {
@@ -11545,7 +11268,6 @@ export async function registerReplitAccount(
     } finally {
       if (owaBrowser) { try { await owaBrowser.close(); } catch {} }
     }
-    } // end else (Outlook OWA branch)
 
     if (verificationLink) {
       log(`Navigating to verification link...`);
@@ -16660,13 +16382,13 @@ export async function checkoutExistingReplitAccount(
     log(`🤖 Pre-solving hCaptcha x2 (no rqdata) — both tokens in parallel...`);
     let preSolvedToken2: string | null = null;
 
-    const nopeKeysPre = await getNopeCHAKeys();
-    const nopeKeyPre = nopeKeysPre[0] || nopeKeysPre[1];
+    const nopeKeyRowPre = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+    const nopeKeyPre = nopeKeyRowPre.rows.length > 0 ? (nopeKeyRowPre.rows[0].value as string) : "";
 
     const solveOneNope = async (label: string): Promise<string | null> => {
-      if (!nopeKeysPre[0] && !nopeKeysPre[1]) return null;
+      if (!nopeKeyPre) return null;
       try {
-        const r = await solveHCaptchaViaNopeCHADual(nopeKeysPre, HCAP_URL, HCAP_SITE_KEY, undefined, 120);
+        const r = await solveHCaptchaViaNopeCHA(nopeKeyPre, HCAP_URL, HCAP_SITE_KEY, undefined, 120);
         if (r.success && r.token) {
           log(`✅ Pre-solved token ${label} (len=${r.token.length})`);
           return r.token;
@@ -16814,11 +16536,12 @@ export async function checkoutExistingReplitAccount(
       // NopeCHA solves in ~35s when not rate-limited — much better than using a stale pre-solved token.
       // Race NopeCHA (90s timeout) against a pre-solved fallback.
       let finalResult: { success: boolean; token?: string; error?: string };
-      const nopeKeysRow = await getNopeCHAKeys();
-      const freshSolvePromise = (nopeKeysRow[0] || nopeKeysRow[1])
-        ? solveHCaptchaViaNopeCHADual(nopeKeysRow, HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
+      const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+      const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0].value as string) : "";
+      const freshSolvePromise = nopeKey
+        ? solveHCaptchaViaNopeCHA(nopeKey, HCAP_URL, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
         : Promise.resolve({ success: false, error: "no NopeCHA key" } as { success: false; error: string });
-      log(`  🔄 Starting fresh NopeCHA solve for visible challenge (90s timeout, dual-key)...`);
+      log(`  🔄 Starting fresh NopeCHA solve for visible challenge (90s timeout)...`);
       const freshResult = await freshSolvePromise;
       if (freshResult.success && freshResult.token) {
         log(`  ✅ Fresh live solve succeeded (len=${freshResult.token.length})`);
@@ -18199,13 +17922,13 @@ export async function onboardingCheckoutReplitAccount(
 
     log(`🤖 Pre-solving hCaptcha x2 (parallel)...`);
     let preSolvedToken2b: string | null = null;
-    const nopeKeysPre2 = await getNopeCHAKeys();
-    const nopeKeyPre2 = nopeKeysPre2[0] || nopeKeysPre2[1];
+    const nopeKeyRowPre2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+    const nopeKeyPre2 = nopeKeyRowPre2.rows.length > 0 ? (nopeKeyRowPre2.rows[0].value as string) : "";
 
     const solveOneNope2 = async (label: string): Promise<string | null> => {
-      if (!nopeKeysPre2[0] && !nopeKeysPre2[1]) return null;
+      if (!nopeKeyPre2) return null;
       try {
-        const r = await solveHCaptchaViaNopeCHADual(nopeKeysPre2, HCAP_URL2, HCAP_SITE_KEY, undefined, 120);
+        const r = await solveHCaptchaViaNopeCHA(nopeKeyPre2, HCAP_URL2, HCAP_SITE_KEY, undefined, 120);
         if (r.success && r.token) { log(`✅ Pre-solved token ${label} (len=${r.token.length})`); return r.token; }
       } catch (e: any) { log(`⚠️ Pre-solve ${label} failed: ${e.message}`); }
       return null;
@@ -18340,11 +18063,12 @@ export async function onboardingCheckoutReplitAccount(
       log(`  rqdata: ${capturedRqdata ? capturedRqdata.substring(0, 40) + "..." : "not found (will solve without)"}`);
 
       let finalResult2: { success: boolean; token?: string; error?: string };
-      const nopeKeysRow2 = await getNopeCHAKeys();
-      const freshSolvePromise2 = (nopeKeysRow2[0] || nopeKeysRow2[1])
-        ? solveHCaptchaViaNopeCHADual(nopeKeysRow2, HCAP_URL2, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
+      const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+      const nopeKey2 = nopeKeyRow2.rows.length > 0 ? (nopeKeyRow2.rows[0].value as string) : "";
+      const freshSolvePromise2 = nopeKey2
+        ? solveHCaptchaViaNopeCHA(nopeKey2, HCAP_URL2, HCAP_SITE_KEY, capturedRqdata || undefined, 90)
         : Promise.resolve({ success: false, error: "no NopeCHA key" } as { success: false; error: string });
-      log(`  🔄 Starting fresh NopeCHA solve (90s, dual-key)...`);
+      log(`  🔄 Starting fresh NopeCHA solve (90s)...`);
       const freshResult2 = await freshSolvePromise2;
       if (freshResult2.success && freshResult2.token) {
         log(`  ✅ Fresh solve succeeded (len=${freshResult2.token.length})`);
@@ -19429,21 +19153,21 @@ export async function generateSingleCheckoutLink(
         const keyToUse = siteKey || "4c672d35-0701-42b2-88c3-78380b0db560"; // Replit's known hCaptcha sitekey fallback
         log(`  → sitekey: ${keyToUse.substring(0, 20)}...`);
 
-        // Fetch NopeCHA API keys from settings (dual-key support)
-        const nopeKeysDual = await getNopeCHAKeys();
-        const nopeKey = nopeKeysDual[0] || nopeKeysDual[1] || null;
+        // Fetch NopeCHA API key from settings; fall back to CapSolver if not configured
+        const nopeKeyRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+        const nopeKey = nopeKeyRow.rows.length > 0 ? (nopeKeyRow.rows[0] as any).value as string : null;
 
         let capResult = { success: false, token: undefined as string | undefined, error: "no solver configured" };
 
         if (nopeKey) {
-          log(`  → Using NopeCHA solver (dual-key)... (this takes 30–60s)`);
+          log(`  → Using NopeCHA solver... (this takes 30–60s)`);
           const nopeStart = Date.now();
           const nopeTicker = setInterval(() => {
             const elapsed = Math.round((Date.now() - nopeStart) / 1000);
             log(`  ⏳ Captcha solving in progress... (${elapsed}s elapsed)`);
           }, 12000);
           try {
-            capResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual, "https://replit.com/login", keyToUse, undefined, 150);
+            capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/login", keyToUse, undefined, 150);
           } finally {
             clearInterval(nopeTicker);
           }
@@ -19625,14 +19349,15 @@ export async function generateSingleCheckoutLink(
         if (hasNewCaptcha && stuckUrl.includes("replit.com/login")) {
           log(`🔄 Replit presented a new hCaptcha — solving again (retry #2)...`);
           try {
-            const nopeKeysDual2 = await getNopeCHAKeys();
+            const nopeKeyRow2 = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] }));
+            const nopeKey2 = nopeKeyRow2.rows.length > 0 ? (nopeKeyRow2.rows[0] as any).value as string : null;
             let retryResult = { success: false, token: undefined as string | undefined, error: "no solver" };
-            if (nopeKeysDual2[0] || nopeKeysDual2[1]) {
-              log(`  → Solving retry captcha via NopeCHA (dual-key)...`);
+            if (nopeKey2) {
+              log(`  → Solving retry captcha via NopeCHA...`);
               const retryStart = Date.now();
               const retryTicker = setInterval(() => log(`  ⏳ Retry captcha solving... (${Math.round((Date.now() - retryStart) / 1000)}s)`), 12000);
               try {
-                retryResult = await solveHCaptchaViaNopeCHADual(nopeKeysDual2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 150);
+                retryResult = await solveHCaptchaViaNopeCHA(nopeKey2, "https://replit.com/login", "4c672d35-0701-42b2-88c3-78380b0db560", undefined, 150);
               } finally {
                 clearInterval(retryTicker);
               }
@@ -20731,9 +20456,12 @@ export async function registerNanoBananaAccount(
 
   try {
     // Get NopeCHA key for hCaptcha solving
-    const nopeKeysFinal = await getNopeCHAKeys().catch(() => ["", ""] as [string, string]);
-    const nopeKey = nopeKeysFinal[0] || nopeKeysFinal[1];
-    log(`NopeCHA key loaded: ${nopeKey ? "yes (dual-key enabled)" : "none"}`);
+    let nopeKey = "";
+    try {
+      const r = await db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`);
+      if (r.rows.length > 0 && r.rows[0].value) nopeKey = r.rows[0].value as string;
+    } catch {}
+    log(`NopeCHA key loaded: ${nopeKey ? "yes" : "none"}`);
 
     // Use ZenRows browser — handles fingerprint randomisation, TLS masking, and proxy routing
     // so Microsoft does not flag the session as automation on every login

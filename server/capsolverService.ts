@@ -36,7 +36,6 @@ export interface CapSolverTaskResult {
   error?: string;
   taskId?: string;
   cost?: number;
-  rateLimited?: boolean; // true when NopeCHA key has hit its daily/credit limit
 }
 
 export async function getCapSolverBalance(): Promise<{ balance: number; error?: string }> {
@@ -171,38 +170,23 @@ export async function solveHCaptcha(
 
 // Generic hCaptcha solver using anti-captcha.com compatible JSON API
 // Supports: anti-captcha.com (preferred), 2captcha.com (fallback)
-export async function solveHCaptchaViaJsonApi(
+async function solveHCaptchaViaJsonApi(
   apiKey: string,
   baseUrl: string,
   serviceName: string,
   websiteURL: string,
   websiteKey: string,
-  rqdata?: string | null,
-  proxyUrl?: string,
-  userAgent?: string
+  rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   try {
     const taskPayload: Record<string, any> = {
-      type: proxyUrl ? "HCaptchaTask" : "HCaptchaTaskProxyless",
+      type: "HCaptchaTaskProxyless",
       websiteURL,
       websiteKey,
     };
     if (rqdata) taskPayload.enterprisePayload = { rqdata };
-    if (proxyUrl) {
-      try {
-        const pu = new URL(proxyUrl);
-        taskPayload.proxyType = "http";
-        taskPayload.proxyAddress = pu.hostname;
-        taskPayload.proxyPort = parseInt(pu.port, 10) || 80;
-        if (pu.username) taskPayload.proxyLogin = decodeURIComponent(pu.username);
-        if (pu.password) taskPayload.proxyPassword = decodeURIComponent(pu.password);
-      } catch {}
-    }
-    if (userAgent) taskPayload.userAgent = userAgent;
 
-    const debugPayload = { ...taskPayload };
-    if (debugPayload.proxyPassword) debugPayload.proxyPassword = "***";
-    console.log(`[${serviceName}] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}${rqdata ? " [+rqdata]" : ""} payload:${JSON.stringify(debugPayload)}`);
+    console.log(`[${serviceName}] Creating hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}${rqdata ? " [+rqdata]" : ""}...`);
     const createResp = await axios.post(`${baseUrl}/createTask`, {
       clientKey: apiKey,
       task: taskPayload,
@@ -261,8 +245,7 @@ export async function solveHCaptchaViaNopeCHA(
   websiteURL: string,
   websiteKey: string,
   rqdata?: string | null,
-  maxWaitSec: number = 300,
-  proxyUrl?: string | null
+  maxWaitSec: number = 300
 ): Promise<CapSolverTaskResult> {
   try {
     const authHeader = `Basic ${apiKey}`;
@@ -271,31 +254,6 @@ export async function solveHCaptchaViaNopeCHA(
     // Per NopeCHA API docs: rqdata must be nested inside data: { rqdata: "..." }
     const payload: Record<string, any> = { sitekey: websiteKey, url: websiteURL };
     if (rqdata) { payload.data = { rqdata }; }
-
-    // ── Proxy support: NopeCHA will solve FROM the proxy IP (IP-matched token) ──
-    // proxyUrl format: http://user:pass@host:port
-    // NopeCHA accepts a plain URL string for the proxy field.
-    if (proxyUrl) {
-      try {
-        const pu = new URL(proxyUrl);
-        const scheme = pu.protocol.replace(":", ""); // "http"
-        const host = pu.hostname;                    // "proxy.nsocks.com"
-        const port = Number(pu.port) || 8080;        // 2312
-        const username = decodeURIComponent(pu.username || "");
-        const password = decodeURIComponent(pu.password || "");
-        if (!scheme || !host || !port) {
-          throw new Error(`missing fields: scheme=${scheme} host=${host} port=${port}`);
-        }
-        // Send proxy as plain URL string (NopeCHA v1 preferred format)
-        const proxyStr = `${scheme}://${username ? encodeURIComponent(username) + ":" + encodeURIComponent(password) + "@" : ""}${host}:${port}`;
-        payload.proxy = proxyStr;
-        const maskedProxy = `${scheme}://${username ? username + ":***@" : ""}${host}:${port}`;
-        console.log(`[NopeCHA] Using proxy for IP-matched solve: ${maskedProxy}`);
-        console.log(`[NopeCHA] Proxy string: ${maskedProxy}`);
-      } catch (pe: any) {
-        console.log(`[NopeCHA] Proxy parse error (${pe.message}) — solving proxyless`);
-      }
-    }
 
     console.log(`[NopeCHA] Submitting hCaptcha task for ${websiteURL} sitekey=${websiteKey.substring(0, 8)}${rqdata ? " [+rqdata]" : ""}...`);
     const submitResp = await axios.post(baseUrl, payload, {
@@ -306,12 +264,7 @@ export async function solveHCaptchaViaNopeCHA(
     console.log(`[NopeCHA] Submit response: ${JSON.stringify(submitResp.data).substring(0, 200)}`);
 
     if (submitResp.data.error) {
-      const errCode = submitResp.data.error;
-      const errMsg = submitResp.data.message || "submission failed";
-      // Error codes 4 (credit exhausted), 28 (daily limit), 29 (request limit) = rate limited
-      const isRateLimit = [4, 28, 29].includes(errCode) ||
-        /limit|credit|quota|exceeded|insufficient/i.test(errMsg);
-      return { success: false, rateLimited: isRateLimit, error: `NopeCHA error ${errCode}: ${errMsg}` };
+      return { success: false, error: `NopeCHA error ${submitResp.data.error}: ${submitResp.data.message || "submission failed"}` };
     }
 
     const taskId = submitResp.data.data;
@@ -371,97 +324,18 @@ export async function solveHCaptchaViaNopeCHA(
   }
 }
 
-// ─── NopeCHA balance ────────────────────────────────────────────────────────
-
-/**
- * Fetch remaining credits for a NopeCHA API key.
- * GET https://api.nopecha.com/v1/credit  →  { data: <credits> }
- * $1 = ~90,000 solves.
- */
-export async function getNopeCHABalance(apiKey: string): Promise<{ credits: number; error?: string }> {
-  try {
-    const resp = await axios.get("https://api.nopecha.com/v1/credit", {
-      headers: { "Authorization": `Basic ${apiKey}` },
-      timeout: 10000,
-    });
-    if (resp.data?.error) {
-      return { credits: 0, error: `NopeCHA error ${resp.data.error}: ${resp.data.message || "unknown"}` };
-    }
-    const credits = typeof resp.data?.data === "number" ? resp.data.data : 0;
-    return { credits };
-  } catch (err: any) {
-    const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 100) : "";
-    return { credits: 0, error: `${err.message}${body ? ` — ${body}` : ""}` };
-  }
-}
-
-// ─── Dual-key NopeCHA helpers ───────────────────────────────────────────────
-
-/** Returns [key1, key2] from settings; empty string when not configured. */
-export async function getNopeCHAKeys(): Promise<[string, string]> {
-  const [r1, r2] = await Promise.all([
-    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`).catch(() => ({ rows: [] })),
-    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key_2'`).catch(() => ({ rows: [] })),
-  ]);
-  const k1 = r1.rows.length > 0 ? (r1.rows[0].value as string) || "" : "";
-  const k2 = r2.rows.length > 0 ? (r2.rows[0].value as string) || "" : "";
-  return [k1, k2];
-}
-
-/**
- * Solve hCaptcha using two NopeCHA API keys.
- * Tries key1 first. If key1 returns a rate-limit / credit-limit error,
- * automatically retries with key2 (if configured).
- */
-export async function solveHCaptchaViaNopeCHADual(
-  keys: [string, string],
-  websiteURL: string,
-  websiteKey: string,
-  rqdata?: string | null,
-  maxWaitSec: number = 300,
-  proxyUrl?: string | null
-): Promise<CapSolverTaskResult> {
-  const [key1, key2] = keys;
-  if (!key1 && !key2) return { success: false, error: "No NopeCHA key configured" };
-
-  if (key1) {
-    const result = await solveHCaptchaViaNopeCHA(key1, websiteURL, websiteKey, rqdata, maxWaitSec, proxyUrl);
-    if (result.success) return result;
-    if (result.rateLimited && key2) {
-      console.log(`[NopeCHA] Key 1 rate limited — switching to Key 2...`);
-    } else if (!key2) {
-      return result;
-    } else if (!result.rateLimited) {
-      // Non-limit error on key1 — still try key2 as a safety net
-      console.log(`[NopeCHA] Key 1 failed (${result.error}) — trying Key 2...`);
-    }
-  }
-
-  if (key2) {
-    console.log(`[NopeCHA] Attempting solve with Key 2...`);
-    return solveHCaptchaViaNopeCHA(key2, websiteURL, websiteKey, rqdata, maxWaitSec, proxyUrl);
-  }
-
-  return { success: false, error: "Both NopeCHA keys exhausted" };
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-
 export async function solveHCaptchaWith2Captcha(
   websiteURL: string,
   websiteKey: string,
   rqdata?: string | null
 ): Promise<CapSolverTaskResult> {
   // Fetch all solver keys from DB in parallel
-  const [nopeRow, nopeRow2, acRow, tcRow] = await Promise.all([
+  const [nopeRow, acRow, tcRow] = await Promise.all([
     db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key'`),
-    db.execute(sql`SELECT value FROM settings WHERE key = 'nopecha_api_key_2'`),
     db.execute(sql`SELECT value FROM settings WHERE key = 'anticaptcha_api_key'`),
     db.execute(sql`SELECT value FROM settings WHERE key = 'twocaptcha_api_key'`),
   ]);
-  const nopeKey  = nopeRow.rows.length  > 0 ? (nopeRow.rows[0].value  as string) : "";
-  const nopeKey2 = nopeRow2.rows.length > 0 ? (nopeRow2.rows[0].value as string) : "";
-  const nopeKeys: [string, string] = [nopeKey, nopeKey2];
+  const nopeKey = nopeRow.rows.length > 0 ? (nopeRow.rows[0].value as string) : "";
   const acKey   = acRow.rows.length > 0   ? (acRow.rows[0].value as string)   : "";
   const tcKey   = tcRow.rows.length > 0   ? (tcRow.rows[0].value as string)   : "";
 
@@ -471,13 +345,13 @@ export async function solveHCaptchaWith2Captcha(
   if (rqdata) {
     const solvers: Array<{ name: string; promise: Promise<CapSolverTaskResult> }> = [];
 
-    if (nopeKey || nopeKey2) {
+    if (nopeKey) {
       // Cap NopeCHA at 50s — it hangs forever on bad keys / slow queues
       const nopeTimeout = new Promise<CapSolverTaskResult>(r =>
         setTimeout(() => r({ success: false, error: "NopeCHA race timeout (50s)" }), 50000)
       );
-      console.log(`[NopeCHA] Starting enterprise hCaptcha race (rqdata, 50s cap, dual-key)...`);
-      solvers.push({ name: "NopeCHA", promise: Promise.race([solveHCaptchaViaNopeCHADual(nopeKeys, websiteURL, websiteKey, rqdata), nopeTimeout]) });
+      console.log(`[NopeCHA] Starting enterprise hCaptcha race (rqdata, 50s cap)...`);
+      solvers.push({ name: "NopeCHA", promise: Promise.race([solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata), nopeTimeout]) });
     }
     if (acKey) {
       console.log(`[AntiCaptcha] Starting enterprise hCaptcha race (rqdata present)...`);
@@ -519,9 +393,9 @@ export async function solveHCaptchaWith2Captcha(
   }
 
   // Without rqdata: try sequentially (cheapest → fallback → CapSolver)
-  if (nopeKey || nopeKey2) {
-    console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com (dual-key)...`);
-    const result = await solveHCaptchaViaNopeCHADual(nopeKeys, websiteURL, websiteKey, rqdata);
+  if (nopeKey) {
+    console.log(`[NopeCHA] Attempting hCaptcha solve via nopecha.com...`);
+    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata);
     if (result.success) return result;
     console.log(`[NopeCHA] Failed: ${result.error} — trying next solver...`);
   }
@@ -538,9 +412,9 @@ export async function solveHCaptchaWith2Captcha(
     console.log(`[2captcha] Failed: ${result.error} — retrying NopeCHA as last resort...`);
   }
   // Final attempt: retry NopeCHA with a fresh task (ElevenLabs hCaptcha is NopeCHA-exclusive)
-  if (nopeKey || nopeKey2) {
-    console.log(`[NopeCHA] Final retry — submitting fresh task via dual-key (last resort)...`);
-    const result = await solveHCaptchaViaNopeCHADual(nopeKeys, websiteURL, websiteKey, rqdata, 300);
+  if (nopeKey) {
+    console.log(`[NopeCHA] Final retry — submitting fresh task (last resort)...`);
+    const result = await solveHCaptchaViaNopeCHA(nopeKey, websiteURL, websiteKey, rqdata, 300);
     if (result.success) return result;
     console.log(`[NopeCHA] Final retry failed: ${result.error}`);
     return result;
@@ -725,13 +599,13 @@ async function createAndPollTask(task: Record<string, any>): Promise<CapSolverTa
   return { success: false, error: "Solving timeout (360s)", taskId };
 }
 
-function parseProxy(proxyUrl: string): Record<string, any> {
+function parseProxy(proxyUrl: string): Record<string, string> {
   try {
-    const url = new URL(proxyUrl.startsWith("http") ? proxyUrl : `http://${proxyUrl}`);
-    const result: Record<string, any> = {
+    const url = new URL(proxyUrl);
+    const result: Record<string, string> = {
       proxyType: url.protocol.replace(":", "").replace("https", "http"),
       proxyAddress: url.hostname,
-      proxyPort: parseInt(url.port, 10),
+      proxyPort: url.port,
     };
     if (url.username) result.proxyLogin = decodeURIComponent(url.username);
     if (url.password) result.proxyPassword = decodeURIComponent(url.password);

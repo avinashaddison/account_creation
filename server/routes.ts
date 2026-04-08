@@ -15,7 +15,7 @@ import { brunoMarsPresaleStep } from "./brunoMarsService";
 import { getSMSPoolBalance } from "./smspoolService";
 import { listDomains, listAccounts, createAccount, deleteAccount, getFullInbox } from "./smtpDevService";
 import { activateOutlookSession, stopOutlookSession, getOutlookMessages, getOutlookSessionInfo } from "./outlookWorkspaceService";
-import { getCapSolverBalance, clearCapsolverApiKeyCache, getNopeCHABalance } from "./capsolverService";
+import { getCapSolverBalance, clearCapsolverApiKeyCache } from "./capsolverService";
 import { getFivesimBalance } from "./fivesimService";
 import { clearZenrowsApiKeyCache } from "./playwrightService";
 import { randomUUID, createHash } from "crypto";
@@ -1077,28 +1077,6 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/settings/nopecha-api-key-2", requireAuth, requireSuperAdmin, async (_req, res) => {
-    try {
-      const key = await storage.getSetting("nopecha_api_key_2");
-      res.json({ key: key || "" });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put("/api/admin/nopecha-api-key-2", requireAuth, requireSuperAdmin, async (req, res) => {
-    try {
-      const { key } = req.body;
-      if (!key || typeof key !== "string" || key.trim().length < 5) {
-        return res.status(400).json({ error: "Valid NopeCHA API Key 2 is required" });
-      }
-      await storage.setSetting("nopecha_api_key_2", key.trim());
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   app.get("/api/settings/replit-checkout-delay", requireAuth, async (_req, res) => {
     try {
       const value = await storage.getSetting("replit_checkout_delay_minutes");
@@ -1282,29 +1260,6 @@ export async function registerRoutes(
     try {
       const result = await getCapSolverBalance();
       res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/nopecha/balance", requireAuth, requireSuperAdmin, async (_req, res) => {
-    try {
-      const key = await storage.getSetting("nopecha_api_key");
-      if (!key) return res.json({ credits: 0, balance: 0, error: "No key configured" });
-      const result = await getNopeCHABalance(key);
-      // $1 = 90,000 solves; expose balance in dollars so the UI renders "$X.XX"
-      res.json({ credits: result.credits, balance: result.credits / 90000, error: result.error });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/nopecha/balance-2", requireAuth, requireSuperAdmin, async (_req, res) => {
-    try {
-      const key = await storage.getSetting("nopecha_api_key_2");
-      if (!key) return res.json({ credits: 0, balance: 0, error: "No key configured" });
-      const result = await getNopeCHABalance(key);
-      res.json({ credits: result.credits, balance: result.credits / 90000, error: result.error });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3305,34 +3260,21 @@ export async function registerRoutes(
 
   app.post("/api/replit-create/bulk", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { count = 1, couponCode, cardId, emailProvider = "outlook" } = req.body;
+      const { count = 1, couponCode, cardId } = req.body;
       const actualCount = Math.min(Math.max(1, parseInt(count) || 1), 1000);
       const userId = req.session.userId;
 
-      type BulkAccount = { email: string; password: string; isBizMail?: boolean; smtpDevId?: string | null };
-      let toUse: BulkAccount[] = [];
+      const allOutlook = await storage.getAllPrivateOutlooks();
+      const replitAccts = await storage.getAllReplitAccounts();
+      const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
+      const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
 
-      if (emailProvider === "bizmail") {
-        const activeBiz = await storage.getActiveBizMailAccounts();
-        // Prefer smtp.dev accounts (smtpDevId set) so verification works
-        const available = activeBiz
-          .filter(a => !a.usedForReplit)
-          .sort((a, b) => (b.smtpDevId ? 1 : 0) - (a.smtpDevId ? 1 : 0));
-        if (available.length === 0) {
-          return res.status(400).json({ error: "No available Business Mail accounts — all have been used for Replit" });
-        }
-        toUse = available.slice(0, Math.min(actualCount, available.length)).map(a => ({ email: a.email, password: a.password, isBizMail: true, smtpDevId: a.smtpDevId }));
-      } else {
-        const allOutlook = await storage.getAllPrivateOutlooks();
-        const replitAccts = await storage.getAllReplitAccounts();
-        const usedEmails = new Set(replitAccts.map((a) => a.outlookEmail?.toLowerCase()).filter(Boolean));
-        const available = allOutlook.filter((a) => !usedEmails.has(a.email.toLowerCase()));
-        if (available.length === 0) {
-          return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
-        }
-        const shuffled = [...available].sort(() => Math.random() - 0.5);
-        toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length)).map(a => ({ email: a.email, password: a.password }));
+      if (available.length === 0) {
+        return res.status(400).json({ error: "No available Outlook accounts — all have already been used for Replit" });
       }
+
+      const shuffled = [...available].sort(() => Math.random() - 0.5);
+      const toUse = shuffled.slice(0, Math.min(actualCount, shuffled.length));
 
       const bulkId = randomUUID().substring(0, 8);
       const batchId = `replit-bulk-${bulkId}`;
@@ -3352,26 +3294,21 @@ export async function registerRoutes(
       res.json({ success: true, bulkId, batchId, count: toUse.length, message: `Starting bulk creation for ${toUse.length} account(s)` });
 
       (async () => {
-        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) queued (${emailProvider === "bizmail" ? "Business Mail" : "Outlook"})`, userId);
+        broadcastLog(batchId, bulkId, `🚀 Bulk create started — ${toUse.length} account(s) queued`, userId);
         let successCount = 0;
         let failCount = 0;
 
         for (let i = 0; i < toUse.length; i++) {
           const acc = toUse[i];
 
-          if (acc.isBizMail) {
-            await storage.markBizMailUsedForReplit(acc.email);
-          }
-
-          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email}${acc.isBizMail ? " (BizMail)" : ""} ━━━`, userId);
+          broadcastLog(batchId, bulkId, `━━━ [${i + 1}/${toUse.length}] ${acc.email} ━━━`, userId);
           try {
             const result = await registerReplitAccount(
               acc.email,
               acc.password,
               (msg) => broadcastLog(batchId, bulkId, msg, userId),
               couponCode || undefined,
-              bulkCardDetails,
-              acc.isBizMail ? { emailAddress: acc.email, smtpDevId: acc.smtpDevId ?? undefined } : undefined
+              bulkCardDetails
             );
             if (result.success) {
               try {
@@ -3379,7 +3316,7 @@ export async function registerRoutes(
                   username: result.username!,
                   email: result.email!,
                   password: result.password!,
-                  outlookEmail: acc.isBizMail ? null : acc.email,
+                  outlookEmail: acc.email,
                   status: "processing",
                   createdBy: userId,
                 });
@@ -3409,134 +3346,19 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/bizmail/replit-available-count", requireAuth, async (_req: Request, res: Response) => {
-    try {
-      const count = await storage.countUnusedBizMailForReplit();
-      res.json({ count });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Paginate all smtp.dev accounts and bulk-upsert them into biz_mail_accounts.
-  // Long-running — streams progress via SSE or returns summary JSON.
-  app.post("/api/bizmail/import-smtp-dev", requireAuth, async (req: Request, res: Response) => {
-    // Stream SSE progress while paginating the smtp.dev account list and importing in chunks.
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders?.();
-
-    const send = (data: object) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
-
-    // Heartbeat every 15s to prevent proxy / browser timeout during long fetch
-    const heartbeat = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 15_000);
-
-    try {
-      const SMTP_DEV_BASE = "https://api.smtp.dev";
-      const apiKey = process.env.SMTP_DEV_API_KEY;
-      if (!apiKey) throw new Error("SMTP_DEV_API_KEY is not configured");
-
-      // smtp.dev returns plain JSON arrays — paginate with ?page=N until empty page.
-      // No view.next / hydra:next links are present in the actual API response.
-      send({ type: "start", message: "Connecting to smtp.dev and paginating accounts..." });
-
-      let pageNum = 0;
-      let totalFetched = 0;
-      let totalInserted = 0;
-      let totalUpdated = 0;
-      const IMPORT_CHUNK = 200;
-      const pending: { smtpDevId: string; email: string }[] = [];
-
-      const flushPending = async () => {
-        if (pending.length === 0) return;
-        const chunk = pending.splice(0, pending.length);
-        const ins = await storage.importSmtpDevAccounts(chunk);
-        totalInserted += ins;
-        totalUpdated += chunk.length - ins;
-      };
-
-      while (true) {
-        pageNum++;
-        const res2 = await fetch(`${SMTP_DEV_BASE}/accounts?page=${pageNum}`, {
-          headers: { "X-API-KEY": apiKey, "Accept": "application/json" },
-        });
-        if (!res2.ok) {
-          const txt = await res2.text().catch(() => "");
-          throw new Error(`smtp.dev GET /accounts?page=${pageNum} → ${res2.status}: ${txt.slice(0, 200)}`);
-        }
-        const data: any = await res2.json();
-        // API returns plain array; guard against JSON-LD member wrapper just in case
-        const items: any[] = Array.isArray(data) ? data : (data?.member ?? []);
-
-        if (items.length === 0) break; // last page reached
-
-        for (const a of items) {
-          if (!a.isDeleted && a.isActive !== false && a.address) {
-            pending.push({ smtpDevId: String(a.id), email: String(a.address) });
-          }
-        }
-        totalFetched += items.length;
-
-        // Flush to DB every IMPORT_CHUNK accounts
-        if (pending.length >= IMPORT_CHUNK) {
-          await flushPending();
-          send({ type: "progress", message: `Page ${pageNum} — ${totalFetched} fetched | ${totalInserted} new | ${totalUpdated} updated` });
-        } else {
-          send({ type: "progress", message: `Page ${pageNum} — ${totalFetched} accounts fetched so far...` });
-        }
-
-        if (pageNum >= 400) break; // safety cap ~12 000 accounts
-      }
-
-      // Flush any remaining
-      await flushPending();
-
-      clearInterval(heartbeat);
-      send({
-        type: "done",
-        message: `Import complete — ${totalInserted} new accounts added, ${totalUpdated} existing updated. (${totalFetched} total fetched across ${pageNum} page${pageNum !== 1 ? "s" : ""})`,
-        total: totalFetched,
-        inserted: totalInserted,
-        updated: totalUpdated,
-      });
-      res.end();
-    } catch (err: any) {
-      clearInterval(heartbeat);
-      send({ type: "error", message: `Import failed: ${err.message}` });
-      res.end();
-    }
-  });
-
   app.post("/api/replit-create", requireAuth, requireServiceAccess("replit"), async (req: Request, res: Response) => {
     try {
-      const { outlookEmail, outlookPassword, couponCode, cardId, emailProvider = "outlook" } = req.body;
+      const { outlookEmail, outlookPassword, couponCode, cardId } = req.body;
+      if (!outlookEmail || !outlookPassword) {
+        return res.status(400).json({ error: "Outlook email and password are required" });
+      }
 
-      let resolvedEmail: string;
-      let resolvedPassword: string;
-      let bizMailRecord: import("@shared/schema").BizMailAccount | null = null;
-
-      if (emailProvider === "bizmail") {
-        const biz = await storage.getUnusedBizMailForReplit();
-        if (!biz) {
-          return res.status(400).json({ error: "No available Business Mail accounts — all have been used for Replit" });
-        }
-        bizMailRecord = biz;
-        resolvedEmail = biz.email;
-        resolvedPassword = biz.password;
-      } else {
-        if (!outlookEmail || !outlookPassword) {
-          return res.status(400).json({ error: "Outlook email and password are required" });
-        }
-        const existingAccts = await storage.getAllReplitAccounts();
-        const alreadyUsed = existingAccts.some(
-          (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
-        );
-        if (alreadyUsed) {
-          return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
-        }
-        resolvedEmail = outlookEmail;
-        resolvedPassword = outlookPassword;
+      const existingAccts = await storage.getAllReplitAccounts();
+      const alreadyUsed = existingAccts.some(
+        (a) => a.outlookEmail?.toLowerCase() === outlookEmail.toLowerCase()
+      );
+      if (alreadyUsed) {
+        return res.status(409).json({ error: `Outlook account ${outlookEmail} has already been used to create a Replit account` });
       }
 
       const userId = req.session.userId;
@@ -3554,23 +3376,18 @@ export async function registerRoutes(
         }
       }
 
-      if (bizMailRecord) {
-        await storage.markBizMailUsedForReplit(bizMailRecord.email);
-      }
-
       batchOwners.set(batchId, userId);
       res.json({ success: true, createId, batchId, message: "Replit account creation started" });
 
       (async () => {
-        broadcastLog(batchId, createId, `Starting Replit account creation for ${resolvedEmail}${emailProvider === "bizmail" ? " (Business Mail)" : ""}...`, userId);
+        broadcastLog(batchId, createId, `Starting Replit account creation for ${outlookEmail}...`, userId);
         try {
           const result = await registerReplitAccount(
-            resolvedEmail,
-            resolvedPassword,
+            outlookEmail,
+            outlookPassword,
             (msg) => broadcastLog(batchId, createId, msg, userId),
             couponCode || undefined,
-            singleCardDetails,
-            emailProvider === "bizmail" ? { emailAddress: resolvedEmail, smtpDevId: bizMailRecord?.smtpDevId ?? undefined } : undefined
+            singleCardDetails
           );
 
           if (result.success) {
@@ -3579,7 +3396,7 @@ export async function registerRoutes(
                 username: result.username!,
                 email: result.email!,
                 password: result.password!,
-                outlookEmail: emailProvider === "bizmail" ? null : resolvedEmail,
+                outlookEmail,
                 status: "processing",
                 createdBy: userId,
               });

@@ -115,7 +115,6 @@ export default function ReplitCreate() {
   const [onbCardId, setOnbCardId] = useState("");
 
   // ── CREATE mode state ──
-  const [emailProvider, setEmailProvider] = useState<"outlook" | "bizmail">("outlook");
   const [outlookEmail, setOutlookEmail] = useState("");
   const [outlookPassword, setOutlookPassword] = useState("");
   const [selectedOutlookId, setSelectedOutlookId] = useState("");
@@ -145,44 +144,6 @@ export default function ReplitCreate() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
-  // ── smtp.dev sync ──
-  const [smtpSyncing, setSmtpSyncing] = useState(false);
-  const [smtpSyncMsg, setSmtpSyncMsg] = useState<string | null>(null);
-
-  async function runSmtpDevSync() {
-    if (smtpSyncing) return;
-    setSmtpSyncing(true);
-    setSmtpSyncMsg("Connecting to smtp.dev...");
-    try {
-      const res = await fetch("/api/bizmail/import-smtp-dev", { method: "POST", credentials: "include" });
-      if (!res.ok || !res.body) { setSmtpSyncMsg("Request failed"); setSmtpSyncing(false); return; }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const ln of lines) {
-          if (!ln.startsWith("data: ")) continue;
-          try {
-            const ev = JSON.parse(ln.slice(6));
-            if (ev.message) setSmtpSyncMsg(ev.message);
-            if (ev.type === "done") {
-              qc.invalidateQueries({ queryKey: ["/api/bizmail/replit-available-count"] });
-            }
-          } catch {}
-        }
-      }
-    } catch (e: any) {
-      setSmtpSyncMsg(`Error: ${e.message}`);
-    } finally {
-      setSmtpSyncing(false);
-    }
-  }
-
   // ── Shared ──
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
@@ -206,11 +167,6 @@ export default function ReplitCreate() {
   const { data: nopeKeyData } = useQuery<{ key: string }>({
     queryKey: ["/api/settings/nopecha-api-key"],
   });
-  const { data: bizMailCountData } = useQuery<{ count: number }>({
-    queryKey: ["/api/bizmail/replit-available-count"],
-    refetchInterval: running ? 10000 : 30000,
-  });
-  const bizMailAvailable = bizMailCountData?.count ?? 0;
 
   useEffect(() => {
     if (nopeKeyData?.key && !nopeKeyDirty) setNopeKey(nopeKeyData.key);
@@ -250,7 +206,6 @@ export default function ReplitCreate() {
               sounds.complete();
               qc.invalidateQueries({ queryKey: ["/api/replit-accounts"] });
               qc.invalidateQueries({ queryKey: ["/api/private/outlook"] });
-              qc.invalidateQueries({ queryKey: ["/api/bizmail/replit-available-count"] });
             } else if (data.type === "replit_create_result") {
               if (data.success) {
                 setCompletedCount((p) => p + 1);
@@ -311,7 +266,7 @@ export default function ReplitCreate() {
     if (count > 1) {
       setTotalCount(count);
       try {
-        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, emailProvider, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
+        const res = await apiRequest("POST", "/api/replit-create/bulk", { count, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start bulk");
         activeBatchId.current = data.batchId;
@@ -324,23 +279,15 @@ export default function ReplitCreate() {
         setRunning(false);
       }
     } else {
-      if (emailProvider === "outlook" && (!outlookEmail || !outlookPassword)) {
+      if (!outlookEmail || !outlookPassword) {
         sounds.error();
         toast({ title: "Missing fields", description: "Select or enter an Outlook account", variant: "destructive" });
         setRunning(false);
         return;
       }
-      if (emailProvider === "bizmail" && bizMailAvailable === 0) {
-        sounds.error();
-        toast({ title: "No Business Mail available", description: "All Business Mail accounts have already been used", variant: "destructive" });
-        setRunning(false);
-        return;
-      }
       setTotalCount(1);
       try {
-        const payload: Record<string, any> = { emailProvider, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined };
-        if (emailProvider === "outlook") { payload.outlookEmail = outlookEmail; payload.outlookPassword = outlookPassword; }
-        const res = await apiRequest("POST", "/api/replit-create", payload);
+        const res = await apiRequest("POST", "/api/replit-create", { outlookEmail, outlookPassword, couponCode: couponCode.trim() || undefined, cardId: selectedCardId || undefined });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to start");
         activeBatchId.current = data.batchId;
@@ -543,11 +490,8 @@ export default function ReplitCreate() {
   };
 
   const isBulk = count > 1;
-  const canCreate = isBulk
-    ? (emailProvider === "bizmail" ? bizMailAvailable > 0 : availableOutlookAccounts.length > 0)
-    : (emailProvider === "bizmail" ? bizMailAvailable > 0 : (!!outlookEmail && !!outlookPassword));
-  const poolSize = emailProvider === "bizmail" ? bizMailAvailable : availableOutlookAccounts.length;
-  const maxCount = Math.min(1000, poolSize || 1);
+  const canCreate = isBulk ? availableOutlookAccounts.length > 0 : (!!outlookEmail && !!outlookPassword);
+  const maxCount = Math.min(1000, availableOutlookAccounts.length || 1);
   const pct = maxCount > 1 ? ((count - 1) / (maxCount - 1)) * 100 : 100;
   const selectedReplitAccount = replitAccounts.find((a) => a.id === selectedReplitId);
 
@@ -581,7 +525,7 @@ export default function ReplitCreate() {
         <div className="flex items-center gap-2.5 text-[10px] font-mono">
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: GA(0.05), border: `1px solid ${GA(0.18)}` }}>
             <Cpu className="w-3 h-3" style={{ color: GA(0.55) }} />
-            <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{mode === "create" ? poolSize : availableOutlookAccounts.length}</span>
+            <span style={{ color: G, textShadow: `0 0 8px ${GA(0.5)}` }}>{availableOutlookAccounts.length}</span>
             <span style={{ color: GA(0.3) }}>avail</span>
           </div>
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -679,36 +623,6 @@ export default function ReplitCreate() {
           {/* ══ CREATE MODE ══ */}
           {mode === "create" && (
             <>
-              {/* Email Provider Toggle */}
-              <div>
-                <label className="block text-[10px] font-mono uppercase tracking-widest mb-2" style={{ color: GA(0.4) }}>
-                  <Mail className="w-2.5 h-2.5 inline mr-1" />Email Provider
-                </label>
-                <div className="flex gap-2">
-                  {(["outlook", "bizmail"] as const).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => { sounds.toggle(); setEmailProvider(p); setCount(1); }}
-                      data-testid={`button-provider-${p}`}
-                      className="flex-1 py-2 rounded-lg text-[10px] font-mono uppercase tracking-widest transition-all duration-150"
-                      style={{
-                        background: emailProvider === p ? GA(0.18) : "rgba(0,0,0,0.4)",
-                        border: `1px solid ${emailProvider === p ? GA(0.55) : GA(0.1)}`,
-                        color: emailProvider === p ? G : GA(0.35),
-                        textShadow: emailProvider === p ? `0 0 8px ${GA(0.5)}` : "none",
-                      }}
-                    >
-                      {p === "outlook" ? "Outlook" : "Business Mail"}
-                      {p === "bizmail" && (
-                        <span className="ml-1.5 px-1 py-0.5 rounded text-[8px]" style={{ background: GA(0.1), border: `1px solid ${GA(0.2)}`, color: bizMailAvailable > 0 ? G : "rgba(255,80,80,0.8)" }}>
-                          {bizMailAvailable} avail
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Count slider */}
               <div>
                 <label className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest mb-2.5" style={{ color: GA(0.4) }}>
@@ -735,12 +649,12 @@ export default function ReplitCreate() {
                 {isBulk && (
                   <p className="text-[10px] font-mono mt-2 flex items-center gap-1.5" style={{ color: GA(0.32) }}>
                     <Layers className="w-3 h-3" />
-                    bulk mode — picks {count} random from {poolSize} {emailProvider === "bizmail" ? "business mail" : "outlook"} pool
+                    bulk mode — picks {count} random from {availableOutlookAccounts.length} pool
                   </p>
                 )}
               </div>
 
-              {!isBulk && emailProvider === "outlook" && (
+              {!isBulk && (
                 <>
                   {availableOutlookAccounts.length > 0 && (
                     <div>
@@ -770,38 +684,6 @@ export default function ReplitCreate() {
                     </div>
                   </div>
                 </>
-              )}
-
-              {!isBulk && emailProvider === "bizmail" && (
-                <div className="rounded-lg px-4 py-3 flex items-center gap-3" style={{ background: GA(0.05), border: `1px solid ${bizMailAvailable > 0 ? GA(0.22) : "rgba(255,80,80,0.25)"}` }}>
-                  <Mail className="w-4 h-4 flex-shrink-0" style={{ color: bizMailAvailable > 0 ? GA(0.7) : "rgba(255,80,80,0.6)" }} />
-                  <div>
-                    <div className="text-[11px] font-mono font-bold" style={{ color: bizMailAvailable > 0 ? G : "rgba(255,80,80,0.9)" }}>
-                      {bizMailAvailable > 0 ? `${bizMailAvailable} Business Mail account${bizMailAvailable !== 1 ? "s" : ""} available` : "No Business Mail accounts available"}
-                    </div>
-                    <div className="text-[9px] font-mono mt-0.5" style={{ color: GA(0.28) }}>
-                      {bizMailAvailable > 0 ? "Next unused account will be auto-selected and marked as used" : "All accounts have been used for Replit — add more in Business Mail"}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {emailProvider === "bizmail" && (
-                <div className="rounded-lg px-3 py-2.5 flex items-center gap-3" style={{ background: "rgba(0,0,0,0.3)", border: `1px solid ${GA(0.1)}` }}>
-                  <button
-                    onClick={runSmtpDevSync}
-                    disabled={smtpSyncing}
-                    data-testid="button-sync-smtp-dev"
-                    className="flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-mono uppercase tracking-widest transition-all"
-                    style={{ background: smtpSyncing ? GA(0.06) : GA(0.12), border: `1px solid ${GA(0.25)}`, color: smtpSyncing ? GA(0.4) : G, cursor: smtpSyncing ? "wait" : "pointer" }}
-                  >
-                    <Zap className="w-2.5 h-2.5" />
-                    {smtpSyncing ? "Syncing..." : "Sync smtp.dev"}
-                  </button>
-                  <div className="text-[9px] font-mono leading-tight" style={{ color: smtpSyncMsg ? GA(0.75) : GA(0.28) }}>
-                    {smtpSyncMsg ?? "Import all smtp.dev accounts and link them to Business Mail for fast verification"}
-                  </div>
-                </div>
               )}
 
               {/* Coupon Code */}

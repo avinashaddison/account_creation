@@ -114,10 +114,6 @@ export interface IStorage {
   getDeletedBizMailAccounts(): Promise<BizMailAccount[]>;
   getActiveBizMailAccounts(): Promise<BizMailAccount[]>;
   getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]>;
-  getUnusedBizMailForReplit(): Promise<BizMailAccount | undefined>;
-  markBizMailUsedForReplit(email: string): Promise<void>;
-  countUnusedBizMailForReplit(): Promise<number>;
-  importSmtpDevAccounts(accounts: { smtpDevId: string; email: string }[]): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -756,58 +752,6 @@ export class DatabaseStorage implements IStorage {
       .where(isNull(bizMailAccounts.deletedAt))
       .orderBy(bizMailAccounts.createdAt)
       .limit(limit);
-  }
-
-  async getUnusedBizMailForReplit(): Promise<BizMailAccount | undefined> {
-    // Prefer smtp.dev accounts (have smtpDevId) so verification polling works;
-    // fall back to plain accounts if no smtp.dev accounts remain.
-    const rows = await db.select().from(bizMailAccounts)
-      .where(and(isNull(bizMailAccounts.deletedAt), eq(bizMailAccounts.usedForReplit, false), eq(bizMailAccounts.isActive, true)))
-      .orderBy(
-        // smtpDevId IS NOT NULL sorts first (TRUE > FALSE in pg)
-        sql`(smtp_dev_id IS NOT NULL) DESC`,
-        bizMailAccounts.createdAt,
-      )
-      .limit(1);
-    return rows[0];
-  }
-
-  async markBizMailUsedForReplit(email: string): Promise<void> {
-    await db.update(bizMailAccounts)
-      .set({ usedForReplit: true })
-      .where(eq(bizMailAccounts.email, email));
-  }
-
-  async countUnusedBizMailForReplit(): Promise<number> {
-    const rows = await db.select({ id: bizMailAccounts.id }).from(bizMailAccounts)
-      .where(and(isNull(bizMailAccounts.deletedAt), eq(bizMailAccounts.usedForReplit, false), eq(bizMailAccounts.isActive, true)));
-    return rows.length;
-  }
-
-  // Bulk-upsert smtp.dev accounts into the biz_mail_accounts table.
-  // Inserts new rows and updates smtpDevId on existing rows matched by email.
-  // Returns the number of new rows inserted.
-  async importSmtpDevAccounts(accounts: { smtpDevId: string; email: string }[]): Promise<number> {
-    if (accounts.length === 0) return 0;
-    let inserted = 0;
-    // Process in chunks to avoid huge parameter lists
-    const CHUNK = 200;
-    for (let i = 0; i < accounts.length; i += CHUNK) {
-      const chunk = accounts.slice(i, i + CHUNK);
-      const result = await db.execute(sql`
-        INSERT INTO biz_mail_accounts (email, password, is_active, used_for_replit, smtp_dev_id)
-        SELECT v.email, 'smtpdev', true, false, v.smtp_dev_id
-        FROM (VALUES ${sql.join(
-          chunk.map(a => sql`(${a.email}, ${a.smtpDevId})`),
-          sql`, `
-        )}) AS v(email, smtp_dev_id)
-        ON CONFLICT (email) DO UPDATE SET smtp_dev_id = EXCLUDED.smtp_dev_id
-        RETURNING (xmax = 0) AS inserted
-      `);
-      const rows = (result as any).rows ?? [];
-      inserted += rows.filter((r: any) => r.inserted === true || r.inserted === 't').length;
-    }
-    return inserted;
   }
 }
 
