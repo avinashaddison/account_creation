@@ -316,7 +316,7 @@ export async function solveHCaptchaViaNopeCHA(
       }
     }
 
-    return { success: false, error: "NopeCHA solving timeout (300s)" };
+    return { success: false, error: `NopeCHA solving timeout (${maxWaitSec}s)` };
   } catch (err: any) {
     const body = err.response?.data ? JSON.stringify(err.response.data).substring(0, 200) : "";
     console.log(`[NopeCHA] Network error: ${err.message} ${body}`);

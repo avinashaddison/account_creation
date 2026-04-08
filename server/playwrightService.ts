@@ -11013,6 +11013,8 @@ export async function registerReplitAccount(
 
     // ── Solve hCaptcha on signup page ──
     // Replit loads hCaptcha via JS — always solve regardless of HTML content
+    let captchaFailed = false;
+    let capturedRequests: string[] = [];
     try {
       const REPLIT_SIGNUP_SITEKEY = "4c672d35-0701-42b2-88c3-78380b0db560";
       log(`🔒 Solving hCaptcha for Replit signup (NopeCHA)...`);
@@ -11033,51 +11035,128 @@ export async function registerReplitAccount(
         const ticker = setInterval(() => log(`  ⏳ Captcha solving in progress...`), 15000);
         let capResult: { success: boolean; token?: string; error?: string };
         try {
-          capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 150);
+          capResult = await solveHCaptchaViaNopeCHA(nopeKey, "https://replit.com/signup", capKey, undefined, 240);
         } finally {
           clearInterval(ticker);
         }
 
         if (capResult.success && capResult.token) {
           log(`  ✅ hCaptcha solved — injecting token...`);
-          await page.evaluate((token: string) => {
+          const injectionResult = await page.evaluate((token: string) => {
+            const debug: string[] = [];
             const textareaSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
             const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+
+            // 1) Set DOM textarea/input fields
+            let textareaCount = 0;
             document.querySelectorAll<HTMLTextAreaElement>("textarea[name='h-captcha-response'], textarea[name='g-recaptcha-response']").forEach(el => {
               if (textareaSetter) textareaSetter.call(el, token); else el.value = token;
               el.dispatchEvent(new Event("input", { bubbles: true }));
               el.dispatchEvent(new Event("change", { bubbles: true }));
+              textareaCount++;
             });
             document.querySelectorAll<HTMLInputElement>("input[name='h-captcha-response']").forEach(el => {
               if (inputSetter) inputSetter.call(el, token); else el.value = token;
               el.dispatchEvent(new Event("input", { bubbles: true }));
               el.dispatchEvent(new Event("change", { bubbles: true }));
+              textareaCount++;
             });
+            debug.push(`textareas/inputs set: ${textareaCount}`);
+
+            // 2) hCaptcha SDK methods
             const w = window as any;
             if (w.hcaptcha) {
+              debug.push("hcaptcha SDK present");
               try {
                 const widgets = document.querySelectorAll("[data-hcaptcha-widget-id]");
+                debug.push(`widget elements: ${widgets.length}`);
                 if (widgets.length > 0) {
                   widgets.forEach(wEl => {
                     const wid = (wEl as HTMLElement).getAttribute("data-hcaptcha-widget-id");
-                    if (wid) { try { w.hcaptcha.setResponse(wid, token); } catch {} }
+                    if (wid) {
+                      try { w.hcaptcha.setResponse(wid, token); debug.push(`setResponse(${wid}) ok`); } catch(e:any) { debug.push(`setResponse(${wid}) err: ${e.message}`); }
+                    }
                   });
                 } else {
-                  w.hcaptcha.setResponse(token);
+                  try { w.hcaptcha.setResponse(token); debug.push("setResponse(no-id) ok"); } catch(e:any) { debug.push(`setResponse(no-id) err: ${e.message}`); }
                 }
-              } catch {}
+              } catch(e:any) { debug.push(`hcaptcha block err: ${e.message}`); }
+            } else {
+              debug.push("hcaptcha SDK NOT present");
             }
-            ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess"].forEach(name => {
-              if (typeof (w as any)[name] === "function") { try { (w as any)[name](token); } catch {} }
+
+            // 3) Simulate postMessage from hCaptcha iframe (what react-hcaptcha listens for)
+            try {
+              const widgetEl = document.querySelector("[data-hcaptcha-widget-id]") as HTMLElement | null;
+              const widgetId = widgetEl?.getAttribute("data-hcaptcha-widget-id") || "0";
+              // react-hcaptcha listens to window messages with specific formats
+              window.dispatchEvent(new MessageEvent("message", {
+                data: JSON.stringify({ event: "challenge-passed", expiredToken: false, token, id: widgetId }),
+                origin: "https://hcaptcha.com",
+              }));
+              window.dispatchEvent(new MessageEvent("message", {
+                data: { event: "challenge-passed", expiredToken: false, token, id: widgetId },
+                origin: "https://hcaptcha.com",
+              }));
+              debug.push("postMessage dispatched");
+            } catch(e:any) { debug.push(`postMessage err: ${e.message}`); }
+
+            // 4) Try known global callback names
+            ["onhcaptchasuccess", "hcaptchaCallback", "onSuccess", "__hcaptcha_callback", "hcaptchaSuccess"].forEach(name => {
+              if (typeof (w as any)[name] === "function") {
+                try { (w as any)[name](token); debug.push(`called ${name}()`); } catch {}
+              }
             });
+
+            return debug.join(" | ");
           }, capResult.token);
+          log(`  🔧 Injection debug: ${injectionResult}`);
+
+          // Intercept the signup POST and inject our NopeCHA token into recaptchaToken
+          const solvedToken = capResult.token!;
+          const routeHandler = async (route: any) => {
+            const req = route.request();
+            const url: string = req.url();
+            const method: string = req.method();
+            if (method === "POST" && url.includes("replit.com/api/v1/auth/sign-up")) {
+              try {
+                const origBody = req.postData() || "{}";
+                let parsed: any = {};
+                try { parsed = JSON.parse(origBody); } catch {}
+                const origToken = parsed.recaptchaToken || "(none)";
+                parsed.recaptchaToken = solvedToken;
+                const modBody = JSON.stringify(parsed);
+                capturedRequests.push(`INTERCEPTED sign-up → replaced recaptchaToken (was: ${origToken.substring(0, 30)}...) with NopeCHA token`);
+                await route.continue({
+                  postData: modBody,
+                  headers: { ...req.headers(), "content-type": "application/json", "content-length": Buffer.byteLength(modBody).toString() },
+                });
+                return;
+              } catch (intErr: any) {
+                capturedRequests.push(`Intercept error: ${intErr.message}`);
+              }
+            }
+            if (method === "POST" && url.includes("replit.com")) {
+              const body = req.postData() || "";
+              capturedRequests.push(`${method} ${url.split("?")[0].replace("https://", "")} → ${body.substring(0, 200)}`);
+            }
+            await route.continue();
+          };
+          await page.route("**", routeHandler).catch(() => {});
           await page.waitForTimeout(800);
         } else {
-          log(`  ⚠️ NopeCHA failed: ${capResult.error} — submitting without token`);
+          log(`  ❌ NopeCHA failed: ${capResult.error} — aborting (will not submit without token)`);
+          captchaFailed = true;
         }
       }
     } catch (capErr: any) {
-      log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — continuing`);
+      log(`  ⚠️ hCaptcha solve error: ${(capErr.message || "").substring(0, 80)} — aborting`);
+      captchaFailed = true;
+    }
+
+    if (captchaFailed) {
+      log("❌ hCaptcha solve failed — returning failure (no token to submit)");
+      return { success: false, error: "hcaptcha_solve_failed" };
     }
 
     log("Submitting signup form...");
@@ -11129,6 +11208,14 @@ export async function registerReplitAccount(
     // Extra settle time in case of redirect chains
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1000);
+
+    // Log what requests were captured
+    if (capturedRequests && capturedRequests.length > 0) {
+      capturedRequests.forEach(r => log(`  📡 Captured: ${r}`));
+    } else {
+      log(`  📡 No POST requests captured to Replit`);
+    }
+    await page.unroute("**").catch(() => {});
 
     const currentUrl = page.url();
     const pageContent = await page.content().catch(async () => {
