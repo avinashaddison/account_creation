@@ -1344,12 +1344,14 @@ export function startShopBot(token: string) {
     );
   }
 
-  bot.hears(BTN.CHATGPT_PLUS, async (ctx) => {
+  // Match both old (🤖) and new (֎) keyboard variants for ChatGPT Plus
+  bot.hears(/ChatGPT.*Plus/i, async (ctx) => {
     await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
     await showActivationMenu(ctx, "chatgpt_plus");
   });
 
-  bot.hears(BTN.REPLIT_CORE, async (ctx) => {
+  // Match both old (🔵) and new variants for Replit Core
+  bot.hears(/Replit.*Core/i, async (ctx) => {
     await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
     await showActivationMenu(ctx, "replit_core");
   });
