@@ -1344,17 +1344,23 @@ export function startShopBot(token: string) {
     );
   }
 
-  // Match both old (🤖) and new (֎) keyboard variants for ChatGPT Plus
-  bot.hears(/ChatGPT.*Plus/i, async (ctx) => {
-    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
-    await showActivationMenu(ctx, "chatgpt_plus");
-  });
+  // Match current AND legacy keyboard button text (emoji changed from 🤖 → ֎)
+  // Unicode bold chars in the label mean regex won't work — must use exact strings
+  bot.hears(
+    [BTN.CHATGPT_PLUS, "🤖  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2"],
+    async (ctx) => {
+      await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+      await showActivationMenu(ctx, "chatgpt_plus");
+    }
+  );
 
-  // Match both old (🔵) and new variants for Replit Core
-  bot.hears(/Replit.*Core/i, async (ctx) => {
-    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
-    await showActivationMenu(ctx, "replit_core");
-  });
+  bot.hears(
+    [BTN.REPLIT_CORE, "🔵  𝗥𝗲𝗽𝗹𝗶𝘁  𝗖𝗼𝗿𝗲  ·  $2"],
+    async (ctx) => {
+      await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+      await showActivationMenu(ctx, "replit_core");
+    }
+  );
 
   bot.action("act_back", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
