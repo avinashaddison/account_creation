@@ -10850,25 +10850,31 @@ export async function registerReplitAccount(
     page = await context.newPage();
     page.setDefaultTimeout(30000);
 
-    // ── Hook grecaptcha.enterprise.execute early to capture real action name ──
-    // This runs before any page script so we intercept the real action Replit uses
+    // ── Intercept grecaptcha.enterprise.execute with a controlled pending promise ──
+    // This completely blocks execute() so Replit can't get a real token.
+    // When submit fires and Replit calls execute(), it hangs on our pending promise.
+    // We then solve with CapSolver using the real action and resolve the promise.
     await page.addInitScript(() => {
       (window as any).__recaptcha_last_action = null;
       (window as any).__recaptcha_last_sitekey = null;
       (window as any).__recaptcha_exec_hooked = false;
+      (window as any).__recaptcha_pending_resolve = null;
+      (window as any).__recaptcha_pending_reject = null;
+      (window as any).__recaptcha_execute_called = false;
+
       function hookExec() {
         const g = (window as any).grecaptcha;
         if (g?.enterprise?.execute && !(window as any).__recaptcha_exec_hooked) {
           (window as any).__recaptcha_exec_hooked = true;
-          const orig = g.enterprise.execute.bind(g.enterprise);
           g.enterprise.execute = function(siteKey: string, opts: any) {
             (window as any).__recaptcha_last_action = (opts && opts.action) || null;
             (window as any).__recaptcha_last_sitekey = siteKey;
-            // If we have a pre-injected token, return it directly
-            if ((window as any).__capsolver_token) {
-              return Promise.resolve((window as any).__capsolver_token);
-            }
-            return orig(siteKey, opts);
+            (window as any).__recaptcha_execute_called = true;
+            // Return a controlled pending promise — Replit will wait for us to resolve it
+            return new Promise((resolve, reject) => {
+              (window as any).__recaptcha_pending_resolve = resolve;
+              (window as any).__recaptcha_pending_reject = reject;
+            });
           };
           return true;
         }
@@ -11054,90 +11060,24 @@ export async function registerReplitAccount(
 
     await page.waitForTimeout(800);
 
-    // ── Solve reCAPTCHA Enterprise with CapSolver, inject into recaptchaToken ──
-    // Replit's API sends `recaptchaToken` (reCAPTCHA Enterprise) — NOT hCaptcha
-    let captchaFailed = false;
-    let capturedRequests: string[] = [];
-    try {
-      // Fallback: scan already-loaded script tags for the site key
-      if (!recaptchaEnterpriseSiteKey) {
-        recaptchaEnterpriseSiteKey = await page.evaluate(() => {
-          const scripts = Array.from(document.querySelectorAll("script[src]")) as HTMLScriptElement[];
-          for (const s of scripts) {
-            if (s.src && s.src.includes("enterprise.js") && s.src.includes("render=")) {
-              const m = s.src.match(/render=([^&\s]+)/);
-              if (m && m[1] !== "explicit") return m[1];
-            }
+    // ── Fallback: scan script tags for site key if not yet captured ──
+    if (!recaptchaEnterpriseSiteKey) {
+      recaptchaEnterpriseSiteKey = await page.evaluate(() => {
+        const scripts = Array.from(document.querySelectorAll("script[src]")) as HTMLScriptElement[];
+        for (const s of scripts) {
+          if (s.src && s.src.includes("enterprise.js") && s.src.includes("render=")) {
+            const m = s.src.match(/render=([^&\s]+)/);
+            if (m && m[1] !== "explicit") return m[1];
           }
-          // Also check window.__recaptcha_site_key or similar
-          const w = window as any;
-          return w.__recaptchaSiteKey || w.RECAPTCHA_SITE_KEY || null;
-        }).catch(() => null) as string | null;
-      }
-
-      if (!recaptchaEnterpriseSiteKey) {
-        log(`  ⚠️ reCAPTCHA Enterprise site key not detected — proceeding without solve (may fail)`);
-      } else {
-        // Read the real action name captured by our initScript hook (Replit may use something other than "signup")
-        const capturedAction = await page.evaluate(() => (window as any).__recaptcha_last_action || null).catch(() => null) as string | null;
-        const actionToUse = capturedAction || "signup";
-        if (capturedAction) {
-          log(`  🔑 reCAPTCHA Enterprise site key: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... (action: "${actionToUse}")`);
-        } else {
-          log(`  🔑 reCAPTCHA Enterprise site key: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... (action: "signup" fallback)`);
         }
-        log(`  🔒 Solving reCAPTCHA Enterprise with CapSolver...`);
-        const ticker = setInterval(() => log(`  ⏳ reCAPTCHA Enterprise solve in progress...`), 15000);
-        let capResult: { success: boolean; token?: string; error?: string };
-        try {
-          capResult = await solveRecaptchaV3Enterprise("https://replit.com/signup", recaptchaEnterpriseSiteKey, actionToUse, 0.7);
-        } finally {
-          clearInterval(ticker);
-        }
-
-        if (capResult.success && capResult.token) {
-          log(`  ✅ reCAPTCHA Enterprise solved! Token: ${capResult.token.substring(0, 30)}...`);
-          const solvedToken = capResult.token;
-
-          // Inject token directly into the browser via grecaptcha.enterprise.execute override.
-          // This is more reliable than network interception — Replit's own JS receives the token
-          // natively from its execute() call, so the backend sees it as a legitimate token.
-          await page.evaluate((tok: string) => {
-            // Store token so our hooked execute() returns it immediately
-            (window as any).__capsolver_token = tok;
-            // Also directly override execute in case the hook ran before we set the token
-            const inject = (token: string) => {
-              const g = (window as any).grecaptcha;
-              if (g?.enterprise) {
-                g.enterprise.execute = () => Promise.resolve(token);
-                return true;
-              }
-              return false;
-            };
-            if (!inject(tok)) {
-              const iv = setInterval(() => { if (inject(tok)) clearInterval(iv); }, 50);
-              setTimeout(() => clearInterval(iv), 8000);
-            }
-          }, solvedToken).catch(() => {});
-
-          capturedRequests.push(`Token injected into grecaptcha.enterprise.execute (${solvedToken.substring(0, 30)}...)`);
-          await page.waitForTimeout(300);
-        } else {
-          log(`  ❌ CapSolver reCAPTCHA Enterprise failed: ${capResult.error} — aborting`);
-          captchaFailed = true;
-        }
-      }
-    } catch (capErr: any) {
-      log(`  ⚠️ reCAPTCHA Enterprise solve error: ${(capErr.message || "").substring(0, 80)} — aborting`);
-      captchaFailed = true;
+        const w = window as any;
+        return w.__recaptchaSiteKey || w.RECAPTCHA_SITE_KEY || null;
+      }).catch(() => null) as string | null;
     }
 
-    if (captchaFailed) {
-      log("❌ reCAPTCHA Enterprise solve failed — returning failure");
-      return { success: false, error: "recaptcha_enterprise_solve_failed" };
-    }
-
-    log("Submitting signup form...");
+    // ── Step 1: Click submit FIRST — this triggers Replit to call grecaptcha.enterprise.execute() ──
+    // Our pending-promise hook blocks execute() until we resolve it with our CapSolver token.
+    log("Submitting signup form (will intercept reCAPTCHA execute call)...");
     const submitSelectors = [
       'button[type="submit"]',
       'button:has-text("Create Account")',
@@ -11159,10 +11099,7 @@ export async function registerReplitAccount(
             txt.toLowerCase().includes("github") ||
             txt.toLowerCase().includes("apple") ||
             txt.toLowerCase().includes("facebook")
-          ) {
-            log(`Skipping OAuth button: "${txt.substring(0, 30)}"`);
-            continue;
-          }
+          ) continue;
           if (txt.trim().length === 0) continue;
           await btn.click();
           log(`Clicked submit button "${txt.substring(0, 40)}" (${sel})`);
@@ -11175,6 +11112,75 @@ export async function registerReplitAccount(
     if (!submitted) {
       log("Trying Enter key to submit...");
       await page.keyboard.press("Enter");
+    }
+
+    // ── Step 2: Wait for Replit to call execute() — our hook captures the real action ──
+    log("Waiting for reCAPTCHA execute() to be called by Replit...");
+    let executeCalled = false;
+    for (let i = 0; i < 50; i++) {
+      await page.waitForTimeout(200);
+      executeCalled = await page.evaluate(() => !!(window as any).__recaptcha_execute_called).catch(() => false);
+      if (executeCalled) break;
+    }
+
+    // ── Step 3: Solve with CapSolver using the real captured action ──
+    let captchaFailed = false;
+    let capturedRequests: string[] = [];
+    try {
+      if (!recaptchaEnterpriseSiteKey) {
+        log(`  ⚠️ reCAPTCHA Enterprise site key not detected — cannot solve`);
+        captchaFailed = true;
+      } else {
+        const capturedAction = await page.evaluate(() => (window as any).__recaptcha_last_action || null).catch(() => null) as string | null;
+        const actionToUse = capturedAction || "signup";
+        log(`  🔑 sitekey: ${recaptchaEnterpriseSiteKey.substring(0, 20)}... | action: "${actionToUse}"${executeCalled ? " (captured)" : " (fallback)"}`);
+        log(`  🔒 Solving reCAPTCHA Enterprise with CapSolver...`);
+
+        const ticker = setInterval(() => log(`  ⏳ reCAPTCHA solve in progress...`), 15000);
+        let capResult: { success: boolean; token?: string; error?: string };
+        try {
+          capResult = await solveRecaptchaV3Enterprise("https://replit.com/signup", recaptchaEnterpriseSiteKey, actionToUse, 0.7);
+        } finally {
+          clearInterval(ticker);
+        }
+
+        if (capResult.success && capResult.token) {
+          log(`  ✅ reCAPTCHA solved! Resolving pending execute() promise...`);
+          // ── Step 4: Resolve the pending promise — Replit's form gets our token natively ──
+          await page.evaluate((tok: string) => {
+            if (typeof (window as any).__recaptcha_pending_resolve === "function") {
+              (window as any).__recaptcha_pending_resolve(tok);
+            } else {
+              // Fallback: override execute directly if hook wasn't active
+              const g = (window as any).grecaptcha;
+              if (g?.enterprise) g.enterprise.execute = () => Promise.resolve(tok);
+            }
+          }, capResult.token).catch(() => {});
+          capturedRequests.push(`Resolved reCAPTCHA pending promise with CapSolver token (${capResult.token.substring(0, 30)}...)`);
+        } else {
+          log(`  ❌ CapSolver failed: ${capResult.error}`);
+          // Reject the pending promise so Replit doesn't hang forever
+          await page.evaluate(() => {
+            if (typeof (window as any).__recaptcha_pending_reject === "function") {
+              (window as any).__recaptcha_pending_reject(new Error("captcha_solve_failed"));
+            }
+          }).catch(() => {});
+          captchaFailed = true;
+        }
+      }
+    } catch (capErr: any) {
+      log(`  ⚠️ reCAPTCHA solve error: ${(capErr.message || "").substring(0, 80)}`);
+      await page.evaluate(() => {
+        if (typeof (window as any).__recaptcha_pending_reject === "function") {
+          (window as any).__recaptcha_pending_reject(new Error("captcha_solve_error"));
+        }
+      }).catch(() => {});
+      captchaFailed = true;
+    }
+
+    if (captchaFailed) {
+      log("❌ reCAPTCHA solve failed — returning failure");
+      return { success: false, error: "recaptcha_enterprise_solve_failed" };
     }
 
     log("Waiting for signup response...");

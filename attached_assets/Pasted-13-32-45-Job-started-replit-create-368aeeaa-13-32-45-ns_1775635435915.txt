@@ -1,0 +1,102 @@
+13:32:45
+·
+Job started: replit-create-368aeeaa
+13:32:45
+·
+🌐 nsocks connected — session: ei5qsyfh8s7n | endpoint: proxy.nsocks.com:2312
+13:32:47
+·
+┌─── WEBSHARE RESIDENTIAL ACTIVE ───────────────────────────
+13:32:47
+·
+│ Exit IP : 71.126.158.59
+13:32:47
+·
+│ Location : Springfield, Virginia, US
+13:32:47
+·
+│ Provider : AS701 Verizon Business
+13:32:47
+·
+└────────────────────────────────────────────────
+13:32:47
+>
+Using stealth headless browser
+13:32:47
+·
+Visiting Replit homepage before signup...
+13:32:59
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+13:33:05
+>
+Homepage visited — navigating to signup...
+13:33:05
+>
+Navigating to https://replit.com/signup ...
+13:33:11
+~
+🔑 Captured reCAPTCHA Enterprise sitekey from network: 6LfyLYUsAAAAAP0Xmu-h...
+13:33:14
+·
+Looking for email signup option (avoiding Google/GitHub/Apple)...
+13:33:14
+·
+Page title: Sign Up - Replit
+13:33:14
+»
+Buttons on page: [{"text":"Continue with Google","tag":"BUTTON"},{"text":"Continue with GitHub","tag":"BUTTON"},{"text":"Continue with X","tag":"BUTTON"},{"text":"Continue with Apple","tag":"BUTTON"},{"text":"Email & password","tag":"BUTTON"},{"text":"Single sign-on (SSO)","tag":"BUTTON"}]
+13:33:14
+»
+Clicked email signup button: "Email & password" (button:has-text("Email"))
+13:33:22
+·
+Network idle timeout — waiting 4s instead
+13:33:26
+·
+Page HTML snippet: <noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1153929076518158&amp;ev=PageView&amp;noscript=1" alt=""/></noscript><div id="__next"><div class=" useView-module__vOh_Ha__view _sdz_theme-default _sdz_surface-bg _sdz_surface _sdz_switch-theme UnauthedLayout-module__lntL9q__page" id="main-content"><div class="UnauthedLayout-module__lntL9q__content"><div cl
+13:33:26
+·
+Waiting for signup form fields to appear...
+13:33:26
+·
+Form fields detected
+13:33:26
+·
+Filling signup form...
+13:33:26
+~
+⚠️ Could not find username field
+13:33:28
+·
+Typed email into input[name="email"]
+13:33:29
+»
+Typed password into input[name="password"]
+13:33:30
+~
+🔑 reCAPTCHA Enterprise site key: 6LfyLYUsAAAAAP0Xmu-h... (action: "signup" fallback)
+13:33:30
+~
+🔒 Solving reCAPTCHA Enterprise with CapSolver...
+13:33:33
++
+✅ reCAPTCHA Enterprise solved! Token: 0cAFcWeA5j57tKik5fo-usPSa7CQfb...
+13:33:33
+·
+Submitting signup form...
+13:33:33
+·
+Clicked submit button "Create Account" (button[type="submit"])
+13:33:33
+·
+Waiting for signup response...
+13:33:37
+~
+📡 Captured: Token injected into grecaptcha.enterprise.execute (0cAFcWeA5j57tKik5fo-usPSa7CQfb...)
+13:33:37
+!
+❌ Signup blocked by captcha: Create a Replit account | Your captcha token is invalid. Please refresh the page and try again. (code:1) | Continue with Google
+13:33:37
+!
+❌ Replit creation failed: Signup blocked by Replit captcha — try again later
