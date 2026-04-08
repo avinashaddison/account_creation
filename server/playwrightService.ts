@@ -10560,9 +10560,10 @@ export async function registerReplitAccount(
 ): Promise<{ success: boolean; username?: string; email?: string; password?: string; checkoutUrl?: string; checkoutComplete?: boolean; error?: string }> {
   const { ImapFlow } = await import("imapflow");
 
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  // Exclude visually ambiguous chars: 0/O, 1/l/I so credentials are easy to read and type
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
   const rand = (n: number) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-  const randUpper = (n: number) => Array.from({ length: n }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
+  const randUpper = (n: number) => Array.from({ length: n }, () => "ABCDEFGHJKMNPQRSTUVWXYZ"[Math.floor(Math.random() * 23)]).join("");
   const randSym = () => ["!", "@", "#", "$", "%"][Math.floor(Math.random() * 5)];
 
   // Natural-looking usernames — avoid predictable emailprefix+random pattern
