@@ -88,7 +88,7 @@ export async function solveRecaptchaV2Enterprise(
 export async function solveRecaptchaV3Enterprise(
   websiteURL: string,
   websiteKey: string,
-  pageAction: string,
+  pageAction?: string,
   minScore?: number,
   proxy?: string
 ): Promise<CapSolverTaskResult> {
@@ -98,8 +98,11 @@ export async function solveRecaptchaV3Enterprise(
       type: taskType,
       websiteURL,
       websiteKey,
-      pageAction,
+      apiDomain: "google.com",
     };
+    if (pageAction) {
+      task.pageAction = pageAction;
+    }
     if (minScore) {
       task.minScore = minScore;
     }
@@ -108,7 +111,7 @@ export async function solveRecaptchaV3Enterprise(
       Object.assign(task, parsed);
     }
 
-    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL} action=${pageAction}`);
+    console.log(`[CapSolver] Creating ${taskType} task for ${websiteURL} action=${pageAction || "auto"}`);
     return await createAndPollTask(task);
   } catch (err: any) {
     console.log(`[CapSolver] ReCaptchaV3Enterprise error: ${err.message}`);
@@ -599,13 +602,13 @@ async function createAndPollTask(task: Record<string, any>): Promise<CapSolverTa
   return { success: false, error: "Solving timeout (360s)", taskId };
 }
 
-function parseProxy(proxyUrl: string): Record<string, string> {
+function parseProxy(proxyUrl: string): Record<string, any> {
   try {
     const url = new URL(proxyUrl);
-    const result: Record<string, string> = {
+    const result: Record<string, any> = {
       proxyType: url.protocol.replace(":", "").replace("https", "http"),
       proxyAddress: url.hostname,
-      proxyPort: url.port,
+      proxyPort: parseInt(url.port, 10) || 80,
     };
     if (url.username) result.proxyLogin = decodeURIComponent(url.username);
     if (url.password) result.proxyPassword = decodeURIComponent(url.password);

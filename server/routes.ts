@@ -3382,20 +3382,36 @@ export async function registerRoutes(
       (async () => {
         broadcastLog(batchId, createId, `Starting Replit account creation for ${outlookEmail}...`, userId);
         try {
-          const result = await registerReplitAccount(
-            outlookEmail,
-            outlookPassword,
-            (msg) => broadcastLog(batchId, createId, msg, userId),
-            couponCode || undefined,
-            singleCardDetails
-          );
+          const MAX_CAPTCHA_RETRIES = 4;
+          let result: Awaited<ReturnType<typeof registerReplitAccount>> | null = null;
+          for (let attempt = 1; attempt <= MAX_CAPTCHA_RETRIES; attempt++) {
+            if (attempt > 1) {
+              broadcastLog(batchId, createId, `🔄 Captcha retry ${attempt}/${MAX_CAPTCHA_RETRIES} — rotating IP via new nsocks session...`, userId);
+              await new Promise(r => setTimeout(r, 3000)); // brief pause before retry
+            }
+            result = await registerReplitAccount(
+              outlookEmail,
+              outlookPassword,
+              (msg) => broadcastLog(batchId, createId, msg, userId),
+              couponCode || undefined,
+              singleCardDetails
+            );
+            // Break out of retry loop if succeeded, or if failure is NOT captcha-related
+            if (result.success) break;
+            const isCaptchaFail = /captcha|code:1|code:2|browser integrity/i.test(result.error || "");
+            const isRateLimit = /too quickly|rate.?limit|429/i.test(result.error || "");
+            if (!isCaptchaFail || isRateLimit) break;
+            if (attempt < MAX_CAPTCHA_RETRIES) {
+              broadcastLog(batchId, createId, `  ⚠️ Captcha blocked (attempt ${attempt}) — will retry with fresh IP`, userId);
+            }
+          }
 
-          if (result.success) {
+          if (result!.success) {
             try {
               await storage.createReplitAccount({
-                username: result.username!,
-                email: result.email!,
-                password: result.password!,
+                username: result!.username!,
+                email: result!.email!,
+                password: result!.password!,
                 outlookEmail,
                 status: "processing",
                 createdBy: userId,
@@ -3404,10 +3420,10 @@ export async function registerRoutes(
             } catch (dbErr: any) {
               broadcastLog(batchId, createId, `⚠️ DB save error: ${dbErr.message}`, userId);
             }
-            broadcast({ type: "replit_create_result", createId, batchId, success: true, username: result.username, email: result.email, password: result.password, checkoutUrl: result.checkoutUrl }, userId);
+            broadcast({ type: "replit_create_result", createId, batchId, success: true, username: result!.username, email: result!.email, password: result!.password, checkoutUrl: result!.checkoutUrl }, userId);
           } else {
-            broadcastLog(batchId, createId, `❌ Replit creation failed: ${result.error || "Unknown error"}`, userId);
-            broadcast({ type: "replit_create_result", createId, batchId, success: false, error: result.error }, userId);
+            broadcastLog(batchId, createId, `❌ Replit creation failed: ${result!.error || "Unknown error"}`, userId);
+            broadcast({ type: "replit_create_result", createId, batchId, success: false, error: result!.error }, userId);
           }
         } catch (err: any) {
           broadcastLog(batchId, createId, `Error: ${(err.message || "").substring(0, 150)}`, userId);
