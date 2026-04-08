@@ -11153,15 +11153,23 @@ export async function registerReplitAccount(
         }
       }
 
-      // ── CapSolver reCAPTCHA Enterprise — hardcoded action "signup" fixes code:2 ──
-      // Previous code:2 error was caused by missing/wrong action name (intercept wasn't firing).
-      // Real browser through Addison Proxy gives code:1 (fingerprint scored too low by Google).
-      // CapSolver produces a Google-accepted token with correct action → should pass Replit.
+      // ── reCAPTCHA Enterprise token strategy ──
+      // Bright Data's Scraping Browser generates high-scoring real tokens natively
+      // (premium residential IPs + hardened Chrome fingerprint) — no CapSolver needed.
+      // CapSolver is only used as fallback when NOT on Bright Data (e.g. legacy proxy).
       let capsolverToken: string | null = null;
-      if (recaptchaEnterpriseSiteKey) {
-        // Try CapSolver without action first (matches Replit's actual call if they use no/null action),
-        // then fall back to named actions if no-action produces code:2.
-        // "not captured" in logs = action is null/undefined in Replit's grecaptcha.enterprise.execute call.
+      let cdpUrlForCheck = "";
+      try {
+        const cdpRow = await db.execute(sql`SELECT value FROM settings WHERE key = 'zenrows_api_url'`);
+        if (cdpRow.rows.length > 0 && cdpRow.rows[0].value) cdpUrlForCheck = cdpRow.rows[0].value as string;
+      } catch {}
+      const usingBrightData = cdpUrlForCheck.includes("brd.superproxy.io");
+
+      if (usingBrightData) {
+        log("  🌟 Bright Data browser detected — using real browser reCAPTCHA token (skipping CapSolver)");
+      } else if (recaptchaEnterpriseSiteKey) {
+        // Non-Bright Data path: use CapSolver to generate token
+        // Try no-action first (matches Replit's actual call), then named actions as fallback.
         const actionsToTry: (string | undefined)[] = [undefined, "signup", "submit", "create_account"];
         for (const action of actionsToTry) {
           try {
@@ -11189,7 +11197,7 @@ export async function registerReplitAccount(
           log("  ⚠️ CapSolver could not produce a token — falling back to real browser token");
         }
       } else {
-        log("  ⚠️ No reCAPTCHA sitekey captured — skipping CapSolver, using browser token");
+        log("  ⚠️ No reCAPTCHA sitekey captured — using real browser token");
       }
 
       const routeHandler = async (route: any) => {
