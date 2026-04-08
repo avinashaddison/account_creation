@@ -1305,21 +1305,39 @@ export function startShopBot(token: string) {
     const name  = ACTIVATION_LABEL[service];
     const price = ACTIVATION_PRICE.toFixed(2);
 
+    // Feature lines differ per service
+    const features: Record<ActivationService, string[]> = {
+      chatgpt_plus: [
+        "Access to GPT-4o, DALL·E & Plugins",
+        "Works on any existing account",
+        "Or receive a brand-new account",
+        "Zero setup · Instant activation",
+      ],
+      replit_core: [
+        "Full Replit Core subscription",
+        "Unlimited AI tokens & compute",
+        "Works on any existing account",
+        "Zero setup · Instant activation",
+      ],
+    };
+    const featureBlock = features[service]
+      .map(f => `  ◈  ${f}`)
+      .join("\n");
+
     await safeReply(ctx,
-      `${emoji} <b>${name}</b>\n\n` +
-      `Price: <b>$${price}</b>\n\n` +
-      `<blockquote expandable>🔑 <b>Activate at my Mail</b>\n` +
-      `You provide your account — we upgrade it to ${name}.\n` +
-      `Your credentials stay on your device.</blockquote>\n\n` +
-      `<blockquote expandable>📦 <b>Send Account by your side</b>\n` +
-      `We send you a ready-made ${name} account instantly.\n` +
-      `Full access credentials delivered right here in chat.</blockquote>\n\n` +
-      `<i>Delivery is confirmed within minutes of payment.</i>`,
+      `${emoji}  <b>${name}</b>\n` +
+      `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+      `<code>${featureBlock}</code>\n\n` +
+      `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n` +
+      `💵  <b>$${price}</b>  ·  ⚡ Instant  ·  both options\n\n` +
+      `<blockquote>🔑  <b>Activate at my Mail</b>\nShare your login once — we upgrade your account to ${name}. Your password never leaves your device.</blockquote>\n\n` +
+      `<blockquote>📦  <b>Get a Sent Account</b>\nReceive a brand-new ${name} account — full email + password — delivered straight to this chat.</blockquote>\n\n` +
+      `<i>Tap an option below to continue  →</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback(`🔑  Activate at my Mail`, `act_mine_${service}`)],
-          [Markup.button.callback(`📦  Send Account by your side`, `act_send_${service}`)],
+          [Markup.button.callback(`📦  Get a Sent Account`, `act_send_${service}`)],
           [Markup.button.callback(`◀  Back to Menu`, `act_back`)],
         ]),
       }
