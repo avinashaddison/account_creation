@@ -2528,11 +2528,17 @@ export function startShopBot(token: string) {
   }
 
   // ── Launch with retry ─────────────────────────────────────────────────────
+  // IMPORTANT: bot.launch() in long-polling mode blocks forever (resolves only
+  // when bot.stop() is called).  Any code after `await bot.launch()` would NEVER
+  // run.  We must NOT await it — start polling as a background task and then
+  // call registerCommands() immediately after.
   async function launch(attempt = 1) {
     try {
-      await bot.launch({ dropPendingUpdates: true });
+      await registerCommands();   // ← register BEFORE launch so commands are set
+      bot.launch({ dropPendingUpdates: true }).catch((err: any) => {
+        console.error("[ShopBot] Polling error:", err?.message);
+      });
       console.log("[ShopBot] Online — Project Addison v2 Marketplace");
-      await registerCommands();
     } catch (err: any) {
       const delay = Math.min(attempt * 5000, 60_000);
       console.error(`[ShopBot] Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
