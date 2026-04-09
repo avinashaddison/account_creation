@@ -2840,38 +2840,42 @@ export function startTelegramBot(config: BotConfig) {
   }));
 
   // ── Shop keyboard: individual section hears ─────────────────────────────
-  bot.hears(SHOP_KB.BACK, (ctx) => handleMenu(ctx, async () => {
-    await ctx.reply(`↩ Main menu`, { ...MAIN_KEYBOARD });
-  }));
+  // NOTE: These do NOT use handleMenu — the shop reply keyboard stays visible
+  //       at the bottom while section content is sent as a new chat message.
+  //       Only BACK restores the main keyboard.
 
-  bot.hears(SHOP_KB.PRODUCTS, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.BACK, async (ctx) => {
+    await ctx.reply(`↩ Main menu`, { ...MAIN_KEYBOARD });
+  });
+
+  bot.hears(SHOP_KB.PRODUCTS, async (ctx) => {
     const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
     await ctx.reply(buildProductsListMsg(res.rows), { parse_mode: "HTML", ...buildProductsListButtons(res.rows) });
-  }));
+  });
 
-  bot.hears(SHOP_KB.ADD_PRODUCT, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.ADD_PRODUCT, async (ctx) => {
     getState(ctx.from.id).shopAdminFlow = { step: "name" };
     await ctx.reply(
       `\n🔷 <b>➕ ADD PRODUCT — 1/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `› Enter the product <b>name</b>:\n<code>  e.g. "Replit Core 1 Month"</code>`,
       { parse_mode: "HTML" }
     );
-  }));
+  });
 
-  bot.hears(SHOP_KB.CUSTOMER, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.CUSTOMER, async (ctx) => {
     await showCustomerPage(ctx, 0, false);
-  }));
+  });
 
-  bot.hears(SHOP_KB.FUND_ACCOUNT, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.FUND_ACCOUNT, async (ctx) => {
     getState(ctx.from.id).shopAdminFlow = { step: "topup_uid" };
     await ctx.reply(
       `\n💰 <b>FUND CUSTOMER ACCOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `› Enter the customer's <b>Telegram ID</b>:\n<i>  e.g. 123456789</i>`,
       { parse_mode: "HTML" }
     );
-  }));
+  });
 
-  bot.hears(SHOP_KB.ACT_ORDERS, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.ACT_ORDERS, async (ctx) => {
     const res = await dbQuery(
       `SELECT id, telegram_id, service, delivery_type, email, amount, status, created_at
        FROM shop_activation_orders ORDER BY created_at DESC LIMIT 20`
@@ -2895,9 +2899,9 @@ export function startTelegramBot(config: BotConfig) {
     }
     t += `</code>`;
     await ctx.reply(t, { parse_mode: "HTML" });
-  }));
+  });
 
-  bot.hears(SHOP_KB.DEPOSITS, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.DEPOSITS, async (ctx) => {
     const res = await dbQuery(
       `SELECT d.id, d.telegram_id, d.status, d.amount_requested, d.created_at, c.username, c.first_name
        FROM shop_deposit_requests d
@@ -2927,9 +2931,9 @@ export function startTelegramBot(config: BotConfig) {
     }
     t += `</code>`;
     await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
-  }));
+  });
 
-  bot.hears(SHOP_KB.BROADCAST, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.BROADCAST, async (ctx) => {
     const r = await dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`);
     const total = parseInt(r.rows[0]?.cnt ?? "0");
     getState(ctx.from.id).shopAdminFlow = { step: "broadcast_text" };
@@ -2939,9 +2943,9 @@ export function startTelegramBot(config: BotConfig) {
       `› Type your <b>broadcast message</b>:\n<i>Supports HTML. Sent to all customers.</i>`,
       { parse_mode: "HTML" }
     );
-  }));
+  });
 
-  bot.hears(SHOP_KB.ANALYTICS, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.ANALYTICS, async (ctx) => {
     const [todayRes, weekRes, monthRes, bestRes, topCustRes, avgRating] = await Promise.all([
       dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '1 day'`),
       dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '7 days'`),
@@ -2970,18 +2974,18 @@ export function startTelegramBot(config: BotConfig) {
       t += `</code>`;
     }
     await ctx.reply(t, { parse_mode: "HTML" });
-  }));
+  });
 
-  bot.hears(SHOP_KB.SEARCH, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.SEARCH, async (ctx) => {
     getState(ctx.from.id).shopAdminFlow = { step: "search_uid" };
     await ctx.reply(
       `\n🔍 <b>SEARCH CUSTOMER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `› Enter a <b>Telegram ID</b> or <b>@username</b>:`,
       { parse_mode: "HTML" }
     );
-  }));
+  });
 
-  bot.hears(SHOP_KB.REFER_REWARD, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.REFER_REWARD, async (ctx) => {
     const cur = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'referral_reward'`);
     const current = parseFloat(cur.rows[0]?.value ?? "0.50");
     getState(ctx.from.id).shopAdminFlow = { step: "refer_amount" };
@@ -2991,9 +2995,9 @@ export function startTelegramBot(config: BotConfig) {
       `› Enter the new reward amount in USD:\n<code>  e.g. 0.50 · 1.00 · 2.00</code>`,
       { parse_mode: "HTML" }
     );
-  }));
+  });
 
-  bot.hears(SHOP_KB.PROMO_CODES, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.PROMO_CODES, async (ctx) => {
     const res = await dbQuery(
       `SELECT code, discount_pct, discount_fixed, max_uses, uses_count, active FROM shop_promo_codes ORDER BY created_at DESC LIMIT 20`
     );
@@ -3017,9 +3021,9 @@ export function startTelegramBot(config: BotConfig) {
     t += `</code>`;
     buttons.push([Markup.button.callback("➕  Create Code", "shop_admin_promo_create")]);
     await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
-  }));
+  });
 
-  bot.hears(SHOP_KB.RESTOCK, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.RESTOCK, async (ctx) => {
     const res = await dbQuery(
       `SELECT s.product_id, COUNT(*) as sub_count, p.name as product_name
        FROM shop_restock_subs s
@@ -3041,9 +3045,9 @@ export function startTelegramBot(config: BotConfig) {
     }
     t += `</code>`;
     await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
-  }));
+  });
 
-  bot.hears(SHOP_KB.STOCK, (ctx) => handleMenu(ctx, async () => {
+  bot.hears(SHOP_KB.STOCK, async (ctx) => {
     const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
     if (res.rows.length === 0) {
       return ctx.reply(
@@ -3066,7 +3070,7 @@ export function startTelegramBot(config: BotConfig) {
     }
     text += `</code>`;
     await ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
-  }));
+  });
   // ─────────────────────────────────────────────────────────────────────────
 
   bot.hears(KB.PAYMENT, (ctx) => handleMenu(ctx, async () => {
