@@ -2826,6 +2826,7 @@ export function startTelegramBot(config: BotConfig) {
       ],
       [
         Markup.button.callback("🗄  STOCK MANAGER",       "shop_admin_stock"),
+        Markup.button.callback("📬  MANUAL ORDERS",       "shop_admin_manual_orders"),
       ],
     ]);
 
