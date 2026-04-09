@@ -1210,29 +1210,22 @@ export function startShopBot(token: string) {
     }
     sendRatingRequest(bot, uid, result.orderId, result.productName);
 
-    const discountLine = discount > 0
-      ? `🏷️ Promo <b>${escHtml(promoCode ?? "")}</b>: <b>-${fmt$(discount)}</b>\n`
-      : "";
+    const itemsBlock = result.redeemLink
+      ? `1. <code>${escHtml(result.redeemLink)}</code>`
+      : `📧 <code>${escHtml(result.accountEmail)}</code>\n` +
+        `🔑 <code>${escHtml(result.accountPassword)}</code>`;
 
-    const pEmoji = platformEmoji(prod.account_type);
-    const deliveryBody = result.redeemLink
-      ? `🔗 <b>REDEEM YOUR ACCESS</b>\n\n` +
-        `<code>${escHtml(result.redeemLink)}</code>\n\n` +
-        `<i>Tap the link to activate instantly.\nSingle-use only — save it somewhere safe.</i>`
-      : `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
-        `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
-        `<i>Credentials saved — access anytime in My Orders.</i>`;
     await safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PURCHASE SUCCESSFUL!</b>  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `${deliveryBody}\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `${discountLine}` +
-      `💵 Paid: <b>${fmt$(result.finalPrice)}</b>\n` +
-      `💰 New balance: <b>${fmt$(result.newBalance)}</b>`,
+      `✅ <b>Order Delivered!</b>\n\n` +
+      `<code>` +
+      `Product:    ${escHtml(prod.name)}\n` +
+      `Quantity:   1\n` +
+      `${discount > 0 ? `Discount:   -${fmt$(discount)}\n` : ""}` +
+      `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
+      `</code>\n` +
+      `📦 <b>${escHtml(prod.name)}</b> × 1\n\n` +
+      `${itemsBlock}\n\n` +
+      `💰 Balance: <b>${fmt$(result.newBalance)}</b>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1336,24 +1329,21 @@ export function startShopBot(token: string) {
     }
     sendRatingRequest(bot, uid, result.orderId, result.productName);
 
-    const pEmoji = platformEmoji(prod.account_type ?? "");
-    const deliveryBody2 = result.redeemLink
-      ? `🔗 <b>REDEEM YOUR ACCESS</b>\n\n` +
-        `<code>${escHtml(result.redeemLink)}</code>\n\n` +
-        `<i>Tap the link to activate instantly.\nSingle-use only — save it somewhere safe.</i>`
-      : `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
-        `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
-        `<i>Save these credentials safely. For issues, contact ${escHtml(SUPPORT_CONTACT)}</i>`;
+    const itemsBlock2 = result.redeemLink
+      ? `1. <code>${escHtml(result.redeemLink)}</code>`
+      : `📧 <code>${escHtml(result.accountEmail)}</code>\n` +
+        `🔑 <code>${escHtml(result.accountPassword)}</code>`;
+
     await safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PURCHASE SUCCESSFUL!</b>  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `${deliveryBody2}\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `💵 Paid: <b>${fmt$(result.finalPrice)}</b>\n` +
-      `💰 New balance: <b>${fmt$(result.newBalance)}</b>`,
+      `✅ <b>Order Delivered!</b>\n\n` +
+      `<code>` +
+      `Product:    ${escHtml(prod.name)}\n` +
+      `Quantity:   1\n` +
+      `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
+      `</code>\n` +
+      `📦 <b>${escHtml(prod.name)}</b> × 1\n\n` +
+      `${itemsBlock2}\n\n` +
+      `💰 Balance: <b>${fmt$(result.newBalance)}</b>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
