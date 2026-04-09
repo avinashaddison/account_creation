@@ -333,6 +333,34 @@ const MAIN_KEYBOARD = Markup.keyboard([
   [KB.ADDRESS],
 ]).resize().oneTime();
 
+const SHOP_KB = {
+  PRODUCTS:     "📦  PRODUCTS",
+  ADD_PRODUCT:  "➕  ADD PRODUCT",
+  CUSTOMER:     "👥  CUSTOMER",
+  FUND_ACCOUNT: "💰  FUND ACCOUNT",
+  ACT_ORDERS:   "📋  ACTIVATION ORDERS",
+  DEPOSITS:     "📸  DEPOSITS",
+  BROADCAST:    "📢  BROADCAST",
+  ANALYTICS:    "📊  ANALYTICS",
+  SEARCH:       "🔍  SEARCH CUSTOMER",
+  REFER_REWARD: "🔗  REFER REWARD",
+  PROMO_CODES:  "🏷️  PROMO CODES",
+  RESTOCK:      "🔔  RESTOCK NOTIFY",
+  STOCK:        "🗄  STOCK MANAGER",
+  BACK:         "↩  BACK",
+} as const;
+
+const SHOP_KEYBOARD = Markup.keyboard([
+  [SHOP_KB.PRODUCTS,    SHOP_KB.ADD_PRODUCT],
+  [SHOP_KB.CUSTOMER,    SHOP_KB.FUND_ACCOUNT],
+  [SHOP_KB.ACT_ORDERS,  SHOP_KB.DEPOSITS],
+  [SHOP_KB.BROADCAST,   SHOP_KB.ANALYTICS],
+  [SHOP_KB.SEARCH,      SHOP_KB.REFER_REWARD],
+  [SHOP_KB.PROMO_CODES, SHOP_KB.RESTOCK],
+  [SHOP_KB.STOCK],
+  [SHOP_KB.BACK],
+]).resize();
+
 // ── Inline sub-menus (shown in chat, not bottom bar) ─────────────────────────
 
 /** Step 1 — account type picker */
@@ -2798,9 +2826,248 @@ export function startTelegramBot(config: BotConfig) {
     }
   }
 
+  // Helper: reply or edit depending on context
+  function replyOrEdit(ctx: any, edit: boolean, text: string, opts: any = {}) {
+    if (edit) return safeEdit(ctx, text, opts);
+    return ctx.reply(text, opts);
+  }
+
   bot.hears(KB.SHOP, (ctx) => handleMenu(ctx, async () => {
-    await showShopAdminMenu(ctx);
+    await ctx.reply(
+      `\n🛍 <b>SHOP ADMIN</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n› Choose a module:`,
+      { parse_mode: "HTML", ...SHOP_KEYBOARD }
+    );
   }));
+
+  // ── Shop keyboard: individual section hears ─────────────────────────────
+  bot.hears(SHOP_KB.BACK, (ctx) => handleMenu(ctx, async () => {
+    await ctx.reply(`↩ Main menu`, { ...MAIN_KEYBOARD });
+  }));
+
+  bot.hears(SHOP_KB.PRODUCTS, (ctx) => handleMenu(ctx, async () => {
+    const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    await ctx.reply(buildProductsListMsg(res.rows), { parse_mode: "HTML", ...buildProductsListButtons(res.rows) });
+  }));
+
+  bot.hears(SHOP_KB.ADD_PRODUCT, (ctx) => handleMenu(ctx, async () => {
+    getState(ctx.from.id).shopAdminFlow = { step: "name" };
+    await ctx.reply(
+      `\n🔷 <b>➕ ADD PRODUCT — 1/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter the product <b>name</b>:\n<code>  e.g. "Replit Core 1 Month"</code>`,
+      { parse_mode: "HTML" }
+    );
+  }));
+
+  bot.hears(SHOP_KB.CUSTOMER, (ctx) => handleMenu(ctx, async () => {
+    await showCustomerPage(ctx, 0, false);
+  }));
+
+  bot.hears(SHOP_KB.FUND_ACCOUNT, (ctx) => handleMenu(ctx, async () => {
+    getState(ctx.from.id).shopAdminFlow = { step: "topup_uid" };
+    await ctx.reply(
+      `\n💰 <b>FUND CUSTOMER ACCOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter the customer's <b>Telegram ID</b>:\n<i>  e.g. 123456789</i>`,
+      { parse_mode: "HTML" }
+    );
+  }));
+
+  bot.hears(SHOP_KB.ACT_ORDERS, (ctx) => handleMenu(ctx, async () => {
+    const res = await dbQuery(
+      `SELECT id, telegram_id, service, delivery_type, email, amount, status, created_at
+       FROM shop_activation_orders ORDER BY created_at DESC LIMIT 20`
+    );
+    const serviceLabel: Record<string, string> = { chatgpt_plus: "ChatGPT+", replit_core: "Replit Core" };
+    if (res.rows.length === 0) {
+      return ctx.reply(
+        `\n📋 <b>ACTIVATION ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No activation orders yet.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+    let t = `\n📋 <b>ACTIVATION ORDERS</b>  <code>last ${res.rows.length}</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    for (const r of res.rows) {
+      const svc  = serviceLabel[r.service] ?? r.service;
+      const type = r.delivery_type === "activate" ? "🔑" : "📦";
+      const stat = r.status === "pending" ? "⏳" : r.status === "completed" ? "✅" : "❌";
+      const email = r.email ? r.email.slice(0, 20) : "—";
+      const date  = new Date(r.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+      t += `${stat} ${type} ${svc.padEnd(10)}  $${parseFloat(r.amount).toFixed(2)}  ${date}\n`;
+      if (r.email) t += `   ${email}\n`;
+    }
+    t += `</code>`;
+    await ctx.reply(t, { parse_mode: "HTML" });
+  }));
+
+  bot.hears(SHOP_KB.DEPOSITS, (ctx) => handleMenu(ctx, async () => {
+    const res = await dbQuery(
+      `SELECT d.id, d.telegram_id, d.status, d.amount_requested, d.created_at, c.username, c.first_name
+       FROM shop_deposit_requests d
+       LEFT JOIN shop_customers c ON d.telegram_id = c.telegram_id
+       ORDER BY d.created_at DESC LIMIT 20`
+    );
+    if (res.rows.length === 0) {
+      return ctx.reply(
+        `\n📸 <b>DEPOSIT REQUESTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No deposit requests yet.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+    let t = `\n📸 <b>DEPOSIT REQUESTS</b>  <code>last ${res.rows.length}</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const r of res.rows) {
+      const name = r.username ? `@${r.username}` : (r.first_name ?? `${r.telegram_id}`);
+      const stat = r.status === "pending" ? "⏳" : r.status === "approved" ? "✅" : "❌";
+      const amt  = r.amount_requested ? `$${parseFloat(r.amount_requested).toFixed(2)}` : "—";
+      const date = new Date(r.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+      t += `${stat} #${r.id}  ${name.slice(0, 14).padEnd(14)}  ${amt}  ${date}\n`;
+      if (r.status === "pending") {
+        buttons.push([
+          Markup.button.callback(`✅ #${r.id} Approve`, `dep_approve_${r.id}_${r.telegram_id}`),
+          Markup.button.callback(`❌ Deny`, `dep_deny_${r.id}_${r.telegram_id}`),
+        ]);
+      }
+    }
+    t += `</code>`;
+    await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }));
+
+  bot.hears(SHOP_KB.BROADCAST, (ctx) => handleMenu(ctx, async () => {
+    const r = await dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`);
+    const total = parseInt(r.rows[0]?.cnt ?? "0");
+    getState(ctx.from.id).shopAdminFlow = { step: "broadcast_text" };
+    await ctx.reply(
+      `\n📢 <b>BROADCAST MESSAGE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>Recipients:  ${total} customers</code>\n\n` +
+      `› Type your <b>broadcast message</b>:\n<i>Supports HTML. Sent to all customers.</i>`,
+      { parse_mode: "HTML" }
+    );
+  }));
+
+  bot.hears(SHOP_KB.ANALYTICS, (ctx) => handleMenu(ctx, async () => {
+    const [todayRes, weekRes, monthRes, bestRes, topCustRes, avgRating] = await Promise.all([
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '1 day'`),
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '7 days'`),
+      dbQuery(`SELECT COALESCE(SUM(amount),0) as t FROM shop_orders WHERE created_at >= NOW() - INTERVAL '30 days'`),
+      dbQuery(`SELECT product_name, COUNT(*) as cnt, SUM(amount) as rev FROM shop_orders GROUP BY product_name ORDER BY cnt DESC LIMIT 5`),
+      dbQuery(`SELECT c.first_name, c.username, SUM(o.amount) as spent FROM shop_orders o JOIN shop_customers c ON o.telegram_id = c.telegram_id GROUP BY c.telegram_id, c.first_name, c.username ORDER BY spent DESC LIMIT 5`),
+      dbQuery(`SELECT ROUND(AVG(rating),1) as avg FROM shop_order_ratings`),
+    ]);
+    const today = parseFloat(todayRes.rows[0]?.t ?? "0");
+    const week  = parseFloat(weekRes.rows[0]?.t ?? "0");
+    const month = parseFloat(monthRes.rows[0]?.t ?? "0");
+    const avg   = avgRating.rows[0]?.avg ?? "N/A";
+    let t = `\n📊 <b>REVENUE ANALYTICS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    t += `<b>💵 Revenue</b>\n<code>Today:   $${today.toFixed(2)}\n7 days:  $${week.toFixed(2)}\n30 days: $${month.toFixed(2)}\nRating:  ${avg} / 5\n</code>\n\n`;
+    if (bestRes.rows.length > 0) {
+      t += `<b>📦 Top Products</b>\n<code>`;
+      for (const r of bestRes.rows) t += `${String(r.cnt).padStart(3)}x  $${parseFloat(r.rev).toFixed(2)}  ${r.product_name.slice(0, 20)}\n`;
+      t += `</code>\n\n`;
+    }
+    if (topCustRes.rows.length > 0) {
+      t += `<b>👥 Top Customers</b>\n<code>`;
+      for (const r of topCustRes.rows) {
+        const name = r.username ? `@${r.username}` : (r.first_name ?? "Unknown");
+        t += `$${parseFloat(r.spent).toFixed(2).padStart(7)}  ${name.slice(0, 18)}\n`;
+      }
+      t += `</code>`;
+    }
+    await ctx.reply(t, { parse_mode: "HTML" });
+  }));
+
+  bot.hears(SHOP_KB.SEARCH, (ctx) => handleMenu(ctx, async () => {
+    getState(ctx.from.id).shopAdminFlow = { step: "search_uid" };
+    await ctx.reply(
+      `\n🔍 <b>SEARCH CUSTOMER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `› Enter a <b>Telegram ID</b> or <b>@username</b>:`,
+      { parse_mode: "HTML" }
+    );
+  }));
+
+  bot.hears(SHOP_KB.REFER_REWARD, (ctx) => handleMenu(ctx, async () => {
+    const cur = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'referral_reward'`);
+    const current = parseFloat(cur.rows[0]?.value ?? "0.50");
+    getState(ctx.from.id).shopAdminFlow = { step: "refer_amount" };
+    await ctx.reply(
+      `\n🔗 <b>REFER REWARD AMOUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>Current reward:  $${current.toFixed(2)}</code>\n\n` +
+      `› Enter the new reward amount in USD:\n<code>  e.g. 0.50 · 1.00 · 2.00</code>`,
+      { parse_mode: "HTML" }
+    );
+  }));
+
+  bot.hears(SHOP_KB.PROMO_CODES, (ctx) => handleMenu(ctx, async () => {
+    const res = await dbQuery(
+      `SELECT code, discount_pct, discount_fixed, max_uses, uses_count, active FROM shop_promo_codes ORDER BY created_at DESC LIMIT 20`
+    );
+    if (res.rows.length === 0) {
+      return ctx.reply(
+        `\n🏷️ <b>PROMO CODES</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No promo codes created yet.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([
+          [Markup.button.callback("➕  Create Code", "shop_admin_promo_create")],
+        ]) }
+      );
+    }
+    let t = `\n🏷️ <b>PROMO CODES</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const r of res.rows) {
+      const stat = r.active ? "🟢" : "🔴";
+      const disc = parseFloat(r.discount_pct) > 0 ? `${parseFloat(r.discount_pct).toFixed(0)}% off` : `$${parseFloat(r.discount_fixed).toFixed(2)} off`;
+      const uses = r.max_uses > 0 ? `${r.uses_count}/${r.max_uses}` : `${r.uses_count}/∞`;
+      t += `${stat} ${r.code.padEnd(12)} ${disc.padEnd(10)} ${uses}\n`;
+      buttons.push([Markup.button.callback(`${r.active ? "⏸ Disable" : "▶ Enable"} ${r.code}`, `shop_promo_toggle_${r.code}`)]);
+    }
+    t += `</code>`;
+    buttons.push([Markup.button.callback("➕  Create Code", "shop_admin_promo_create")]);
+    await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }));
+
+  bot.hears(SHOP_KB.RESTOCK, (ctx) => handleMenu(ctx, async () => {
+    const res = await dbQuery(
+      `SELECT s.product_id, COUNT(*) as sub_count, p.name as product_name
+       FROM shop_restock_subs s
+       LEFT JOIN shop_products p ON p.id::text = s.product_id
+       GROUP BY s.product_id, p.name ORDER BY sub_count DESC`
+    );
+    if (res.rows.length === 0) {
+      return ctx.reply(
+        `\n🔔 <b>RESTOCK SUBSCRIBERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No subscribers yet.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+    let t = `\n🔔 <b>RESTOCK SUBSCRIBERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<code>`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const r of res.rows) {
+      const name = r.product_name ?? r.product_id;
+      t += `${String(r.sub_count).padStart(3)} subs  ${name.slice(0, 25)}\n`;
+      buttons.push([Markup.button.callback(`📢 Notify ${r.sub_count} subs — ${name.slice(0, 20)}`, `shop_notify_restock_${r.product_id}`)]);
+    }
+    t += `</code>`;
+    await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }));
+
+  bot.hears(SHOP_KB.STOCK, (ctx) => handleMenu(ctx, async () => {
+    const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    if (res.rows.length === 0) {
+      return ctx.reply(
+        `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No products exist yet. Create a product first.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+    let text = `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>  Product                  Avail  Sold  Total\n  ─────────────────────────────────────────────\n`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const p of res.rows) {
+      const info = await getProductStockInfo(p);
+      const name = p.name.slice(0, 22).padEnd(22);
+      const statusIcon = p.active ? "🟢" : "🔴";
+      text += `  ${statusIcon} ${name}  ${String(info.avail).padStart(4)}   ${String(info.sold).padStart(4)}   ${String(info.total).padStart(4)}\n`;
+      buttons.push([Markup.button.callback(
+        `${info.avail > 0 ? "🟢" : "🔴"} ${p.name.slice(0, 28)}  (${info.avail} avail)`,
+        `shop_stock_${p.id}`
+      )]);
+    }
+    text += `</code>`;
+    await ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }));
+  // ─────────────────────────────────────────────────────────────────────────
 
   bot.hears(KB.PAYMENT, (ctx) => handleMenu(ctx, async () => {
     const msg =
@@ -3163,7 +3430,7 @@ export function startTelegramBot(config: BotConfig) {
   });
 
   // ── Paginated customer list ───────────────────────────────────────────────
-  async function showCustomerPage(ctx: any, offset: number) {
+  async function showCustomerPage(ctx: any, offset: number, edit = true) {
     const PAGE = 20;
     const [countRes, totalBalRes] = await Promise.all([
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers`),
@@ -3173,7 +3440,7 @@ export function startTelegramBot(config: BotConfig) {
     const totalBal  = parseFloat(totalBalRes.rows[0]?.total ?? "0");
 
     if (total === 0) {
-      return safeEdit(ctx,
+      return replyOrEdit(ctx, edit,
         `\n👥 <b>CUSTOMER DATABASE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `<i>No customers have used the shop bot yet.</i>`,
         { parse_mode: "HTML", ...Markup.inlineKeyboard([
@@ -3209,7 +3476,7 @@ export function startTelegramBot(config: BotConfig) {
       Markup.button.callback("💰  FUND ACCOUNT", "shop_admin_topup"),
       Markup.button.callback("↩  Back",          "shop_admin_menu"),
     ]);
-    await safeEdit(ctx, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) });
+    await replyOrEdit(ctx, edit, t, { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) });
   }
 
   bot.action("shop_admin_customers", async (ctx) => {
