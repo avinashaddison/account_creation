@@ -142,7 +142,9 @@ interface ShopAdminFlow {
        | "dep_approve_amount"
        | "stock_add_creds"
        | "stock_add_links"
-       | "stock_set_override";
+       | "stock_set_override"
+       | "stock_set_manual_stock"
+       | "manual_fulfill";
   name?: string;
   description?: string;
   price?: string;
@@ -159,6 +161,9 @@ interface ShopAdminFlow {
   stockTableName?: string;
   stockStatusFilter?: string;
   stockOverrideProductId?: string;
+  manualStockProductId?: string;
+  fulfillOrderId?: string;
+  fulfillCustomerId?: number;
 }
 interface UserState {
   lastCopiedIds?: string[];
@@ -338,30 +343,31 @@ const MAIN_KEYBOARD = Markup.keyboard([
 ]).resize().oneTime();
 
 const SHOP_KB = {
-  PRODUCTS:     "📦  PRODUCTS",
-  ADD_PRODUCT:  "➕  ADD PRODUCT",
-  CUSTOMER:     "👥  CUSTOMER",
-  FUND_ACCOUNT: "💰  FUND ACCOUNT",
-  ACT_ORDERS:   "📋  ACTIVATION ORDERS",
-  DEPOSITS:     "📸  DEPOSITS",
-  BROADCAST:    "📢  BROADCAST",
-  ANALYTICS:    "📊  ANALYTICS",
-  SEARCH:       "🔍  SEARCH CUSTOMER",
-  REFER_REWARD: "🔗  REFER REWARD",
-  PROMO_CODES:  "🏷️  PROMO CODES",
-  RESTOCK:      "🔔  RESTOCK NOTIFY",
-  STOCK:        "🗄  STOCK MANAGER",
-  BACK:         "↩  BACK",
+  PRODUCTS:      "📦  PRODUCTS",
+  ADD_PRODUCT:   "➕  ADD PRODUCT",
+  CUSTOMER:      "👥  CUSTOMER",
+  FUND_ACCOUNT:  "💰  FUND ACCOUNT",
+  ACT_ORDERS:    "📋  ACTIVATION ORDERS",
+  DEPOSITS:      "📸  DEPOSITS",
+  BROADCAST:     "📢  BROADCAST",
+  ANALYTICS:     "📊  ANALYTICS",
+  SEARCH:        "🔍  SEARCH CUSTOMER",
+  REFER_REWARD:  "🔗  REFER REWARD",
+  PROMO_CODES:   "🏷️  PROMO CODES",
+  RESTOCK:       "🔔  RESTOCK NOTIFY",
+  STOCK:         "🗄  STOCK MANAGER",
+  MANUAL_ORDERS: "📬  MANUAL ORDERS",
+  BACK:          "↩  BACK",
 } as const;
 
 const SHOP_KEYBOARD = Markup.keyboard([
-  [SHOP_KB.PRODUCTS,    SHOP_KB.ADD_PRODUCT],
-  [SHOP_KB.CUSTOMER,    SHOP_KB.FUND_ACCOUNT],
-  [SHOP_KB.ACT_ORDERS,  SHOP_KB.DEPOSITS],
-  [SHOP_KB.BROADCAST,   SHOP_KB.ANALYTICS],
-  [SHOP_KB.SEARCH,      SHOP_KB.REFER_REWARD],
-  [SHOP_KB.PROMO_CODES, SHOP_KB.RESTOCK],
-  [SHOP_KB.STOCK],
+  [SHOP_KB.PRODUCTS,      SHOP_KB.ADD_PRODUCT],
+  [SHOP_KB.CUSTOMER,      SHOP_KB.FUND_ACCOUNT],
+  [SHOP_KB.ACT_ORDERS,    SHOP_KB.DEPOSITS],
+  [SHOP_KB.BROADCAST,     SHOP_KB.ANALYTICS],
+  [SHOP_KB.SEARCH,        SHOP_KB.REFER_REWARD],
+  [SHOP_KB.PROMO_CODES,   SHOP_KB.RESTOCK],
+  [SHOP_KB.STOCK,         SHOP_KB.MANUAL_ORDERS],
   [SHOP_KB.BACK],
 ]).resize();
 
@@ -3099,6 +3105,37 @@ export function startTelegramBot(config: BotConfig) {
     text += `</code>`;
     await ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
   });
+
+  bot.hears(SHOP_KB.MANUAL_ORDERS, async (ctx) => {
+    await clearShopMenu(ctx);
+    const res = await dbQuery(
+      `SELECT o.id, o.telegram_id, o.product_name, o.amount, o.created_at,
+              c.username, c.first_name
+       FROM shop_orders o
+       LEFT JOIN shop_customers c ON c.telegram_id = o.telegram_id
+       WHERE o.delivery_status = 'pending_delivery'
+       ORDER BY o.created_at ASC`
+    );
+    if (res.rows.length === 0) {
+      return ctx.reply(
+        `\n📬 <b>MANUAL ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<i>No pending manual orders. All caught up!</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
+      );
+    }
+    let text = `\n📬 <b>MANUAL ORDERS</b>  <code>${res.rows.length} pending</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const o of res.rows) {
+      const custName = o.username ? `@${o.username}` : (o.first_name ?? `ID:${o.telegram_id}`);
+      const date     = new Date(o.created_at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
+      text += `📦 <b>${escapeHtml(o.product_name)}</b>  ·  $${parseFloat(o.amount).toFixed(2)}\n`;
+      text += `👤 ${escapeHtml(custName)}  <code>(${o.telegram_id})</code>  ·  ${date}\n`;
+      text += `🆔 <code>${o.id}</code>\n\n`;
+      buttons.push([Markup.button.callback(`📦  Fulfill — ${o.product_name.slice(0, 20)}`, `shop_fulfill_${o.id}`)]);
+    }
+    buttons.push([Markup.button.callback("🔄  Refresh", "shop_admin_manual_orders")]);
+    await ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
   // ─────────────────────────────────────────────────────────────────────────
 
   bot.hears(KB.PAYMENT, (ctx) => handleMenu(ctx, async () => {
@@ -3947,39 +3984,64 @@ export function startTelegramBot(config: BotConfig) {
 
     const table = SHOP_TABLE_MAP[p.account_type];
     const sf    = p.status_filter ?? "available";
+    const delivMode = (p.delivery_mode ?? "auto") as string;
+    const isManual  = delivMode === "manual";
+    const manualStk = p.manual_stock ?? 0;
     const info  = await getProductStockInfo(p);
 
     const overrideVal = p.stock_override != null ? p.stock_override : null;
-    const displayStock = overrideVal != null ? `${overrideVal}  (manual override)` : `${info.avail}  (real count)`;
+    const displayStock = isManual
+      ? `${manualStk}  (manual stock)`
+      : overrideVal != null ? `${overrideVal}  (override)` : `${info.avail}  (real count)`;
 
     const text =
       `\n🗄 <b>STOCK: ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<code>` +
+      `Delivery mode  :  ${isManual ? "MANUAL 📬" : "AUTO ⚡"}\n` +
       `Account type   :  ${p.account_type}\n` +
       `DB table       :  ${table ?? "⚠️ unmapped"}\n` +
       `Status filter  :  ${sf}\n` +
       `─────────────────────────────────\n` +
       `Shown to buyer :  ${displayStock}\n` +
-      `Real available :  ${info.avail}\n` +
-      `Sold out       :  ${info.sold}\n` +
-      `Total entries  :  ${info.total}\n` +
+      (isManual ? "" : `Real available :  ${info.avail}\nSold out       :  ${info.sold}\nTotal entries  :  ${info.total}\n`) +
       `</code>\n\n` +
       `› What would you like to do?`;
 
+    const toggleLabel = isManual ? "⚡  Switch to AUTO" : "📬  Switch to MANUAL";
+
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [
+      [Markup.button.callback(toggleLabel, `shop_stock_togglemode_${productId}`)],
+    ];
+
+    if (isManual) {
+      buttons.push([
+        Markup.button.callback(`📊  Set Manual Stock  (now: ${manualStk})`, `shop_stock_setmanualstock_${productId}`),
+      ]);
+    } else {
+      buttons.push([
+        Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
+        Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`),
+      ]);
+      buttons.push([
+        Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
+        Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`),
+      ]);
+      buttons.push([
+        Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
+        Markup.button.callback(overrideVal != null ? "🔄  Real Count" : "🔢  Override",
+                               overrideVal != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`),
+      ]);
+      buttons.push([
+        Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
+        Markup.button.callback("♻  Reset Available",     `shop_stock_resetavail_${productId}`),
+      ]);
+    }
+
+    buttons.push([Markup.button.callback("↩  Back to Stock", "shop_admin_stock")]);
+
     await safeEdit(ctx, text, {
       parse_mode: "HTML",
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
-         Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`)],
-        [Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
-         Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`)],
-        [Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
-         Markup.button.callback(overrideVal != null ? "🔄  Real Count" : "🔢  Override",
-                                overrideVal != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`)],
-        [Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
-         Markup.button.callback("♻  Reset Available",     `shop_stock_resetavail_${productId}`)],
-        [Markup.button.callback("↩  Back to Stock",       "shop_admin_stock")],
-      ]),
+      ...Markup.inlineKeyboard(buttons),
     });
   });
 
@@ -4223,6 +4285,160 @@ export function startTelegramBot(config: BotConfig) {
     );
     await ctx.reply(
       `✅ Reset <b>${upd.rowCount}</b> entries to <code>${sf}</code> in <code>${table}</code>.`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Delivery mode toggle (AUTO ↔ MANUAL) ─────────────────────────────────
+  bot.action(/^shop_stock_togglemode_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT delivery_mode FROM shop_products WHERE id = $1`, [productId]);
+    if (!r.rows[0]) return ctx.reply("Product not found.", { parse_mode: "HTML" });
+    const current = r.rows[0].delivery_mode ?? "auto";
+    const next    = current === "manual" ? "auto" : "manual";
+    await dbQuery(`UPDATE shop_products SET delivery_mode = $1 WHERE id = $2`, [next, productId]);
+    await ctx.answerCbQuery(`Switched to ${next.toUpperCase()} mode`).catch(() => {});
+    // Refresh the stock page
+    const r2 = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
+    const p   = r2.rows[0];
+    if (!p) return ctx.reply("Product not found.", { parse_mode: "HTML" });
+    const table     = SHOP_TABLE_MAP[p.account_type];
+    const sf        = p.status_filter ?? "available";
+    const isManual2 = next === "manual";
+    const manualStk2 = p.manual_stock ?? 0;
+    const info2     = await getProductStockInfo(p);
+    const overrideVal2 = p.stock_override != null ? p.stock_override : null;
+    const displayStock2 = isManual2
+      ? `${manualStk2}  (manual stock)`
+      : overrideVal2 != null ? `${overrideVal2}  (override)` : `${info2.avail}  (real count)`;
+    const text2 =
+      `\n🗄 <b>STOCK: ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>` +
+      `Delivery mode  :  ${isManual2 ? "MANUAL 📬" : "AUTO ⚡"}\n` +
+      `Account type   :  ${p.account_type}\n` +
+      `DB table       :  ${table ?? "⚠️ unmapped"}\n` +
+      `Status filter  :  ${sf}\n` +
+      `─────────────────────────────────\n` +
+      `Shown to buyer :  ${displayStock2}\n` +
+      (isManual2 ? "" : `Real available :  ${info2.avail}\nSold out       :  ${info2.sold}\nTotal entries  :  ${info2.total}\n`) +
+      `</code>\n\n` +
+      `✅ Mode switched to <b>${next.toUpperCase()}</b>.\n\n› What would you like to do?`;
+    const toggleLabel2 = isManual2 ? "⚡  Switch to AUTO" : "📬  Switch to MANUAL";
+    const btns2: ReturnType<typeof Markup.button.callback>[][] = [
+      [Markup.button.callback(toggleLabel2, `shop_stock_togglemode_${productId}`)],
+    ];
+    if (isManual2) {
+      btns2.push([Markup.button.callback(`📊  Set Manual Stock  (now: ${manualStk2})`, `shop_stock_setmanualstock_${productId}`)]);
+    } else {
+      btns2.push([
+        Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
+        Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`),
+      ]);
+      btns2.push([
+        Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
+        Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`),
+      ]);
+      btns2.push([
+        Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
+        Markup.button.callback(overrideVal2 != null ? "🔄  Real Count" : "🔢  Override",
+                               overrideVal2 != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`),
+      ]);
+      btns2.push([
+        Markup.button.callback("🗑  Clear Sold Out",  `shop_stock_clearsold_${productId}`),
+        Markup.button.callback("♻  Reset Available", `shop_stock_resetavail_${productId}`),
+      ]);
+    }
+    btns2.push([Markup.button.callback("↩  Back to Stock", "shop_admin_stock")]);
+    await safeEdit(ctx, text2, { parse_mode: "HTML", ...Markup.inlineKeyboard(btns2) });
+  });
+
+  // ── Set manual stock count ────────────────────────────────────────────────
+  bot.action(/^shop_stock_setmanualstock_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name, manual_stock FROM shop_products WHERE id = $1`, [productId]);
+    if (!r.rows[0]) return ctx.reply("Product not found.", { parse_mode: "HTML" });
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "stock_set_manual_stock", manualStockProductId: productId };
+    return ctx.reply(
+      `\n📊 <b>SET MANUAL STOCK</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Product: <b>${r.rows[0].name}</b>\n` +
+      `Current manual stock: <b>${r.rows[0].manual_stock ?? 0}</b>\n\n` +
+      `› Type the new stock count (e.g. <code>50</code>):\n` +
+      `<i>This is the number customers see and buy against.</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Manual Orders panel ───────────────────────────────────────────────────
+  bot.action("shop_admin_manual_orders", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const res = await dbQuery(
+      `SELECT o.id, o.telegram_id, o.product_name, o.amount, o.created_at,
+              c.username, c.first_name
+       FROM shop_orders o
+       LEFT JOIN shop_customers c ON c.telegram_id = o.telegram_id
+       WHERE o.delivery_status = 'pending_delivery'
+       ORDER BY o.created_at ASC`
+    );
+    if (res.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n📬 <b>MANUAL ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<i>No pending manual orders. All caught up!</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
+      );
+    }
+    let text = `\n📬 <b>MANUAL ORDERS</b>  <code>${res.rows.length} pending</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+    for (const o of res.rows) {
+      const custName = o.username ? `@${o.username}` : (o.first_name ?? `ID:${o.telegram_id}`);
+      const date     = new Date(o.created_at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
+      text += `📦 <b>${escapeHtml(o.product_name)}</b>  ·  $${parseFloat(o.amount).toFixed(2)}\n`;
+      text += `👤 ${escapeHtml(custName)}  <code>(${o.telegram_id})</code>  ·  ${date}\n`;
+      text += `🆔 <code>${o.id}</code>\n\n`;
+      buttons.push([Markup.button.callback(`📦  Fulfill — ${o.product_name.slice(0, 20)}`, `shop_fulfill_${o.id}`)]);
+    }
+    buttons.push([Markup.button.callback("🔄  Refresh", "shop_admin_manual_orders")]);
+    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
+    await safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  });
+
+  // ── Fulfill a manual order ────────────────────────────────────────────────
+  bot.action(/^shop_fulfill_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const orderId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(
+      `SELECT o.id, o.telegram_id, o.product_name, o.amount, o.delivery_status,
+              c.username, c.first_name
+       FROM shop_orders o
+       LEFT JOIN shop_customers c ON c.telegram_id = o.telegram_id
+       WHERE o.id = $1`,
+      [orderId]
+    );
+    const o = r.rows[0];
+    if (!o) return ctx.reply("Order not found.", { parse_mode: "HTML" });
+    if (o.delivery_status !== "pending_delivery") {
+      return ctx.reply(
+        `⚠️ This order is already <b>${o.delivery_status}</b>. No action needed.`,
+        { parse_mode: "HTML" }
+      );
+    }
+    const custName = o.username ? `@${o.username}` : (o.first_name ?? `ID:${o.telegram_id}`);
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = {
+      step: "manual_fulfill",
+      fulfillOrderId: orderId,
+      fulfillCustomerId: parseInt(o.telegram_id),
+    };
+    return ctx.reply(
+      `\n📦 <b>FULFILL ORDER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Product:  <b>${escapeHtml(o.product_name)}</b>\n` +
+      `Amount:   <b>$${parseFloat(o.amount).toFixed(2)}</b>\n` +
+      `Customer: <b>${escapeHtml(custName)}</b>  <code>(${o.telegram_id})</code>\n` +
+      `Order ID: <code>${orderId}</code>\n\n` +
+      `› Type and send the <b>delivery content</b> (credentials, link, etc.).\n` +
+      `<i>It will be sent directly to the customer.</i>`,
       { parse_mode: "HTML" }
     );
   });
@@ -4897,6 +5113,70 @@ export function startTelegramBot(config: BotConfig) {
           {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${productId}`)]]),
+          }
+        );
+      }
+
+      // ── Stock: Set manual stock count ────────────────────────────────────────
+      if (flow.step === "stock_set_manual_stock") {
+        const productId = flow.manualStockProductId!;
+        st.shopAdminFlow = undefined;
+        const n = parseInt(text.trim(), 10);
+        if (isNaN(n) || n < 0) {
+          return ctx.reply(
+            `🔴 Invalid number. Enter a whole number like <code>50</code> or <code>0</code>:`,
+            { parse_mode: "HTML" }
+          );
+        }
+        await dbQuery(`UPDATE shop_products SET manual_stock = $1 WHERE id = $2`, [n, productId]);
+        return ctx.reply(
+          `✅ Manual stock set to <b>${n}</b>.\n\nCustomers will be able to purchase up to this quantity.`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${productId}`)]]),
+          }
+        );
+      }
+
+      // ── Manual order fulfillment ─────────────────────────────────────────────
+      if (flow.step === "manual_fulfill") {
+        const orderId    = flow.fulfillOrderId!;
+        const customerId = flow.fulfillCustomerId!;
+        st.shopAdminFlow = undefined;
+
+        const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;
+        if (!shopToken2) {
+          return ctx.reply(`⚠️ Shop bot token not configured. Cannot deliver.`, { parse_mode: "HTML" });
+        }
+
+        // Send delivery text to customer via shop bot
+        try {
+          await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: customerId,
+              text: `\n✅ <b>ORDER DELIVERED!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${text}\n\n<i>Thank you for your purchase!</i>`,
+              parse_mode: "HTML",
+            }),
+          });
+        } catch (e) {
+          return ctx.reply(`⚠️ Failed to send message to customer: ${(e as Error).message}`, { parse_mode: "HTML" });
+        }
+
+        // Mark order as delivered
+        await dbQuery(
+          `UPDATE shop_orders SET delivery_status = 'delivered', fulfillment_note = $1 WHERE id = $2`,
+          [text, orderId]
+        );
+
+        return ctx.reply(
+          `\n✅ <b>ORDER FULFILLED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `Delivery sent to customer <code>${customerId}</code>.\n` +
+          `Order <code>${orderId}</code> marked as <b>delivered</b>.`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
           }
         );
       }

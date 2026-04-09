@@ -348,6 +348,8 @@ export const shopProducts = pgTable("shop_products", {
   sortOrder:    integer("sort_order").notNull().default(0),
   sticky:       boolean("sticky").notNull().default(false),
   stickyLabel:  text("sticky_label"),
+  deliveryMode: text("delivery_mode").notNull().default("auto"),
+  manualStock:  integer("manual_stock"),
   createdAt:    timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -360,6 +362,8 @@ export const shopOrders = pgTable("shop_orders", {
   accountEmail:    text("account_email").notNull(),
   accountPassword: text("account_password").notNull(),
   amount:          numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  deliveryStatus:  text("delivery_status").notNull().default("delivered"),
+  fulfillmentNote: text("fulfillment_note"),
   createdAt:       timestamp("created_at").notNull().defaultNow(),
 });
 

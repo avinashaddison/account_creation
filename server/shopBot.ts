@@ -313,6 +313,40 @@ function alertAdminLowStock(productName: string, remaining: number) {
   }
 }
 
+function notifyAdminsManualOrder(
+  productName: string,
+  orderId: string,
+  custName: string,
+  custId: number,
+  finalPrice: number
+) {
+  const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+  const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!adminToken || adminIds.length === 0) return;
+  const text =
+    `📬 <b>NEW MANUAL ORDER</b>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `📦 Product:  <b>${escHtml(productName)}</b>\n` +
+    `💵 Amount:   <b>$${finalPrice.toFixed(2)}</b>\n` +
+    `👤 Customer: <b>${escHtml(custName)}</b>  <code>(${custId})</code>\n` +
+    `🆔 Order ID: <code>${orderId}</code>\n\n` +
+    `<i>Tap Fulfill to deliver the product to this customer.</i>`;
+  for (const id of adminIds) {
+    fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: id,
+        text,
+        parse_mode: "HTML",
+        reply_markup: JSON.stringify({
+          inline_keyboard: [[{ text: `📦  Fulfill Order`, callback_data: `shop_fulfill_${orderId}` }]],
+        }),
+      }),
+    }).catch(() => {});
+  }
+}
+
 async function notifyRestockSubscribers(bot: any, productId: string, productName: string) {
   const r = await dbQuery(`SELECT telegram_id FROM shop_restock_subs WHERE product_id = $1`, [productId]);
   if (r.rows.length === 0) return;
@@ -433,6 +467,8 @@ interface ProductWithStock {
   sticky: boolean;
   sticky_label: string | null;
   custom_emoji: string | null;
+  delivery_mode: string;
+  manual_stock: number | null;
   stock: number;
 }
 
@@ -456,7 +492,9 @@ async function getProductsWithStock(): Promise<ProductWithStock[]> {
   const out: ProductWithStock[] = [];
   for (const p of res.rows) {
     let stock = 0;
-    if (p.stock_override != null) {
+    if ((p.delivery_mode ?? "auto") === "manual") {
+      stock = p.manual_stock ?? 0;
+    } else if (p.stock_override != null) {
       stock = p.stock_override;
     } else {
       const table = ACCOUNT_TABLE_MAP[p.account_type];
@@ -483,7 +521,9 @@ async function getProductById(id: string): Promise<ProductWithStock | null> {
   if (!res.rows[0]) return null;
   const p = res.rows[0];
   let stock = 0;
-  if (p.stock_override != null) {
+  if ((p.delivery_mode ?? "auto") === "manual") {
+    stock = p.manual_stock ?? 0;
+  } else if (p.stock_override != null) {
     stock = p.stock_override;
   } else {
     const table = ACCOUNT_TABLE_MAP[p.account_type];
@@ -513,6 +553,7 @@ interface PurchaseResult {
   finalPrice: number;
   stockRemaining: number;
   productName: string;
+  deliveryPending?: boolean;
 }
 interface PurchaseFailure {
   success: false;
@@ -554,6 +595,47 @@ async function purchaseProduct(
         success: false,
         reason: "insufficient_funds",
         shortfall: parseFloat((finalPrice - balance).toFixed(2)),
+      };
+    }
+
+    // ── Manual delivery branch ───────────────────────────────────────────────
+    if ((prod.delivery_mode ?? "auto") === "manual") {
+      const manualStock = prod.manual_stock ?? 0;
+      if (manualStock <= 0) {
+        await client.query("ROLLBACK");
+        return { success: false, reason: "out_of_stock" };
+      }
+
+      await client.query(
+        `UPDATE shop_customers SET balance = balance - $1, total_spend = total_spend + $1 WHERE telegram_id = $2`,
+        [finalPrice, uid]
+      );
+      await client.query(
+        `UPDATE shop_products SET manual_stock = manual_stock - 1 WHERE id = $1`,
+        [productId]
+      );
+
+      const orderRes = await client.query(
+        `INSERT INTO shop_orders
+           (telegram_id, product_id, product_name, account_id, account_email, account_password, amount, delivery_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`,
+        [uid, productId, prod.name, "", "", "", finalPrice, "pending_delivery"]
+      );
+
+      await client.query("COMMIT");
+
+      const newManualStock = manualStock - 1;
+      return {
+        success: true,
+        accountEmail: "",
+        accountPassword: "",
+        newBalance: balance - finalPrice,
+        orderId: orderRes.rows[0].id,
+        finalPrice,
+        stockRemaining: newManualStock,
+        productName: prod.name,
+        deliveryPending: true,
       };
     }
 
@@ -684,6 +766,8 @@ async function ensureShopTables() {
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sticky BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sticky_label TEXT DEFAULT NULL;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS custom_emoji TEXT DEFAULT NULL;
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS delivery_mode TEXT NOT NULL DEFAULT 'auto';
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS manual_stock INTEGER DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_redeem_links (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       product_id VARCHAR NOT NULL,
@@ -703,6 +787,8 @@ async function ensureShopTables() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS redeem_link TEXT DEFAULT NULL;
+    ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'delivered';
+    ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS fulfillment_note TEXT DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_activation_orders (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       telegram_id BIGINT NOT NULL,
@@ -1379,6 +1465,35 @@ export function startShopBot(token: string) {
 
     // ── Post-purchase tasks ───────────────────────────────────────────────────
     checkAndUpdateVip(uid).catch(() => {});
+
+    if (result.deliveryPending) {
+      // Manual delivery — notify admins and show pending message to customer
+      const custRes = await dbQuery(`SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [uid]);
+      const cu = custRes.rows[0];
+      const custName = cu?.username ? `@${cu.username}` : (cu?.first_name ?? `User ${uid}`);
+      notifyAdminsManualOrder(result.productName, result.orderId, custName, uid, result.finalPrice);
+
+      return safeEdit(ctx,
+        `📬 <b>Order Placed!</b>\n\n` +
+        `<code>` +
+        `Product:    ${escHtml(prod.name)}\n` +
+        `Quantity:   1\n` +
+        `${discount > 0 ? `Discount:   -${fmt$(discount)}\n` : ""}` +
+        `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
+        `</code>\n\n` +
+        `⏳ Your order is confirmed. The admin will deliver your product shortly.\n\n` +
+        `💰 Balance: <b>${fmt$(result.newBalance)}</b>\n\n` +
+        `<i>Need help? Contact ${escHtml(SUPPORT_CONTACT)}</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("📦  My Orders", "shop_view_orders")],
+            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          ]),
+        }
+      );
+    }
+
     if (result.stockRemaining <= 3) {
       alertAdminLowStock(result.productName, result.stockRemaining);
       if (result.stockRemaining === 0) {
@@ -1500,6 +1615,33 @@ export function startShopBot(token: string) {
     }
 
     checkAndUpdateVip(uid).catch(() => {});
+
+    if (result.deliveryPending) {
+      const custRes2 = await dbQuery(`SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [uid]);
+      const cu2 = custRes2.rows[0];
+      const custName2 = cu2?.username ? `@${cu2.username}` : (cu2?.first_name ?? `User ${uid}`);
+      notifyAdminsManualOrder(result.productName, result.orderId, custName2, uid, result.finalPrice);
+
+      return safeEdit(ctx,
+        `📬 <b>Order Placed!</b>\n\n` +
+        `<code>` +
+        `Product:    ${escHtml(prod.name)}\n` +
+        `Quantity:   1\n` +
+        `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
+        `</code>\n\n` +
+        `⏳ Your order is confirmed. The admin will deliver your product shortly.\n\n` +
+        `💰 Balance: <b>${fmt$(result.newBalance)}</b>\n\n` +
+        `<i>Need help? Contact ${escHtml(SUPPORT_CONTACT)}</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("📦  My Orders", "shop_view_orders")],
+            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          ]),
+        }
+      );
+    }
+
     if (result.stockRemaining <= 3) {
       alertAdminLowStock(result.productName, result.stockRemaining);
       if (result.stockRemaining === 0) notifyRestockSubscribers(bot, productId, result.productName).catch(() => {});
