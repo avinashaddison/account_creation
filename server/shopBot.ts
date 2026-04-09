@@ -1427,6 +1427,43 @@ export function startShopBot(token: string) {
     return safeEdit(ctx, `❌ <i>Cancelled.</i>`, { parse_mode: "HTML" });
   });
 
+  // ── Shared helper: manual-delivery post-purchase response ───────────────────
+  async function replyManualPending(
+    ctx: any,
+    uid: number,
+    result: PurchaseResult,
+    prodName: string,
+    discount: number
+  ) {
+    const custRes = await dbQuery(
+      `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`,
+      [uid]
+    );
+    const cu = custRes.rows[0];
+    const custName = cu?.username ? `@${cu.username}` : (cu?.first_name ?? `User ${uid}`);
+    notifyAdminsManualOrder(result.productName, result.orderId, custName, uid, result.finalPrice);
+
+    return safeEdit(ctx,
+      `📬 <b>Order Placed!</b>\n\n` +
+      `<code>` +
+      `Product:    ${escHtml(prodName)}\n` +
+      `Quantity:   1\n` +
+      `${discount > 0 ? `Discount:   -${fmt$(discount)}\n` : ""}` +
+      `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
+      `</code>\n\n` +
+      `⏳ Your order is confirmed. The admin will deliver your product shortly.\n\n` +
+      `💰 Balance: <b>${fmt$(result.newBalance)}</b>\n\n` +
+      `<i>Need help? Contact ${escHtml(SUPPORT_CONTACT)}</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📦  My Orders", "shop_view_orders")],
+          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+        ]),
+      }
+    );
+  }
+
   // ── Confirm purchase ──────────────────────────────────────────────────────
   bot.action(/^buyconfirm_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery("Processing…").catch(() => {});
@@ -1470,31 +1507,7 @@ export function startShopBot(token: string) {
     checkAndUpdateVip(uid).catch(() => {});
 
     if (result.deliveryPending) {
-      // Manual delivery — notify admins and show pending message to customer
-      const custRes = await dbQuery(`SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [uid]);
-      const cu = custRes.rows[0];
-      const custName = cu?.username ? `@${cu.username}` : (cu?.first_name ?? `User ${uid}`);
-      notifyAdminsManualOrder(result.productName, result.orderId, custName, uid, result.finalPrice);
-
-      return safeEdit(ctx,
-        `📬 <b>Order Placed!</b>\n\n` +
-        `<code>` +
-        `Product:    ${escHtml(prod.name)}\n` +
-        `Quantity:   1\n` +
-        `${discount > 0 ? `Discount:   -${fmt$(discount)}\n` : ""}` +
-        `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
-        `</code>\n\n` +
-        `⏳ Your order is confirmed. The admin will deliver your product shortly.\n\n` +
-        `💰 Balance: <b>${fmt$(result.newBalance)}</b>\n\n` +
-        `<i>Need help? Contact ${escHtml(SUPPORT_CONTACT)}</i>`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("📦  My Orders", "shop_view_orders")],
-            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
-          ]),
-        }
-      );
+      return replyManualPending(ctx, uid, result, prod.name, discount);
     }
 
     if (result.stockRemaining <= 3) {
@@ -1620,29 +1633,7 @@ export function startShopBot(token: string) {
     checkAndUpdateVip(uid).catch(() => {});
 
     if (result.deliveryPending) {
-      const custRes2 = await dbQuery(`SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [uid]);
-      const cu2 = custRes2.rows[0];
-      const custName2 = cu2?.username ? `@${cu2.username}` : (cu2?.first_name ?? `User ${uid}`);
-      notifyAdminsManualOrder(result.productName, result.orderId, custName2, uid, result.finalPrice);
-
-      return safeEdit(ctx,
-        `📬 <b>Order Placed!</b>\n\n` +
-        `<code>` +
-        `Product:    ${escHtml(prod.name)}\n` +
-        `Quantity:   1\n` +
-        `Total Paid: ${result.finalPrice.toFixed(2)} USDT\n` +
-        `</code>\n\n` +
-        `⏳ Your order is confirmed. The admin will deliver your product shortly.\n\n` +
-        `💰 Balance: <b>${fmt$(result.newBalance)}</b>\n\n` +
-        `<i>Need help? Contact ${escHtml(SUPPORT_CONTACT)}</i>`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("📦  My Orders", "shop_view_orders")],
-            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
-          ]),
-        }
-      );
+      return replyManualPending(ctx, uid, result, prod.name, 0);
     }
 
     if (result.stockRemaining <= 3) {
