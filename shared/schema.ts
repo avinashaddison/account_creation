@@ -403,6 +403,7 @@ export const cryptoOrders = pgTable("crypto_orders", {
   userId:        text("user_id").notNull(),
   amount:        numeric("amount", { precision: 18, scale: 8 }).notNull(),
   note:          text("note").notNull().unique(),
+  chain:         text("chain").notNull().default("BINANCE_PAY"), // BINANCE_PAY | TRC20 | BEP20
   status:        text("status").notNull().default("PENDING"), // PENDING | PAID | EXPIRED
   transactionId: text("transaction_id").unique(),
   createdAt:     timestamp("created_at").defaultNow().notNull(),

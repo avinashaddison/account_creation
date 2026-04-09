@@ -224,9 +224,11 @@ interface DepositFlow {
 }
 const depositFlows = new Map<number, DepositFlow>();
 
-// Binance auto-verify deposit flow
+// Auto-verify deposit flow (Binance Pay, TRC20, BEP20)
+type DepositChain = "BINANCE_PAY" | "TRC20" | "BEP20";
 interface CryptoDepositFlow {
   step:     "waiting_amount" | "waiting_payment";
+  chain:    DepositChain;
   orderId?: string;
   note?:    string;
   amount?:  number;
@@ -1220,9 +1222,9 @@ export function startShopBot(token: string) {
     await safeReply(ctx, depositText(uid), {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
-        [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
-        [Markup.button.callback("⚡  AUTO VERIFY (Binance Pay)", "dep_auto_binance")],
+        [Markup.button.callback("🟡  Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20 addr", "dep_copy_trc20"), Markup.button.callback("🔷  BEP20 addr", "dep_copy_bep20")],
+        [Markup.button.callback("🇮🇳  UPI", "dep_copy_upi")],
+        [Markup.button.callback("⚡  Auto: Binance Pay", "dep_auto_binance"), Markup.button.callback("💎  Auto: TRC20", "dep_auto_trc20"), Markup.button.callback("🔷  Auto: BEP20", "dep_auto_bep20")],
         [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
       ]),
     });
@@ -1772,9 +1774,9 @@ export function startShopBot(token: string) {
     await safeEdit(ctx, depositText(uid), {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20", "dep_copy_trc20")],
-        [Markup.button.callback("🔷  BEP20",          "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",  "dep_copy_upi")],
-        [Markup.button.callback("⚡  AUTO VERIFY (Binance Pay)", "dep_auto_binance")],
+        [Markup.button.callback("🟡  Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20 addr", "dep_copy_trc20"), Markup.button.callback("🔷  BEP20 addr", "dep_copy_bep20")],
+        [Markup.button.callback("🇮🇳  UPI", "dep_copy_upi")],
+        [Markup.button.callback("⚡  Auto: Binance Pay", "dep_auto_binance"), Markup.button.callback("💎  Auto: TRC20", "dep_auto_trc20"), Markup.button.callback("🔷  Auto: BEP20", "dep_auto_bep20")],
         [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
         [Markup.button.callback("🛍  BACK TO SHOP",           "shop_back_products")],
       ]),
@@ -2200,9 +2202,9 @@ export function startShopBot(token: string) {
     const cryptoFlow = cryptoDepositFlows.get(uid);
     if (cryptoFlow && cryptoFlow.step === "waiting_amount") {
       const raw    = ctx.message.text?.trim() ?? "";
-      const amount = parseFloat(raw);
+      const baseAmt = parseFloat(raw);
       await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
-      if (isNaN(amount) || amount < 1) {
+      if (isNaN(baseAmt) || baseAmt < 1) {
         return safeReply(ctx,
           `⚠️ <b>Invalid amount.</b> Please enter a number ≥ 1 (e.g. <code>10</code> or <code>25.50</code>):`,
           {
@@ -2211,10 +2213,11 @@ export function startShopBot(token: string) {
           }
         );
       }
-      // Create order
+      const chain = cryptoFlow.chain ?? "BINANCE_PAY";
+      // Create order (on-chain orders get unique cent suffix inside createOrder)
       let order: Awaited<ReturnType<typeof createOrder>>;
       try {
-        order = await createOrder({ userId: String(uid), amount });
+        order = await createOrder({ userId: String(uid), amount: baseAmt, chain });
       } catch (err: any) {
         cryptoDepositFlows.delete(uid);
         return safeReply(ctx,
@@ -2222,34 +2225,69 @@ export function startShopBot(token: string) {
           { parse_mode: "HTML" }
         );
       }
+      const exactAmt = order.amount;
       cryptoDepositFlows.set(uid, {
         step:    "waiting_payment",
+        chain,
         orderId: order.orderId,
         note:    order.note,
-        amount,
+        amount:  exactAmt,
       });
-      return safeReply(ctx,
-        `╔══════════════════════════════════════╗\n` +
-        `║  ⚡  <b>AUTO VERIFY — PAY NOW</b>  ║\n` +
-        `╚══════════════════════════════════════╝\n\n` +
-        `Send exactly:\n\n` +
-        `<b>Amount:</b>  <code>${amount.toFixed(2)} USDT</code>\n` +
-        `<b>To Binance ID:</b>  <code>510120124</code>\n\n` +
-        `${divider()}\n\n` +
-        `<b>IMPORTANT — Payment Note / Reference:</b>\n` +
-        `<code>${order.note}</code>\n\n` +
-        `${divider()}\n\n` +
-        `<i>Include the note above in the <b>Binance Pay transfer note / message</b> field.\n` +
-        `Your balance will be credited <b>automatically</b> once we detect the payment (usually within 25 seconds).\n\n` +
-        `Order expires in <b>30 minutes</b>.</i>`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("🔄  Check Status", "dep_auto_check")],
-            [Markup.button.callback("❌  Cancel Order",  "dep_auto_cancel")],
-          ]),
-        }
-      );
+
+      // Build chain-specific payment instructions
+      let payMsg = "";
+      if (chain === "BINANCE_PAY") {
+        payMsg =
+          `╔══════════════════════════════════════╗\n` +
+          `║  ⚡  <b>AUTO VERIFY — PAY NOW</b>  ║\n` +
+          `╚══════════════════════════════════════╝\n\n` +
+          `Send exactly:\n\n` +
+          `<b>Amount:</b>  <code>${exactAmt.toFixed(2)} USDT</code>\n` +
+          `<b>To Binance ID:</b>  <code>510120124</code>\n\n` +
+          `${divider()}\n\n` +
+          `<b>IMPORTANT — Payment Note / Reference:</b>\n` +
+          `<code>${order.note}</code>\n\n` +
+          `${divider()}\n\n` +
+          `<i>Include the note above in the <b>Binance Pay transfer note / message</b> field.\n` +
+          `Your balance will be credited <b>automatically</b> once we detect the payment (usually within 25 seconds).\n\n` +
+          `Order expires in <b>30 minutes</b>.</i>`;
+      } else if (chain === "TRC20") {
+        payMsg =
+          `╔══════════════════════════════════════╗\n` +
+          `║  💎  <b>AUTO VERIFY — TRC20</b>  ║\n` +
+          `╚══════════════════════════════════════╝\n\n` +
+          `Send <b>exactly this amount</b> to our TRC20 wallet:\n\n` +
+          `<b>Amount:</b>  <code>${exactAmt.toFixed(2)} USDT</code>\n` +
+          `<b>Network:</b>  <code>TRON (TRC20)</code>\n` +
+          `<b>Address:</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
+          `${divider()}\n\n` +
+          `<b>⚠️ Send the EXACT amount shown above.</b>\n` +
+          `<i>The unique amount identifies your payment automatically. Do not send a rounded number.\n\n` +
+          `Your balance will be credited once the blockchain confirms the transfer (usually within 1-2 minutes).\n\n` +
+          `Order expires in <b>30 minutes</b>.</i>`;
+      } else {
+        payMsg =
+          `╔══════════════════════════════════════╗\n` +
+          `║  🔷  <b>AUTO VERIFY — BEP20</b>  ║\n` +
+          `╚══════════════════════════════════════╝\n\n` +
+          `Send <b>exactly this amount</b> to our BEP20 wallet:\n\n` +
+          `<b>Amount:</b>  <code>${exactAmt.toFixed(2)} USDT</code>\n` +
+          `<b>Network:</b>  <code>BNB Smart Chain (BEP20)</code>\n` +
+          `<b>Address:</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+          `${divider()}\n\n` +
+          `<b>⚠️ Send the EXACT amount shown above.</b>\n` +
+          `<i>The unique amount identifies your payment automatically. Do not send a rounded number.\n\n` +
+          `Your balance will be credited once the blockchain confirms the transfer (usually within 1-2 minutes).\n\n` +
+          `Order expires in <b>30 minutes</b>.</i>`;
+      }
+
+      return safeReply(ctx, payMsg, {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Status", "dep_auto_check")],
+          [Markup.button.callback("❌  Cancel Order",  "dep_auto_cancel")],
+        ]),
+      });
     }
 
     // ── Buy promo code flow ───────────────────────────────────────────────────
@@ -2418,9 +2456,9 @@ export function startShopBot(token: string) {
     await safeReply(ctx, depositText(uid), {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
-        [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
-        [Markup.button.callback("⚡  AUTO VERIFY (Binance Pay)", "dep_auto_binance")],
+        [Markup.button.callback("🟡  Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20 addr", "dep_copy_trc20"), Markup.button.callback("🔷  BEP20 addr", "dep_copy_bep20")],
+        [Markup.button.callback("🇮🇳  UPI", "dep_copy_upi")],
+        [Markup.button.callback("⚡  Auto: Binance Pay", "dep_auto_binance"), Markup.button.callback("💎  Auto: TRC20", "dep_auto_trc20"), Markup.button.callback("🔷  Auto: BEP20", "dep_auto_bep20")],
         [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
       ]),
     });
@@ -2454,12 +2492,46 @@ export function startShopBot(token: string) {
   bot.action("dep_auto_binance", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
-    cryptoDepositFlows.set(uid, { step: "waiting_amount" });
+    cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "BINANCE_PAY" });
     return safeEdit(ctx,
       `⚡ <b>Auto Verify — Binance Pay</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "dep_auto_cancel")]]),
+      }
+    );
+  });
+
+  bot.action("dep_auto_trc20", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "TRC20" });
+    return safeEdit(ctx,
+      `💎 <b>Auto Verify — USDT TRC20</b>\n\n` +
+      `${divider()}\n\n` +
+      `How much USDT do you want to deposit?\n\n` +
+      `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>\n\n` +
+      `<i>We will assign you a unique amount to send so your payment can be matched automatically.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "dep_auto_cancel")]]),
+      }
+    );
+  });
+
+  bot.action("dep_auto_bep20", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "BEP20" });
+    return safeEdit(ctx,
+      `🔷 <b>Auto Verify — USDT BEP20</b>\n\n` +
+      `${divider()}\n\n` +
+      `How much USDT do you want to deposit?\n\n` +
+      `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>\n\n` +
+      `<i>We will assign you a unique amount to send so your payment can be matched automatically.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "dep_auto_cancel")]]),
@@ -2484,12 +2556,20 @@ export function startShopBot(token: string) {
         { parse_mode: "HTML" }
       );
     }
+    const chain = flow.chain ?? "BINANCE_PAY";
+    let statusLines = `<b>Amount:</b> <code>${flow.amount!.toFixed(2)} USDT</code>\n`;
+    if (chain === "BINANCE_PAY") {
+      statusLines += `<b>Note:</b> <code>${flow.note}</code>\n`;
+    } else if (chain === "TRC20") {
+      statusLines += `<b>Address:</b> <code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n<b>Network:</b> TRON (TRC20)\n`;
+    } else {
+      statusLines += `<b>Address:</b> <code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n<b>Network:</b> BNB Smart Chain (BEP20)\n`;
+    }
     return safeEdit(ctx,
       `⏳ <b>Still waiting for payment…</b>\n\n` +
       `${divider()}\n\n` +
       `Our system checks every ~25 seconds. Your balance will be credited automatically once the transfer is detected.\n\n` +
-      `<b>Note:</b> <code>${flow.note}</code>\n` +
-      `<b>Amount:</b> <code>${flow.amount!.toFixed(2)} USDT</code>`,
+      statusLines,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([

@@ -16,6 +16,8 @@ export function setOnPaymentPaid(cb: PaymentPaidCallback): void {
   onPaymentPaid = cb;
 }
 
+export type Chain = "BINANCE_PAY" | "TRC20" | "BEP20";
+
 const ORDER_EXPIRY_MINUTES = 30;
 
 function generateNote(userId: string): string {
@@ -23,38 +25,53 @@ function generateNote(userId: string): string {
   return `AX-${userId}-${rand}`;
 }
 
+/**
+ * For on-chain orders (TRC20/BEP20) there is no memo field, so we add a
+ * random 1-99 cent suffix to make each deposit amount unique enough to match.
+ * e.g. $10.00 → $10.47
+ */
+function addUniqueCents(amount: number): number {
+  const cents = Math.floor(Math.random() * 99) + 1; // 1–99 cents
+  return Math.round((amount + cents / 100) * 100) / 100;
+}
+
 export interface CreateOrderInput {
   userId: string;
-  amount: number;
+  amount: number;           // base amount requested by user
+  chain?: Chain;            // defaults to BINANCE_PAY
 }
 
 export interface CreateOrderResult {
-  orderId:    string;
-  amount:     number;
-  binanceUID: string;
-  note:       string;
-  expiresAt:  Date;
+  orderId:     string;
+  amount:      number;      // exact amount to send (may have unique cent suffix)
+  chain:       Chain;
+  binanceUID:  string;
+  note:        string;
+  expiresAt:   Date;
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
-  const { userId, amount } = input;
+  const { userId, chain = "BINANCE_PAY" } = input;
 
+  // On-chain orders use a unique amount for matching; Binance Pay uses the note field
+  const amount    = chain === "BINANCE_PAY" ? input.amount : addUniqueCents(input.amount);
   const orderId   = randomUUID();
-  const note      = generateNote(userId);
+  const note      = generateNote(userId); // still stored for uniqueness constraint
   const expiresAt = new Date(Date.now() + ORDER_EXPIRY_MINUTES * 60 * 1000);
   const binanceUID = process.env.BINANCE_UID ?? "";
 
   await insertOrder({
     orderId,
     userId,
-    amount: amount.toFixed(8) as unknown as string,
+    amount:    amount.toFixed(8) as unknown as string,
     note,
+    chain,
     expiresAt,
   });
 
-  logger.info("OrderService", "Order created", { orderId, userId, amount, note });
+  logger.info("OrderService", "Order created", { orderId, userId, amount, chain, note });
 
-  return { orderId, amount, binanceUID, note, expiresAt };
+  return { orderId, amount, chain, binanceUID, note, expiresAt };
 }
 
 export type CheckStatusResult =

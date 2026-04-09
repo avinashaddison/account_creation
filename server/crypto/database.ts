@@ -15,6 +15,7 @@ const db = drizzle(pool, { schema });
 export async function ensureCryptoTable(): Promise<void> {
   const client = await pool.connect();
   try {
+    // Step 1: create table without chain (safe for existing tables)
     await client.query(`
       CREATE TABLE IF NOT EXISTS crypto_orders (
         id             VARCHAR  PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -28,9 +29,17 @@ export async function ensureCryptoTable(): Promise<void> {
         expires_at     TIMESTAMPTZ NOT NULL,
         paid_at        TIMESTAMPTZ
       );
+    `);
+    // Step 2: add chain column if it doesn't exist yet (idempotent)
+    await client.query(`
+      ALTER TABLE crypto_orders ADD COLUMN IF NOT EXISTS chain TEXT NOT NULL DEFAULT 'BINANCE_PAY';
+    `);
+    // Step 3: create indexes (all idempotent)
+    await client.query(`
       CREATE INDEX IF NOT EXISTS crypto_orders_status_idx  ON crypto_orders (status);
       CREATE INDEX IF NOT EXISTS crypto_orders_note_idx    ON crypto_orders (note);
       CREATE INDEX IF NOT EXISTS crypto_orders_expires_idx ON crypto_orders (expires_at);
+      CREATE INDEX IF NOT EXISTS crypto_orders_chain_idx   ON crypto_orders (chain);
     `);
     logger.info("Database", "crypto_orders table ready");
   } finally {
