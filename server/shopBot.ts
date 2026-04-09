@@ -868,12 +868,16 @@ export function startShopBot(token: string) {
 
   // Resolve TMA URL immediately — web_app menu button only works per-chat;
   // the global default cannot be set to web_app (Telegram silently ignores it).
-  const devDomain = process.env.REPLIT_DEV_DOMAIN;
-  if (devDomain) {
+  // SHOP_TMA_BASE_URL must be a publicly-accessible HTTPS base (e.g. deployed
+  // app domain).  The riker.replit.dev dev domain is only reachable internally.
+  const tmaBase = process.env.SHOP_TMA_BASE_URL?.replace(/\/$/, "");
+  if (tmaBase) {
     bot.telegram.getMe().then((me) => {
-      _shopTmaUrl = `https://${devDomain}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
+      _shopTmaUrl = `${tmaBase}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
       console.log(`[ShopBot] TMA URL ready: ${_shopTmaUrl}`);
     }).catch(() => {});
+  } else {
+    console.warn("[ShopBot] SHOP_TMA_BASE_URL not set — Menu button will not work until set.");
   }
 
   // Push the web-app menu button to a specific chat using raw Telegram API
