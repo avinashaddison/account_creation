@@ -2400,6 +2400,29 @@ export function startShopBot(token: string) {
     );
   });
 
+  // ── Fallback: any unrecognised text → show main menu + keyboard ──────────
+  bot.on("text", async (ctx: any) => {
+    const uid = ctx.from?.id;
+    if (!uid) return;
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    const balance = await getBalance(uid);
+    const name  = ctx.from.first_name || ctx.from.username || "User";
+    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    await ctx.reply(
+      truncate(
+        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
+        `      Global AI Tools Marketplace\n` +
+        `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `👋  Hey, <b>${escHtml(name)}</b>!  Use the menu below to navigate.\n\n` +
+        `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
+        `◈  🔖  User      ›  ${uname}\n` +
+        `◈  🆔  ID        ›  ${uid}</code>`
+      ),
+      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+    );
+  });
+
   // ── Register commands ─────────────────────────────────────────────────────
   async function registerCommands() {
     try {
