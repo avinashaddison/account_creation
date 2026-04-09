@@ -143,13 +143,23 @@ const BTN = {
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
 } as const;
 
+// Cycling hot-product emoji for sticky keyboard buttons
+const STICKY_EMOJI = ["🔥", "⚡", "✨", "💎", "🌟", "🚀", "💥", "👑"];
+
+function hasLeadingEmoji(s: string): boolean {
+  return /^\p{Emoji_Presentation}/u.test(s) || /^\p{Extended_Pictographic}/u.test(s);
+}
+
 async function buildShopKeyboard() {
   const res = await dbQuery(
     `SELECT name, sticky_label FROM shop_products WHERE sticky = true AND active = true ORDER BY sort_order ASC, created_at ASC`
   );
-  const labels: string[] = res.rows.map((p: any) =>
-    (p.sticky_label ?? "").trim() || p.name
-  );
+  const labels: string[] = res.rows.map((p: any, i: number) => {
+    const base = (p.sticky_label ?? "").trim() || p.name;
+    if (hasLeadingEmoji(base)) return base;
+    const icon = STICKY_EMOJI[i % STICKY_EMOJI.length];
+    return `${icon}  ${base}`;
+  });
   const stickyRows: string[][] = [];
   for (let i = 0; i < labels.length; i += 2) {
     stickyRows.push(labels[i + 1] ? [labels[i], labels[i + 1]] : [labels[i]]);
@@ -404,6 +414,8 @@ interface ProductWithStock {
   min_credits: number | null;
   active: boolean;
   sort_order: number;
+  sticky: boolean;
+  sticky_label: string | null;
   stock: number;
 }
 
@@ -738,13 +750,16 @@ const BOX_INNER_WIDTH = 30;
 function buildProductCard(p: ProductWithStock): string {
   const emoji   = platformEmoji(p.account_type);
   const rawName = p.name;
-  // Clip to BOX_INNER_WIDTH (3 chars used by "emoji + 2 spaces")
   const name    = escHtml(boxClip(rawName, BOX_INNER_WIDTH - 3));
   const rawDesc = p.description ?? `${platformLabel(p.account_type)} · Instant delivery`;
   const desc    = escHtml(boxClip(rawDesc, BOX_INNER_WIDTH));
   const badge   = stockBadge(p.stock);
+  const trendingLine = p.sticky
+    ? `║  🔥 <b>TRENDING  ·  TOP PICK</b>  ║\n`
+    : "";
   return (
     `╔══════════════════════════════════════╗\n` +
+    `${trendingLine}` +
     `║  ${emoji}  <b>${name}</b>  ║\n` +
     `║  <i>${desc}</i>  ║\n` +
     `║  💵 <b>${fmt$(p.price)}</b>  ·  ${badge}  ║\n` +
@@ -754,9 +769,8 @@ function buildProductCard(p: ProductWithStock): string {
 
 function buildProductButtons(products: ProductWithStock[]) {
   return products.map((p) => {
-    const emoji   = platformEmoji(p.account_type);
     const inStock = p.stock > 0;
-    const icon    = inStock ? "⚡" : "🔴";
+    const icon    = p.sticky ? "🔥" : inStock ? "⚡" : "🔴";
     const label   = `${icon}  ${p.name}  —  ${fmt$(p.price)}`;
     return [Markup.button.callback(label, `shop_product_${p.id}`)];
   });
@@ -1395,10 +1409,14 @@ export function startShopBot(token: string) {
   });
 
   // ── Activation Service — keyboard button handlers ─────────────────────────
-  async function showActivationMenu(ctx: any, service: ActivationService) {
+  async function showActivationMenu(ctx: any, service: ActivationService, trending = false) {
     const emoji = ACTIVATION_EMOJI[service];
     const name  = ACTIVATION_LABEL[service];
     const price = ACTIVATION_PRICE.toFixed(2);
+
+    const trendingHeader = trending
+      ? `🔥  <b>TRENDING  ·  TOP PICK</b>\n<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`
+      : "";
 
     // Feature lines differ per service
     const features: Record<ActivationService, string[]> = {
@@ -1420,6 +1438,7 @@ export function startShopBot(token: string) {
       .join("\n");
 
     await safeReply(ctx,
+      `${trendingHeader}` +
       `${emoji}  <b>${name}</b>\n` +
       `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
       `<code>${featureBlock}</code>\n\n` +
@@ -1461,17 +1480,20 @@ export function startShopBot(token: string) {
     if (ctx.updateType !== "message" || !ctx.message?.text) return next();
     const text = ctx.message.text as string;
     const res = await dbQuery(
-      `SELECT id, name, account_type, sticky_label FROM shop_products WHERE sticky = true AND active = true`
+      `SELECT id, name, account_type, sticky_label FROM shop_products WHERE sticky = true AND active = true ORDER BY sort_order ASC, created_at ASC`
     );
-    const match = res.rows.find((p: any) => {
-      const label = (p.sticky_label ?? "").trim() || p.name;
-      return label === text;
+    const match = res.rows.find((p: any, i: number) => {
+      const base = (p.sticky_label ?? "").trim() || p.name;
+      const displayLabel = hasLeadingEmoji(base)
+        ? base
+        : `${STICKY_EMOJI[i % STICKY_EMOJI.length]}  ${base}`;
+      return displayLabel === text || base === text;
     });
     if (!match) return next();
     await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
     const at: string = match.account_type;
     if (at === "chatgpt_plus" || at === "replit_core") {
-      await showActivationMenu(ctx, at as ActivationService);
+      await showActivationMenu(ctx, at as ActivationService, true);
     } else {
       shopState.set(ctx.from.id, { selectedProductId: match.id });
       await showProductList(ctx);
