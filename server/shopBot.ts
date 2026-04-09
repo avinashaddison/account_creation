@@ -339,9 +339,9 @@ function notifyAdminsManualOrder(
         chat_id: id,
         text,
         parse_mode: "HTML",
-        reply_markup: JSON.stringify({
+        reply_markup: {
           inline_keyboard: [[{ text: `📦  Fulfill Order`, callback_data: `shop_fulfill_${orderId}` }]],
-        }),
+        },
       }),
     }).catch(() => {});
   }

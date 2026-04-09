@@ -5129,14 +5129,15 @@ export function startTelegramBot(config: BotConfig) {
       // ── Stock: Set manual stock count ────────────────────────────────────────
       if (flow.step === "stock_set_manual_stock") {
         const productId = flow.manualStockProductId!;
-        st.shopAdminFlow = undefined;
         const n = parseInt(text.trim(), 10);
         if (isNaN(n) || n < 0) {
+          // Keep flow active so admin can type again without pressing the button again
           return ctx.reply(
-            `🔴 Invalid number. Enter a whole number like <code>50</code> or <code>0</code>:`,
+            `🔴 Invalid number. Please enter a whole number like <code>50</code> or <code>0</code>:`,
             { parse_mode: "HTML" }
           );
         }
+        st.shopAdminFlow = undefined;
         await dbQuery(`UPDATE shop_products SET manual_stock = $1 WHERE id = $2`, [n, productId]);
         return ctx.reply(
           `✅ Manual stock set to <b>${n}</b>.\n\nCustomers will be able to purchase up to this quantity.`,
