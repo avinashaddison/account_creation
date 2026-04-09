@@ -3049,6 +3049,8 @@ export function startTelegramBot(config: BotConfig) {
         [Markup.button.callback("Name", `shop_editfield_${productId}_name`), Markup.button.callback("Description", `shop_editfield_${productId}_description`)],
         [Markup.button.callback("Price", `shop_editfield_${productId}_price`), Markup.button.callback("Account Type", `shop_editfield_${productId}_account_type`)],
         [Markup.button.callback("Status Filter", `shop_editfield_${productId}_status_filter`)],
+        [Markup.button.callback(`${p.active ? "🔴 Deactivate" : "🟢 Activate"}`, `shop_toggle_active_${productId}`)],
+        [Markup.button.callback("🗑  Delete Product", `shop_delete_confirm_${productId}`)],
         [Markup.button.callback("↩ Products", "shop_admin_products")],
       ]),
     });
@@ -3074,6 +3076,90 @@ export function startTelegramBot(config: BotConfig) {
       status_filter: `› Enter new <b>status filter</b>:\n<code>  e.g. available | working | created</code>`,
     };
     await ctx.reply(promptMap[field], { parse_mode: "HTML" });
+  });
+
+  // ── Toggle product active/inactive ───────────────────────────────────────
+  bot.action(/^shop_toggle_active_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const res = await dbQuery(`UPDATE shop_products SET active = NOT active WHERE id = $1 RETURNING active, name`, [productId]);
+    const p = res.rows[0];
+    if (!p) return ctx.reply("Product not found.");
+    await ctx.answerCbQuery(`${p.active ? "🟢 Activated" : "🔴 Deactivated"}: ${p.name}`).catch(() => {});
+    // Refresh the edit screen
+    const full = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
+    const fp = full.rows[0];
+    const info =
+      `\n🔷 <b>✏ EDIT PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<b>${fp.name}</b>\n` +
+      `<code>◈ Description   →  ${fp.description || "—"}\n` +
+      `◈ Price         →  $${parseFloat(fp.price).toFixed(2)}\n` +
+      `◈ Account type  →  ${fp.account_type}\n` +
+      `◈ Status filter →  ${fp.status_filter}\n` +
+      `◈ Active        →  ${fp.active ? "Yes" : "No"}</code>\n\n` +
+      `› Select a field to edit:`;
+    await safeEdit(ctx, info, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("Name", `shop_editfield_${productId}_name`), Markup.button.callback("Description", `shop_editfield_${productId}_description`)],
+        [Markup.button.callback("Price", `shop_editfield_${productId}_price`), Markup.button.callback("Account Type", `shop_editfield_${productId}_account_type`)],
+        [Markup.button.callback("Status Filter", `shop_editfield_${productId}_status_filter`)],
+        [Markup.button.callback(`${fp.active ? "🔴 Deactivate" : "🟢 Activate"}`, `shop_toggle_active_${productId}`)],
+        [Markup.button.callback("🗑  Delete Product", `shop_delete_confirm_${productId}`)],
+        [Markup.button.callback("↩ Products", "shop_admin_products")],
+      ]),
+    });
+  });
+
+  // ── Delete product: confirmation prompt ───────────────────────────────────
+  bot.action(/^shop_delete_confirm_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const res = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [productId]);
+    const p = res.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.");
+    await safeEdit(ctx,
+      `\n🗑 <b>DELETE PRODUCT?</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<b>${p.name}</b>  ·  <code>$${parseFloat(p.price).toFixed(2)}</code>\n\n` +
+      `⚠️ This removes the product listing permanently.\n` +
+      `<i>Credentials in the linked account table are NOT deleted.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("✅  Yes, delete it", `shop_delete_do_${productId}`)],
+          [Markup.button.callback("↩  Cancel", `shop_edit_${productId}`)],
+        ]),
+      }
+    );
+  });
+
+  // ── Delete product: execute ───────────────────────────────────────────────
+  bot.action(/^shop_delete_do_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery("Deleting…").catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const res = await dbQuery(`DELETE FROM shop_products WHERE id = $1 RETURNING name`, [productId]);
+    const name = res.rows[0]?.name ?? "Unknown";
+    await safeEdit(ctx,
+      `✅ <b>${name}</b> has been deleted.\n\n<i>Returning to product list…</i>`,
+      { parse_mode: "HTML" }
+    );
+    // Navigate back to products list after a short delay
+    await new Promise(r => setTimeout(r, 800));
+    const prodRes = await dbQuery(`SELECT id, name, price, active FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    if (prodRes.rows.length === 0) {
+      return safeEdit(ctx,
+        `\n📦 <b>PRODUCTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No products yet. Add your first product!</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("➕ Add Product", "shop_admin_addproduct"), Markup.button.callback("↩ Back", "shop_admin_menu")]]) }
+      );
+    }
+    const btns = prodRes.rows.map((prod: any) =>
+      [Markup.button.callback(`${prod.active ? "🟢" : "🔴"} ${prod.name}  ·  $${parseFloat(prod.price).toFixed(2)}`, `shop_edit_${prod.id}`)]
+    );
+    btns.push([Markup.button.callback("➕ Add Product", "shop_admin_addproduct"), Markup.button.callback("↩ Back", "shop_admin_menu")]);
+    await safeEdit(ctx,
+      `\n📦 <b>PRODUCTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n› Select a product to edit:`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
+    );
   });
 
   // ── Paginated customer list ───────────────────────────────────────────────
