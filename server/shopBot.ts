@@ -2475,7 +2475,10 @@ export function startShopBot(token: string) {
     );
   });
 
-  // ── Fallback: any unrecognised text → show main menu + keyboard ──────────
+  // ── Fallback: any unrecognised text → info card only, NO keyboard ────────
+  // Intentionally no reply keyboard here — sending a keyboard on every message
+  // keeps it permanently active, which hides the "Menu" button in the input bar.
+  // Users can tap the Menu button or use /start / /menu to get the keyboard.
   bot.on("text", async (ctx: any) => {
     const uid = ctx.from?.id;
     if (!uid) return;
@@ -2490,12 +2493,14 @@ export function startShopBot(token: string) {
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `👋  Hey, <b>${escHtml(name)}</b>!  Use the menu below to navigate.\n\n` +
+        `👋  Hey, <b>${escHtml(name)}</b>!  Tap the <b>Menu</b> button to navigate.\n\n` +
         `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
         `◈  🔖  User      ›  ${uname}\n` +
         `◈  🆔  ID        ›  ${uid}</code>`
       ),
-      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+      // Explicitly remove any active reply keyboard so the "Menu" button in the
+      // input bar becomes visible again.
+      { parse_mode: "HTML", ...Markup.removeKeyboard() }
     );
   });
 
