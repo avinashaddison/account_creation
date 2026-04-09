@@ -1054,25 +1054,27 @@ export function startShopBot(token: string) {
       );
     }
 
-    const emoji    = platformEmoji(prod.account_type);
-    const plat     = platformLabel(prod.account_type);
-    const inStock  = prod.stock > 0;
-    const desc     = prod.description
-      ? `\n<i>${escHtml(prod.description)}</i>\n`
+    const emoji   = prod.sticky && prod.stock > 0 ? "🔥" : platformEmoji(prod.account_type);
+    const inStock = prod.stock > 0;
+
+    // Build description block
+    const descBlock = prod.description
+      ? `\n${escHtml(prod.description)}\n`
       : "";
 
+    // Stock warning line (only show when low or OOS)
+    const stockLine = prod.stock === 0
+      ? `\n❌ <b>Out of stock.</b> Join the waitlist below to be notified.\n`
+      : prod.stock <= 5
+        ? `\n⚠️ <i>Only ${prod.stock} left — order fast!</i>\n`
+        : "";
+
     const text =
-      `${emoji} <b>${escHtml(prod.name)}</b>${desc}\n\n` +
-      `${divider()}\n\n` +
-      `💵 <b>${fmt$(prod.price)}</b> per account\n` +
-      `📦 Platform: ${plat}\n` +
-      `📊 Stock: ${stockBadge(prod.stock)}\n` +
-      `⚡ Delivery: Instant\n\n` +
-      `${divider()}\n\n` +
-      (inStock
-        ? `✅ <b>Ready to buy.</b> Account delivered immediately after payment.`
-        : `❌ <b>Out of stock.</b> Check back soon.`
-      );
+      `${emoji}  <b>${escHtml(prod.name)}</b>\n\n` +
+      `Price: <b>${fmt$(prod.price)}</b> / account\n` +
+      `${descBlock}` +
+      `${stockLine}\n` +
+      `<i>Delivery is automatic after payment confirmation.</i>`;
 
     const subsRes = await dbQuery(
       `SELECT 1 FROM shop_restock_subs WHERE telegram_id = $1 AND product_id = $2`,
@@ -1082,12 +1084,12 @@ export function startShopBot(token: string) {
 
     const buttons = [
       ...(inStock
-        ? [[Markup.button.callback(`✅  Buy Now  —  ${fmt$(prod.price)}`, `shop_buy_${productId}`)]]
+        ? [[Markup.button.callback(`🛒  Buy Now  —  ${fmt$(prod.price)}`, `shop_buy_${productId}`)]]
         : alreadySubscribed
           ? [[Markup.button.callback("🔔  Notify Me (subscribed)", `notify_already_${productId}`)]]
           : [[Markup.button.callback("🔔  Notify Me When Back in Stock", `notify_me_${productId}`)]]
       ),
-      [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+      [Markup.button.callback("↩  Back to Store", "shop_back_products")],
     ];
 
     await safeEdit(ctx, text, {
