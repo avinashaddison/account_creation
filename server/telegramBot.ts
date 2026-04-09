@@ -3343,6 +3343,20 @@ export function startTelegramBot(config: BotConfig) {
 
   // ── Shared: build edit-product text + keyboard ───────────────────────────
   function editProductText(p: any): string {
+    // Build emoji display outside <code> so tg-emoji tags render properly
+    let emojiDisplay: string;
+    if (!p.custom_emoji) {
+      emojiDisplay = "default";
+    } else if (p.custom_emoji.startsWith("tg:")) {
+      const rest  = p.custom_emoji.slice(3);
+      const sep   = rest.indexOf(":");
+      const id    = rest.slice(0, sep);
+      const fb    = rest.slice(sep + 1);
+      emojiDisplay = `<tg-emoji emoji-id="${id}">${fb}</tg-emoji> <i>(animated)</i>`;
+    } else {
+      emojiDisplay = p.custom_emoji;
+    }
+
     return (
       `\n🔷 <b>EDIT PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<b>${esc(p.name)}</b>\n` +
@@ -3355,9 +3369,9 @@ export function startTelegramBot(config: BotConfig) {
       `◈ Sort order    →  ${p.sort_order}\n` +
       `◈ Sticky        →  ${p.sticky ? "Yes" : "No"}\n` +
       `◈ Sticky label  →  ${p.sticky_label ? esc(p.sticky_label) : "—"}\n` +
-      `◈ Emoji         →  ${!p.custom_emoji ? "default" : p.custom_emoji.startsWith("tg:") ? p.custom_emoji.split(":")[2] + " (animated)" : p.custom_emoji}\n` +
       `◈ Active        →  ${p.active ? "Yes" : "No"}` +
-      `</code>\n\n` +
+      `</code>\n` +
+      `◈ Emoji  →  ${emojiDisplay}\n\n` +
       `› Tap a field to change it:`
     );
   }
