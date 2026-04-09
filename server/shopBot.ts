@@ -864,31 +864,19 @@ export function startShopBot(token: string) {
 
   ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
-  // Build TMA URL: prefer the deployed domain (SHOP_TMA_BASE_URL), fall back to
-  // the dev domain (REPLIT_DEV_DOMAIN).  type:"web_app" is the only menu button
-  // type Telegram shows alongside an active reply keyboard — type:"commands" is
-  // suppressed whenever a reply keyboard is visible.
-  let _shopTmaUrl = "";
-  bot.telegram.getMe().then((me) => {
-    const base = (process.env.SHOP_TMA_BASE_URL?.replace(/\/$/, ""))
-              || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
-    if (base) {
-      _shopTmaUrl = `${base}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
-      console.log(`[ShopBot] TMA URL: ${_shopTmaUrl}`);
-    } else {
-      console.warn("[ShopBot] No domain available for TMA URL — Menu button disabled");
-    }
-  }).catch(() => {});
-
-  // Push the web-app menu button per-chat (raw fetch — Telegraf mis-maps params).
+  // Per-chat: explicitly set menu button to type:"commands" so Telegram shows
+  // the native "Menu" button that opens the command list — same as the reference
+  // bot pattern.  The button is visible whenever no reply keyboard is active;
+  // Telegram temporarily hides it while a reply keyboard is shown (this is normal
+  // Telegram behaviour — once the user taps a keyboard button it closes and the
+  // Menu button reappears).
   async function pushMenuButton(chatId: number) {
-    if (!_shopTmaUrl) return;
     await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id:     chatId,
-        menu_button: { type: "web_app", text: "Menu", web_app: { url: _shopTmaUrl } },
+        menu_button: { type: "commands" },
       }),
     }).catch(() => {});
   }
@@ -2514,13 +2502,20 @@ export function startShopBot(token: string) {
   // ── Register commands ─────────────────────────────────────────────────────
   async function registerCommands() {
     try {
-      // Register the command list (shown when user taps the blue "Menu" button)
+      // Register the command list (shown when user taps the blue "Menu" button).
+      // Descriptions shown in the command list popup that appears when Menu is tapped.
       await bot.telegram.setMyCommands([
-        { command: "menu",    description: "Open main menu" },
-        { command: "shop",    description: "Browse marketplace" },
-        { command: "balance", description: "Check wallet balance" },
-        { command: "cancel",  description: "Cancel active flow" },
+        { command: "start",   description: "🏠 Main Menu" },
+        { command: "shop",    description: "🛍 Browse marketplace" },
+        { command: "balance", description: "💰 Check wallet balance" },
+        { command: "cancel",  description: "❌ Cancel active flow" },
       ]);
+      // Set global default to type:"commands"
+      await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ menu_button: { type: "commands" } }),
+      });
       console.log("[ShopBot] Commands registered");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
