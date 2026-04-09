@@ -1217,11 +1217,12 @@ export function startShopBot(token: string) {
   bot.action("shop_quick_deposit", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
-    await ctx.reply(depositText(uid), {
+    await safeReply(ctx, depositText(uid), {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
         [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
+        [Markup.button.callback("⚡  AUTO VERIFY (Binance Pay)", "dep_auto_binance")],
         [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
       ]),
     });
@@ -1773,6 +1774,7 @@ export function startShopBot(token: string) {
       ...Markup.inlineKeyboard([
         [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20", "dep_copy_trc20")],
         [Markup.button.callback("🔷  BEP20",          "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",  "dep_copy_upi")],
+        [Markup.button.callback("⚡  AUTO VERIFY (Binance Pay)", "dep_auto_binance")],
         [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
         [Markup.button.callback("🛍  BACK TO SHOP",           "shop_back_products")],
       ]),
@@ -2853,14 +2855,13 @@ export function startShopBot(token: string) {
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     pushMenuButton(ctx.chat.id).catch(() => {});
     const name = ctx.from.first_name || ctx.from.username || "User";
-    await ctx.reply(
-      truncate(
-        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
-        `      Global AI Tools Marketplace\n` +
-        `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `👋  Hey, <b>${escHtml(name)}</b>!  Tap the <b>Menu</b> button to navigate.`
-      ),
+    await safeReply(
+      ctx,
+      `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
+      `      Global AI Tools Marketplace\n` +
+      `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `👋  Hey, <b>${escHtml(name)}</b>!  Tap the <b>Menu</b> button to navigate.`,
       // Explicitly remove any active reply keyboard so the "Menu" button in the
       // input bar becomes visible again.
       { parse_mode: "HTML", ...Markup.removeKeyboard() }
