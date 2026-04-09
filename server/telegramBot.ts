@@ -4564,22 +4564,24 @@ export function startTelegramBot(config: BotConfig) {
         const custs = await dbQuery(`SELECT telegram_id FROM shop_customers`);
         const total = custs.rows.length;
         await ctx.reply(`📢 Sending broadcast to <b>${total}</b> customers…`, { parse_mode: "HTML" });
-        // Use copyMessage to preserve all entities (animated emoji, bold, links, etc.)
-        const fromChatId = ctx.message.chat.id;
-        const messageId  = ctx.message.message_id;
+        // Use sendMessage with entities array to preserve all formatting
+        // (animated emoji, bold, links, etc.) without cross-bot access issues
+        const rawText     = ctx.message.text;
+        const rawEntities = (ctx.message as any).entities ?? [];
         let sent = 0, failed = 0;
         for (const row of custs.rows) {
           try {
-            await fetch(`https://api.telegram.org/bot${shopToken}/copyMessage`, {
+            const res = await fetch(`https://api.telegram.org/bot${shopToken}/sendMessage`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                chat_id:      row.telegram_id,
-                from_chat_id: fromChatId,
-                message_id:   messageId,
+                chat_id:  row.telegram_id,
+                text:     rawText,
+                entities: rawEntities,
               }),
             });
-            sent++;
+            const json = await res.json() as any;
+            if (json.ok) sent++; else failed++;
             await new Promise(r => setTimeout(r, 35)); // ~28 msg/s max
           } catch { failed++; }
         }
