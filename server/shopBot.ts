@@ -785,8 +785,36 @@ function buildProductCard(p: ProductWithStock): string {
   );
 }
 
+/**
+ * Parse stored emoji value.
+ * Format "tg:DOCUMENT_ID:FALLBACK" = Telegram animated custom emoji
+ * Anything else = plain emoji string
+ */
+function parseTgEmoji(raw: string): { id: string; fallback: string } | null {
+  if (!raw.startsWith("tg:")) return null;
+  const rest = raw.slice(3);               // "DOCUMENT_ID:FALLBACK"
+  const sep  = rest.indexOf(":");
+  if (sep === -1) return null;
+  return { id: rest.slice(0, sep), fallback: rest.slice(sep + 1) };
+}
+
+/** Plain emoji for use in inline-keyboard button labels (no HTML). */
 function productEmoji(p: ProductWithStock, inStock = true): string {
-  if (p.custom_emoji) return p.custom_emoji;
+  if (p.custom_emoji) {
+    const tg = parseTgEmoji(p.custom_emoji);
+    return tg ? tg.fallback : p.custom_emoji;
+  }
+  if (p.sticky && inStock) return "🔥";
+  return platformEmoji(p.account_type);
+}
+
+/** Animated emoji HTML for use inside HTML-parsed message bodies. */
+function productEmojiHtml(p: ProductWithStock, inStock = true): string {
+  if (p.custom_emoji) {
+    const tg = parseTgEmoji(p.custom_emoji);
+    if (tg) return `<tg-emoji emoji-id="${tg.id}">${tg.fallback}</tg-emoji>`;
+    return p.custom_emoji;
+  }
   if (p.sticky && inStock) return "🔥";
   return platformEmoji(p.account_type);
 }
@@ -1062,7 +1090,7 @@ export function startShopBot(token: string) {
       );
     }
 
-    const emoji   = productEmoji(prod, prod.stock > 0);
+    const emoji   = productEmojiHtml(prod, prod.stock > 0);
     const inStock = prod.stock > 0;
 
     // Build description block

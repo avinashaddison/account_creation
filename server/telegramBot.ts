@@ -3355,7 +3355,7 @@ export function startTelegramBot(config: BotConfig) {
       `◈ Sort order    →  ${p.sort_order}\n` +
       `◈ Sticky        →  ${p.sticky ? "Yes" : "No"}\n` +
       `◈ Sticky label  →  ${p.sticky_label ? esc(p.sticky_label) : "—"}\n` +
-      `◈ Emoji         →  ${p.custom_emoji ?? "default"}\n` +
+      `◈ Emoji         →  ${!p.custom_emoji ? "default" : p.custom_emoji.startsWith("tg:") ? p.custom_emoji.split(":")[2] + " (animated)" : p.custom_emoji}\n` +
       `◈ Active        →  ${p.active ? "Yes" : "No"}` +
       `</code>\n\n` +
       `› Tap a field to change it:`
@@ -4438,8 +4438,22 @@ export function startTelegramBot(config: BotConfig) {
         }
 
         else if (flow.step === "edit_custom_emoji") {
-          const val = text.trim() === "-" ? null : text.trim();
-          await dbQuery(`UPDATE shop_products SET custom_emoji = $1 WHERE id = $2`, [val, pid]);
+          if (text.trim() === "-") {
+            await dbQuery(`UPDATE shop_products SET custom_emoji = NULL WHERE id = $1`, [pid]);
+          } else {
+            // Check for Telegram animated custom emoji entity in the message
+            const entities: any[] = (ctx.message as any)?.entities ?? [];
+            const tgEnt = entities.find((e: any) => e.type === "custom_emoji");
+            let val: string;
+            if (tgEnt) {
+              // Extract the fallback Unicode character(s) at the entity's position
+              const fallback = text.slice(tgEnt.offset, tgEnt.offset + tgEnt.length);
+              val = `tg:${tgEnt.custom_emoji_id}:${fallback}`;
+            } else {
+              val = text.trim();
+            }
+            await dbQuery(`UPDATE shop_products SET custom_emoji = $1 WHERE id = $2`, [val, pid]);
+          }
         }
 
         st.shopAdminFlow = undefined;
