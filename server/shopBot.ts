@@ -600,19 +600,23 @@ async function purchaseProduct(
 
     // ── Manual delivery branch ───────────────────────────────────────────────
     if ((prod.delivery_mode ?? "auto") === "manual") {
-      const manualStock = prod.manual_stock ?? 0;
-      if (manualStock <= 0) {
+      // Atomically decrement manual_stock only if > 0 (prevents overselling under concurrency)
+      const decrRes = await client.query(
+        `UPDATE shop_products
+         SET manual_stock = manual_stock - 1
+         WHERE id = $1 AND manual_stock > 0
+         RETURNING manual_stock`,
+        [productId]
+      );
+      if ((decrRes.rowCount ?? 0) === 0) {
         await client.query("ROLLBACK");
         return { success: false, reason: "out_of_stock" };
       }
+      const newManualStock = decrRes.rows[0].manual_stock as number;
 
       await client.query(
         `UPDATE shop_customers SET balance = balance - $1, total_spend = total_spend + $1 WHERE telegram_id = $2`,
         [finalPrice, uid]
-      );
-      await client.query(
-        `UPDATE shop_products SET manual_stock = manual_stock - 1 WHERE id = $1`,
-        [productId]
       );
 
       const orderRes = await client.query(
@@ -625,7 +629,6 @@ async function purchaseProduct(
 
       await client.query("COMMIT");
 
-      const newManualStock = manualStock - 1;
       return {
         success: true,
         accountEmail: "",

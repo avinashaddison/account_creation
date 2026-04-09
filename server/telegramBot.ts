@@ -5149,9 +5149,26 @@ export function startTelegramBot(config: BotConfig) {
           return ctx.reply(`⚠️ Shop bot token not configured. Cannot deliver.`, { parse_mode: "HTML" });
         }
 
-        // Send delivery text to customer via shop bot
+        // Guard: ensure order is still pending (prevent double-fulfillment)
+        const orderCheck = await dbQuery(
+          `SELECT delivery_status FROM shop_orders WHERE id = $1`,
+          [orderId]
+        );
+        if (!orderCheck.rows[0]) {
+          return ctx.reply(`⚠️ Order <code>${orderId}</code> not found.`, { parse_mode: "HTML" });
+        }
+        if (orderCheck.rows[0].delivery_status !== "pending_delivery") {
+          return ctx.reply(
+            `⚠️ Order <code>${orderId}</code> is already <b>${orderCheck.rows[0].delivery_status}</b>. No action taken.`,
+            { parse_mode: "HTML" }
+          );
+        }
+
+        // Send delivery text to customer via shop bot — check Telegram API response
+        let tgOk = false;
+        let tgErrMsg = "";
         try {
-          await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
+          const tgRes = await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5160,11 +5177,27 @@ export function startTelegramBot(config: BotConfig) {
               parse_mode: "HTML",
             }),
           });
+          const tgJson = await tgRes.json() as { ok: boolean; description?: string };
+          tgOk      = tgJson.ok === true;
+          tgErrMsg  = tgJson.description ?? "Unknown Telegram error";
         } catch (e) {
-          return ctx.reply(`⚠️ Failed to send message to customer: ${(e as Error).message}`, { parse_mode: "HTML" });
+          tgErrMsg = (e as Error).message;
         }
 
-        // Mark order as delivered
+        if (!tgOk) {
+          // Delivery failed — keep order as pending_delivery so admin can retry
+          return ctx.reply(
+            `⚠️ <b>Delivery failed</b> — order is still <i>pending</i>.\n\n` +
+            `Telegram error: <code>${escapeHtml(tgErrMsg)}</code>\n\n` +
+            `Please try fulfilling the order again.`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
+            }
+          );
+        }
+
+        // Message delivered — now mark order as delivered
         await dbQuery(
           `UPDATE shop_orders SET delivery_status = 'delivered', fulfillment_note = $1 WHERE id = $2`,
           [text, orderId]
