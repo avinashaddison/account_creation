@@ -416,12 +416,16 @@ async function getProductsWithStock(): Promise<ProductWithStock[]> {
   );
   const out: ProductWithStock[] = [];
   for (const p of res.rows) {
-    const table = ACCOUNT_TABLE_MAP[p.account_type];
     let stock = 0;
-    if (table) {
-      const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
-      const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
-      stock = parseInt(sr.rows[0]?.cnt ?? "0");
+    if (p.stock_override != null) {
+      stock = p.stock_override;
+    } else {
+      const table = ACCOUNT_TABLE_MAP[p.account_type];
+      if (table) {
+        const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
+        const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
+        stock = parseInt(sr.rows[0]?.cnt ?? "0");
+      }
     }
     out.push({ ...p, stock });
   }
@@ -432,12 +436,16 @@ async function getProductById(id: string): Promise<ProductWithStock | null> {
   const res = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [id]);
   if (!res.rows[0]) return null;
   const p = res.rows[0];
-  const table = ACCOUNT_TABLE_MAP[p.account_type];
   let stock = 0;
-  if (table) {
-    const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
-    const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
-    stock = parseInt(sr.rows[0]?.cnt ?? "0");
+  if (p.stock_override != null) {
+    stock = p.stock_override;
+  } else {
+    const table = ACCOUNT_TABLE_MAP[p.account_type];
+    if (table) {
+      const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
+      const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
+      stock = parseInt(sr.rows[0]?.cnt ?? "0");
+    }
   }
   return { ...p, stock };
 }
@@ -573,6 +581,7 @@ async function ensureShopTables() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS min_credits INTEGER DEFAULT NULL;
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS stock_override INTEGER DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_orders (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       telegram_id BIGINT NOT NULL,

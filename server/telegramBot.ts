@@ -140,7 +140,8 @@ interface ShopAdminFlow {
        | "broadcast_text" | "search_uid"
        | "promo_code" | "promo_discount" | "promo_maxuses"
        | "dep_approve_amount"
-       | "stock_add_creds";
+       | "stock_add_creds"
+       | "stock_set_override";
   name?: string;
   description?: string;
   price?: string;
@@ -156,6 +157,7 @@ interface ShopAdminFlow {
   stockProductId?: string;
   stockTableName?: string;
   stockStatusFilter?: string;
+  stockOverrideProductId?: string;
 }
 interface UserState {
   lastCopiedIds?: string[];
@@ -3884,6 +3886,9 @@ export function startTelegramBot(config: BotConfig) {
     const sf    = p.status_filter ?? "available";
     const info  = await getProductStockInfo(p);
 
+    const overrideVal = p.stock_override != null ? p.stock_override : null;
+    const displayStock = overrideVal != null ? `${overrideVal}  (manual override)` : `${info.avail}  (real count)`;
+
     const text =
       `\n🗄 <b>STOCK: ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<code>` +
@@ -3891,7 +3896,8 @@ export function startTelegramBot(config: BotConfig) {
       `DB table       :  ${table ?? "⚠️ unmapped"}\n` +
       `Status filter  :  ${sf}\n` +
       `─────────────────────────────────\n` +
-      `Available      :  ${info.avail}\n` +
+      `Shown to buyer :  ${displayStock}\n` +
+      `Real available :  ${info.avail}\n` +
       `Sold out       :  ${info.sold}\n` +
       `Total entries  :  ${info.total}\n` +
       `</code>\n\n` +
@@ -3902,6 +3908,66 @@ export function startTelegramBot(config: BotConfig) {
       ...Markup.inlineKeyboard([
         [Markup.button.callback("➕  Add Credentials",     `shop_stock_add_${productId}`)],
         [Markup.button.callback("📋  View Credentials",    `shop_stock_view_${productId}_0`)],
+        [Markup.button.callback("✏️  Set Stock Count",     `shop_stock_setcount_${productId}`),
+         Markup.button.callback(overrideVal != null ? "🔄  Use Real Count" : "🔢  Override",
+                                overrideVal != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`)],
+        [Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
+         Markup.button.callback("♻  Reset All Available", `shop_stock_resetavail_${productId}`)],
+        [Markup.button.callback("↩  Back to Stock",       "shop_admin_stock")],
+      ]),
+    });
+  });
+
+  // Start set-stock-count flow
+  bot.action(/^shop_stock_setcount_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name FROM shop_products WHERE id = $1`, [productId]);
+    if (!r.rows[0]) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "stock_set_override", stockOverrideProductId: productId };
+    return ctx.reply(
+      `\n✏️ <b>SET STOCK COUNT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Product: <b>${r.rows[0].name}</b>\n\n` +
+      `› Type the number to display as stock (e.g. <code>100</code>):\n` +
+      `<i>This overrides the real DB count shown to customers.</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // Clear stock override — revert to real count
+  bot.action(/^shop_stock_clearoverride_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    await dbQuery(`UPDATE shop_products SET stock_override = NULL WHERE id = $1`, [productId]);
+    // Refresh the stock page
+    const r = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+    const table = SHOP_TABLE_MAP[p.account_type];
+    const sf    = p.status_filter ?? "available";
+    const info  = await getProductStockInfo(p);
+    const displayStock = `${info.avail}  (real count)`;
+    const text =
+      `\n🗄 <b>STOCK: ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<code>` +
+      `Account type   :  ${p.account_type}\n` +
+      `DB table       :  ${table ?? "⚠️ unmapped"}\n` +
+      `Status filter  :  ${sf}\n` +
+      `─────────────────────────────────\n` +
+      `Shown to buyer :  ${displayStock}\n` +
+      `Real available :  ${info.avail}\n` +
+      `Sold out       :  ${info.sold}\n` +
+      `Total entries  :  ${info.total}\n` +
+      `</code>\n\n` +
+      `✅ Override cleared — now showing real count.\n\n› What would you like to do?`;
+    await safeEdit(ctx, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("➕  Add Credentials",     `shop_stock_add_${productId}`)],
+        [Markup.button.callback("📋  View Credentials",    `shop_stock_view_${productId}_0`)],
+        [Markup.button.callback("✏️  Set Stock Count",     `shop_stock_setcount_${productId}`),
+         Markup.button.callback("🔢  Override",            `shop_stock_setcount_${productId}`)],
         [Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
          Markup.button.callback("♻  Reset All Available", `shop_stock_resetavail_${productId}`)],
         [Markup.button.callback("↩  Back to Stock",       "shop_admin_stock")],
@@ -4494,6 +4560,28 @@ export function startTelegramBot(config: BotConfig) {
           {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${prodId}`)]]),
+          }
+        );
+      }
+
+      // ── Stock: Set override count ────────────────────────────────────────────
+      if (flow.step === "stock_set_override") {
+        const productId = flow.stockOverrideProductId!;
+        st.shopAdminFlow = undefined;
+        const n = parseInt(text.trim(), 10);
+        if (isNaN(n) || n < 0) {
+          return ctx.reply(
+            `🔴 Invalid number. Enter a whole number like <code>100</code> or <code>0</code>:`,
+            { parse_mode: "HTML" }
+          );
+        }
+        await dbQuery(`UPDATE shop_products SET stock_override = $1 WHERE id = $2`, [n, productId]);
+        return ctx.reply(
+          `✅ Stock count set to <b>${n}</b>. Customers will now see this number.\n\n` +
+          `Tap below to go back to the stock page.`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${productId}`)]]),
           }
         );
       }
