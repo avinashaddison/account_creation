@@ -2214,7 +2214,7 @@ export function startShopBot(token: string) {
       // Create order
       let order: Awaited<ReturnType<typeof createOrder>>;
       try {
-        order = await createOrder(String(uid), amount.toFixed(2));
+        order = await createOrder({ userId: String(uid), amount });
       } catch (err: any) {
         cryptoDepositFlows.delete(uid);
         return safeReply(ctx,
