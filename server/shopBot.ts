@@ -832,13 +832,22 @@ function buildProductButtons(products: ProductWithStock[]) {
 
 function buildMarketplaceText(products: ProductWithStock[]): string {
   const count = products.length;
+
+  // Build the animated product listing in message body (tg-emoji renders here)
+  const productLines = products.map((p) => {
+    const emoji     = productEmojiHtml(p, p.stock > 0);
+    const stockPart = p.stock > 0 ? ` <i>[${p.stock}]</i>` : ` <i>[OUT]</i>`;
+    return `${emoji}  ${escHtml(p.name)}  ·  <b>${fmt$(p.price)}</b>${stockPart}`;
+  }).join("\n");
+
   return (
     `🛍  <b>LIVE MARKETPLACE</b>  ·  <i>Project Addison v2</i>\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `After ordering, your product &amp; credentials are delivered <b>automatically</b> — instant, secure, 24/7.\n\n` +
-    `<i>${count} product${count !== 1 ? "s" : ""} available  ·  USD  ·  ⚡ Instant delivery</i>\n\n` +
-    `Choose a product below or manage your account:\n` +
-    `<i>Need help? Contact → <a href="https://t.me/${SUPPORT_CONTACT.replace("@", "")}">${escHtml(SUPPORT_CONTACT)}</a></i>`
+    `${productLines}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `<i>${count} product${count !== 1 ? "s" : ""}  ·  USD  ·  ⚡ Instant delivery</i>\n` +
+    `<i>Need help? → <a href="https://t.me/${SUPPORT_CONTACT.replace("@", "")}">${escHtml(SUPPORT_CONTACT)}</a></i>\n\n` +
+    `Tap a product below to buy ↓`
   );
 }
 
