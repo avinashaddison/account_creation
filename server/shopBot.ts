@@ -80,12 +80,12 @@ const ANIM_EMOJI = {
 
 /**
  * Animated custom emoji helper.
- * NOTE: <tg-emoji> requires verified document IDs from real Telegram sticker packs.
- * Until valid IDs are sourced via the API, this returns the plain fallback emoji
- * so messages render correctly without DOCUMENT_INVALID errors.
+ * Generates <tg-emoji emoji-id="..."> tags which render as animated emoji
+ * in Telegram clients that support them (iOS, Android, Desktop).
+ * Falls back to the plain emoji character on older clients.
  */
-function ae(_id: string, fallback: string): string {
-  return fallback;
+function ae(id: string, fallback: string): string {
+  return `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>`;
 }
 
 /**
@@ -916,7 +916,7 @@ export function startShopBot(token: string) {
       const uname2 = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
       await ctx.reply(
         truncate(
-          `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+          `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
           `      Global AI Tools Marketplace\n` +
           `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -948,7 +948,7 @@ export function startShopBot(token: string) {
     // Welcome card — inline CTA buttons (no reply keyboard, no auto-open)
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -995,7 +995,7 @@ export function startShopBot(token: string) {
     }
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -2456,7 +2456,7 @@ export function startShopBot(token: string) {
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -2488,7 +2488,7 @@ export function startShopBot(token: string) {
     const name = ctx.from.first_name || ctx.from.username || "User";
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
