@@ -864,15 +864,15 @@ export function startShopBot(token: string) {
 
   ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
-  // Reset any per-chat menu button override back to global default (commands list).
-  // This is needed to clear old web_app overrides that were pushed previously.
+  // Explicitly set per-chat menu button to type:"commands" (the native command list).
+  // This overrides any old web_app override that may still be cached per-chat.
   async function pushMenuButton(chatId: number) {
     await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id:     chatId,
-        menu_button: { type: "default" },
+        menu_button: { type: "commands" },
       }),
     }).catch(() => {});
   }
