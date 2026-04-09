@@ -5149,22 +5149,27 @@ export function startTelegramBot(config: BotConfig) {
           return ctx.reply(`⚠️ Shop bot token not configured. Cannot deliver.`, { parse_mode: "HTML" });
         }
 
-        // Guard: ensure order is still pending (prevent double-fulfillment)
-        const orderCheck = await dbQuery(
-          `SELECT delivery_status FROM shop_orders WHERE id = $1`,
-          [orderId]
+        // Atomically claim the order: transition pending_delivery → delivered only if still pending
+        // This prevents two admins racing to fulfill the same order
+        const claimRes = await dbQuery(
+          `UPDATE shop_orders
+           SET delivery_status = 'delivered', fulfillment_note = $1
+           WHERE id = $2 AND delivery_status = 'pending_delivery'
+           RETURNING id`,
+          [text, orderId]
         );
-        if (!orderCheck.rows[0]) {
-          return ctx.reply(`⚠️ Order <code>${orderId}</code> not found.`, { parse_mode: "HTML" });
-        }
-        if (orderCheck.rows[0].delivery_status !== "pending_delivery") {
+        if ((claimRes.rowCount ?? 0) === 0) {
+          // Either not found or already fulfilled by another admin
+          const statusCheck = await dbQuery(`SELECT delivery_status FROM shop_orders WHERE id = $1`, [orderId]);
+          const current = statusCheck.rows[0]?.delivery_status ?? "unknown";
           return ctx.reply(
-            `⚠️ Order <code>${orderId}</code> is already <b>${orderCheck.rows[0].delivery_status}</b>. No action taken.`,
+            `⚠️ Order <code>${orderId}</code> is already <b>${current}</b>. No action taken.`,
             { parse_mode: "HTML" }
           );
         }
 
-        // Send delivery text to customer via shop bot — check Telegram API response
+        // Order claimed — send delivery content to customer
+        // Use plain text (no parse_mode) so credentials with <, >, & are never misinterpreted
         let tgOk = false;
         let tgErrMsg = "";
         try {
@@ -5173,8 +5178,7 @@ export function startTelegramBot(config: BotConfig) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               chat_id: customerId,
-              text: `\n✅ <b>ORDER DELIVERED!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${text}\n\n<i>Thank you for your purchase!</i>`,
-              parse_mode: "HTML",
+              text: `✅ ORDER DELIVERED!\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${text}\n\nThank you for your purchase!`,
             }),
           });
           const tgJson = await tgRes.json() as { ok: boolean; description?: string };
@@ -5185,9 +5189,13 @@ export function startTelegramBot(config: BotConfig) {
         }
 
         if (!tgOk) {
-          // Delivery failed — keep order as pending_delivery so admin can retry
+          // Telegram message failed — revert order status back to pending so admin can retry
+          await dbQuery(
+            `UPDATE shop_orders SET delivery_status = 'pending_delivery', fulfillment_note = NULL WHERE id = $1`,
+            [orderId]
+          );
           return ctx.reply(
-            `⚠️ <b>Delivery failed</b> — order is still <i>pending</i>.\n\n` +
+            `⚠️ <b>Delivery failed</b> — order reverted to <i>pending</i>.\n\n` +
             `Telegram error: <code>${escapeHtml(tgErrMsg)}</code>\n\n` +
             `Please try fulfilling the order again.`,
             {
@@ -5196,12 +5204,6 @@ export function startTelegramBot(config: BotConfig) {
             }
           );
         }
-
-        // Message delivered — now mark order as delivered
-        await dbQuery(
-          `UPDATE shop_orders SET delivery_status = 'delivered', fulfillment_note = $1 WHERE id = $2`,
-          [text, orderId]
-        );
 
         return ctx.reply(
           `\n✅ <b>ORDER FULFILLED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
