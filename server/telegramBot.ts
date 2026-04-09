@@ -4765,6 +4765,33 @@ export function startTelegramBot(config: BotConfig) {
         );
         const newStock = parseInt(countRes.rows[0]?.cnt ?? "0");
 
+        // ── Broadcast new stock to all customers (fire-and-forget) ──────────────
+        if (added > 0) {
+          const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;
+          const pRes = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [prodId]);
+          const prod = pRes.rows[0];
+          if (shopToken2 && prod) {
+            const custs = await dbQuery(`SELECT telegram_id FROM shop_customers`);
+            const broadMsg =
+              `📢 <b>${added} new stock added for ${esc(prod.name)}!</b>\n\n` +
+              `🌀 Available: <b>${newStock} items</b>\n` +
+              `💰 Price: <b>${parseFloat(prod.price).toFixed(2)} USDT</b>`;
+            const broadKb = JSON.stringify({ inline_keyboard: [[{ text: `${prod.name} (${added})`, callback_data: `shop_product_${prodId}` }]] });
+            (async () => {
+              for (const c of custs.rows) {
+                try {
+                  await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: c.telegram_id, text: broadMsg, parse_mode: "HTML", reply_markup: broadKb }),
+                  });
+                } catch {}
+                await new Promise(r => setTimeout(r, 35));
+              }
+            })().catch(() => {});
+          }
+        }
+
         return ctx.reply(
           `\n✅ <b>CREDENTIALS ADDED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
           `<code>` +
@@ -4809,6 +4836,33 @@ export function startTelegramBot(config: BotConfig) {
           [prodId]
         );
         const newStock = parseInt(countRes.rows[0]?.cnt ?? "0");
+
+        // ── Broadcast new stock to all customers (fire-and-forget) ──────────────
+        if (added > 0) {
+          const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;
+          const pRes = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [prodId]);
+          const prod = pRes.rows[0];
+          if (shopToken2 && prod) {
+            const custs = await dbQuery(`SELECT telegram_id FROM shop_customers`);
+            const broadMsg =
+              `📢 <b>${added} new stock added for ${esc(prod.name)}!</b>\n\n` +
+              `🌀 Available: <b>${newStock} items</b>\n` +
+              `💰 Price: <b>${parseFloat(prod.price).toFixed(2)} USDT</b>`;
+            const broadKb = JSON.stringify({ inline_keyboard: [[{ text: `${prod.name} (${added})`, callback_data: `shop_product_${prodId}` }]] });
+            (async () => {
+              for (const c of custs.rows) {
+                try {
+                  await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: c.telegram_id, text: broadMsg, parse_mode: "HTML", reply_markup: broadKb }),
+                  });
+                } catch {}
+                await new Promise(r => setTimeout(r, 35));
+              }
+            })().catch(() => {});
+          }
+        }
 
         return ctx.reply(
           `\n✅ <b>REDEEM LINKS ADDED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
