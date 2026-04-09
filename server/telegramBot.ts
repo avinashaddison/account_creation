@@ -3260,7 +3260,8 @@ export function startTelegramBot(config: BotConfig) {
   function buildProductsListButtons(rows: any[]) {
     const buttons: ReturnType<typeof Markup.button.callback>[][] = rows.map((p: any) => [
       Markup.button.callback(p.active ? `⏸  Deactivate` : `▶  Activate`, `shop_toggle_${p.id}`),
-      Markup.button.callback(`✏  ${p.name.slice(0, 18)}`, `shop_edit_${p.id}`),
+      Markup.button.callback(`✏  ${p.name.slice(0, 14)}`, `shop_edit_${p.id}`),
+      Markup.button.callback(`🗑`, `shop_delete_confirm_${p.id}`),
     ]);
     buttons.push([
       Markup.button.callback("➕  ADD PRODUCT", "shop_admin_add_product"),
