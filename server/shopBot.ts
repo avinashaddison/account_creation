@@ -838,11 +838,24 @@ async function ensureShopTables() {
 }
 
 // ── Safe messaging helpers ───────────────────────────────────────────────────
+/** Strip <tg-emoji emoji-id="...">FALLBACK</tg-emoji> tags, leaving only the fallback character. */
+function stripTgEmoji(text: string): string {
+  return text.replace(/<tg-emoji[^>]*>([^<]*)<\/tg-emoji>/g, "$1");
+}
+
 async function safeReply(ctx: any, text: string, extra: any = {}) {
   try {
     return await ctx.reply(truncate(text), extra);
   } catch (e: any) {
-    console.error("[ShopBot] safeReply failed:", e.message);
+    if (e.message?.includes("DOCUMENT_INVALID")) {
+      try {
+        return await ctx.reply(truncate(stripTgEmoji(text)), extra);
+      } catch (e2: any) {
+        console.error("[ShopBot] safeReply fallback failed:", e2.message);
+      }
+    } else {
+      console.error("[ShopBot] safeReply failed:", e.message);
+    }
     return null;
   }
 }
@@ -850,7 +863,14 @@ async function safeReply(ctx: any, text: string, extra: any = {}) {
 async function safeEdit(ctx: any, text: string, extra: any = {}) {
   try {
     return await ctx.editMessageText(truncate(text), extra);
-  } catch {
+  } catch (e: any) {
+    if (e.message?.includes("DOCUMENT_INVALID")) {
+      try {
+        return await ctx.editMessageText(truncate(stripTgEmoji(text)), extra);
+      } catch {
+        return safeReply(ctx, stripTgEmoji(text), extra);
+      }
+    }
     return safeReply(ctx, text, extra);
   }
 }
@@ -865,7 +885,20 @@ async function editMsg(ctx: any, msg: any, text: string, extra: any = {}) {
       truncate(text),
       extra
     );
-  } catch {
+  } catch (e: any) {
+    if (e.message?.includes("DOCUMENT_INVALID")) {
+      try {
+        return await ctx.telegram.editMessageText(
+          msg.chat.id,
+          msg.message_id,
+          undefined,
+          truncate(stripTgEmoji(text)),
+          extra
+        );
+      } catch {
+        return safeReply(ctx, stripTgEmoji(text), extra);
+      }
+    }
     return safeReply(ctx, text, extra);
   }
 }
