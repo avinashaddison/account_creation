@@ -864,15 +864,31 @@ export function startShopBot(token: string) {
 
   ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
-  // Explicitly set per-chat menu button to type:"commands" (the native command list).
-  // This overrides any old web_app override that may still be cached per-chat.
+  // Build TMA URL: prefer the deployed domain (SHOP_TMA_BASE_URL), fall back to
+  // the dev domain (REPLIT_DEV_DOMAIN).  type:"web_app" is the only menu button
+  // type Telegram shows alongside an active reply keyboard — type:"commands" is
+  // suppressed whenever a reply keyboard is visible.
+  let _shopTmaUrl = "";
+  bot.telegram.getMe().then((me) => {
+    const base = (process.env.SHOP_TMA_BASE_URL?.replace(/\/$/, ""))
+              || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
+    if (base) {
+      _shopTmaUrl = `${base}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
+      console.log(`[ShopBot] TMA URL: ${_shopTmaUrl}`);
+    } else {
+      console.warn("[ShopBot] No domain available for TMA URL — Menu button disabled");
+    }
+  }).catch(() => {});
+
+  // Push the web-app menu button per-chat (raw fetch — Telegraf mis-maps params).
   async function pushMenuButton(chatId: number) {
+    if (!_shopTmaUrl) return;
     await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id:     chatId,
-        menu_button: { type: "commands" },
+        menu_button: { type: "web_app", text: "Menu", web_app: { url: _shopTmaUrl } },
       }),
     }).catch(() => {});
   }
@@ -2505,15 +2521,7 @@ export function startShopBot(token: string) {
         { command: "balance", description: "Check wallet balance" },
         { command: "cancel",  description: "Cancel active flow" },
       ]);
-      // Set global menu button to type:"commands" — this is the native blue "Menu"
-      // button that appears next to the text input and shows the command list.
-      // No URL or web app needed; Telegram handles the UI entirely.
-      await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ menu_button: { type: "commands" } }),
-      });
-      console.log("[ShopBot] Commands registered + Menu button set to commands");
+      console.log("[ShopBot] Commands registered");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
     }
