@@ -5062,6 +5062,15 @@ export function startTelegramBot(config: BotConfig) {
       if (flow.step === "manual_fulfill") {
         const orderId    = flow.fulfillOrderId!;
         const customerId = flow.fulfillCustomerId!;
+
+        // Require non-empty delivery content before proceeding
+        if (!text || text.trim().length === 0) {
+          return ctx.reply(
+            `⚠️ Fulfillment content cannot be empty. Please send the delivery text/credentials for this order.`,
+            { parse_mode: "HTML" }
+          );
+        }
+
         st.shopAdminFlow = undefined;
 
         const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;

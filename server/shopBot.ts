@@ -813,6 +813,15 @@ async function ensureShopTables() {
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS redeem_link TEXT DEFAULT NULL;
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'delivered';
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS fulfillment_note TEXT DEFAULT NULL;
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name='shop_orders' AND constraint_name='shop_orders_delivery_status_check'
+      ) THEN
+        ALTER TABLE shop_orders ADD CONSTRAINT shop_orders_delivery_status_check
+          CHECK (delivery_status IN ('delivered', 'pending_delivery'));
+      END IF;
+    END $$;
     CREATE TABLE IF NOT EXISTS shop_activation_orders (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       telegram_id BIGINT NOT NULL,
