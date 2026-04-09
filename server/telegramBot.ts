@@ -5159,27 +5159,24 @@ export function startTelegramBot(config: BotConfig) {
           return ctx.reply(`⚠️ Shop bot token not configured. Cannot deliver.`, { parse_mode: "HTML" });
         }
 
-        // Atomically claim the order: transition pending_delivery → delivered only if still pending
-        // This prevents two admins racing to fulfill the same order
-        const claimRes = await dbQuery(
-          `UPDATE shop_orders
-           SET delivery_status = 'delivered', fulfillment_note = $1
-           WHERE id = $2 AND delivery_status = 'pending_delivery'
-           RETURNING id`,
-          [text, orderId]
+        // Pre-flight guard: check order is still pending (fast early exit)
+        const preCheck = await dbQuery(
+          `SELECT delivery_status FROM shop_orders WHERE id = $1`,
+          [orderId]
         );
-        if ((claimRes.rowCount ?? 0) === 0) {
-          // Either not found or already fulfilled by another admin
-          const statusCheck = await dbQuery(`SELECT delivery_status FROM shop_orders WHERE id = $1`, [orderId]);
-          const current = statusCheck.rows[0]?.delivery_status ?? "unknown";
+        if (!preCheck.rows[0]) {
+          return ctx.reply(`⚠️ Order <code>${orderId}</code> not found.`, { parse_mode: "HTML" });
+        }
+        if (preCheck.rows[0].delivery_status !== "pending_delivery") {
           return ctx.reply(
-            `⚠️ Order <code>${orderId}</code> is already <b>${current}</b>. No action taken.`,
+            `⚠️ Order <code>${orderId}</code> is already <b>${preCheck.rows[0].delivery_status}</b>. No action taken.`,
             { parse_mode: "HTML" }
           );
         }
 
-        // Order claimed — send delivery content to customer
-        // Use plain text (no parse_mode) so credentials with <, >, & are never misinterpreted
+        // Send Telegram message FIRST (before any DB mutation) so we never mark
+        // an order delivered unless the customer actually received the content.
+        // Use plain text (no parse_mode) so credentials with <, >, & are safe.
         let tgOk = false;
         let tgErrMsg = "";
         try {
@@ -5199,15 +5196,31 @@ export function startTelegramBot(config: BotConfig) {
         }
 
         if (!tgOk) {
-          // Telegram message failed — revert order status back to pending so admin can retry
-          await dbQuery(
-            `UPDATE shop_orders SET delivery_status = 'pending_delivery', fulfillment_note = NULL WHERE id = $1`,
-            [orderId]
-          );
+          // Telegram send failed — do NOT touch the DB; order stays pending so admin can retry
           return ctx.reply(
-            `⚠️ <b>Delivery failed</b> — order reverted to <i>pending</i>.\n\n` +
+            `⚠️ <b>Delivery failed</b> — order is still <i>pending</i>.\n\n` +
             `Telegram error: <code>${escapeHtml(tgErrMsg)}</code>\n\n` +
             `Please try fulfilling the order again.`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
+            }
+          );
+        }
+
+        // Telegram send confirmed — now atomically mark delivered only if still pending
+        // (handles race where two admins sent content in quick succession)
+        const claimRes = await dbQuery(
+          `UPDATE shop_orders
+           SET delivery_status = 'delivered', fulfillment_note = $1
+           WHERE id = $2 AND delivery_status = 'pending_delivery'
+           RETURNING id`,
+          [text, orderId]
+        );
+        if ((claimRes.rowCount ?? 0) === 0) {
+          // Another admin fulfilled just before us — content already sent, flag as info
+          return ctx.reply(
+            `ℹ️ Delivery sent to customer, but order <code>${orderId}</code> was already marked delivered by another admin.`,
             {
               parse_mode: "HTML",
               ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
