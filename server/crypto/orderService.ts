@@ -6,6 +6,16 @@ import { notifyUser, buildPaymentSuccessMessage } from "./notifications";
 import { logger }                  from "./logger";
 import type { CryptoOrder }        from "@shared/schema";
 
+// ── Payment-confirmed callback ─────────────────────────────────────────────────
+// Register a handler (e.g. from the shop bot) to credit balance and send a
+// custom confirmation message when a payment is verified.
+type PaymentPaidCallback = (order: CryptoOrder) => Promise<void>;
+let onPaymentPaid: PaymentPaidCallback | null = null;
+
+export function setOnPaymentPaid(cb: PaymentPaidCallback): void {
+  onPaymentPaid = cb;
+}
+
 const ORDER_EXPIRY_MINUTES = 30;
 
 function generateNote(userId: string): string {
@@ -106,14 +116,27 @@ export async function fulfillOrder(
       orderId: order.orderId, transactionId, trigger, userId: order.userId,
     });
 
-    await notifyUser(
-      order.userId,
-      buildPaymentSuccessMessage({
-        orderId: order.orderId,
-        amount:  order.amount,
-        note:    order.note,
-      }),
-    );
+    if (onPaymentPaid) {
+      // Shop bot (or other) callback — handles balance credit + custom notification
+      try {
+        await onPaymentPaid({ ...order, status: "PAID", transactionId, paidAt: updated!.paidAt });
+      } catch (err: unknown) {
+        logger.error("OrderService", "onPaymentPaid callback threw", {
+          orderId: order.orderId,
+          error:   err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else {
+      // No callback registered — fall back to generic Telegram message
+      await notifyUser(
+        order.userId,
+        buildPaymentSuccessMessage({
+          orderId: order.orderId,
+          amount:  order.amount,
+          note:    order.note,
+        }),
+      );
+    }
   }
 
   return {

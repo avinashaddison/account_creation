@@ -6,6 +6,7 @@ import {
   type PendingActivation, type ActivationService,
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
+import { createOrder, setOnPaymentPaid } from "./crypto/orderService";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -222,6 +223,15 @@ interface DepositFlow {
   step: "waiting_screenshot";
 }
 const depositFlows = new Map<number, DepositFlow>();
+
+// Binance auto-verify deposit flow
+interface CryptoDepositFlow {
+  step:     "waiting_amount" | "waiting_payment";
+  orderId?: string;
+  note?:    string;
+  amount?:  number;
+}
+const cryptoDepositFlows = new Map<number, CryptoDepositFlow>();
 
 const ACTIVATION_PRICE = 2.00;
 const VIP_THRESHOLD    = 10.00;
@@ -2184,6 +2194,62 @@ export function startShopBot(token: string) {
     const uid  = ctx.from?.id;
     if (!uid) return next();
 
+    // ── Crypto auto-verify — amount input ─────────────────────────────────────
+    const cryptoFlow = cryptoDepositFlows.get(uid);
+    if (cryptoFlow && cryptoFlow.step === "waiting_amount") {
+      const raw    = ctx.message.text?.trim() ?? "";
+      const amount = parseFloat(raw);
+      await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
+      if (isNaN(amount) || amount < 1) {
+        return safeReply(ctx,
+          `⚠️ <b>Invalid amount.</b> Please enter a number ≥ 1 (e.g. <code>10</code> or <code>25.50</code>):`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "dep_auto_cancel")]]),
+          }
+        );
+      }
+      // Create order
+      let order: Awaited<ReturnType<typeof createOrder>>;
+      try {
+        order = await createOrder(String(uid), amount.toFixed(2));
+      } catch (err: any) {
+        cryptoDepositFlows.delete(uid);
+        return safeReply(ctx,
+          `❌ <b>Failed to create order.</b> Please try again later.\n<i>${escHtml(err?.message ?? "Unknown error")}</i>`,
+          { parse_mode: "HTML" }
+        );
+      }
+      cryptoDepositFlows.set(uid, {
+        step:    "waiting_payment",
+        orderId: order.orderId,
+        note:    order.note,
+        amount,
+      });
+      return safeReply(ctx,
+        `╔══════════════════════════════════════╗\n` +
+        `║  ⚡  <b>AUTO VERIFY — PAY NOW</b>  ║\n` +
+        `╚══════════════════════════════════════╝\n\n` +
+        `Send exactly:\n\n` +
+        `<b>Amount:</b>  <code>${amount.toFixed(2)} USDT</code>\n` +
+        `<b>To Binance ID:</b>  <code>510120124</code>\n\n` +
+        `${divider()}\n\n` +
+        `<b>IMPORTANT — Payment Note / Reference:</b>\n` +
+        `<code>${order.note}</code>\n\n` +
+        `${divider()}\n\n` +
+        `<i>Include the note above in the <b>Binance Pay transfer note / message</b> field.\n` +
+        `Your balance will be credited <b>automatically</b> once we detect the payment (usually within 25 seconds).\n\n` +
+        `Order expires in <b>30 minutes</b>.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("🔄  Check Status", "dep_auto_check")],
+            [Markup.button.callback("❌  Cancel Order",  "dep_auto_cancel")],
+          ]),
+        }
+      );
+    }
+
     // ── Buy promo code flow ───────────────────────────────────────────────────
     const buyFlow = buyFlows.get(uid);
     if (buyFlow && buyFlow.step === "promo") {
@@ -2340,7 +2406,8 @@ export function startShopBot(token: string) {
       `${divider()}\n\n` +
       `🪪  Your ID: <code>${uid}</code>\n` +
       `⚡  Minimum deposit: <b>$1.00</b>\n\n` +
-      `<i>After paying, tap <b>📸 Submit Payment Proof</b> to send your screenshot for fast confirmation.</i>`
+      `<i>Choose <b>⚡ Auto Verify</b> to get a unique payment note and have your balance credited instantly after Binance confirms the transfer.\n` +
+      `Or tap <b>📸 Submit Proof</b> for manual review.</i>`
     );
   }
 
@@ -2351,6 +2418,7 @@ export function startShopBot(token: string) {
       ...Markup.inlineKeyboard([
         [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
         [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
+        [Markup.button.callback("⚡  AUTO VERIFY (Binance Pay)", "dep_auto_binance")],
         [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
       ]),
     });
@@ -2378,6 +2446,56 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     depositFlows.delete(uid);
     return safeEdit(ctx, `❌ <i>Cancelled.</i>`, { parse_mode: "HTML" });
+  });
+
+  // ── Auto Verify — Binance Pay ─────────────────────────────────────────────
+  bot.action("dep_auto_binance", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    cryptoDepositFlows.set(uid, { step: "waiting_amount" });
+    return safeEdit(ctx,
+      `⚡ <b>Auto Verify — Binance Pay</b>\n\n` +
+      `${divider()}\n\n` +
+      `How much USDT do you want to deposit?\n\n` +
+      `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("❌  Cancel", "dep_auto_cancel")]]),
+      }
+    );
+  });
+
+  bot.action("dep_auto_cancel", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    cryptoDepositFlows.delete(uid);
+    return safeEdit(ctx, `❌ <i>Cancelled.</i>`, { parse_mode: "HTML" });
+  });
+
+  bot.action("dep_auto_check", async (ctx) => {
+    await ctx.answerCbQuery("Checking payment…").catch(() => {});
+    const uid  = ctx.from.id;
+    const flow = cryptoDepositFlows.get(uid);
+    if (!flow || flow.step !== "waiting_payment" || !flow.orderId) {
+      return safeEdit(ctx,
+        `⚠️ <i>No active payment order found. Please start a new deposit.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+    return safeEdit(ctx,
+      `⏳ <b>Still waiting for payment…</b>\n\n` +
+      `${divider()}\n\n` +
+      `Our system checks every ~25 seconds. Your balance will be credited automatically once the transfer is detected.\n\n` +
+      `<b>Note:</b> <code>${flow.note}</code>\n` +
+      `<b>Amount:</b> <code>${flow.amount!.toFixed(2)} USDT</code>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Again", "dep_auto_check")],
+          [Markup.button.callback("❌  Cancel Order", "dep_auto_cancel")],
+        ]),
+      }
+    );
   });
 
   // ── Photo handler — deposit screenshots ───────────────────────────────────
@@ -2787,6 +2905,38 @@ export function startShopBot(token: string) {
       setTimeout(() => launch(attempt + 1), delay);
     }
   }
+  // ── Wire crypto payment-confirmed callback ────────────────────────────────
+  // Called by the background payment checker when it detects a matched USDT
+  // transfer on Binance.  Credits the customer balance and notifies via bot.
+  setOnPaymentPaid(async (order) => {
+    const telegramId = parseInt(order.userId, 10);
+    const amount     = parseFloat(order.amount);
+
+    // Credit balance in shop_customers (upsert-safe: only if the row exists)
+    await dbQuery(
+      `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
+      [amount.toFixed(2), telegramId]
+    );
+
+    // Clear the user's in-memory crypto deposit flow (if still pending)
+    cryptoDepositFlows.delete(telegramId);
+
+    // Notify the user via Telegram
+    const newBal = await getBalance(telegramId);
+    await bot.telegram.sendMessage(
+      telegramId,
+      `╔══════════════════════════════════════╗\n` +
+      `║  ✅  <b>PAYMENT CONFIRMED!</b>  ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
+      `<b>+${amount.toFixed(2)} USDT</b> has been added to your wallet.\n\n` +
+      `💰 <b>New balance:</b> <code>$${newBal.toFixed(2)}</code>\n\n` +
+      `<i>Reference: <code>${order.note}</code></i>`,
+      { parse_mode: "HTML" }
+    ).catch((err: any) => {
+      console.error(`[ShopBot] Failed to send payment confirmation to ${telegramId}:`, err?.message);
+    });
+  });
+
   launch();
 
   process.once("SIGINT",  () => bot.stop("SIGINT"));
