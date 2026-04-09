@@ -3146,6 +3146,7 @@ export function startTelegramBot(config: BotConfig) {
       buttons.push([Markup.button.callback(`📦  Fulfill — ${o.product_name.slice(0, 20)}`, `shop_fulfill_${o.id}`)]);
     }
     buttons.push([Markup.button.callback("🔄  Refresh", "shop_admin_manual_orders")]);
+    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
     if (send === "edit") return safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
     return ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
   }
