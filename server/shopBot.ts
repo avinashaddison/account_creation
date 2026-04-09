@@ -852,6 +852,9 @@ function buildMarketplaceKeyboard(products: ProductWithStock[]) {
   ]);
 }
 
+// Module-level TMA URL — set in registerCommands() once the bot is online
+let _shopTmaUrl = "";
+
 // ── Main bot export ──────────────────────────────────────────────────────────
 export function startShopBot(token: string) {
   if (!token) {
@@ -870,6 +873,16 @@ export function startShopBot(token: string) {
     } catch {}
   });
 
+  // Push the web-app menu button to a specific chat, overriding any old
+  // per-chat "commands" setting that may have been stored previously.
+  async function pushMenuButton(chatId: number) {
+    if (!_shopTmaUrl) return;
+    await bot.telegram.setChatMenuButton({
+      chatId,
+      menuButton: { type: "web_app", text: "Menu", web_app: { url: _shopTmaUrl } } as any,
+    }).catch(() => {});
+  }
+
   // ── /start ─────────────────────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const uid     = ctx.from.id;
@@ -884,6 +897,7 @@ export function startShopBot(token: string) {
 
     const isNew = await isNewCustomer(uid);
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name, referredBy);
+    pushMenuButton(ctx.chat.id).catch(() => {});   // reset any old per-chat override
 
     // Credit referrer $0.50 when new user joins
     if (isNew && referredBy) {
@@ -967,6 +981,7 @@ export function startShopBot(token: string) {
     const uid   = ctx.from.id;
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    pushMenuButton(ctx.chat.id).catch(() => {});   // reset any old per-chat override
     const balance = await getBalance(uid);
     // Dismiss any hidden keyboard first, then show fresh
     const dismiss = await ctx.reply("\u200B", { ...Markup.removeKeyboard() }).catch(() => null);
@@ -2502,6 +2517,7 @@ export function startShopBot(token: string) {
             web_app: { url: tmaUrl },
           } as any,
         });
+        _shopTmaUrl = tmaUrl;          // store for per-chat resets
         console.log(`[ShopBot] Menu button → ${tmaUrl}`);
       } else {
         await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
