@@ -1,4 +1,5 @@
 import { createHmac } from "crypto";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import { logger } from "./logger";
 
 export interface BinanceTransaction {
@@ -50,9 +51,16 @@ export async function getRecentTransactions(
 
     params.append("signature", signature);
 
-    const res = await fetch(`${BINANCE_API_BASE}/sapi/v1/pay/transactions?${params}`, {
+    const proxyUrl = process.env.BINANCE_PROXY_URL;
+    const fetchOpts: RequestInit & { agent?: unknown } = {
       headers: { "X-MBX-APIKEY": apiKey },
-    });
+    };
+    if (proxyUrl) {
+      fetchOpts.agent = new HttpsProxyAgent(proxyUrl);
+      logger.debug("TransactionService", "Using proxy for Binance API", { proxy: proxyUrl.replace(/:[^:@]+@/, ":***@") });
+    }
+
+    const res = await fetch(`${BINANCE_API_BASE}/sapi/v1/pay/transactions?${params}`, fetchOpts);
 
     const rawText = await res.text();
     let json: Record<string, unknown>;
