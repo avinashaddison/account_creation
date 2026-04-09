@@ -838,18 +838,27 @@ export function startShopBot(token: string) {
     const name    = ctx.from.first_name || ctx.from.username || "User";
     const uname   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
 
+    const greeting = isNew
+      ? `✨  Hey, <b>${escHtml(name)}</b>!  Welcome aboard — glad to have you! 🎉`
+      : `👋  Hey, <b>${escHtml(name)}</b>!  Great to see you back.`;
+
     await ctx.reply(
       truncate(
-        `╔══════════════════════════════════════╗\n` +
-        `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <b>PROJECT ADDISON  v2</b>  ║\n` +
-        `║  <i>Global AI Tools Marketplace</i>  ║\n` +
-        `╚══════════════════════════════════════╝\n\n` +
-        `👋 Welcome back, <b>${escHtml(name)}</b>!\n\n` +
-        `<code>  💰 Balance   ›  ${fmt$(balance)}\n` +
-        `  🔖 User      ›  ${uname}\n` +
-        `  🆔 ID        ›  ${uid}</code>\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `<i>Use the menu below to get started.</i>`
+        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
+        `      Global AI Tools Marketplace\n` +
+        `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `${greeting}\n\n` +
+        `<b>💎  What you can do here:</b>\n` +
+        `<blockquote>⚡  ${toBold("SHOP")}  —  Browse &amp; buy premium AI tools\n` +
+        `💳  ${toBold("DEPOSIT")}  —  Instantly add funds to your wallet\n` +
+        `👤  ${toBold("PROFILE")}  —  View balance, orders &amp; settings\n` +
+        `🎧  ${toBold("SUPPORT")}  —  We\'re always here to help\n` +
+        `🔗  ${toBold("REFER & EARN")}  —  Invite friends, earn rewards</blockquote>\n\n` +
+        `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
+        `◈  🔖  User      ›  ${uname}\n` +
+        `◈  🆔  ID        ›  ${uid}</code>\n\n` +
+        `<i>👇  Tap a button below to get started</i>`
       ),
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
@@ -870,14 +879,21 @@ export function startShopBot(token: string) {
     }
     await ctx.reply(
       truncate(
-        `╔══════════════════════════════════════╗\n` +
-        `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <b>PROJECT ADDISON  v2</b>  ║\n` +
-        `║  <i>Global AI Tools Marketplace</i>  ║\n` +
-        `╚══════════════════════════════════════╝\n\n` +
-        `<code>  💰 Balance   ›  ${fmt$(balance)}\n` +
-        `  🔖 User      ›  ${uname}\n` +
-        `  🆔 ID        ›  ${uid}</code>\n\n` +
-        `<i>Select an option from the menu below.</i>`
+        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
+        `      Global AI Tools Marketplace\n` +
+        `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `👋  Hey, <b>${escHtml(uname)}</b>!  Welcome back.\n\n` +
+        `<b>💎  What you can do here:</b>\n` +
+        `<blockquote>⚡  ${toBold("SHOP")}  —  Browse &amp; buy premium AI tools\n` +
+        `💳  ${toBold("DEPOSIT")}  —  Instantly add funds to your wallet\n` +
+        `👤  ${toBold("PROFILE")}  —  View balance, orders &amp; settings\n` +
+        `🎧  ${toBold("SUPPORT")}  —  We\'re always here to help\n` +
+        `🔗  ${toBold("REFER & EARN")}  —  Invite friends, earn rewards</blockquote>\n\n` +
+        `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
+        `◈  🔖  User      ›  ${uname}\n` +
+        `◈  🆔  ID        ›  ${uid}</code>\n\n` +
+        `<i>👇  Select an option from the menu below</i>`
       ),
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
