@@ -343,7 +343,9 @@ function notifyAdminsManualOrder(
           inline_keyboard: [[{ text: `📦  Fulfill Order`, callback_data: `shop_fulfill_${orderId}` }]],
         },
       }),
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+      console.error(`[shopBot] Failed to notify admin ${id} of manual order ${orderId}:`, err);
+    });
   }
 }
 
