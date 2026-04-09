@@ -819,7 +819,7 @@ async function ensureShopTables() {
         WHERE table_name='shop_orders' AND constraint_name='shop_orders_delivery_status_check'
       ) THEN
         ALTER TABLE shop_orders ADD CONSTRAINT shop_orders_delivery_status_check
-          CHECK (delivery_status IN ('delivered', 'pending_delivery'));
+          CHECK (delivery_status IN ('delivered', 'pending_delivery', 'fulfilling'));
       END IF;
     END $$;
     CREATE TABLE IF NOT EXISTS shop_activation_orders (

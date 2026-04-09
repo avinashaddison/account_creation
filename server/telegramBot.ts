@@ -5078,23 +5078,32 @@ export function startTelegramBot(config: BotConfig) {
           return ctx.reply(`⚠️ Shop bot token not configured. Cannot deliver.`, { parse_mode: "HTML" });
         }
 
-        // Pre-flight guard: check order is still pending (fast early exit)
-        const preCheck = await dbQuery(
-          `SELECT delivery_status FROM shop_orders WHERE id = $1`,
+        // Step 1: Atomically claim the order by transitioning pending_delivery → fulfilling.
+        // This prevents a second admin from delivering the same order concurrently.
+        const claimRes = await dbQuery(
+          `UPDATE shop_orders
+           SET delivery_status = 'fulfilling'
+           WHERE id = $1 AND delivery_status = 'pending_delivery'
+           RETURNING id`,
           [orderId]
         );
-        if (!preCheck.rows[0]) {
-          return ctx.reply(`⚠️ Order <code>${orderId}</code> not found.`, { parse_mode: "HTML" });
-        }
-        if (preCheck.rows[0].delivery_status !== "pending_delivery") {
+        if (!claimRes.rows[0]) {
+          // Check whether the order exists at all or was already claimed/delivered
+          const statusRes = await dbQuery(
+            `SELECT delivery_status FROM shop_orders WHERE id = $1`,
+            [orderId]
+          );
+          const existingStatus = statusRes.rows[0]?.delivery_status ?? "not found";
           return ctx.reply(
-            `⚠️ Order <code>${orderId}</code> is already <b>${preCheck.rows[0].delivery_status}</b>. No action taken.`,
-            { parse_mode: "HTML" }
+            `⚠️ Could not claim order <code>${orderId}</code> — current status: <b>${existingStatus}</b>. No action taken.`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
+            }
           );
         }
 
-        // Send Telegram message FIRST (before any DB mutation) so we never mark
-        // an order delivered unless the customer actually received the content.
+        // Step 2: Send the delivery message to the customer.
         // Use plain text (no parse_mode) so credentials with <, >, & are safe.
         let tgOk = false;
         let tgErrMsg = "";
@@ -5115,9 +5124,13 @@ export function startTelegramBot(config: BotConfig) {
         }
 
         if (!tgOk) {
-          // Telegram send failed — do NOT touch the DB; order stays pending so admin can retry
+          // Telegram send failed — revert order back to pending so the admin can retry
+          await dbQuery(
+            `UPDATE shop_orders SET delivery_status = 'pending_delivery' WHERE id = $1`,
+            [orderId]
+          );
           return ctx.reply(
-            `⚠️ <b>Delivery failed</b> — order is still <i>pending</i>.\n\n` +
+            `⚠️ <b>Delivery failed</b> — order reverted to <i>pending</i>.\n\n` +
             `Telegram error: <code>${escapeHtml(tgErrMsg)}</code>\n\n` +
             `Please try fulfilling the order again.`,
             {
@@ -5127,25 +5140,13 @@ export function startTelegramBot(config: BotConfig) {
           );
         }
 
-        // Telegram send confirmed — now atomically mark delivered only if still pending
-        // (handles race where two admins sent content in quick succession)
-        const claimRes = await dbQuery(
+        // Step 3: Telegram confirmed — finalize to delivered with fulfillment note
+        await dbQuery(
           `UPDATE shop_orders
            SET delivery_status = 'delivered', fulfillment_note = $1
-           WHERE id = $2 AND delivery_status = 'pending_delivery'
-           RETURNING id`,
+           WHERE id = $2`,
           [text, orderId]
         );
-        if ((claimRes.rowCount ?? 0) === 0) {
-          // Another admin fulfilled just before us — content already sent, flag as info
-          return ctx.reply(
-            `ℹ️ Delivery sent to customer, but order <code>${orderId}</code> was already marked delivered by another admin.`,
-            {
-              parse_mode: "HTML",
-              ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
-            }
-          );
-        }
 
         return ctx.reply(
           `\n✅ <b>ORDER FULFILLED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
