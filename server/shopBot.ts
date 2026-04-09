@@ -2505,10 +2505,7 @@ export function startShopBot(token: string) {
       // Register the command list (shown when user taps the blue "Menu" button).
       // Descriptions shown in the command list popup that appears when Menu is tapped.
       await bot.telegram.setMyCommands([
-        { command: "start",   description: "🚀 Main Menu" },
-        { command: "shop",    description: "🛍 Browse marketplace" },
-        { command: "balance", description: "💰 Check wallet balance" },
-        { command: "cancel",  description: "❌ Cancel active flow" },
+        { command: "start", description: "🚀 Main Menu" },
       ]);
       // Set global default to type:"commands"
       await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
