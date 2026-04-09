@@ -897,14 +897,14 @@ function insufficientFundsMsg(opts: {
   const bar      = "█".repeat(filled) + "░".repeat(empty);
   const pct      = Math.round((balance / required) * 100);
   return (
-    `🚫  <b>INSUFFICIENT FUNDS</b>\n` +
+    `${ae(ANIM_EMOJI.card, "💳")}  <b>INSUFFICIENT FUNDS</b>  ${ae(ANIM_EMOJI.money, "💰")}\n` +
     `╔══════════════════════════════════════╗` +
     `${productLine}\n` +
     `║\n` +
     `║  <code>${pad("Balance",  col)} ›   ${balStr}</code>\n` +
     `║  <code>${pad("Required", col)} ›   ${reqStr}</code>\n` +
     `║  <code>───────────────────────────</code>\n` +
-    `║  <code>${pad("Shortfall",col)} ›   ${shortStr}  ⬅</code>\n` +
+    `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <code>${pad("Shortfall",col)} ›   ${shortStr}</code>\n` +
     `║\n` +
     `║  ${bar}  ${pct}%\n` +
     `║\n` +
