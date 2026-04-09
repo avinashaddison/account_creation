@@ -785,21 +785,19 @@ function buildProductCard(p: ProductWithStock): string {
 
 function buildProductButtons(products: ProductWithStock[]) {
   return products.map((p) => {
-    const icon  = p.sticky && p.stock > 0 ? "🔥"
-                : p.stock > 5             ? "🟢"
-                : p.stock > 0             ? "🟡"
-                :                           "🔴";
-    const stock = p.stock > 0 ? `[${p.stock}]` : `[OUT]`;
-    const name  = toBold(p.name);
+    const emoji = p.sticky && p.stock > 0 ? "🔥" : platformEmoji(p.account_type);
     const price = fmt$(p.price);
-    return [Markup.button.callback(`${icon}  ${stock}  ${name}  ·  ${price}`, `shop_product_${p.id}`)];
+    const label = p.stock > 0
+      ? `[${p.stock}]  ${emoji}  ${p.name}  •  ${price}`
+      : `${emoji}  ${p.name}  •  ${price}`;
+    return [Markup.button.callback(label, `shop_product_${p.id}`)];
   });
 }
 
 function buildMarketplaceText(products: ProductWithStock[]): string {
   const count = products.length;
   return (
-    `🛍  <b>${toBold("LIVE MARKETPLACE")}</b>  ·  <i>Project Addison v2</i>\n` +
+    `🛍  <b>LIVE MARKETPLACE</b>  ·  <i>Project Addison v2</i>\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `After ordering, your product &amp; credentials are delivered <b>automatically</b> — instant, secure, 24/7.\n\n` +
     `<i>${count} product${count !== 1 ? "s" : ""} available  ·  USD  ·  ⚡ Instant delivery</i>\n\n` +
@@ -812,8 +810,8 @@ function buildMarketplaceKeyboard(products: ProductWithStock[]) {
   return Markup.inlineKeyboard([
     ...buildProductButtons(products),
     [
-      Markup.button.callback(`📋  ${toBold("My Orders")}`, "shop_view_orders"),
-      Markup.button.callback(`🔄  ${toBold("Refresh")}`,   "shop_refresh_products"),
+      Markup.button.callback("📋  My Orders", "shop_view_orders"),
+      Markup.button.callback("🔄  Refresh",   "shop_refresh_products"),
     ],
   ]);
 }
@@ -995,7 +993,7 @@ export function startShopBot(token: string) {
 
     if (products.length === 0) {
       const emptyText =
-        `🛍  <b>${toBold("LIVE MARKETPLACE")}</b>\n` +
+        `🛍  <b>LIVE MARKETPLACE</b>\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `⚠️ <b>No products online right now.</b>\n` +
         `<i>Check back soon or contact support.</i>\n\n` +
@@ -1023,7 +1021,7 @@ export function startShopBot(token: string) {
     const products = await getProductsWithStock();
     if (products.length === 0) {
       return safeEdit(ctx,
-        `🛍  <b>${toBold("LIVE MARKETPLACE")}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
+        `🛍  <b>LIVE MARKETPLACE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
         { parse_mode: "HTML" }
       );
     }
@@ -1107,7 +1105,7 @@ export function startShopBot(token: string) {
     const products = await getProductsWithStock();
     if (products.length === 0) {
       return safeEdit(ctx,
-        `🛍  <b>${toBold("LIVE MARKETPLACE")}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
+        `🛍  <b>LIVE MARKETPLACE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
         { parse_mode: "HTML" }
       );
     }
