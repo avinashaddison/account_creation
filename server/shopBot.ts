@@ -432,6 +432,7 @@ interface ProductWithStock {
   sort_order: number;
   sticky: boolean;
   sticky_label: string | null;
+  custom_emoji: string | null;
   stock: number;
 }
 
@@ -682,6 +683,7 @@ async function ensureShopTables() {
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS stock_override INTEGER DEFAULT NULL;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sticky BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sticky_label TEXT DEFAULT NULL;
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS custom_emoji TEXT DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_redeem_links (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       product_id VARCHAR NOT NULL,
@@ -783,9 +785,15 @@ function buildProductCard(p: ProductWithStock): string {
   );
 }
 
+function productEmoji(p: ProductWithStock, inStock = true): string {
+  if (p.custom_emoji) return p.custom_emoji;
+  if (p.sticky && inStock) return "🔥";
+  return platformEmoji(p.account_type);
+}
+
 function buildProductButtons(products: ProductWithStock[]) {
   return products.map((p) => {
-    const emoji = p.sticky && p.stock > 0 ? "🔥" : platformEmoji(p.account_type);
+    const emoji = productEmoji(p, p.stock > 0);
     const price = fmt$(p.price);
     const label = p.stock > 0
       ? `[${p.stock}]  ${emoji}  ${p.name}  •  ${price}`
@@ -1054,7 +1062,7 @@ export function startShopBot(token: string) {
       );
     }
 
-    const emoji   = prod.sticky && prod.stock > 0 ? "🔥" : platformEmoji(prod.account_type);
+    const emoji   = productEmoji(prod, prod.stock > 0);
     const inStock = prod.stock > 0;
 
     // Build description block

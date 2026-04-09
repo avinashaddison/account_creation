@@ -135,7 +135,7 @@ interface BizMailSession {
 interface ShopAdminFlow {
   step?: "name" | "description" | "price" | "account_type" | "status_filter"
        | "topup_uid" | "topup_amount"
-       | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter" | "edit_sort_order" | "edit_sticky_label"
+       | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter" | "edit_sort_order" | "edit_sticky_label" | "edit_custom_emoji"
        | "activation_time" | "refer_amount"
        | "broadcast_text" | "search_uid"
        | "promo_code" | "promo_discount" | "promo_maxuses"
@@ -3355,6 +3355,7 @@ export function startTelegramBot(config: BotConfig) {
       `◈ Sort order    →  ${p.sort_order}\n` +
       `◈ Sticky        →  ${p.sticky ? "Yes" : "No"}\n` +
       `◈ Sticky label  →  ${p.sticky_label ? esc(p.sticky_label) : "—"}\n` +
+      `◈ Emoji         →  ${p.custom_emoji ?? "default"}\n` +
       `◈ Active        →  ${p.active ? "Yes" : "No"}` +
       `</code>\n\n` +
       `› Tap a field to change it:`
@@ -3369,8 +3370,9 @@ export function startTelegramBot(config: BotConfig) {
        Markup.button.callback("✏ Account Type",  `shop_ef_${productId}_account_type`)],
       [Markup.button.callback("✏ Status Filter", `shop_ef_${productId}_status_filter`),
        Markup.button.callback("✏ Sort Order",    `shop_ef_${productId}_sort_order`)],
-      [Markup.button.callback(isSticky ? "✅ Sticky" : "🔲 Sticky", `shop_toggle_sticky_${productId}`),
+      [Markup.button.callback("✏ Emoji",         `shop_ef_${productId}_custom_emoji`),
        Markup.button.callback("✏ Sticky Label",  `shop_ef_${productId}_sticky_label`)],
+      [Markup.button.callback(isSticky ? "✅ Sticky" : "🔲 Sticky", `shop_toggle_sticky_${productId}`)],
       [Markup.button.callback(isActive ? "🔴 Deactivate" : "🟢 Activate", `shop_toggle_active_${productId}`)],
       [Markup.button.callback("🗑  Delete Product", `shop_delete_confirm_${productId}`),
        Markup.button.callback("↩ Products",         "shop_admin_products")],
@@ -3390,7 +3392,7 @@ export function startTelegramBot(config: BotConfig) {
     });
   });
 
-  bot.action(/^shop_ef_([0-9a-f-]{36})_(name|description|price|account_type|status_filter|sort_order|sticky_label)$/, async (ctx) => {
+  bot.action(/^shop_ef_([0-9a-f-]{36})_(name|description|price|account_type|status_filter|sort_order|sticky_label|custom_emoji)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
     const [, productId, field] = ctx.match as RegExpExecArray;
@@ -3402,6 +3404,7 @@ export function startTelegramBot(config: BotConfig) {
       status_filter: "edit_status_filter",
       sort_order:    "edit_sort_order",
       sticky_label:  "edit_sticky_label",
+      custom_emoji:  "edit_custom_emoji",
     };
     getState(uid).shopAdminFlow = { step: stepMap[field], editProductId: productId };
     const promptMap: Record<string, string> = {
@@ -3412,6 +3415,7 @@ export function startTelegramBot(config: BotConfig) {
       status_filter: `✏ <b>Edit Status Filter</b>\n\n› Send the credential status to match:\n<code>  e.g. available | working | created</code>`,
       sort_order:    `✏ <b>Edit Sort Order</b>\n\n› Send a number (lower = shown first):\n<code>  e.g. 0, 1, 2 …</code>`,
       sticky_label:  `✏ <b>Edit Sticky Label</b>\n\n› Send the text to display on the reply keyboard button, or <code>-</code> to use the product name:`,
+      custom_emoji:  `✏ <b>Edit Product Emoji</b>\n\n› Send any emoji to use as this product's icon in the shop list and detail view.\n<i>Paste a Telegram emoji, standard emoji, or send <code>-</code> to reset to the platform default.</i>`,
     };
     await ctx.reply(promptMap[field], { parse_mode: "HTML" });
   });
@@ -4431,6 +4435,11 @@ export function startTelegramBot(config: BotConfig) {
         else if (flow.step === "edit_sticky_label") {
           const val = text.trim() === "-" ? null : text.trim();
           await dbQuery(`UPDATE shop_products SET sticky_label = $1 WHERE id = $2`, [val, pid]);
+        }
+
+        else if (flow.step === "edit_custom_emoji") {
+          const val = text.trim() === "-" ? null : text.trim();
+          await dbQuery(`UPDATE shop_products SET custom_emoji = $1 WHERE id = $2`, [val, pid]);
         }
 
         st.shopAdminFlow = undefined;
