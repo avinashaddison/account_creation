@@ -852,8 +852,6 @@ function buildMarketplaceKeyboard(products: ProductWithStock[]) {
   ]);
 }
 
-// Module-level TMA URL — set in registerCommands() once the bot is online
-let _shopTmaUrl = "";
 
 // ── Main bot export ──────────────────────────────────────────────────────────
 export function startShopBot(token: string) {
@@ -866,30 +864,15 @@ export function startShopBot(token: string) {
 
   ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
-  // Resolve TMA URL immediately — web_app menu button only works per-chat;
-  // the global default cannot be set to web_app (Telegram silently ignores it).
-  // SHOP_TMA_BASE_URL must be a publicly-accessible HTTPS base (e.g. deployed
-  // app domain).  The riker.replit.dev dev domain is only reachable internally.
-  const tmaBase = process.env.SHOP_TMA_BASE_URL?.replace(/\/$/, "");
-  if (tmaBase) {
-    bot.telegram.getMe().then((me) => {
-      _shopTmaUrl = `${tmaBase}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
-      console.log(`[ShopBot] TMA URL ready: ${_shopTmaUrl}`);
-    }).catch(() => {});
-  } else {
-    console.warn("[ShopBot] SHOP_TMA_BASE_URL not set — Menu button will not work until set.");
-  }
-
-  // Push the web-app menu button to a specific chat using raw Telegram API
-  // (Telegraf's wrapper silently mis-maps the parameters for this endpoint).
+  // Reset any per-chat menu button override back to global default (commands list).
+  // This is needed to clear old web_app overrides that were pushed previously.
   async function pushMenuButton(chatId: number) {
-    if (!_shopTmaUrl) return;
     await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id:     chatId,
-        menu_button: { type: "web_app", text: "Menu", web_app: { url: _shopTmaUrl } },
+        menu_button: { type: "default" },
       }),
     }).catch(() => {});
   }
@@ -2515,16 +2498,22 @@ export function startShopBot(token: string) {
   // ── Register commands ─────────────────────────────────────────────────────
   async function registerCommands() {
     try {
-      // Full command list (shown in bot info / search)
+      // Register the command list (shown when user taps the blue "Menu" button)
       await bot.telegram.setMyCommands([
-        { command: "menu",    description: "🏠 Open main menu" },
-        { command: "shop",    description: "🛍 Browse marketplace" },
-        { command: "balance", description: "💰 Check wallet balance" },
-        { command: "cancel",  description: "❌ Cancel active flow" },
+        { command: "menu",    description: "Open main menu" },
+        { command: "shop",    description: "Browse marketplace" },
+        { command: "balance", description: "Check wallet balance" },
+        { command: "cancel",  description: "Cancel active flow" },
       ]);
-      // NOTE: Telegram silently ignores setting type:"web_app" as global default —
-      // the per-chat menu button is set via pushMenuButton() on every /start & /menu.
-      console.log("[ShopBot] Commands registered");
+      // Set global menu button to type:"commands" — this is the native blue "Menu"
+      // button that appears next to the text input and shows the command list.
+      // No URL or web app needed; Telegram handles the UI entirely.
+      await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ menu_button: { type: "commands" } }),
+      });
+      console.log("[ShopBot] Commands registered + Menu button set to commands");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
     }
