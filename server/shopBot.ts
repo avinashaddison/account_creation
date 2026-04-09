@@ -842,6 +842,7 @@ export function startShopBot(token: string) {
       ? `✨  Hey, <b>${escHtml(name)}</b>!  Welcome aboard — glad to have you! 🎉`
       : `👋  Hey, <b>${escHtml(name)}</b>!  Great to see you back.`;
 
+    // Welcome card — inline CTA buttons (no reply keyboard, no auto-open)
     await ctx.reply(
       truncate(
         `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
@@ -849,7 +850,7 @@ export function startShopBot(token: string) {
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
         `${greeting}\n\n` +
-        `<b>💎  What you can do here:</b>\n` +
+        `<b>💎  What we offer:</b>\n` +
         `<blockquote>⚡  ${toBold("SHOP")}  —  Browse &amp; buy premium AI tools\n` +
         `💳  ${toBold("DEPOSIT")}  —  Instantly add funds to your wallet\n` +
         `👤  ${toBold("PROFILE")}  —  View balance, orders &amp; settings\n` +
@@ -857,14 +858,25 @@ export function startShopBot(token: string) {
         `🔗  ${toBold("REFER & EARN")}  —  Invite friends, earn rewards</blockquote>\n\n` +
         `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
         `◈  🔖  User      ›  ${uname}\n` +
-        `◈  🆔  ID        ›  ${uid}</code>\n\n` +
-        `<i>👇  Tap a button below to get started</i>`
+        `◈  🆔  ID        ›  ${uid}</code>`
       ),
-      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`🛍  ${toBold("SHOP NOW")}  ⚡`, "shop_now")],
+          [
+            Markup.button.callback(`💳  ${toBold("Add Funds")}`,  "shop_quick_deposit"),
+            Markup.button.callback(`👤  ${toBold("My Profile")}`, "shop_quick_profile"),
+          ],
+        ]),
+      }
     );
 
-    // Show product list right after welcome
-    await showProductList(ctx);
+    // Send reply keyboard (sticky products + navigation) as a separate follow-up
+    await ctx.reply(
+      `<i>👇  Use the menu below to navigate</i>`,
+      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+    );
   });
 
   bot.command("menu", async (ctx) => {
@@ -896,6 +908,50 @@ export function startShopBot(token: string) {
         `<i>👇  Select an option from the menu below</i>`
       ),
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+    );
+  });
+
+  // ── Welcome card inline buttons ─────────────────────────────────────────
+  bot.action("shop_now", async (ctx) => {
+    await ctx.answerCbQuery("🛍  Loading marketplace…").catch(() => {});
+    await showProductList(ctx);
+  });
+
+  bot.action("shop_quick_deposit", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    await ctx.reply(depositText(uid), {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
+        [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
+        [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+      ]),
+    });
+  });
+
+  bot.action("shop_quick_profile", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid   = ctx.from.id;
+    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    const r = await dbQuery(`SELECT vip, total_spend, balance FROM shop_customers WHERE telegram_id = $1`, [uid]);
+    const row   = r.rows[0];
+    const vip   = row?.vip ?? false;
+    const spend = parseFloat(row?.total_spend ?? "0");
+    const bal   = parseFloat(row?.balance ?? "0");
+    const statusLine = vip
+      ? `${ae(ANIM_EMOJI.crown, "👑")} <b>VIP Member</b>`
+      : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend`;
+    await ctx.reply(
+      `╔══════════════════════════════════════╗\n` +
+      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae(ANIM_EMOJI.crown, "👑")}` : ""}  ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
+      `${statusLine}\n\n` +
+      `<code>  💰  Balance   ›  ${fmt$(bal)}\n` +
+      `  📊  Total Spend  ›  ${fmt$(spend)}\n` +
+      `  🔖  Username    ›  ${uname}\n` +
+      `  🆔  ID          ›  ${uid}</code>`,
+      { parse_mode: "HTML" }
     );
   });
 
