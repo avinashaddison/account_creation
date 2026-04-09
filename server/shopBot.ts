@@ -600,11 +600,12 @@ async function purchaseProduct(
 
     // ── Manual delivery branch ───────────────────────────────────────────────
     if ((prod.delivery_mode ?? "auto") === "manual") {
-      // Atomically decrement manual_stock only if > 0 (prevents overselling under concurrency)
+      // Atomically decrement manual_stock only if > 0 AND still in manual mode
+      // (prevents overselling under concurrency and guards against mid-flow mode switch)
       const decrRes = await client.query(
         `UPDATE shop_products
          SET manual_stock = manual_stock - 1
-         WHERE id = $1 AND manual_stock > 0
+         WHERE id = $1 AND delivery_mode = 'manual' AND manual_stock > 0
          RETURNING manual_stock`,
         [productId]
       );
