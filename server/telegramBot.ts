@@ -3331,10 +3331,10 @@ export function startTelegramBot(config: BotConfig) {
   function editProductText(p: any): string {
     return (
       `\n🔷 <b>EDIT PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<b>${escHtml(p.name)}</b>\n` +
+      `<b>${esc(p.name)}</b>\n` +
       `<code>` +
-      `◈ Name          →  ${escHtml(p.name)}\n` +
-      `◈ Description   →  ${p.description ? escHtml(p.description) : "—"}\n` +
+      `◈ Name          →  ${esc(p.name)}\n` +
+      `◈ Description   →  ${p.description ? esc(p.description) : "—"}\n` +
       `◈ Price         →  $${parseFloat(p.price).toFixed(2)}\n` +
       `◈ Account type  →  ${p.account_type}\n` +
       `◈ Status filter →  ${p.status_filter}\n` +
