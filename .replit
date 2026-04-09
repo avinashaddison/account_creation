@@ -57,6 +57,7 @@ integrations = ["google-sheet:1.0.0"]
 [userenv.shared]
 TELEGRAM_ALLOWED_IDS = "1127734159,8678635992"
 BINANCE_UID = "510120124"
+BINANCE_PROXY_URL = "socks5://ns-mrqq7v2x6zlr_area-IN_session-DDY9EewuW1_life-5:A8nbnUET41WZWo2V@proxy.nsocks.com:2312"
 
 [postMerge]
 path = "scripts/post-merge.sh"

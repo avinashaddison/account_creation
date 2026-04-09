@@ -1,6 +1,8 @@
-import { createHmac } from "crypto";
+import { createHmac }    from "crypto";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { logger } from "./logger";
+import { SocksProxyAgent } from "socks-proxy-agent";
+import nodeFetch           from "node-fetch";
+import { logger }          from "./logger";
 
 export interface BinanceTransaction {
   transactionId: string;
@@ -51,16 +53,21 @@ export async function getRecentTransactions(
 
     params.append("signature", signature);
 
-    const proxyUrl = process.env.BINANCE_PROXY_URL;
-    const fetchOpts: RequestInit & { agent?: unknown } = {
+    const proxyUrl  = process.env.BINANCE_PROXY_URL;
+    const fetchOpts: Parameters<typeof nodeFetch>[1] = {
       headers: { "X-MBX-APIKEY": apiKey },
     };
     if (proxyUrl) {
-      fetchOpts.agent = new HttpsProxyAgent(proxyUrl);
-      logger.debug("TransactionService", "Using proxy for Binance API", { proxy: proxyUrl.replace(/:[^:@]+@/, ":***@") });
+      const isSocks = proxyUrl.startsWith("socks5://") || proxyUrl.startsWith("socks4://") || proxyUrl.startsWith("socks://");
+      fetchOpts.agent = isSocks
+        ? new SocksProxyAgent(proxyUrl)
+        : new HttpsProxyAgent(proxyUrl);
+      logger.debug("TransactionService", `Using ${isSocks ? "SOCKS" : "HTTP"} proxy for Binance API`, {
+        proxy: proxyUrl.replace(/:[^:@]+@/, ":***@"),
+      });
     }
 
-    const res = await fetch(`${BINANCE_API_BASE}/sapi/v1/pay/transactions?${params}`, fetchOpts);
+    const res = await nodeFetch(`${BINANCE_API_BASE}/sapi/v1/pay/transactions?${params}`, fetchOpts);
 
     const rawText = await res.text();
     let json: Record<string, unknown>;
