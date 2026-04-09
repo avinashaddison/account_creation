@@ -246,25 +246,30 @@ app.use((req, res, next) => {
   // ── Telegram Mini App page — powers the "Menu" button in the shop bot ──────
   app.get("/tma", (req, res) => {
     const bot = req.query.bot as string ?? "";
+    // Telegram injects window.Telegram.WebApp automatically — no external script needed.
+    // Page is transparent and closes itself as fast as possible; the user sees
+    // at most a very brief flash before the bot chat shows the menu message.
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Menu</title>
+    res.setHeader("Cache-Control", "no-store");
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-</head>
-<body style="background:#111;margin:0;display:flex;align-items:center;justify-content:center;height:100vh;">
-<p style="color:#fff;font-family:sans-serif;font-size:16px">Opening menu…</p>
+<style>html,body{margin:0;padding:0;background:transparent}</style>
 <script>
-  Telegram.WebApp.ready();
-  var bot = ${JSON.stringify(bot)};
-  if (bot) {
-    Telegram.WebApp.openTelegramLink('https://t.me/' + bot + '?start=show_menu');
+(function(){
+  var bot=${JSON.stringify(bot)};
+  function go(){
+    try{
+      if(window.Telegram&&Telegram.WebApp){
+        Telegram.WebApp.ready();
+        if(bot) Telegram.WebApp.openTelegramLink('https://t.me/'+bot+'?start=show_menu');
+        Telegram.WebApp.close();
+      }
+    }catch(e){}
   }
-  Telegram.WebApp.close();
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',go);}else{go();}
+})();
 </script>
-</body>
-</html>`);
+</head><body></body></html>`);
   });
 
   // Start primary Telegram bot
