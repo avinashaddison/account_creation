@@ -1186,7 +1186,7 @@ export function startShopBot(token: string) {
       ...Markup.inlineKeyboard([
         [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
         [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
-        [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+        [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
       ]),
     });
   });
@@ -1286,7 +1286,7 @@ export function startShopBot(token: string) {
         `${header("⚠️ UNAVAILABLE")}\n\nThis product is no longer available.\n\n→ <b>Back to shop:</b> tap the button below.`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]),
         }
       );
     }
@@ -1327,7 +1327,7 @@ export function startShopBot(token: string) {
           ? [[Markup.button.callback("🔔  Notify Me (subscribed)", `notify_already_${productId}`)]]
           : [[Markup.button.callback("🔔  Notify Me When Back in Stock", `notify_me_${productId}`)]]
       ),
-      [Markup.button.callback("↩  Back to Store", "shop_back_products")],
+      [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
     ];
 
     await safeEdit(ctx, text, {
@@ -1395,7 +1395,7 @@ export function startShopBot(token: string) {
           ...Markup.inlineKeyboard([
             [Markup.button.url("📢  Join @projectaddison", CHANNEL_URL)],
             [Markup.button.callback("✅  I've Joined — Verify", `shop_verify_${productId}`)],
-            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+            [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
           ]),
         }
       );
@@ -1407,7 +1407,7 @@ export function startShopBot(token: string) {
         `${header("⚠️ UNAVAILABLE")}\n\nThis product is no longer available.`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]),
         }
       );
     }
@@ -1421,8 +1421,8 @@ export function startShopBot(token: string) {
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
-            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+            [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
+            [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
           ]),
         }
       );
@@ -1435,7 +1435,7 @@ export function startShopBot(token: string) {
         `<i>Check back soon — stock is updated frequently.</i>`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]),
         }
       );
     }
@@ -1456,7 +1456,7 @@ export function startShopBot(token: string) {
         ...Markup.inlineKeyboard([
           [Markup.button.callback(`✅  Confirm Purchase  —  ${fmt$(price)}`, `buyconfirm_${productId}`)],
           [Markup.button.callback("🏷️  Apply Promo Code", `buypromo_${productId}`)],
-          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
         ]),
       }
     );
@@ -1519,7 +1519,7 @@ export function startShopBot(token: string) {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📦  My Orders", "shop_view_orders")],
-          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
         ]),
       }
     );
@@ -1553,8 +1553,8 @@ export function startShopBot(token: string) {
           {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-              [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
-              [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+              [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
+              [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
             ]),
           }
         );
@@ -1562,12 +1562,12 @@ export function startShopBot(token: string) {
       if (result.reason === "out_of_stock") {
         return safeEdit(ctx,
           `❌ <b>Just sold out.</b>\n<i>Check back soon.</i>`,
-          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]) }
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]) }
         );
       }
       return safeEdit(ctx,
         `⚠️ <b>Purchase Failed.</b> Balance not charged.\n→ ${escHtml(SUPPORT_CONTACT)}`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]) }
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]) }
       );
     }
 
@@ -1606,7 +1606,7 @@ export function startShopBot(token: string) {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📦  My Orders", "shop_view_orders")],
-          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
         ]),
       }
     );
@@ -1630,7 +1630,7 @@ export function startShopBot(token: string) {
           ...Markup.inlineKeyboard([
             [Markup.button.url("📢  Join @projectaddison", CHANNEL_URL)],
             [Markup.button.callback("✅  I've Joined — Verify", `shop_verify_${productId}`)],
-            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+            [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
           ]),
         }
       );
@@ -1650,7 +1650,7 @@ export function startShopBot(token: string) {
         `⚠️ <b>Product Unavailable</b>\n\nThis product is no longer available.`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]),
         }
       );
     }
@@ -1663,8 +1663,8 @@ export function startShopBot(token: string) {
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
-            [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+            [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
+            [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
           ]),
         }
       );
@@ -1675,7 +1675,7 @@ export function startShopBot(token: string) {
         `❌ <b>Out of Stock</b>\n\n<b>${escHtml(prod.name)}</b> just sold out.\n<i>Check back soon.</i>`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]),
         }
       );
     }
@@ -1686,7 +1686,7 @@ export function startShopBot(token: string) {
         `⚠️ <b>Purchase Failed</b>\n\nSomething went wrong. Your balance was not charged.\n\n→ Contact ${escHtml(SUPPORT_CONTACT)}`,
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]),
+          ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]),
         }
       );
     }
@@ -1722,7 +1722,7 @@ export function startShopBot(token: string) {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📦  My Orders", "shop_view_orders")],
-          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+          [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
         ]),
       }
     );
@@ -1737,8 +1737,8 @@ export function startShopBot(token: string) {
       ...Markup.inlineKeyboard([
         [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20", "dep_copy_trc20")],
         [Markup.button.callback("🔷  BEP20",          "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",  "dep_copy_upi")],
-        [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
-        [Markup.button.callback("◀  Back to Shop",          "shop_back_products")],
+        [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
+        [Markup.button.callback("🛍  BACK TO SHOP",           "shop_back_products")],
       ]),
     });
   });
@@ -1800,7 +1800,7 @@ export function startShopBot(token: string) {
         ...Markup.inlineKeyboard([
           [Markup.button.callback(`🔑  Activate at my Mail`, `act_mine_${service}`)],
           [Markup.button.callback(`📦  Get a Sent Account`, `act_send_${service}`)],
-          [Markup.button.callback(`◀  Back to Menu`, `act_back`)],
+          [Markup.button.callback(`🔙  BACK TO MENU`, `act_back`)],
         ]),
       }
     );
@@ -1867,8 +1867,8 @@ export function startShopBot(token: string) {
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
-            [Markup.button.callback("◀  Back", "act_back")],
+            [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
+            [Markup.button.callback("🔙  BACK", "act_back")],
           ]),
         }
       );
@@ -1918,7 +1918,7 @@ export function startShopBot(token: string) {
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+            [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
             [Markup.button.callback("◀  Back", `act_back`)],
           ]),
         }
@@ -1964,8 +1964,8 @@ export function startShopBot(token: string) {
           {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-              [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
-              [Markup.button.callback("◀  Back", "act_back")],
+              [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
+              [Markup.button.callback("🔙  BACK", "act_back")],
             ]),
           }
         );
@@ -2062,8 +2062,8 @@ export function startShopBot(token: string) {
           {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-              [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
-              [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+              [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
+              [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
             ]),
           }
         );
@@ -2293,7 +2293,7 @@ export function startShopBot(token: string) {
       `<i>Tap below to add funds to your wallet.</i>`,
       {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[Markup.button.callback("💳  Add Funds", "shop_deposit_info")]]),
+        ...Markup.inlineKeyboard([[Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")]]),
       }
     );
   });
@@ -2325,7 +2325,7 @@ export function startShopBot(token: string) {
       ...Markup.inlineKeyboard([
         [Markup.button.callback("🟡  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("💎  USDT TRC20", "dep_copy_trc20")],
         [Markup.button.callback("🔷  USDT BEP20",     "dep_copy_bep20"),  Markup.button.callback("🇮🇳  UPI",       "dep_copy_upi")],
-        [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+        [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
       ]),
     });
   });
@@ -2646,7 +2646,7 @@ export function startShopBot(token: string) {
       `<i>Tap Add Funds to top up your balance.</i>`,
       {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[Markup.button.callback("💳  Add Funds", "shop_deposit_info")]]),
+        ...Markup.inlineKeyboard([[Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")]]),
       }
     );
   });
