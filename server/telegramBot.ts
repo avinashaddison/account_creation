@@ -3408,7 +3408,7 @@ export function startTelegramBot(config: BotConfig) {
       name:          `✏ <b>Edit Name</b>\n\n› Send the new product name:`,
       description:   `✏ <b>Edit Description</b>\n\n› Send the new description, or <code>-</code> to clear it:`,
       price:         `✏ <b>Edit Price</b>\n\n› Send the new price in USD:\n<code>  e.g. 1.50</code>`,
-      account_type:  `✏ <b>Edit Account Type</b>\n\n› Send one of:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+      account_type:  `✏ <b>Edit Account Type</b>\n\n<i>Known types (linked to credential tables):</i>\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>\n\n<i>Or type any custom name (e.g. <code>perplexity</code>, <code>cursor</code>) — stock will come from redeem links.</i>`,
       status_filter: `✏ <b>Edit Status Filter</b>\n\n› Send the credential status to match:\n<code>  e.g. available | working | created</code>`,
       sort_order:    `✏ <b>Edit Sort Order</b>\n\n› Send a number (lower = shown first):\n<code>  e.g. 0, 1, 2 …</code>`,
       sticky_label:  `✏ <b>Edit Sticky Label</b>\n\n› Send the text to display on the reply keyboard button, or <code>-</code> to use the product name:`,
@@ -4331,16 +4331,18 @@ export function startTelegramBot(config: BotConfig) {
         flow.step = "account_type";
         return ctx.reply(
           `\n🔷 <b>➕ ADD PRODUCT — 4/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `› Enter the <b>account type</b>:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+          `› Enter the <b>account type</b>:\n` +
+          `<i>Known types (linked to credential tables):</i>\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>\n\n` +
+          `<i>Or type any custom name (e.g. <code>perplexity</code>, <code>cursor</code>) — stock will come from redeem links.</i>`,
           { parse_mode: "HTML" }
         );
       }
 
       if (flow.step === "account_type") {
-        const at = text.toLowerCase().trim();
-        if (!SHOP_ACCOUNT_TYPES.includes(at)) {
+        const at = text.toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+        if (!at) {
           return ctx.reply(
-            `🔴  Invalid type. Choose from:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+            `🔴  Account type cannot be empty. Enter a type name (known: <code>${SHOP_ACCOUNT_TYPES.join(" | ")}</code>) or any custom name:`,
             { parse_mode: "HTML" }
           );
         }
@@ -4403,10 +4405,10 @@ export function startTelegramBot(config: BotConfig) {
         }
 
         else if (flow.step === "edit_account_type") {
-          const at = text.toLowerCase().trim();
-          if (!SHOP_ACCOUNT_TYPES.includes(at)) {
+          const at = text.toLowerCase().trim().replace(/[^a-z0-9_-]/g, "_");
+          if (!at) {
             return ctx.reply(
-              `🔴 Invalid type. Choose from:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
+              `🔴 Account type cannot be empty. Send a known type or any custom name:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
               { parse_mode: "HTML" }
             );
           }
