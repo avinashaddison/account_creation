@@ -395,3 +395,23 @@ export const bizMailAccounts = pgTable("biz_mail_accounts", {
 export const insertBizMailAccountSchema = createInsertSchema(bizMailAccounts).omit({ id: true, createdAt: true, deletedAt: true });
 export type BizMailAccount       = typeof bizMailAccounts.$inferSelect;
 export type InsertBizMailAccount = z.infer<typeof insertBizMailAccountSchema>;
+
+// ── Crypto Payment Orders ─────────────────────────────────────────────────────
+export const cryptoOrders = pgTable("crypto_orders", {
+  id:            varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId:       varchar("order_id").notNull().unique(),
+  userId:        text("user_id").notNull(),
+  amount:        numeric("amount", { precision: 18, scale: 8 }).notNull(),
+  note:          text("note").notNull().unique(),
+  status:        text("status").notNull().default("PENDING"), // PENDING | PAID | EXPIRED
+  transactionId: text("transaction_id").unique(),
+  createdAt:     timestamp("created_at").defaultNow().notNull(),
+  expiresAt:     timestamp("expires_at").notNull(),
+  paidAt:        timestamp("paid_at"),
+});
+
+export const insertCryptoOrderSchema = createInsertSchema(cryptoOrders).omit({
+  id: true, status: true, transactionId: true, createdAt: true, paidAt: true,
+});
+export type InsertCryptoOrder = z.infer<typeof insertCryptoOrderSchema>;
+export type CryptoOrder       = typeof cryptoOrders.$inferSelect;

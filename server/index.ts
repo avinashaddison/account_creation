@@ -4,6 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { startTelegramBot } from "./telegramBot";
 import { startShopBot } from "./shopBot";
+import { ensureCryptoTable, startPaymentChecker, cryptoRouter } from "./crypto/index";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import pg from "pg";
@@ -241,6 +242,11 @@ app.use((req, res, next) => {
     })
   );
 
+  await ensureCryptoTable().catch(err =>
+    console.error("[Crypto] Table init failed:", err)
+  );
+  app.use("/api/crypto", cryptoRouter);
+
   await registerRoutes(httpServer, app);
 
   // ── Telegram Mini App page — powers the "Menu" button in the shop bot ──────
@@ -286,6 +292,9 @@ app.use((req, res, next) => {
     startShopBot(secondaryToken);
     console.log("[ShopBot] Project Addison v2 shop bot starting...");
   }
+
+  // Start crypto payment auto-checker background job
+  startPaymentChecker();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
