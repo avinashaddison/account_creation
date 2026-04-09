@@ -2469,7 +2469,7 @@ export function startShopBot(token: string) {
 
   async function showOrders(ctx: any, uid: number, isEdit: boolean) {
     const res = await dbQuery(
-      `SELECT id, product_name, amount, account_type, created_at
+      `SELECT id, product_name, amount, account_type, created_at, delivery_status
        FROM shop_orders
        WHERE telegram_id = $1
        ORDER BY created_at DESC
@@ -2499,11 +2499,16 @@ export function startShopBot(token: string) {
     const buttons = res.rows.map((o: any, i: number) => {
       const emoji = platformEmoji(o.account_type ?? "");
       const date  = new Date(o.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-      lines.push(`${emoji} <b>${escHtml(o.product_name)}</b>  —  ${fmt$(o.amount)}  —  <i>${date}</i>`);
-      return [Markup.button.callback(`🔑  Reveal #${i + 1}: ${o.product_name}`, `shop_creds_${o.id}`)];
+      const isPending = o.delivery_status === "pending_delivery";
+      const statusTag = isPending ? "  ⏳" : "";
+      lines.push(`${emoji} <b>${escHtml(o.product_name)}</b>${statusTag}  —  ${fmt$(o.amount)}  —  <i>${date}</i>`);
+      const btnLabel = isPending
+        ? `⏳  Order #${i + 1}: ${o.product_name}  (pending)`
+        : `🔑  Reveal #${i + 1}: ${o.product_name}`;
+      return [Markup.button.callback(btnLabel, `shop_creds_${o.id}`)];
     });
 
-    lines.push(`\n${divider()}\n<i>Tap an order below to reveal login credentials.</i>`);
+    lines.push(`\n${divider()}\n<i>Tap an order to view details or reveal credentials.</i>`);
 
     const text = lines.join("\n");
     const kb   = Markup.inlineKeyboard(buttons);
@@ -2519,7 +2524,8 @@ export function startShopBot(token: string) {
     const uid     = ctx.from.id;
 
     const res = await dbQuery(
-      `SELECT product_name, account_type, account_email, account_password, amount, created_at
+      `SELECT product_name, account_type, account_email, account_password, amount,
+              created_at, delivery_status, fulfillment_note
        FROM shop_orders WHERE id = $1 AND telegram_id = $2`,
       [orderId, uid]
     );
@@ -2540,13 +2546,31 @@ export function startShopBot(token: string) {
       month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
     });
 
+    const isPending = o.delivery_status === "pending_delivery";
+    const isManualDelivered = o.delivery_status === "delivered" && o.fulfillment_note;
+
+    let contentBlock: string;
+    if (isPending) {
+      contentBlock =
+        `⏳ <b>Pending Delivery</b>\n\n` +
+        `Your order is being processed. An admin will deliver your product shortly.\n\n` +
+        `<i>You will receive the delivery directly in this chat.</i>`;
+    } else if (isManualDelivered) {
+      contentBlock =
+        `✅ <b>Delivered</b>\n\n` +
+        `<code>${escHtml(o.fulfillment_note)}</code>`;
+    } else {
+      contentBlock =
+        `📧 <b>Email</b>\n<code>${escHtml(o.account_email ?? "")}</code>\n\n` +
+        `🔑 <b>Password</b>\n<code>${escHtml(o.account_password ?? "")}</code>`;
+    }
+
     await safeEdit(ctx,
-      `🔑 <b>Credentials</b>\n\n` +
+      `🔑 <b>${isPending ? "Order Status" : "Credentials"}</b>\n\n` +
       `${emoji} <b>${escHtml(o.product_name)}</b>\n` +
       `<i>Purchased ${date}  ·  ${fmt$(o.amount)}</i>\n\n` +
       `${divider()}\n\n` +
-      `📧 <b>Email</b>\n<code>${escHtml(o.account_email)}</code>\n\n` +
-      `🔑 <b>Password</b>\n<code>${escHtml(o.account_password)}</code>`,
+      contentBlock,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[Markup.button.callback("◀  My Orders", "shop_view_orders")]]),
