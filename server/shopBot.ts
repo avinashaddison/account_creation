@@ -866,22 +866,36 @@ export function startShopBot(token: string) {
 
   ensureShopTables().catch((err) => console.error("[ShopBot] Table init error:", err.message));
 
+  // Resolve TMA URL immediately — web_app menu button only works per-chat;
+  // the global default cannot be set to web_app (Telegram silently ignores it).
+  const devDomain = process.env.REPLIT_DEV_DOMAIN;
+  if (devDomain) {
+    bot.telegram.getMe().then((me) => {
+      _shopTmaUrl = `https://${devDomain}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
+      console.log(`[ShopBot] TMA URL ready: ${_shopTmaUrl}`);
+    }).catch(() => {});
+  }
+
+  // Push the web-app menu button to a specific chat using raw Telegram API
+  // (Telegraf's wrapper silently mis-maps the parameters for this endpoint).
+  async function pushMenuButton(chatId: number) {
+    if (!_shopTmaUrl) return;
+    await fetch(`https://api.telegram.org/bot${token}/setChatMenuButton`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id:     chatId,
+        menu_button: { type: "web_app", text: "Menu", web_app: { url: _shopTmaUrl } },
+      }),
+    }).catch(() => {});
+  }
+
   bot.catch((err: any, ctx: any) => {
     console.error("[ShopBot] Unhandled error:", err?.message || err);
     try {
       ctx?.answerCbQuery?.("Something went wrong. Please try again.").catch(() => {});
     } catch {}
   });
-
-  // Push the web-app menu button to a specific chat, overriding any old
-  // per-chat "commands" setting that may have been stored previously.
-  async function pushMenuButton(chatId: number) {
-    if (!_shopTmaUrl) return;
-    await bot.telegram.setChatMenuButton({
-      chatId,
-      menuButton: { type: "web_app", text: "Menu", web_app: { url: _shopTmaUrl } } as any,
-    }).catch(() => {});
-  }
 
   // ── /start ─────────────────────────────────────────────────────────────────
   bot.start(async (ctx) => {
@@ -2475,6 +2489,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from?.id;
     if (!uid) return;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    pushMenuButton(ctx.chat.id).catch(() => {});
     const balance = await getBalance(uid);
     const name  = ctx.from.first_name || ctx.from.username || "User";
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
@@ -2503,25 +2518,8 @@ export function startShopBot(token: string) {
         { command: "balance", description: "💰 Check wallet balance" },
         { command: "cancel",  description: "❌ Cancel active flow" },
       ]);
-      // Menu Button: single blue "Menu" button that opens a mini app page.
-      // The page uses openTelegramLink to send /start show_menu back to the bot
-      // and then closes itself.  sendData() is not available in menu-button apps.
-      const devDomain = process.env.REPLIT_DEV_DOMAIN;
-      if (devDomain) {
-        const me = await bot.telegram.getMe();
-        const tmaUrl = `https://${devDomain}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
-        await bot.telegram.setChatMenuButton({
-          menuButton: {
-            type:    "web_app",
-            text:    "Menu",
-            web_app: { url: tmaUrl },
-          } as any,
-        });
-        _shopTmaUrl = tmaUrl;          // store for per-chat resets
-        console.log(`[ShopBot] Menu button → ${tmaUrl}`);
-      } else {
-        await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
-      }
+      // NOTE: Telegram silently ignores setting type:"web_app" as global default —
+      // the per-chat menu button is set via pushMenuButton() on every /start & /menu.
       console.log("[ShopBot] Commands registered");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
