@@ -141,6 +141,7 @@ interface ShopAdminFlow {
        | "promo_code" | "promo_discount" | "promo_maxuses"
        | "dep_approve_amount"
        | "stock_add_creds"
+       | "stock_add_links"
        | "stock_set_override";
   name?: string;
   description?: string;
@@ -3906,13 +3907,15 @@ export function startTelegramBot(config: BotConfig) {
     await safeEdit(ctx, text, {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("➕  Add Credentials",     `shop_stock_add_${productId}`)],
-        [Markup.button.callback("📋  View Credentials",    `shop_stock_view_${productId}_0`)],
-        [Markup.button.callback("✏️  Set Stock Count",     `shop_stock_setcount_${productId}`),
-         Markup.button.callback(overrideVal != null ? "🔄  Use Real Count" : "🔢  Override",
+        [Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
+         Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`)],
+        [Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
+         Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`)],
+        [Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
+         Markup.button.callback(overrideVal != null ? "🔄  Real Count" : "🔢  Override",
                                 overrideVal != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`)],
         [Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
-         Markup.button.callback("♻  Reset All Available", `shop_stock_resetavail_${productId}`)],
+         Markup.button.callback("♻  Reset Available",     `shop_stock_resetavail_${productId}`)],
         [Markup.button.callback("↩  Back to Stock",       "shop_admin_stock")],
       ]),
     });
@@ -3964,19 +3967,21 @@ export function startTelegramBot(config: BotConfig) {
     await safeEdit(ctx, text, {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("➕  Add Credentials",     `shop_stock_add_${productId}`)],
-        [Markup.button.callback("📋  View Credentials",    `shop_stock_view_${productId}_0`)],
-        [Markup.button.callback("✏️  Set Stock Count",     `shop_stock_setcount_${productId}`),
-         Markup.button.callback("🔢  Override",            `shop_stock_setcount_${productId}`)],
+        [Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
+         Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`)],
+        [Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
+         Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`)],
+        [Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
+         Markup.button.callback("🔢  Override",           `shop_stock_setcount_${productId}`)],
         [Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
-         Markup.button.callback("♻  Reset All Available", `shop_stock_resetavail_${productId}`)],
+         Markup.button.callback("♻  Reset Available",     `shop_stock_resetavail_${productId}`)],
         [Markup.button.callback("↩  Back to Stock",       "shop_admin_stock")],
       ]),
     });
   });
 
-  // Start add-credentials flow for a product
-  bot.action(/^shop_stock_add_([0-9a-f-]{36})$/, async (ctx) => {
+  // Add credentials (email:password) for a product
+  bot.action(/^shop_stock_addcreds_([0-9a-f-]{36})$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const productId = (ctx.match as RegExpExecArray)[1];
     const r = await dbQuery(`SELECT name, account_type, status_filter FROM shop_products WHERE id = $1`, [productId]);
@@ -3997,13 +4002,83 @@ export function startTelegramBot(config: BotConfig) {
     };
 
     await ctx.reply(
-      `\n🗄 <b>ADD CREDENTIALS — ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `\n📧 <b>ADD CREDENTIALS — ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<b>Table:</b> <code>${table}</code>  ·  <b>Status:</b> <code>${p.status_filter ?? "available"}</code>\n\n` +
       `Paste credentials — one per line:\n` +
       `<code>email:password\nemail:password\n...</code>\n\n` +
       `<i>Duplicates are skipped automatically.</i>`,
       { parse_mode: "HTML" }
     );
+  });
+
+  // Add redeem links for a product
+  bot.action(/^shop_stock_addlinks_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const r = await dbQuery(`SELECT name FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+
+    const uid = ctx.from.id;
+    getState(uid).shopAdminFlow = { step: "stock_add_links", stockProductId: productId };
+
+    await ctx.reply(
+      `\n🔗 <b>ADD REDEEM LINKS — ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Paste redeem links — one per line:\n` +
+      `<code>https://lovable.dev/redeem/abc123\nhttps://lovable.dev/redeem/xyz456\n...</code>\n\n` +
+      `<i>Links are delivered to customers on purchase. Duplicates are skipped.</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // View redeem links paginated
+  bot.action(/^shop_stock_viewlinks_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const [, productId, offsetStr] = ctx.match as RegExpExecArray;
+    const offset = parseInt(offsetStr, 10);
+    const PAGE   = 10;
+
+    const r = await dbQuery(`SELECT name FROM shop_products WHERE id = $1`, [productId]);
+    const p = r.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
+
+    const countRes = await dbQuery(`SELECT COUNT(*) as cnt FROM shop_redeem_links WHERE product_id = $1`, [productId]);
+    const total    = parseInt(countRes.rows[0]?.cnt ?? "0");
+
+    if (total === 0) {
+      return safeEdit(ctx,
+        `\n🔗 <b>REDEEM LINKS — ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<i>No redeem links added yet.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", `shop_stock_${productId}`)]]),
+        }
+      );
+    }
+
+    const rows = await dbQuery(
+      `SELECT link, status FROM shop_redeem_links WHERE product_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [productId, PAGE, offset]
+    );
+
+    const page = Math.floor(offset / PAGE) + 1;
+    const totalPages = Math.ceil(total / PAGE);
+    let text = `\n🔗 <b>REDEEM LINKS — ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    text += `<code>Page ${page}/${totalPages}  ·  ${total} total\n\n`;
+    for (const row of rows.rows) {
+      const st = row.status === "sold" ? "✗" : "✓";
+      const shortLink = row.link.length > 40 ? row.link.slice(0, 37) + "..." : row.link;
+      text += `${st}  ${shortLink}\n`;
+    }
+    text += `</code>`;
+
+    const nav: ReturnType<typeof Markup.button.callback>[] = [];
+    if (offset > 0)               nav.push(Markup.button.callback("◀  Prev", `shop_stock_viewlinks_${productId}_${offset - PAGE}`));
+    if (offset + PAGE < total)    nav.push(Markup.button.callback("Next  ▶", `shop_stock_viewlinks_${productId}_${offset + PAGE}`));
+    const btns: ReturnType<typeof Markup.button.callback>[][] = [];
+    if (nav.length) btns.push(nav);
+    btns.push([Markup.button.callback("↩  Back", `shop_stock_${productId}`)]);
+    await safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) });
   });
 
   // View credentials paginated (10 per page)
@@ -4557,6 +4632,50 @@ export function startTelegramBot(config: BotConfig) {
           `New stock count :  ${newStock}\n` +
           `</code>` +
           (skipped.length ? `\n⚠️ Skipped:\n<code>${skipped.join("\n")}</code>` : ""),
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${prodId}`)]]),
+          }
+        );
+      }
+
+      // ── Stock: Add redeem links (bulk paste) ─────────────────────────────────
+      if (flow.step === "stock_add_links") {
+        const prodId = flow.stockProductId!;
+        st.shopAdminFlow = undefined;
+
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) {
+          return ctx.reply(`🔴 No links found. Paste one link per line.`, { parse_mode: "HTML" });
+        }
+
+        let added = 0, dupes = 0, invalid = 0;
+        for (const line of lines) {
+          if (!line.startsWith("http")) { invalid++; continue; }
+          try {
+            const res2 = await dbQuery(
+              `INSERT INTO shop_redeem_links (product_id, link) VALUES ($1, $2) ON CONFLICT (link) DO NOTHING`,
+              [prodId, line]
+            );
+            if ((res2.rowCount ?? 0) > 0) added++;
+            else dupes++;
+          } catch { dupes++; }
+        }
+
+        const countRes = await dbQuery(
+          `SELECT COUNT(*) as cnt FROM shop_redeem_links WHERE product_id = $1 AND status = 'available'`,
+          [prodId]
+        );
+        const newStock = parseInt(countRes.rows[0]?.cnt ?? "0");
+
+        return ctx.reply(
+          `\n✅ <b>REDEEM LINKS ADDED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `<code>` +
+          `Parsed          :  ${lines.length}\n` +
+          `Added           :  ${added}\n` +
+          `Skipped/dupes   :  ${dupes + invalid}\n` +
+          `Links available :  ${newStock}\n` +
+          `</code>`,
           {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([[Markup.button.callback("📊  View Stock", `shop_stock_${prodId}`)]]),

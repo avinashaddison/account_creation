@@ -421,11 +421,18 @@ async function getProductsWithStock(): Promise<ProductWithStock[]> {
       stock = p.stock_override;
     } else {
       const table = ACCOUNT_TABLE_MAP[p.account_type];
+      let credCount = 0;
       if (table) {
         const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
         const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
-        stock = parseInt(sr.rows[0]?.cnt ?? "0");
+        credCount = parseInt(sr.rows[0]?.cnt ?? "0");
       }
+      const linkRes = await dbQuery(
+        `SELECT COUNT(*) as cnt FROM shop_redeem_links WHERE product_id = $1 AND status = 'available'`,
+        [p.id]
+      ).catch(() => ({ rows: [{ cnt: "0" }] }));
+      const linkCount = parseInt(linkRes.rows[0]?.cnt ?? "0");
+      stock = credCount + linkCount;
     }
     out.push({ ...p, stock });
   }
@@ -441,11 +448,18 @@ async function getProductById(id: string): Promise<ProductWithStock | null> {
     stock = p.stock_override;
   } else {
     const table = ACCOUNT_TABLE_MAP[p.account_type];
+    let credCount = 0;
     if (table) {
       const { sql, params } = stockCountSql(table, p.status_filter, p.min_credits ?? null);
       const sr = await dbQuery(sql, params).catch(() => ({ rows: [{ cnt: "0" }] }));
-      stock = parseInt(sr.rows[0]?.cnt ?? "0");
+      credCount = parseInt(sr.rows[0]?.cnt ?? "0");
     }
+    const linkRes = await dbQuery(
+      `SELECT COUNT(*) as cnt FROM shop_redeem_links WHERE product_id = $1 AND status = 'available'`,
+      [id]
+    ).catch(() => ({ rows: [{ cnt: "0" }] }));
+    const linkCount = parseInt(linkRes.rows[0]?.cnt ?? "0");
+    stock = credCount + linkCount;
   }
   return { ...p, stock };
 }
@@ -454,6 +468,7 @@ interface PurchaseResult {
   success: true;
   accountEmail: string;
   accountPassword: string;
+  redeemLink?: string;
   newBalance: number;
   orderId: string;
   finalPrice: number;
@@ -477,7 +492,6 @@ async function purchaseProduct(
   if (!prod.active) return { success: false, reason: "product_not_found" };
 
   const table = ACCOUNT_TABLE_MAP[prod.account_type];
-  if (!table) return { success: false, reason: "error", message: "Unknown account type" };
 
   const listPrice  = parseFloat(prod.price);
   const finalPrice = Math.max(0, parseFloat((listPrice - discountAmt).toFixed(2)));
@@ -504,6 +518,54 @@ async function purchaseProduct(
       };
     }
 
+    // ── Try redeem links first ───────────────────────────────────────────────
+    const linkRes = await client.query(
+      `SELECT id, link FROM shop_redeem_links WHERE product_id = $1 AND status = 'available' ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+      [productId]
+    );
+    if (linkRes.rows[0]) {
+      const { id: linkId, link: redeemLink } = linkRes.rows[0];
+
+      await client.query(
+        `UPDATE shop_customers SET balance = balance - $1, total_spend = total_spend + $1 WHERE telegram_id = $2`,
+        [finalPrice, uid]
+      );
+      await client.query(`UPDATE shop_redeem_links SET status = 'sold' WHERE id = $1`, [linkId]);
+
+      const orderRes = await client.query(
+        `INSERT INTO shop_orders
+           (telegram_id, product_id, product_name, amount, redeem_link)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [uid, productId, prod.name, finalPrice, redeemLink]
+      );
+
+      await client.query("COMMIT");
+
+      const stockRem = await dbQuery(
+        `SELECT COUNT(*) as cnt FROM shop_redeem_links WHERE product_id = $1 AND status = 'available'`,
+        [productId]
+      ).catch(() => ({ rows: [{ cnt: "0" }] }));
+
+      return {
+        success: true,
+        accountEmail: "",
+        accountPassword: "",
+        redeemLink,
+        newBalance: balance - finalPrice,
+        orderId: orderRes.rows[0].id,
+        finalPrice,
+        stockRemaining: parseInt(stockRem.rows[0]?.cnt ?? "0"),
+        productName: prod.name,
+      };
+    }
+
+    // ── Fall back to credential table ────────────────────────────────────────
+    if (!table) {
+      await client.query("ROLLBACK");
+      return { success: false, reason: "out_of_stock" };
+    }
+
     const minCred = prod.min_credits ?? null;
     const acctSql = minCred != null
       ? `SELECT id, email, password FROM ${table} WHERE status = $1 AND credits >= $2 ORDER BY credits DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`
@@ -521,7 +583,6 @@ async function purchaseProduct(
       `UPDATE shop_customers SET balance = balance - $1, total_spend = total_spend + $1 WHERE telegram_id = $2`,
       [finalPrice, uid]
     );
-
     await client.query(`UPDATE ${table} SET status = 'sold_out' WHERE id = $1`, [accountId]);
 
     const orderRes = await client.query(
@@ -534,7 +595,6 @@ async function purchaseProduct(
 
     await client.query("COMMIT");
 
-    // Count remaining stock after purchase
     const { sql: stockSql, params: stockParams } = stockCountSql(table, prod.status_filter, prod.min_credits ?? null);
     const stockRes = await dbQuery(stockSql, stockParams).catch(() => ({ rows: [{ cnt: "0" }] }));
     const stockRemaining = parseInt(stockRes.rows[0]?.cnt ?? "0");
@@ -582,6 +642,13 @@ async function ensureShopTables() {
     );
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS min_credits INTEGER DEFAULT NULL;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS stock_override INTEGER DEFAULT NULL;
+    CREATE TABLE IF NOT EXISTS shop_redeem_links (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      product_id VARCHAR NOT NULL,
+      link TEXT NOT NULL UNIQUE,
+      status VARCHAR NOT NULL DEFAULT 'available',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS shop_orders (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       telegram_id BIGINT NOT NULL,
@@ -593,6 +660,7 @@ async function ensureShopTables() {
       amount NUMERIC(10,2) NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS redeem_link TEXT DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_activation_orders (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       telegram_id BIGINT NOT NULL,
@@ -1147,19 +1215,24 @@ export function startShopBot(token: string) {
       : "";
 
     const pEmoji = platformEmoji(prod.account_type);
+    const deliveryBody = result.redeemLink
+      ? `🔗 <b>REDEEM YOUR ACCESS</b>\n\n` +
+        `<code>${escHtml(result.redeemLink)}</code>\n\n` +
+        `<i>Tap the link to activate instantly.\nSingle-use only — save it somewhere safe.</i>`
+      : `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
+        `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
+        `<i>Credentials saved — access anytime in My Orders.</i>`;
     await safeEdit(ctx,
       `╔══════════════════════════════════════╗\n` +
       `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PURCHASE SUCCESSFUL!</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
-      `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
+      `${deliveryBody}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `${discountLine}` +
       `💵 Paid: <b>${fmt$(result.finalPrice)}</b>\n` +
-      `💰 New balance: <b>${fmt$(result.newBalance)}</b>\n` +
-      `<i>Credentials saved — access anytime in My Orders.</i>`,
+      `💰 New balance: <b>${fmt$(result.newBalance)}</b>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1264,18 +1337,29 @@ export function startShopBot(token: string) {
     sendRatingRequest(bot, uid, result.orderId, result.productName);
 
     const pEmoji = platformEmoji(prod.account_type ?? "");
+    const deliveryBody2 = result.redeemLink
+      ? `🔗 <b>REDEEM YOUR ACCESS</b>\n\n` +
+        `<code>${escHtml(result.redeemLink)}</code>\n\n` +
+        `<i>Tap the link to activate instantly.\nSingle-use only — save it somewhere safe.</i>`
+      : `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
+        `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
+        `<i>Save these credentials safely. For issues, contact ${escHtml(SUPPORT_CONTACT)}</i>`;
     await safeEdit(ctx,
-      `🎉 <b>Purchase Successful!</b>\n\n` +
+      `╔══════════════════════════════════════╗\n` +
+      `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PURCHASE SUCCESSFUL!</b>  ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
       `${pEmoji} <b>${escHtml(prod.name)}</b>\n\n` +
-      `${divider()}\n\n` +
-      `📧 <b>Email</b>\n<code>${escHtml(result.accountEmail)}</code>\n\n` +
-      `🔑 <b>Password</b>\n<code>${escHtml(result.accountPassword)}</code>\n\n` +
-      `${divider()}\n\n` +
-      `💰 New balance: <b>${fmt$(result.newBalance)}</b>\n` +
-      `<i>Save these credentials safely. For issues, contact ${escHtml(SUPPORT_CONTACT)}</i>`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${deliveryBody2}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `💵 Paid: <b>${fmt$(result.finalPrice)}</b>\n` +
+      `💰 New balance: <b>${fmt$(result.newBalance)}</b>`,
       {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[Markup.button.callback("📦  My Orders", "shop_view_orders")]]),
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📦  My Orders", "shop_view_orders")],
+          [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+        ]),
       }
     );
   });
