@@ -1137,9 +1137,10 @@ export function startShopBot(token: string) {
     const emoji   = productEmojiHtml(prod, prod.stock > 0);
     const inStock = prod.stock > 0;
 
-    // Build description block
+    // Build description block — description is admin HTML (may contain <tg-emoji>, <b>, etc.)
+    // Do NOT escHtml() here or animated emoji / formatting will be destroyed
     const descBlock = prod.description
-      ? `\n${escHtml(prod.description)}\n`
+      ? `\n${prod.description}\n`
       : "";
 
     // Stock warning line (only show when low or OOS)
