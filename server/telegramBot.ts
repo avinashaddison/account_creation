@@ -4277,6 +4277,41 @@ export function startTelegramBot(config: BotConfig) {
     );
   });
 
+  // ── Entities → HTML helper ────────────────────────────────────────────────
+  // Converts a Telegram message (text + entities) to an HTML string that
+  // Telegram will render correctly with parse_mode:"HTML".
+  // Supports: bold, italic, underline, strikethrough, code, pre,
+  //           text_link, custom_emoji (animated stickers).
+  function tgEntitiesToHtml(rawText: string, entities?: any[]): string {
+    function escapeHtml(s: string) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    if (!entities || entities.length === 0) return escapeHtml(rawText);
+
+    type Evt = { pos: number; isOpen: boolean; tag: string };
+    const events: Evt[] = [];
+    for (const e of entities) {
+      const s = e.offset, en = e.offset + e.length;
+      if      (e.type === "bold")          { events.push({pos:s,isOpen:true,tag:"<b>"});         events.push({pos:en,isOpen:false,tag:"</b>"}); }
+      else if (e.type === "italic")        { events.push({pos:s,isOpen:true,tag:"<i>"});         events.push({pos:en,isOpen:false,tag:"</i>"}); }
+      else if (e.type === "underline")     { events.push({pos:s,isOpen:true,tag:"<u>"});         events.push({pos:en,isOpen:false,tag:"</u>"}); }
+      else if (e.type === "strikethrough") { events.push({pos:s,isOpen:true,tag:"<s>"});         events.push({pos:en,isOpen:false,tag:"</s>"}); }
+      else if (e.type === "code")          { events.push({pos:s,isOpen:true,tag:"<code>"});      events.push({pos:en,isOpen:false,tag:"</code>"}); }
+      else if (e.type === "pre")           { events.push({pos:s,isOpen:true,tag:"<pre>"});       events.push({pos:en,isOpen:false,tag:"</pre>"}); }
+      else if (e.type === "text_link")     { events.push({pos:s,isOpen:true,tag:`<a href="${e.url}">`}); events.push({pos:en,isOpen:false,tag:"</a>"}); }
+      else if (e.type === "custom_emoji")  { events.push({pos:s,isOpen:true,tag:`<tg-emoji emoji-id="${e.custom_emoji_id}">`}); events.push({pos:en,isOpen:false,tag:"</tg-emoji>"}); }
+    }
+    events.sort((a, b) => a.pos !== b.pos ? a.pos - b.pos : (a.isOpen ? -1 : 1));
+
+    let html = "", pos = 0;
+    for (const evt of events) {
+      if (evt.pos > pos) { html += escapeHtml(rawText.substring(pos, evt.pos)); pos = evt.pos; }
+      html += evt.tag;
+    }
+    if (pos < rawText.length) html += escapeHtml(rawText.substring(pos));
+    return html;
+  }
+
   // ── Text message handler ──────────────────────────────────────────────────
   bot.on("text", async (ctx) => {
     const uid = ctx.from.id;
@@ -4331,7 +4366,7 @@ export function startTelegramBot(config: BotConfig) {
       }
 
       if (flow.step === "description") {
-        flow.description = text === "-" ? "" : text;
+        flow.description = text === "-" ? "" : tgEntitiesToHtml(ctx.message.text, (ctx.message as any).entities);
         flow.step = "price";
         return ctx.reply(
           `\n🔷 <b>➕ ADD PRODUCT — 3/5</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
@@ -4410,7 +4445,8 @@ export function startTelegramBot(config: BotConfig) {
         }
 
         else if (flow.step === "edit_description") {
-          const val = text.trim() === "-" ? null : text.trim();
+          const raw = ctx.message.text.trim();
+          const val = raw === "-" ? null : tgEntitiesToHtml(ctx.message.text, (ctx.message as any).entities);
           await dbQuery(`UPDATE shop_products SET description = $1 WHERE id = $2`, [val, pid]);
         }
 
