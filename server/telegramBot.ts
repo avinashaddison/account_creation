@@ -3968,27 +3968,17 @@ export function startTelegramBot(config: BotConfig) {
     };
   }
 
-  // 🗄 STOCK MANAGER — overview of all products with live counts
-  bot.action("shop_admin_stock", async (ctx) => {
-    await ctx.answerCbQuery().catch(() => {});
-    return renderStockOverview(ctx, "edit");
-  });
-
-  // Per-product stock management page
-  bot.action(/^shop_stock_([0-9a-f-]{36})$/, async (ctx) => {
-    await ctx.answerCbQuery().catch(() => {});
-    const productId = (ctx.match as RegExpExecArray)[1];
+  // ── Shared: render product stock detail page and edit message in-place ────────
+  async function renderProductStockDetail(ctx: any, productId: string, extraNote?: string) {
     const r = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
     const p = r.rows[0];
     if (!p) return safeEdit(ctx, "Product not found.", { parse_mode: "HTML" });
 
     const table = SHOP_TABLE_MAP[p.account_type];
     const sf    = p.status_filter ?? "available";
-    const delivMode = (p.delivery_mode ?? "auto") as string;
-    const isManual  = delivMode === "manual";
+    const isManual  = (p.delivery_mode ?? "auto") === "manual";
     const manualStk = p.manual_stock ?? 0;
     const info  = await getProductStockInfo(p);
-
     const overrideVal = p.stock_override != null ? p.stock_override : null;
     const displayStock = isManual
       ? `${manualStk}  (manual stock)`
@@ -4005,44 +3995,50 @@ export function startTelegramBot(config: BotConfig) {
       `Shown to buyer :  ${displayStock}\n` +
       (isManual ? "" : `Real available :  ${info.avail}\nSold out       :  ${info.sold}\nTotal entries  :  ${info.total}\n`) +
       `</code>\n\n` +
+      (extraNote ? `${extraNote}\n\n` : "") +
       `› What would you like to do?`;
 
     const toggleLabel = isManual ? "⚡  Switch to AUTO" : "📬  Switch to MANUAL";
-
     const buttons: ReturnType<typeof Markup.button.callback>[][] = [
       [Markup.button.callback(toggleLabel, `shop_stock_togglemode_${productId}`)],
     ];
-
     if (isManual) {
-      buttons.push([
-        Markup.button.callback(`📊  Set Manual Stock  (now: ${manualStk})`, `shop_stock_setmanualstock_${productId}`),
-      ]);
+      buttons.push([Markup.button.callback(`📊  Set Manual Stock  (now: ${manualStk})`, `shop_stock_setmanualstock_${productId}`)]);
     } else {
       buttons.push([
-        Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
-        Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`),
+        Markup.button.callback("📧  Add Credentials",  `shop_stock_addcreds_${productId}`),
+        Markup.button.callback("🔗  Add Redeem Links", `shop_stock_addlinks_${productId}`),
       ]);
       buttons.push([
-        Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
-        Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`),
+        Markup.button.callback("📋  View Credentials", `shop_stock_view_${productId}_0`),
+        Markup.button.callback("🔗  View Links",       `shop_stock_viewlinks_${productId}_0`),
       ]);
       buttons.push([
-        Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
+        Markup.button.callback("✏️  Set Stock Count",  `shop_stock_setcount_${productId}`),
         Markup.button.callback(overrideVal != null ? "🔄  Real Count" : "🔢  Override",
                                overrideVal != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`),
       ]);
       buttons.push([
-        Markup.button.callback("🗑  Clear Sold Out",      `shop_stock_clearsold_${productId}`),
-        Markup.button.callback("♻  Reset Available",     `shop_stock_resetavail_${productId}`),
+        Markup.button.callback("🗑  Clear Sold Out",   `shop_stock_clearsold_${productId}`),
+        Markup.button.callback("♻  Reset Available",  `shop_stock_resetavail_${productId}`),
       ]);
     }
-
     buttons.push([Markup.button.callback("↩  Back to Stock", "shop_admin_stock")]);
 
-    await safeEdit(ctx, text, {
-      parse_mode: "HTML",
-      ...Markup.inlineKeyboard(buttons),
-    });
+    return safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }
+
+  // 🗄 STOCK MANAGER — overview of all products with live counts
+  bot.action("shop_admin_stock", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    return renderStockOverview(ctx, "edit");
+  });
+
+  // Per-product stock management page
+  bot.action(/^shop_stock_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    return renderProductStockDetail(ctx, productId);
   });
 
   // Start set-stock-count flow
@@ -4299,58 +4295,7 @@ export function startTelegramBot(config: BotConfig) {
     const next    = current === "manual" ? "auto" : "manual";
     await dbQuery(`UPDATE shop_products SET delivery_mode = $1 WHERE id = $2`, [next, productId]);
     await ctx.answerCbQuery(`Switched to ${next.toUpperCase()} mode`).catch(() => {});
-    // Refresh the stock page
-    const r2 = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [productId]);
-    const p   = r2.rows[0];
-    if (!p) return ctx.reply("Product not found.", { parse_mode: "HTML" });
-    const table     = SHOP_TABLE_MAP[p.account_type];
-    const sf        = p.status_filter ?? "available";
-    const isManual2 = next === "manual";
-    const manualStk2 = p.manual_stock ?? 0;
-    const info2     = await getProductStockInfo(p);
-    const overrideVal2 = p.stock_override != null ? p.stock_override : null;
-    const displayStock2 = isManual2
-      ? `${manualStk2}  (manual stock)`
-      : overrideVal2 != null ? `${overrideVal2}  (override)` : `${info2.avail}  (real count)`;
-    const text2 =
-      `\n🗄 <b>STOCK: ${p.name}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<code>` +
-      `Delivery mode  :  ${isManual2 ? "MANUAL 📬" : "AUTO ⚡"}\n` +
-      `Account type   :  ${p.account_type}\n` +
-      `DB table       :  ${table ?? "⚠️ unmapped"}\n` +
-      `Status filter  :  ${sf}\n` +
-      `─────────────────────────────────\n` +
-      `Shown to buyer :  ${displayStock2}\n` +
-      (isManual2 ? "" : `Real available :  ${info2.avail}\nSold out       :  ${info2.sold}\nTotal entries  :  ${info2.total}\n`) +
-      `</code>\n\n` +
-      `✅ Mode switched to <b>${next.toUpperCase()}</b>.\n\n› What would you like to do?`;
-    const toggleLabel2 = isManual2 ? "⚡  Switch to AUTO" : "📬  Switch to MANUAL";
-    const btns2: ReturnType<typeof Markup.button.callback>[][] = [
-      [Markup.button.callback(toggleLabel2, `shop_stock_togglemode_${productId}`)],
-    ];
-    if (isManual2) {
-      btns2.push([Markup.button.callback(`📊  Set Manual Stock  (now: ${manualStk2})`, `shop_stock_setmanualstock_${productId}`)]);
-    } else {
-      btns2.push([
-        Markup.button.callback("📧  Add Credentials",    `shop_stock_addcreds_${productId}`),
-        Markup.button.callback("🔗  Add Redeem Links",   `shop_stock_addlinks_${productId}`),
-      ]);
-      btns2.push([
-        Markup.button.callback("📋  View Credentials",   `shop_stock_view_${productId}_0`),
-        Markup.button.callback("🔗  View Links",         `shop_stock_viewlinks_${productId}_0`),
-      ]);
-      btns2.push([
-        Markup.button.callback("✏️  Set Stock Count",    `shop_stock_setcount_${productId}`),
-        Markup.button.callback(overrideVal2 != null ? "🔄  Real Count" : "🔢  Override",
-                               overrideVal2 != null ? `shop_stock_clearoverride_${productId}` : `shop_stock_setcount_${productId}`),
-      ]);
-      btns2.push([
-        Markup.button.callback("🗑  Clear Sold Out",  `shop_stock_clearsold_${productId}`),
-        Markup.button.callback("♻  Reset Available", `shop_stock_resetavail_${productId}`),
-      ]);
-    }
-    btns2.push([Markup.button.callback("↩  Back to Stock", "shop_admin_stock")]);
-    await safeEdit(ctx, text2, { parse_mode: "HTML", ...Markup.inlineKeyboard(btns2) });
+    return renderProductStockDetail(ctx, productId, `✅ Mode switched to <b>${next.toUpperCase()}</b>.`);
   });
 
   // ── Set manual stock count ────────────────────────────────────────────────
