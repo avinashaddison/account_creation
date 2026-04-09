@@ -883,15 +883,39 @@ export function startShopBot(token: string) {
     }
 
     const isNew = await isNewCustomer(uid);
-    bot.telegram.setChatMenuButton({
-      chatId: ctx.chat.id,
-      menuButton: { type: "commands" },
-    }).catch(() => {});
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name, referredBy);
 
     // Credit referrer $0.50 when new user joins
     if (isNew && referredBy) {
       processReferralReward(uid, bot).catch(() => {});
+    }
+
+    // "Menu" button deep link — show the main menu + reply keyboard directly
+    if (payload === "show_menu") {
+      const bal   = await getBalance(uid);
+      const name2 = ctx.from.first_name || ctx.from.username || "User";
+      const uname2 = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+      await ctx.reply(
+        truncate(
+          `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
+          `      Global AI Tools Marketplace\n` +
+          `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `👋  Hey, <b>${escHtml(name2)}</b>!  Welcome back.\n\n` +
+          `<b>💎  What you can do here:</b>\n` +
+          `<blockquote>⚡  ${toBold("SHOP")}  —  Browse &amp; buy premium AI tools\n` +
+          `💳  ${toBold("DEPOSIT")}  —  Instantly add funds to your wallet\n` +
+          `👤  ${toBold("PROFILE")}  —  View balance, orders &amp; settings\n` +
+          `🎧  ${toBold("SUPPORT")}  —  We\'re always here to help\n` +
+          `🔗  ${toBold("REFER & EARN")}  —  Invite friends, earn rewards</blockquote>\n\n` +
+          `<code>◈  💰  Balance   ›  ${fmt$(bal)}\n` +
+          `◈  🔖  User      ›  ${uname2}\n` +
+          `◈  🆔  ID        ›  ${uid}</code>\n\n` +
+          `<i>👇  Select an option from the menu below</i>`
+        ),
+        { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+      );
+      return;
     }
 
     const balance = await getBalance(uid);
@@ -2400,6 +2424,37 @@ export function startShopBot(token: string) {
     );
   });
 
+  // ── Menu button web app data → show main menu ────────────────────────────
+  bot.on("web_app_data", async (ctx: any) => {
+    const data = ctx.message?.web_app_data?.data;
+    if (data !== "open_menu") return;
+    const uid = ctx.from.id;
+    await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
+    const balance = await getBalance(uid);
+    const name  = ctx.from.first_name || ctx.from.username || "User";
+    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    await ctx.reply(
+      truncate(
+        `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
+        `      Global AI Tools Marketplace\n` +
+        `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `👋  Hey, <b>${escHtml(name)}</b>!  Welcome back.\n\n` +
+        `<b>💎  What you can do here:</b>\n` +
+        `<blockquote>⚡  ${toBold("SHOP")}  —  Browse &amp; buy premium AI tools\n` +
+        `💳  ${toBold("DEPOSIT")}  —  Instantly add funds to your wallet\n` +
+        `👤  ${toBold("PROFILE")}  —  View balance, orders &amp; settings\n` +
+        `🎧  ${toBold("SUPPORT")}  —  We\'re always here to help\n` +
+        `🔗  ${toBold("REFER & EARN")}  —  Invite friends, earn rewards</blockquote>\n\n` +
+        `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
+        `◈  🔖  User      ›  ${uname}\n` +
+        `◈  🆔  ID        ›  ${uid}</code>\n\n` +
+        `<i>👇  Select an option from the menu below</i>`
+      ),
+      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
+    );
+  });
+
   // ── Fallback: any unrecognised text → show main menu + keyboard ──────────
   bot.on("text", async (ctx: any) => {
     const uid = ctx.from?.id;
@@ -2433,12 +2488,24 @@ export function startShopBot(token: string) {
         { command: "balance", description: "💰 Check wallet balance" },
         { command: "cancel",  description: "❌ Cancel active flow" },
       ]);
-      // Menu Button: shows ONLY /menu so users get a single-tap shortcut
-      await bot.telegram.setChatMenuButton({
-        menuButton: {
-          type: "commands",
-        },
-      });
+      // Menu Button: single blue "Menu" button that opens a mini app page.
+      // The page uses openTelegramLink to send /start show_menu back to the bot
+      // and then closes itself.  sendData() is not available in menu-button apps.
+      const devDomain = process.env.REPLIT_DEV_DOMAIN;
+      if (devDomain) {
+        const me = await bot.telegram.getMe();
+        const tmaUrl = `https://${devDomain}/tma?bot=${encodeURIComponent(me.username ?? "")}`;
+        await bot.telegram.setChatMenuButton({
+          menuButton: {
+            type:    "web_app",
+            text:    "Menu",
+            web_app: { url: tmaUrl },
+          } as any,
+        });
+        console.log(`[ShopBot] Menu button → ${tmaUrl}`);
+      } else {
+        await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
+      }
       console.log("[ShopBot] Commands registered");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
