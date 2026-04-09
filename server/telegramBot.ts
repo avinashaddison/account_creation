@@ -3969,12 +3969,19 @@ export function startTelegramBot(config: BotConfig) {
       `  ─────────────────────────────────────────────\n`;
     const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
     for (const p of res.rows) {
+      const isManual = (p.delivery_mode ?? "auto") === "manual";
       const info = await getProductStockInfo(p);
       const name = p.name.slice(0, 22).padEnd(22);
       const statusIcon = p.active ? "🟢" : "🔴";
-      text += `  ${statusIcon} ${name}  ${String(info.avail).padStart(4)}   ${String(info.sold).padStart(4)}   ${String(info.total).padStart(4)}\n`;
+      if (isManual) {
+        const manualStk = p.manual_stock ?? 0;
+        text += `  ${statusIcon} ${name} 📬  ${String(manualStk).padStart(4)}      —      —\n`;
+      } else {
+        text += `  ${statusIcon} ${name}  ${String(info.avail).padStart(4)}   ${String(info.sold).padStart(4)}   ${String(info.total).padStart(4)}\n`;
+      }
+      const displayAvail = isManual ? (p.manual_stock ?? 0) : info.avail;
       buttons.push([Markup.button.callback(
-        `${info.avail > 0 ? "🟢" : "🔴"} ${p.name.slice(0, 28)}  (${info.avail} avail)`,
+        `${displayAvail > 0 ? "🟢" : "🔴"} ${p.name.slice(0, 25)}${isManual ? " 📬" : ""}  (${displayAvail} avail)`,
         `shop_stock_${p.id}`
       )]);
     }
