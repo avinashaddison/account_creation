@@ -3347,12 +3347,12 @@ export function startTelegramBot(config: BotConfig) {
 
   function editProductKeyboard(productId: string, isActive: boolean) {
     return Markup.inlineKeyboard([
-      [Markup.button.callback("✏ Name",          `shop_editfield_${productId}_name`),
-       Markup.button.callback("✏ Description",   `shop_editfield_${productId}_description`)],
-      [Markup.button.callback("✏ Price",          `shop_editfield_${productId}_price`),
-       Markup.button.callback("✏ Account Type",  `shop_editfield_${productId}_account_type`)],
-      [Markup.button.callback("✏ Status Filter", `shop_editfield_${productId}_status_filter`),
-       Markup.button.callback("✏ Sort Order",    `shop_editfield_${productId}_sort_order`)],
+      [Markup.button.callback("✏ Name",          `shop_ef_${productId}_name`),
+       Markup.button.callback("✏ Description",   `shop_ef_${productId}_description`)],
+      [Markup.button.callback("✏ Price",          `shop_ef_${productId}_price`),
+       Markup.button.callback("✏ Account Type",  `shop_ef_${productId}_account_type`)],
+      [Markup.button.callback("✏ Status Filter", `shop_ef_${productId}_status_filter`),
+       Markup.button.callback("✏ Sort Order",    `shop_ef_${productId}_sort_order`)],
       [Markup.button.callback(isActive ? "🔴 Deactivate" : "🟢 Activate", `shop_toggle_active_${productId}`)],
       [Markup.button.callback("🗑  Delete Product", `shop_delete_confirm_${productId}`),
        Markup.button.callback("↩ Products",         "shop_admin_products")],
@@ -3372,7 +3372,7 @@ export function startTelegramBot(config: BotConfig) {
     });
   });
 
-  bot.action(/^shop_editfield_([0-9a-f-]{36})_(name|description|price|account_type|status_filter|sort_order)$/, async (ctx) => {
+  bot.action(/^shop_ef_([0-9a-f-]{36})_(name|description|price|account_type|status_filter|sort_order)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
     const [, productId, field] = ctx.match as RegExpExecArray;
