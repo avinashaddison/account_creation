@@ -774,6 +774,24 @@ async function ensureShopTables() {
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS custom_emoji TEXT DEFAULT NULL;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS delivery_mode TEXT NOT NULL DEFAULT 'auto';
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS manual_stock INTEGER DEFAULT NULL;
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name='shop_products' AND constraint_name='shop_products_delivery_mode_check'
+      ) THEN
+        ALTER TABLE shop_products ADD CONSTRAINT shop_products_delivery_mode_check
+          CHECK (delivery_mode IN ('auto', 'manual'));
+      END IF;
+    END $$;
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name='shop_products' AND constraint_name='shop_products_manual_stock_check'
+      ) THEN
+        ALTER TABLE shop_products ADD CONSTRAINT shop_products_manual_stock_check
+          CHECK (manual_stock IS NULL OR manual_stock >= 0);
+      END IF;
+    END $$;
     CREATE TABLE IF NOT EXISTS shop_redeem_links (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       product_id VARCHAR NOT NULL,
