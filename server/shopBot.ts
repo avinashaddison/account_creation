@@ -134,8 +134,6 @@ function stockLine(stock: number): string {
 
 // ── Main reply keyboard ──────────────────────────────────────────────────────
 const BTN = {
-  CHATGPT_PLUS: "֎  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2",
-  REPLIT_CORE:  "🔵  𝗥𝗲𝗽𝗹𝗶𝘁  𝗖𝗼𝗿𝗲  ·  $2",
   ACCOUNTS:     "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
   BALANCE:      "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
   ORDERS:       "📋  𝗢𝗥𝗗𝗘𝗥𝗦",
@@ -145,13 +143,25 @@ const BTN = {
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
 } as const;
 
-const SHOP_KEYBOARD = Markup.keyboard([
-  [BTN.CHATGPT_PLUS, BTN.REPLIT_CORE],
-  [BTN.ACCOUNTS],
-  [BTN.BALANCE,   BTN.ORDERS],
-  [BTN.DEPOSIT,   BTN.SUPPORT],
-  [BTN.IDENTITY,  BTN.REFER],
-]).resize().oneTime();
+async function buildShopKeyboard() {
+  const res = await dbQuery(
+    `SELECT name, sticky_label FROM shop_products WHERE sticky = true AND active = true ORDER BY sort_order ASC, created_at ASC`
+  );
+  const labels: string[] = res.rows.map((p: any) =>
+    (p.sticky_label ?? "").trim() || p.name
+  );
+  const stickyRows: string[][] = [];
+  for (let i = 0; i < labels.length; i += 2) {
+    stickyRows.push(labels[i + 1] ? [labels[i], labels[i + 1]] : [labels[i]]);
+  }
+  return Markup.keyboard([
+    ...stickyRows,
+    [BTN.ACCOUNTS],
+    [BTN.BALANCE,   BTN.ORDERS],
+    [BTN.DEPOSIT,   BTN.SUPPORT],
+    [BTN.IDENTITY,  BTN.REFER],
+  ]).resize().oneTime();
+}
 
 // ── Per-user state ───────────────────────────────────────────────────────────
 interface ShopUserState {
@@ -642,6 +652,8 @@ async function ensureShopTables() {
     );
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS min_credits INTEGER DEFAULT NULL;
     ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS stock_override INTEGER DEFAULT NULL;
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sticky BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS sticky_label TEXT DEFAULT NULL;
     CREATE TABLE IF NOT EXISTS shop_redeem_links (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       product_id VARCHAR NOT NULL,
@@ -809,7 +821,7 @@ export function startShopBot(token: string) {
         `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `<i>Use the menu below to get started.</i>`
       ),
-      { parse_mode: "HTML", ...SHOP_KEYBOARD }
+      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
 
     // Show product list right after welcome
@@ -837,7 +849,7 @@ export function startShopBot(token: string) {
         `  🆔 ID        ›  ${uid}</code>\n\n` +
         `<i>Select an option from the menu below.</i>`
       ),
-      { parse_mode: "HTML", ...SHOP_KEYBOARD }
+      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
   });
 
@@ -1427,23 +1439,44 @@ export function startShopBot(token: string) {
     );
   }
 
-  // Match current AND legacy keyboard button text (emoji changed from 🤖 → ֎)
-  // Unicode bold chars in the label mean regex won't work — must use exact strings
+  // ── Dynamic sticky-product keyboard handler ──────────────────────────────
+  // Legacy exact-string fallbacks (users who still have old cached keyboards)
   bot.hears(
-    [BTN.CHATGPT_PLUS, "🤖  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2"],
+    ["🤖  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2", "֎  𝗖𝗵𝗮𝘁𝗚𝗣𝗧  𝗣𝗹𝘂𝘀  ·  $2"],
     async (ctx) => {
       await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
       await showActivationMenu(ctx, "chatgpt_plus");
     }
   );
-
   bot.hears(
-    [BTN.REPLIT_CORE, "🔵  𝗥𝗲𝗽𝗹𝗶𝘁  𝗖𝗼𝗿𝗲  ·  $2"],
+    ["🔵  𝗥𝗲𝗽𝗹𝗶𝘁  𝗖𝗼𝗿𝗲  ·  $2"],
     async (ctx) => {
       await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
       await showActivationMenu(ctx, "replit_core");
     }
   );
+
+  // Dynamic handler: if the user taps any sticky product button, route to it
+  bot.use(async (ctx: any, next: any) => {
+    if (ctx.updateType !== "message" || !ctx.message?.text) return next();
+    const text = ctx.message.text as string;
+    const res = await dbQuery(
+      `SELECT id, name, account_type, sticky_label FROM shop_products WHERE sticky = true AND active = true`
+    );
+    const match = res.rows.find((p: any) => {
+      const label = (p.sticky_label ?? "").trim() || p.name;
+      return label === text;
+    });
+    if (!match) return next();
+    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+    const at: string = match.account_type;
+    if (at === "chatgpt_plus" || at === "replit_core") {
+      await showActivationMenu(ctx, at as ActivationService);
+    } else {
+      shopState.set(ctx.from.id, { selectedProductId: match.id });
+      await showProductList(ctx);
+    }
+  });
 
   bot.action("act_back", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
@@ -2063,7 +2096,7 @@ export function startShopBot(token: string) {
     depositFlows.delete(uid);
     await safeReply(ctx,
       `❌ <b>Cancelled.</b>\n\n<i>All active flows cleared. Use the menu below to continue.</i>`,
-      { parse_mode: "HTML", ...SHOP_KEYBOARD }
+      { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
   });
 

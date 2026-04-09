@@ -346,6 +346,8 @@ export const shopProducts = pgTable("shop_products", {
   statusFilter: text("status_filter").notNull().default("available"),
   active:       boolean("active").notNull().default(true),
   sortOrder:    integer("sort_order").notNull().default(0),
+  sticky:       boolean("sticky").notNull().default(false),
+  stickyLabel:  text("sticky_label"),
   createdAt:    timestamp("created_at").notNull().defaultNow(),
 });
 

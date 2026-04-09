@@ -135,7 +135,7 @@ interface BizMailSession {
 interface ShopAdminFlow {
   step?: "name" | "description" | "price" | "account_type" | "status_filter"
        | "topup_uid" | "topup_amount"
-       | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter" | "edit_sort_order"
+       | "edit_name" | "edit_description" | "edit_price" | "edit_account_type" | "edit_status_filter" | "edit_sort_order" | "edit_sticky_label"
        | "activation_time" | "refer_amount"
        | "broadcast_text" | "search_uid"
        | "promo_code" | "promo_discount" | "promo_maxuses"
@@ -3304,7 +3304,21 @@ export function startTelegramBot(config: BotConfig) {
     await safeEdit(ctx, buildProductsListMsg(res.rows), { parse_mode: "HTML", ...buildProductsListButtons(res.rows) });
   });
 
-  bot.action(/^shop_toggle_(.+)$/, async (ctx) => {
+  // ── Toggle sticky from product list (quick toggle) ─────────────────────
+  bot.action(/^shop_toggle_sticky_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const res = await dbQuery(`UPDATE shop_products SET sticky = NOT sticky WHERE id = $1 RETURNING *`, [productId]);
+    const p = res.rows[0];
+    if (!p) return safeEdit(ctx, "Product not found.");
+    await ctx.answerCbQuery(`${p.sticky ? "✅ Sticky ON" : "🔲 Sticky OFF"}: ${p.name}`).catch(() => {});
+    await safeEdit(ctx, editProductText(p), {
+      parse_mode: "HTML",
+      ...editProductKeyboard(productId, p.active, p.sticky),
+    });
+  });
+
+  bot.action(/^shop_toggle_([0-9a-f-]{36})$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const productId = (ctx.match as RegExpExecArray)[1];
     const res = await dbQuery(`SELECT active, name FROM shop_products WHERE id = $1`, [productId]);
@@ -3339,13 +3353,15 @@ export function startTelegramBot(config: BotConfig) {
       `◈ Account type  →  ${p.account_type}\n` +
       `◈ Status filter →  ${p.status_filter}\n` +
       `◈ Sort order    →  ${p.sort_order}\n` +
+      `◈ Sticky        →  ${p.sticky ? "Yes" : "No"}\n` +
+      `◈ Sticky label  →  ${p.sticky_label ? esc(p.sticky_label) : "—"}\n` +
       `◈ Active        →  ${p.active ? "Yes" : "No"}` +
       `</code>\n\n` +
       `› Tap a field to change it:`
     );
   }
 
-  function editProductKeyboard(productId: string, isActive: boolean) {
+  function editProductKeyboard(productId: string, isActive: boolean, isSticky: boolean) {
     return Markup.inlineKeyboard([
       [Markup.button.callback("✏ Name",          `shop_ef_${productId}_name`),
        Markup.button.callback("✏ Description",   `shop_ef_${productId}_description`)],
@@ -3353,6 +3369,8 @@ export function startTelegramBot(config: BotConfig) {
        Markup.button.callback("✏ Account Type",  `shop_ef_${productId}_account_type`)],
       [Markup.button.callback("✏ Status Filter", `shop_ef_${productId}_status_filter`),
        Markup.button.callback("✏ Sort Order",    `shop_ef_${productId}_sort_order`)],
+      [Markup.button.callback(isSticky ? "✅ Sticky" : "🔲 Sticky", `shop_toggle_sticky_${productId}`),
+       Markup.button.callback("✏ Sticky Label",  `shop_ef_${productId}_sticky_label`)],
       [Markup.button.callback(isActive ? "🔴 Deactivate" : "🟢 Activate", `shop_toggle_active_${productId}`)],
       [Markup.button.callback("🗑  Delete Product", `shop_delete_confirm_${productId}`),
        Markup.button.callback("↩ Products",         "shop_admin_products")],
@@ -3368,11 +3386,11 @@ export function startTelegramBot(config: BotConfig) {
     if (!p) return safeEdit(ctx, "Product not found.");
     await safeEdit(ctx, editProductText(p), {
       parse_mode: "HTML",
-      ...editProductKeyboard(productId, p.active),
+      ...editProductKeyboard(productId, p.active, p.sticky),
     });
   });
 
-  bot.action(/^shop_ef_([0-9a-f-]{36})_(name|description|price|account_type|status_filter|sort_order)$/, async (ctx) => {
+  bot.action(/^shop_ef_([0-9a-f-]{36})_(name|description|price|account_type|status_filter|sort_order|sticky_label)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
     const [, productId, field] = ctx.match as RegExpExecArray;
@@ -3383,6 +3401,7 @@ export function startTelegramBot(config: BotConfig) {
       account_type:  "edit_account_type",
       status_filter: "edit_status_filter",
       sort_order:    "edit_sort_order",
+      sticky_label:  "edit_sticky_label",
     };
     getState(uid).shopAdminFlow = { step: stepMap[field], editProductId: productId };
     const promptMap: Record<string, string> = {
@@ -3392,6 +3411,7 @@ export function startTelegramBot(config: BotConfig) {
       account_type:  `✏ <b>Edit Account Type</b>\n\n› Send one of:\n<code>  ${SHOP_ACCOUNT_TYPES.join(" | ")}</code>`,
       status_filter: `✏ <b>Edit Status Filter</b>\n\n› Send the credential status to match:\n<code>  e.g. available | working | created</code>`,
       sort_order:    `✏ <b>Edit Sort Order</b>\n\n› Send a number (lower = shown first):\n<code>  e.g. 0, 1, 2 …</code>`,
+      sticky_label:  `✏ <b>Edit Sticky Label</b>\n\n› Send the text to display on the reply keyboard button, or <code>-</code> to use the product name:`,
     };
     await ctx.reply(promptMap[field], { parse_mode: "HTML" });
   });
@@ -3406,7 +3426,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.answerCbQuery(`${p.active ? "🟢 Activated" : "🔴 Deactivated"}: ${p.name}`).catch(() => {});
     await safeEdit(ctx, editProductText(p), {
       parse_mode: "HTML",
-      ...editProductKeyboard(productId, p.active),
+      ...editProductKeyboard(productId, p.active, p.sticky),
     });
   });
 
@@ -4406,13 +4426,18 @@ export function startTelegramBot(config: BotConfig) {
           await dbQuery(`UPDATE shop_products SET sort_order = $1 WHERE id = $2`, [n, pid]);
         }
 
+        else if (flow.step === "edit_sticky_label") {
+          const val = text.trim() === "-" ? null : text.trim();
+          await dbQuery(`UPDATE shop_products SET sticky_label = $1 WHERE id = $2`, [val, pid]);
+        }
+
         st.shopAdminFlow = undefined;
         const upd = await dbQuery(`SELECT * FROM shop_products WHERE id = $1`, [pid]);
         const up = upd.rows[0];
         if (!up) return ctx.reply("✅ Updated. (Product no longer found — may have been deleted.)", { parse_mode: "HTML" });
         return ctx.reply(`✅ <b>Saved!</b>\n\n` + editProductText(up), {
           parse_mode: "HTML",
-          ...editProductKeyboard(pid, up.active),
+          ...editProductKeyboard(pid, up.active, up.sticky),
         });
       }
       // ── End edit product field flows ────────────────────────────────────────
