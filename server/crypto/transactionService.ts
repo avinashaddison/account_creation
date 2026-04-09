@@ -54,22 +54,49 @@ export async function getRecentTransactions(
       headers: { "X-MBX-APIKEY": apiKey },
     });
 
-    const json = await res.json() as {
-      code:    string;
-      message: string;
-      data?:   RawBinanceTx[];
-    };
-
-    if (json.code !== "000000") {
-      logger.error("TransactionService", "Binance API returned error", {
-        code:    json.code,
-        message: json.message,
+    const rawText = await res.text();
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      logger.error("TransactionService", "Binance API non-JSON response", {
+        httpStatus: res.status,
+        body:       rawText.slice(0, 500),
       });
       return [];
     }
 
-    const txs = (json.data ?? []).map(mapTx).filter(Boolean) as BinanceTransaction[];
-    logger.debug("TransactionService", `Fetched ${txs.length} transaction(s) from Binance`);
+    // HTTP 451 = geo-blocked (Binance.com blocks US-based servers)
+    if (res.status === 451) {
+      logger.warn("TransactionService",
+        "Binance API geo-blocked (HTTP 451) — Binance.com is unavailable from US servers. " +
+        "Deploy to a non-US server or use a proxy to enable live transaction fetching."
+      );
+      return [];
+    }
+
+    // Binance Pay uses "000000" (string); spot API uses 0 or negative numbers
+    const code    = json["code"];
+    const success = code === "000000" || code === 0 || code === "0";
+
+    if (!success) {
+      const errMsg = json["message"] ?? json["msg"] ?? "(no message)";
+      logger.error("TransactionService", "Binance API error", {
+        httpStatus: res.status,
+        code,
+        message:    errMsg,
+        hint:       code === -2015 || code === "-2015"
+          ? "Invalid API key, IP not whitelisted, or missing Pay permissions"
+          : undefined,
+      });
+      return [];
+    }
+
+    const data = (json["data"] as RawBinanceTx[] | undefined) ?? [];
+    const txs  = data.map(mapTx).filter(Boolean) as BinanceTransaction[];
+    logger.info("TransactionService", `Fetched ${txs.length} transaction(s) from Binance`, {
+      httpStatus: res.status,
+    });
     return txs;
 
   } catch (err: unknown) {
