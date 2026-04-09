@@ -150,15 +150,31 @@ function hasLeadingEmoji(s: string): boolean {
   return /^\p{Emoji_Presentation}/u.test(s) || /^\p{Extended_Pictographic}/u.test(s);
 }
 
+/** Convert ASCII letters/digits → Unicode Mathematical Bold Sans-Serif */
+function toBold(text: string): string {
+  return [...text].map(c => {
+    const code = c.charCodeAt(0);
+    if (code >= 65 && code <= 90)  return String.fromCodePoint(0x1D5D4 + code - 65); // A-Z
+    if (code >= 97 && code <= 122) return String.fromCodePoint(0x1D5EE + code - 97); // a-z
+    if (code >= 48 && code <= 57)  return String.fromCodePoint(0x1D7EC + code - 48); // 0-9
+    return c;
+  }).join("");
+}
+
+/** Build the display label for a sticky product: auto-emoji + bold text */
+function stickyDisplayLabel(base: string, index: number): string {
+  if (hasLeadingEmoji(base)) return base; // already has emoji — user set it themselves
+  const icon = STICKY_EMOJI[index % STICKY_EMOJI.length];
+  return `${icon}  ${toBold(base)}`;
+}
+
 async function buildShopKeyboard() {
   const res = await dbQuery(
     `SELECT name, sticky_label FROM shop_products WHERE sticky = true AND active = true ORDER BY sort_order ASC, created_at ASC`
   );
   const labels: string[] = res.rows.map((p: any, i: number) => {
     const base = (p.sticky_label ?? "").trim() || p.name;
-    if (hasLeadingEmoji(base)) return base;
-    const icon = STICKY_EMOJI[i % STICKY_EMOJI.length];
-    return `${icon}  ${base}`;
+    return stickyDisplayLabel(base, i);
   });
   const stickyRows: string[][] = [];
   for (let i = 0; i < labels.length; i += 2) {
@@ -1484,10 +1500,8 @@ export function startShopBot(token: string) {
     );
     const match = res.rows.find((p: any, i: number) => {
       const base = (p.sticky_label ?? "").trim() || p.name;
-      const displayLabel = hasLeadingEmoji(base)
-        ? base
-        : `${STICKY_EMOJI[i % STICKY_EMOJI.length]}  ${base}`;
-      return displayLabel === text || base === text;
+      const displayLabel = stickyDisplayLabel(base, i);
+      return displayLabel === text || base === text || toBold(base) === text;
     });
     if (!match) return next();
     await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
