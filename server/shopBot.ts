@@ -891,10 +891,11 @@ function insufficientFundsMsg(opts: {
   const productLine = productName
     ? `\n║  ${productEmoji ?? "📦"}  <b>${escHtml(productName)}</b>\n╠══════════════════════════════════════╣`
     : "";
-  const barTotal = 16;
+  const barTotal = 18;
   const filled   = Math.max(1, Math.round((balance / required) * barTotal));
   const empty    = barTotal - filled;
-  const bar      = "▓".repeat(filled) + "░".repeat(empty);
+  const bar      = "█".repeat(filled) + "░".repeat(empty);
+  const pct      = Math.round((balance / required) * 100);
   return (
     `🚫  <b>INSUFFICIENT FUNDS</b>\n` +
     `╔══════════════════════════════════════╗` +
@@ -905,8 +906,7 @@ function insufficientFundsMsg(opts: {
     `║  <code>───────────────────────────</code>\n` +
     `║  <code>${pad("Shortfall",col)} ›   ${shortStr}  ⬅</code>\n` +
     `║\n` +
-    `║  <code>[${bar}]</code>\n` +
-    `║  <code>${pad("", col)}    ${filled}/${barTotal} funded</code>\n` +
+    `║  ${bar}  ${pct}%\n` +
     `║\n` +
     `╚══════════════════════════════════════╝\n\n` +
     `💬  To top up, contact ${escHtml(SUPPORT_CONTACT)}`
