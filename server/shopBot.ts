@@ -875,6 +875,44 @@ function divider(): string {
   return "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 }
 
+function insufficientFundsMsg(opts: {
+  productName?: string;
+  productEmoji?: string;
+  required: number;
+  balance: number;
+}): string {
+  const { productName, productEmoji, required, balance } = opts;
+  const shortfall = (required - balance).toFixed(2);
+  const reqStr    = `$${required.toFixed(2)}`;
+  const balStr    = `$${balance.toFixed(2)}`;
+  const shortStr  = `$${shortfall}`;
+  const col       = 11; // label column width
+  const pad = (s: string, w: number) => s.padEnd(w);
+  const productLine = productName
+    ? `\n║  ${productEmoji ?? "📦"}  <b>${escHtml(productName)}</b>\n╠══════════════════════════════════════╣`
+    : "";
+  const barTotal = 16;
+  const filled   = Math.max(1, Math.round((balance / required) * barTotal));
+  const empty    = barTotal - filled;
+  const bar      = "▓".repeat(filled) + "░".repeat(empty);
+  return (
+    `🚫  <b>INSUFFICIENT FUNDS</b>\n` +
+    `╔══════════════════════════════════════╗` +
+    `${productLine}\n` +
+    `║\n` +
+    `║  <code>${pad("Balance",  col)} ›   ${balStr}</code>\n` +
+    `║  <code>${pad("Required", col)} ›   ${reqStr}</code>\n` +
+    `║  <code>───────────────────────────</code>\n` +
+    `║  <code>${pad("Shortfall",col)} ›   ${shortStr}  ⬅</code>\n` +
+    `║\n` +
+    `║  <code>[${bar}]</code>\n` +
+    `║  <code>${pad("", col)}    ${filled}/${barTotal} funded</code>\n` +
+    `║\n` +
+    `╚══════════════════════════════════════╝\n\n` +
+    `💬  To top up, contact ${escHtml(SUPPORT_CONTACT)}`
+  );
+}
+
 function header(title: string, sub?: string): string {
   return sub
     ? `<b>${title}</b>\n<i>${escHtml(sub)}</i>`
@@ -1378,15 +1416,8 @@ export function startShopBot(token: string) {
     const price   = parseFloat(prod.price);
 
     if (balance < price) {
-      const shortfall = (price - balance).toFixed(2);
       return safeEdit(ctx,
-        `💳 <b>Insufficient Funds</b>\n\n` +
-        `${divider()}\n\n` +
-        `📦 ${escHtml(prod.name)}\n` +
-        `💵 Required: <b>${fmt$(price)}</b>  ·  Your balance: <b>${fmt$(balance)}</b>\n` +
-        `⚠️ You need <b>$${shortfall}</b> more\n\n` +
-        `${divider()}\n\n` +
-        `To top up, contact ${escHtml(SUPPORT_CONTACT)}`,
+        insufficientFundsMsg({ productName: prod.name, required: price, balance }),
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -1515,10 +1546,17 @@ export function startShopBot(token: string) {
 
     if (!result.success) {
       if (result.reason === "insufficient_funds") {
+        const bal2 = await getBalance(uid);
+        const price2 = bal2 + (result.shortfall ?? 0);
         return safeEdit(ctx,
-          `💳 <b>Insufficient Funds</b>\n\n` +
-          `Need <b>$${(result.shortfall ?? 0).toFixed(2)}</b> more.\n\n→ Contact ${escHtml(SUPPORT_CONTACT)} to top up`,
-          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("◀  Back to Shop", "shop_back_products")]]) }
+          insufficientFundsMsg({ productName: prod?.name, required: price2, balance: bal2 }),
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+              [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+            ]),
+          }
         );
       }
       if (result.reason === "out_of_stock") {
@@ -1620,15 +1658,8 @@ export function startShopBot(token: string) {
     const balance = await getBalance(uid);
     const price   = parseFloat(prod.price);
     if (balance < price) {
-      const shortfall = (price - balance).toFixed(2);
       return safeEdit(ctx,
-        `💳 <b>Insufficient Funds</b>\n\n` +
-        `${divider()}\n\n` +
-        `📦 ${escHtml(prod.name)}\n` +
-        `💵 Required: <b>${fmt$(price)}</b>  ·  Your balance: <b>${fmt$(balance)}</b>\n` +
-        `⚠️ You need <b>$${shortfall}</b> more\n\n` +
-        `${divider()}\n\n` +
-        `To top up, contact ${escHtml(SUPPORT_CONTACT)}`,
+        insufficientFundsMsg({ productName: prod.name, required: price, balance }),
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -1831,13 +1862,8 @@ export function startShopBot(token: string) {
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const balance = await getBalance(uid);
     if (balance < ACTIVATION_PRICE) {
-      const shortfall = (ACTIVATION_PRICE - balance).toFixed(2);
       return safeEdit(ctx,
-        `💳 <b>Insufficient Funds</b>\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `${emoji} <b>${name} Activation</b>\n` +
-        `💵 Required: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>  ·  Balance: <b>${fmt$(balance)}</b>\n` +
-        `⚠️ Need <b>$${shortfall}</b> more to proceed`,
+        insufficientFundsMsg({ productName: `${name} Activation`, productEmoji: emoji, required: ACTIVATION_PRICE, balance }),
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -1887,13 +1913,8 @@ export function startShopBot(token: string) {
 
     const balance = await getBalance(uid);
     if (balance < ACTIVATION_PRICE) {
-      const shortfall = (ACTIVATION_PRICE - balance).toFixed(2);
       return safeEdit(ctx,
-        `💳 <b>Insufficient Funds</b>\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `${emoji} <b>${name} Account</b>\n` +
-        `💵 Required: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>  ·  Balance: <b>${fmt$(balance)}</b>\n` +
-        `⚠️ Need <b>$${shortfall}</b> more`,
+        insufficientFundsMsg({ productName: `${name} Account`, productEmoji: emoji, required: ACTIVATION_PRICE, balance }),
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -1938,7 +1959,16 @@ export function startShopBot(token: string) {
       const bal = parseFloat(r.rows[0]?.balance ?? "0");
       if (bal < ACTIVATION_PRICE) {
         await client.query("ROLLBACK");
-        return safeEdit(ctx, `💳 <b>Insufficient Funds</b>`, { parse_mode: "HTML" });
+        return safeEdit(ctx,
+          insufficientFundsMsg({ productName: `${name} Account`, productEmoji: emoji, required: ACTIVATION_PRICE, balance: bal }),
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+              [Markup.button.callback("◀  Back", "act_back")],
+            ]),
+          }
+        );
       }
       await client.query(`UPDATE shop_customers SET balance = balance - $1 WHERE telegram_id = $2`, [ACTIVATION_PRICE, uid]);
       newBalance = bal - ACTIVATION_PRICE;
@@ -2028,10 +2058,13 @@ export function startShopBot(token: string) {
         await client.query("ROLLBACK");
         activationFlows.delete(uid);
         return safeEdit(ctx,
-          `💳 <b>Insufficient Funds</b>\n\nBalance: <b>${fmt$(bal)}</b>  ·  Required: <b>$${ACTIVATION_PRICE.toFixed(2)}</b>`,
+          insufficientFundsMsg({ required: ACTIVATION_PRICE, balance: bal }),
           {
             parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[Markup.button.callback("➕  Deposit Info", "shop_deposit_info")]]),
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("➕  Deposit Info", "shop_deposit_info")],
+              [Markup.button.callback("◀  Back to Shop", "shop_back_products")],
+            ]),
           }
         );
       }
