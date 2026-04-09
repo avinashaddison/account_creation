@@ -2426,15 +2426,19 @@ export function startShopBot(token: string) {
   // ── Register commands ─────────────────────────────────────────────────────
   async function registerCommands() {
     try {
+      // Full command list (shown in bot info / search)
       await bot.telegram.setMyCommands([
-        { command: "start",   description: "Start & open main menu" },
-        { command: "menu",    description: "Open main menu keyboard" },
-        { command: "shop",    description: "Browse AI tools marketplace" },
-        { command: "balance", description: "Check my wallet balance" },
-        { command: "id",      description: "My Telegram user ID" },
-        { command: "cancel",  description: "Cancel any active flow" },
+        { command: "menu",    description: "🏠 Open main menu" },
+        { command: "shop",    description: "🛍 Browse marketplace" },
+        { command: "balance", description: "💰 Check wallet balance" },
+        { command: "cancel",  description: "❌ Cancel active flow" },
       ]);
-      await bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } });
+      // Menu Button: shows ONLY /menu so users get a single-tap shortcut
+      await bot.telegram.setChatMenuButton({
+        menuButton: {
+          type: "commands",
+        },
+      });
       console.log("[ShopBot] Commands registered");
     } catch (e: any) {
       console.error("[ShopBot] Failed to register commands:", e.message);
