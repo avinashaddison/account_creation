@@ -123,34 +123,35 @@ export async function getRecentTransactions(
 }
 
 interface RawBinanceTx {
-  transId:         string;
-  orderAmount:     string;
+  transactionId:   string;
+  amount:          string;   // negative = outgoing, positive = incoming
   currency:        string;
   transactionTime: number;
-  status:          string;
-  remarks?:        string;
-  note?:           string;
-  memo?:           string;
+  note?:           string;   // memo/note provided by sender
+  orderType?:      string;
   payerInfo?: {
-    binanceId?: string;
-    accountId?: string;
+    binanceId?: number | string;
+    accountId?: number | string;
+  };
+  receiverInfo?: {
+    binanceId?: number | string;
+    accountId?: number | string;
   };
 }
 
 function mapTx(tx: RawBinanceTx): BinanceTransaction | null {
-  if (!tx.transId || !tx.orderAmount) return null;
+  if (!tx.transactionId || tx.amount === undefined) return null;
 
-  const status = tx.status === "SUCCESS" ? "SUCCESS"
-               : tx.status === "PROCESSING" ? "PROCESSING"
-               : "FAILED";
+  // Only track INCOMING payments (positive amount = someone paid us)
+  if (parseFloat(tx.amount) <= 0) return null;
 
   return {
-    transactionId: tx.transId,
-    amount:        parseFloat(tx.orderAmount).toFixed(8),
+    transactionId: tx.transactionId,
+    amount:        parseFloat(tx.amount).toFixed(8),
     asset:         tx.currency ?? "USDT",
-    note:          tx.remarks ?? tx.note ?? tx.memo ?? "",
+    note:          tx.note ?? "",
     timestamp:     tx.transactionTime,
-    fromUid:       tx.payerInfo?.binanceId ?? tx.payerInfo?.accountId,
-    status,
+    fromUid:       String(tx.payerInfo?.binanceId ?? tx.payerInfo?.accountId ?? ""),
+    status:        "SUCCESS", // only completed txs appear in Pay history
   };
 }
