@@ -3081,14 +3081,13 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.reply(t, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
   });
 
-  bot.hears(SHOP_KB.STOCK, async (ctx) => {
-    await clearShopMenu(ctx);
+  // ── Shared: build and send stock overview (used by keyboard hears + inline action) ──
+  async function renderStockOverview(ctx: any, send: "reply" | "edit") {
     const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
     if (res.rows.length === 0) {
-      return ctx.reply(
-        `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No products exist yet. Create a product first.</i>`,
-        { parse_mode: "HTML" }
-      );
+      const msg = `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No products exist yet. Create a product first.</i>`;
+      if (send === "edit") return safeEdit(ctx, msg, { parse_mode: "HTML" });
+      return ctx.reply(msg, { parse_mode: "HTML" });
     }
     let text = `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<code>  Product                  Avail  Sold  Total\n  ─────────────────────────────────────────────\n`;
@@ -3098,10 +3097,9 @@ export function startTelegramBot(config: BotConfig) {
       const info = await getProductStockInfo(p);
       const name = p.name.slice(0, 22).padEnd(22);
       const statusIcon = p.active ? "🟢" : "🔴";
-      const modeTag = isManual ? " 📬" : "";
       if (isManual) {
         const manualStk = p.manual_stock ?? 0;
-        text += `  ${statusIcon} ${name}${modeTag}  ${String(manualStk).padStart(4)}      —      —\n`;
+        text += `  ${statusIcon} ${name} 📬  ${String(manualStk).padStart(4)}      —      —\n`;
       } else {
         text += `  ${statusIcon} ${name}  ${String(info.avail).padStart(4)}   ${String(info.sold).padStart(4)}   ${String(info.total).padStart(4)}\n`;
       }
@@ -3112,11 +3110,15 @@ export function startTelegramBot(config: BotConfig) {
       )]);
     }
     text += `</code>`;
-    await ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
-  });
+    if (send === "edit") {
+      buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
+      return safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+    }
+    return ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }
 
-  bot.hears(SHOP_KB.MANUAL_ORDERS, async (ctx) => {
-    await clearShopMenu(ctx);
+  // ── Shared: build and send manual orders panel (used by keyboard hears + inline action) ──
+  async function renderManualOrdersPanel(ctx: any, send: "reply" | "edit") {
     const res = await dbQuery(
       `SELECT o.id, o.telegram_id, o.product_name, o.amount, o.created_at,
               c.username, c.first_name
@@ -3125,12 +3127,13 @@ export function startTelegramBot(config: BotConfig) {
        WHERE o.delivery_status = 'pending_delivery'
        ORDER BY o.created_at ASC`
     );
+    const emptyMsg =
+      `\n📬 <b>MANUAL ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<i>No pending manual orders. All caught up!</i>`;
+    const emptyKb = Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]);
     if (res.rows.length === 0) {
-      return ctx.reply(
-        `\n📬 <b>MANUAL ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `<i>No pending manual orders. All caught up!</i>`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
-      );
+      if (send === "edit") return safeEdit(ctx, emptyMsg, { parse_mode: "HTML", ...emptyKb });
+      return ctx.reply(emptyMsg, { parse_mode: "HTML", ...emptyKb });
     }
     let text = `\n📬 <b>MANUAL ORDERS</b>  <code>${res.rows.length} pending</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
@@ -3143,7 +3146,18 @@ export function startTelegramBot(config: BotConfig) {
       buttons.push([Markup.button.callback(`📦  Fulfill — ${o.product_name.slice(0, 20)}`, `shop_fulfill_${o.id}`)]);
     }
     buttons.push([Markup.button.callback("🔄  Refresh", "shop_admin_manual_orders")]);
-    await ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+    if (send === "edit") return safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+    return ctx.reply(text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+  }
+
+  bot.hears(SHOP_KB.STOCK, async (ctx) => {
+    await clearShopMenu(ctx);
+    return renderStockOverview(ctx, "reply");
+  });
+
+  bot.hears(SHOP_KB.MANUAL_ORDERS, async (ctx) => {
+    await clearShopMenu(ctx);
+    return renderManualOrdersPanel(ctx, "reply");
   });
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -3957,37 +3971,7 @@ export function startTelegramBot(config: BotConfig) {
   // 🗄 STOCK MANAGER — overview of all products with live counts
   bot.action("shop_admin_stock", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    const res = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
-    if (res.rows.length === 0) {
-      return safeEdit(ctx,
-        `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<i>No products exist yet. Create a product first.</i>`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
-      );
-    }
-    let text = `\n🗄 <b>STOCK MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<code>  Product                  Avail  Sold  Total\n` +
-      `  ─────────────────────────────────────────────\n`;
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
-    for (const p of res.rows) {
-      const isManual = (p.delivery_mode ?? "auto") === "manual";
-      const info = await getProductStockInfo(p);
-      const name = p.name.slice(0, 22).padEnd(22);
-      const statusIcon = p.active ? "🟢" : "🔴";
-      if (isManual) {
-        const manualStk = p.manual_stock ?? 0;
-        text += `  ${statusIcon} ${name} 📬  ${String(manualStk).padStart(4)}      —      —\n`;
-      } else {
-        text += `  ${statusIcon} ${name}  ${String(info.avail).padStart(4)}   ${String(info.sold).padStart(4)}   ${String(info.total).padStart(4)}\n`;
-      }
-      const displayAvail = isManual ? (p.manual_stock ?? 0) : info.avail;
-      buttons.push([Markup.button.callback(
-        `${displayAvail > 0 ? "🟢" : "🔴"} ${p.name.slice(0, 25)}${isManual ? " 📬" : ""}  (${displayAvail} avail)`,
-        `shop_stock_${p.id}`
-      )]);
-    }
-    text += `</code>`;
-    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
-    await safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+    return renderStockOverview(ctx, "edit");
   });
 
   // Per-product stock management page
@@ -4390,34 +4374,7 @@ export function startTelegramBot(config: BotConfig) {
   // ── Manual Orders panel ───────────────────────────────────────────────────
   bot.action("shop_admin_manual_orders", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    const res = await dbQuery(
-      `SELECT o.id, o.telegram_id, o.product_name, o.amount, o.created_at,
-              c.username, c.first_name
-       FROM shop_orders o
-       LEFT JOIN shop_customers c ON c.telegram_id = o.telegram_id
-       WHERE o.delivery_status = 'pending_delivery'
-       ORDER BY o.created_at ASC`
-    );
-    if (res.rows.length === 0) {
-      return safeEdit(ctx,
-        `\n📬 <b>MANUAL ORDERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `<i>No pending manual orders. All caught up!</i>`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("↩  Back", "shop_admin_menu")]]) }
-      );
-    }
-    let text = `\n📬 <b>MANUAL ORDERS</b>  <code>${res.rows.length} pending</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
-    for (const o of res.rows) {
-      const custName = o.username ? `@${o.username}` : (o.first_name ?? `ID:${o.telegram_id}`);
-      const date     = new Date(o.created_at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
-      text += `📦 <b>${escapeHtml(o.product_name)}</b>  ·  $${parseFloat(o.amount).toFixed(2)}\n`;
-      text += `👤 ${escapeHtml(custName)}  <code>(${o.telegram_id})</code>  ·  ${date}\n`;
-      text += `🆔 <code>${o.id}</code>\n\n`;
-      buttons.push([Markup.button.callback(`📦  Fulfill — ${o.product_name.slice(0, 20)}`, `shop_fulfill_${o.id}`)]);
-    }
-    buttons.push([Markup.button.callback("🔄  Refresh", "shop_admin_manual_orders")]);
-    buttons.push([Markup.button.callback("↩  Back", "shop_admin_menu")]);
-    await safeEdit(ctx, text, { parse_mode: "HTML", ...Markup.inlineKeyboard(buttons) });
+    return renderManualOrdersPanel(ctx, "edit");
   });
 
   // ── Fulfill a manual order ────────────────────────────────────────────────
