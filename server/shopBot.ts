@@ -2484,19 +2484,14 @@ export function startShopBot(token: string) {
     if (!uid) return;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     pushMenuButton(ctx.chat.id).catch(() => {});
-    const balance = await getBalance(uid);
-    const name  = ctx.from.first_name || ctx.from.username || "User";
-    const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
+    const name = ctx.from.first_name || ctx.from.username || "User";
     await ctx.reply(
       truncate(
         `${ae(ANIM_EMOJI.bolt, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.bolt, "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `👋  Hey, <b>${escHtml(name)}</b>!  Tap the <b>Menu</b> button to navigate.\n\n` +
-        `<code>◈  💰  Balance   ›  ${fmt$(balance)}\n` +
-        `◈  🔖  User      ›  ${uname}\n` +
-        `◈  🆔  ID        ›  ${uid}</code>`
+        `👋  Hey, <b>${escHtml(name)}</b>!  Tap the <b>Menu</b> button to navigate.`
       ),
       // Explicitly remove any active reply keyboard so the "Menu" button in the
       // input bar becomes visible again.
