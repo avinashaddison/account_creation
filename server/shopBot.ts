@@ -1902,7 +1902,7 @@ export function startShopBot(token: string) {
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`${ae("bolt", "⚡")}  Auto Verify  ·  Instant`, "dep_auto_upi")],
+          [Markup.button.callback("⚡  Auto Verify  ·  Instant", "dep_auto_upi")],
           [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
           [Markup.button.callback("‹  Back",         "dep_back_methods")],
         ]),
@@ -1943,7 +1943,7 @@ export function startShopBot(token: string) {
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`${ae("bolt", "⚡")}  Auto Verify  ·  Instant`, "dep_auto_upi")],
+          [Markup.button.callback("⚡  Auto Verify  ·  Instant", "dep_auto_upi")],
           [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
           [Markup.button.callback("‹  Back",         "dep_back_methods")],
         ]),
