@@ -2261,6 +2261,8 @@ export function startShopBot(token: string) {
           `<b>Network:</b>  <code>TRON (TRC20)</code>\n` +
           `<b>Address:</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
           `${divider()}\n\n` +
+          `<b>Reference Note:</b>  <code>${order.note}</code>\n\n` +
+          `${divider()}\n\n` +
           `<b>⚠️ Send the EXACT amount shown above.</b>\n` +
           `<i>The unique amount identifies your payment automatically. Do not send a rounded number.\n\n` +
           `Your balance will be credited once the blockchain confirms the transfer (usually within 1-2 minutes).\n\n` +
@@ -2274,6 +2276,8 @@ export function startShopBot(token: string) {
           `<b>Amount:</b>  <code>${exactAmt.toFixed(2)} USDT</code>\n` +
           `<b>Network:</b>  <code>BNB Smart Chain (BEP20)</code>\n` +
           `<b>Address:</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+          `${divider()}\n\n` +
+          `<b>Reference Note:</b>  <code>${order.note}</code>\n\n` +
           `${divider()}\n\n` +
           `<b>⚠️ Send the EXACT amount shown above.</b>\n` +
           `<i>The unique amount identifies your payment automatically. Do not send a rounded number.\n\n` +
@@ -2561,9 +2565,9 @@ export function startShopBot(token: string) {
     if (chain === "BINANCE_PAY") {
       statusLines += `<b>Note:</b> <code>${flow.note}</code>\n`;
     } else if (chain === "TRC20") {
-      statusLines += `<b>Address:</b> <code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n<b>Network:</b> TRON (TRC20)\n`;
+      statusLines += `<b>Address:</b> <code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n<b>Network:</b> TRON (TRC20)\n<b>Reference Note:</b> <code>${flow.note}</code>\n`;
     } else {
-      statusLines += `<b>Address:</b> <code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n<b>Network:</b> BNB Smart Chain (BEP20)\n`;
+      statusLines += `<b>Address:</b> <code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n<b>Network:</b> BNB Smart Chain (BEP20)\n<b>Reference Note:</b> <code>${flow.note}</code>\n`;
     }
     return safeEdit(ctx,
       `⏳ <b>Still waiting for payment…</b>\n\n` +
