@@ -1841,13 +1841,13 @@ export function startShopBot(token: string) {
   bot.action("dep_method_upi", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("upi", "🇮🇳")} <b>UPI</b>  ·  India\n` +
+      `${ae("upi", "🇮🇳")} <b>UPI</b>  ·  India  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send to this UPI ID:\n\n` +
       `<code>  🇮🇳  UPI ID  ›  avinashaddison-8@okaxis</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `${ae("check", "✅")} After sending, tap <b>Submit Proof</b> to upload your screenshot — our team will confirm and credit your balance.\n\n` +
-      `<i>Min deposit: <b>$1.00 USDT equivalent</b>  ·  Manual review</i>`,
+      `<i>Min deposit: <b>$1.00 USDT equivalent</b></i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -2514,7 +2514,7 @@ export function startShopBot(token: string) {
       [Markup.button.callback("⚡  Binance Pay  ·  Instant",         "dep_method_binance")],
       [Markup.button.callback("💎  USDT TRC20  ·  Tron  ·  Instant", "dep_method_trc20")],
       [Markup.button.callback("🔷  USDT BEP20  ·  BSC  ·  Instant",  "dep_method_bep20")],
-      [Markup.button.callback("🇮🇳  UPI  ·  India",                   "dep_method_upi")],
+      [Markup.button.callback("🇮🇳  UPI  ·  India  ·  Instant",         "dep_method_upi")],
     ];
     if (withBack) rows.push([Markup.button.callback("🛍  Back to Shop", "shop_back_products")]);
     return Markup.inlineKeyboard(rows);
