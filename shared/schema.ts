@@ -416,3 +416,15 @@ export const insertCryptoOrderSchema = createInsertSchema(cryptoOrders).omit({
 });
 export type InsertCryptoOrder = z.infer<typeof insertCryptoOrderSchema>;
 export type CryptoOrder       = typeof cryptoOrders.$inferSelect;
+
+// ── UPI Payment Orders ─────────────────────────────────────────────────────────
+export const upiOrders = pgTable("upi_orders", {
+  id:         varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  utr:        text("utr").notNull().unique(),
+  userId:     text("user_id").notNull(),
+  amountInr:  numeric("amount_inr", { precision: 12, scale: 2 }).notNull(),
+  amountUsd:  numeric("amount_usd", { precision: 12, scale: 2 }).notNull(),
+  senderName: text("sender_name"),
+  senderBank: text("sender_bank"),
+  createdAt:  timestamp("created_at").defaultNow().notNull(),
+});

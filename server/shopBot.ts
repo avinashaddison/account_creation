@@ -8,6 +8,7 @@ import {
 } from "./activationStore";
 import { createOrder, setOnPaymentPaid } from "./crypto/orderService";
 import { ae as aeFromSettings, loadEmojiSettings } from "./emojiSettings";
+import { searchUpiPaymentEmail } from "./mailService";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -219,6 +220,17 @@ interface CryptoDepositFlow {
 }
 const cryptoDepositFlows = new Map<number, CryptoDepositFlow>();
 
+// UPI auto-verify flow
+interface UpiDepositFlow {
+  step:      "waiting_amount" | "waiting_utr";
+  amountUsd?: number;
+  amountInr?: number;
+  msgId?:    number; // message to edit for status updates
+}
+const upiDepositFlows = new Map<number, UpiDepositFlow>();
+
+const UPI_RATE = 100; // 1 USD = 100 INR (configurable)
+
 const ACTIVATION_PRICE = 2.00;
 const VIP_THRESHOLD    = 10.00;
 
@@ -342,6 +354,35 @@ function notifyAdminsManualOrder(
     }).catch((err: unknown) => {
       console.error(`[shopBot] Failed to notify admin ${id} of manual order ${orderId}:`, err);
     });
+  }
+}
+
+function notifyAdminsUpiPayment(
+  uid: number,
+  uname: string,
+  utr: string,
+  amountInr: number,
+  amountUsd: number,
+  senderName: string | null,
+  senderBank: string | null,
+) {
+  const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+  const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!adminToken || adminIds.length === 0) return;
+  const text =
+    `✅ <b>UPI PAYMENT RECEIVED</b>\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `🇮🇳 Amount:  <b>₹${amountInr.toFixed(2)}</b>  →  <b>$${amountUsd.toFixed(2)} USDT</b>\n` +
+    `🔖 UTR:     <code>${utr}</code>\n` +
+    (senderName ? `👤 Sender:  <b>${escHtml(senderName)}</b>` + (senderBank ? ` / ${escHtml(senderBank)}` : "") + `\n` : "") +
+    `\n👤 Customer: ${escHtml(uname)}  <code>(${uid})</code>\n\n` +
+    `<i>Balance credited automatically.</i>`;
+  for (const id of adminIds) {
+    fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: id, text, parse_mode: "HTML" }),
+    }).catch(() => {});
   }
 }
 
@@ -828,6 +869,16 @@ async function ensureShopTables() {
       amount NUMERIC(10,2) NOT NULL DEFAULT 2.00,
       status TEXT NOT NULL DEFAULT 'pending',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS upi_orders (
+      id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      utr         TEXT NOT NULL UNIQUE,
+      user_id     TEXT NOT NULL,
+      amount_inr  NUMERIC(12,2) NOT NULL,
+      amount_usd  NUMERIC(12,2) NOT NULL,
+      sender_name TEXT,
+      sender_bank TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
   console.log("[ShopBot] Tables ready");
@@ -1846,14 +1897,97 @@ export function startShopBot(token: string) {
       `Send to this UPI ID:\n\n` +
       `<code>  🇮🇳  UPI ID  ›  avinashaddison-8@okaxis</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae("check", "✅")} After sending, tap <b>Submit Proof</b> to upload your screenshot — our team will confirm and credit your balance.\n\n` +
-      `<i>Min deposit: <b>$1.00 USDT equivalent</b></i>`,
+      `${ae("bolt", "⚡")} Tap <b>Auto Verify</b> — enter the amount, pay, then submit your UTR number for instant balance credit.\n\n` +
+      `<i>Min deposit: <b>$1.00</b> · Rate: <b>$1 = ₹${UPI_RATE}</b></i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
+          [Markup.button.callback(`${ae("bolt", "⚡")}  Auto Verify  ·  Instant`, "dep_auto_upi")],
           [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
           [Markup.button.callback("‹  Back",         "dep_back_methods")],
         ]),
+      }
+    );
+  });
+
+  // ── UPI Auto-Verify flow ──────────────────────────────────────────────────
+  bot.action("dep_auto_upi", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    upiDepositFlows.set(uid, { step: "waiting_amount" });
+    await safeReply(ctx,
+      `${ae("upi", "🇮🇳")} <b>UPI Auto Verify</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Enter the amount you want to deposit <b>in USD</b>:\n\n` +
+      `<i>Example: <code>10</code>  →  you will pay ₹${UPI_RATE * 10}</i>\n` +
+      `<i>Min: <b>$1.00</b>  ·  Rate: <b>$1 = ₹${UPI_RATE}</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("✖  Cancel", "dep_upi_cancel")]]),
+      }
+    );
+  });
+
+  bot.action("dep_upi_cancel", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    upiDepositFlows.delete(uid);
+    return safeEdit(ctx,
+      `${ae("upi", "🇮🇳")} <b>UPI Payment</b>  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Send to this UPI ID:\n\n` +
+      `<code>  🇮🇳  UPI ID  ›  avinashaddison-8@okaxis</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `${ae("bolt", "⚡")} Tap <b>Auto Verify</b> — enter the amount, pay, then submit your UTR number for instant balance credit.\n\n` +
+      `<i>Min deposit: <b>$1.00</b> · Rate: <b>$1 = ₹${UPI_RATE}</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`${ae("bolt", "⚡")}  Auto Verify  ·  Instant`, "dep_auto_upi")],
+          [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
+          [Markup.button.callback("‹  Back",         "dep_back_methods")],
+        ]),
+      }
+    );
+  });
+
+  bot.action("dep_upi_paid", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid  = ctx.from.id;
+    const flow = upiDepositFlows.get(uid);
+    if (!flow || !flow.amountInr) {
+      await ctx.answerCbQuery("Session expired. Please start over.", { show_alert: true });
+      return;
+    }
+    flow.step = "waiting_utr";
+    await safeReply(ctx,
+      `🔖 <b>Enter your UTR number</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Please enter the <b>UTR / Reference number</b> shown in your UPI payment confirmation.\n\n` +
+      `<i>It's a 12-digit number, e.g. <code>602487211999</code></i>\n\n` +
+      `We will verify the payment automatically against your bank alert.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("✖  Cancel", "dep_upi_cancel")]]),
+      }
+    );
+  });
+
+  bot.action("dep_upi_recheck", async (ctx) => {
+    await ctx.answerCbQuery("Rechecking…").catch(() => {});
+    const uid  = ctx.from.id;
+    const flow = upiDepositFlows.get(uid);
+    if (!flow || flow.step !== "waiting_utr" || !flow.amountInr) {
+      await ctx.answerCbQuery("Session expired. Please start over.", { show_alert: true });
+      return;
+    }
+    // Re-ask for UTR (user has to re-enter it after a recheck)
+    await safeReply(ctx,
+      `🔖 <b>Enter your UTR number again</b>\n\n` +
+      `Please re-enter the UTR number to retry verification:`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("✖  Cancel", "dep_upi_cancel")]]),
       }
     );
   });
@@ -2354,6 +2488,159 @@ export function startShopBot(token: string) {
           [Markup.button.callback("❌  Cancel Order",  "dep_auto_cancel")],
         ]),
       });
+    }
+
+    // ── UPI auto-verify — amount input ───────────────────────────────────────
+    const upiFlow = upiDepositFlows.get(uid);
+    if (upiFlow) {
+      const raw = ctx.message.text?.trim() ?? "";
+      await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
+
+      if (upiFlow.step === "waiting_amount") {
+        const amtUsd = parseFloat(raw);
+        if (isNaN(amtUsd) || amtUsd < 1) {
+          return safeReply(ctx,
+            `⚠️ <b>Invalid amount.</b> Enter a number ≥ 1 (e.g. <code>10</code>):`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("✖  Cancel", "dep_upi_cancel")]]),
+            }
+          );
+        }
+        const amtInr = Math.round(amtUsd * UPI_RATE * 100) / 100;
+        upiFlow.amountUsd = amtUsd;
+        upiFlow.amountInr = amtInr;
+        // Keep step as waiting_amount until user taps "I've Paid"
+
+        return safeReply(ctx,
+          `${ae("upi", "🇮🇳")} <b>UPI Auto Verify  ·  ${ae("bolt", "⚡")} Instant</b>\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `Please send the exact amount to our UPI ID:\n\n` +
+          `<b>Amount:</b>  <code>₹${amtInr.toFixed(2)}</code>\n` +
+          `<b>UPI ID:</b>  <code>avinashaddison-8@okaxis</code>\n\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `After completing the payment, tap <b>I've Paid</b> and enter your <b>UTR number</b> to get your balance credited instantly.\n\n` +
+          `<i>Rate: $1 = ₹${UPI_RATE}  ·  You pay: ₹${amtInr.toFixed(2)}  →  Get: $${amtUsd.toFixed(2)} USDT</i>`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("✅  I've Paid — Enter UTR", "dep_upi_paid")],
+              [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi")],
+              [Markup.button.callback("✖  Cancel", "dep_upi_cancel")],
+            ]),
+          }
+        );
+      }
+
+      if (upiFlow.step === "waiting_utr") {
+        const utr = raw.replace(/\s+/g, "").replace(/[^0-9]/g, "");
+        if (utr.length < 6) {
+          return safeReply(ctx,
+            `⚠️ <b>Invalid UTR.</b> Please enter the full UTR/reference number from your payment confirmation:`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("✖  Cancel", "dep_upi_cancel")]]),
+            }
+          );
+        }
+
+        // Show checking message
+        const checkMsg = await safeReply(ctx,
+          `🔍 <b>Verifying payment…</b>\n\n` +
+          `Checking UTR <code>${utr}</code> against bank records.\n` +
+          `<i>This may take up to 30 seconds…</i>`,
+          { parse_mode: "HTML" }
+        );
+
+        // Check for duplicate UTR
+        const dupCheck = await dbQuery(`SELECT id FROM upi_orders WHERE utr = $1`, [utr]);
+        if (dupCheck.rows.length > 0) {
+          return safeReply(ctx,
+            `⚠️ <b>UTR Already Used</b>\n\n` +
+            `This UTR <code>${utr}</code> has already been processed.\n\n` +
+            `If this is a mistake, contact ${SUPPORT_CONTACT}.`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("✖  Done", "dep_upi_cancel")]]),
+            }
+          );
+        }
+
+        // Search Gmail for matching Axis Bank email
+        const payInfo = await searchUpiPaymentEmail(utr, 48);
+
+        if (!payInfo) {
+          return safeReply(ctx,
+            `❌ <b>Payment Not Detected</b>\n\n` +
+            `Could not find a bank alert for UTR <code>${utr}</code>.\n\n` +
+            `Possible reasons:\n` +
+            `  · The bank alert email hasn't arrived yet (can take 1–2 min)\n` +
+            `  · The UTR number may be incorrect\n\n` +
+            `<i>Try again in a moment, or contact ${SUPPORT_CONTACT} if the issue persists.</i>`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback("🔄  Try Again", "dep_upi_recheck")],
+                [Markup.button.callback("✖  Cancel", "dep_upi_cancel")],
+              ]),
+            }
+          );
+        }
+
+        // Verify amount (allow ±5% tolerance for rounding/fees)
+        const expectedInr = upiFlow.amountInr ?? 0;
+        const tolerance   = Math.max(expectedInr * 0.05, 1);
+        if (Math.abs(payInfo.amountInr - expectedInr) > tolerance) {
+          return safeReply(ctx,
+            `⚠️ <b>Amount Mismatch</b>\n\n` +
+            `Expected: <b>₹${expectedInr.toFixed(2)}</b>\n` +
+            `Received: <b>₹${payInfo.amountInr.toFixed(2)}</b>\n\n` +
+            `The credited amount does not match. Contact ${SUPPORT_CONTACT} for manual resolution.`,
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[Markup.button.callback("✖  Done", "dep_upi_cancel")]]),
+            }
+          );
+        }
+
+        // All checks passed — credit the wallet
+        const amtUsd = Math.round((payInfo.amountInr / UPI_RATE) * 100) / 100;
+
+        await dbQuery(
+          `INSERT INTO upi_orders (utr, user_id, amount_inr, amount_usd, sender_name, sender_bank)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [utr, String(uid), payInfo.amountInr.toFixed(2), amtUsd.toFixed(2), payInfo.senderName, payInfo.senderBank]
+        );
+
+        await dbQuery(
+          `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
+          [amtUsd.toFixed(2), uid]
+        );
+
+        upiDepositFlows.delete(uid);
+
+        const newBal = await getBalance(uid);
+
+        await safeReply(ctx,
+          `╔══════════════════════════════════════╗\n` +
+          `║  ✅  <b>PAYMENT CONFIRMED!</b>  ║\n` +
+          `╚══════════════════════════════════════╝\n\n` +
+          `<b>+${amtUsd.toFixed(2)} USDT</b> has been added to your wallet.\n\n` +
+          `🇮🇳 <b>INR paid:</b> <code>₹${payInfo.amountInr.toFixed(2)}</code>\n` +
+          `🔖 <b>UTR:</b> <code>${utr}</code>\n` +
+          (payInfo.senderName ? `👤 <b>Sender:</b> <code>${escHtml(payInfo.senderName)}</code>\n` : "") +
+          `\n💰 <b>New balance:</b> <code>$${newBal.toFixed(2)}</code>`,
+          { parse_mode: "HTML" }
+        );
+
+        // Notify admins
+        const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Unknown";
+        notifyAdminsUpiPayment(uid, uname, utr, payInfo.amountInr, amtUsd, payInfo.senderName, payInfo.senderBank);
+
+        return;
+      }
+
+      return; // in some UPI flow step — consumed
     }
 
     // ── Buy promo code flow ───────────────────────────────────────────────────

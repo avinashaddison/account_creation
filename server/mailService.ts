@@ -1364,3 +1364,108 @@ export async function fetchOpenAICodeFromBizMail(
   log(`[BizMail JMAP] Timed out waiting for OpenAI verification email to ${email}`);
   return null;
 }
+
+// ── UPI Payment email parser (Axis Bank alerts) ────────────────────────────────
+// Subject format:  "INR 2000.00 was credited to your A/c."
+// From:            alerts@axis.bank.in
+// Body contains:   "UPI/P2A/602487211999/MOHD AADI/HDFC/Sent"
+
+export interface UpiPaymentInfo {
+  utr:        string;
+  amountInr:  number;
+  senderName: string | null;
+  senderBank: string | null;
+}
+
+function parseAxisBankEmail(subject: string, body: string): UpiPaymentInfo | null {
+  // Extract amount from subject
+  const amtMatch = subject.match(/INR\s+([\d,]+\.?\d*)\s+was credited/i);
+  if (!amtMatch) return null;
+  const amountInr = parseFloat(amtMatch[1].replace(/,/g, ""));
+  if (isNaN(amountInr) || amountInr <= 0) return null;
+
+  // Extract UTR, sender name, sender bank from body
+  // Patterns: UPI/P2A/UTR/NAME/BANK/Sent  or  UPI/P2P/UTR/NAME/BANK/Sent
+  const txMatch = body.match(/UPI\/P2[AP]\/(\d{6,})\/?([^\/\r\n]*)?\/?([^\/\r\n]*)?/i);
+  if (!txMatch) {
+    // Fallback: look for a standalone 12-digit UTR
+    const utrOnly = body.match(/\b(\d{12})\b/);
+    if (!utrOnly) return null;
+    return { utr: utrOnly[1], amountInr, senderName: null, senderBank: null };
+  }
+
+  return {
+    utr:        txMatch[1],
+    amountInr,
+    senderName: txMatch[2]?.trim() || null,
+    senderBank: txMatch[3]?.trim() || null,
+  };
+}
+
+/**
+ * Searches Gmail IMAP for an Axis Bank UPI credit notification containing the
+ * given UTR number.  Looks back `sinceHours` hours.  Returns payment details
+ * or null if not found.
+ */
+export async function searchUpiPaymentEmail(
+  utr: string,
+  sinceHours = 48,
+): Promise<UpiPaymentInfo | null> {
+  if (!_gmailAddress || !_gmailAppPassword) {
+    console.log("[UPI] Gmail credentials not configured");
+    return null;
+  }
+
+  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+
+  const client = new ImapFlow({
+    host: "imap.gmail.com",
+    port: 993,
+    secure: true,
+    auth: { user: _gmailAddress, pass: _gmailAppPassword },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock("INBOX").catch(async () => {
+      // Try [Gmail]/All Mail as fallback
+      return client.getMailboxLock("[Gmail]/All Mail");
+    });
+
+    try {
+      const uids = await client.search(
+        { from: "axis.bank.in", since },
+        { uid: true },
+      );
+
+      if (!uids.length) {
+        console.log("[UPI] No Axis Bank emails found in timeframe");
+        return null;
+      }
+
+      const range = (uids as number[]).join(",");
+      for await (const msg of client.fetch(range, { source: true, envelope: true }, { uid: true })) {
+        const subject = msg.envelope?.subject || "";
+        const raw     = msg.source?.toString("utf8") || "";
+        const body    = extractMimeText(raw);
+        const full    = subject + " " + body + " " + raw;
+
+        const info = parseAxisBankEmail(subject, full);
+        if (!info) continue;
+        if (info.utr !== utr) continue;
+
+        console.log(`[UPI] Found matching email: UTR=${info.utr} INR=${info.amountInr}`);
+        return info;
+      }
+    } finally {
+      lock.release();
+    }
+  } catch (err: any) {
+    console.error("[UPI] IMAP error:", err.message);
+  } finally {
+    try { await client.logout(); } catch {}
+  }
+
+  return null;
+}
