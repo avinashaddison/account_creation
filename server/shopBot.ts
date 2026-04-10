@@ -1801,7 +1801,7 @@ export function startShopBot(token: string) {
   bot.action("dep_method_trc20", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("diamond", "💎")} <b>USDT TRC20</b>  ·  Tron Network\n` +
+      `${ae("diamond", "💎")} <b>USDT TRC20</b>  ·  Tron  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send USDT (TRC20) to this address:\n\n` +
       `<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
@@ -1811,7 +1811,7 @@ export function startShopBot(token: string) {
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("📋  Copy Address", "dep_copy_trc20"), Markup.button.callback("💎  Auto Verify", "dep_auto_trc20")],
+          [Markup.button.callback("📋  Copy Address", "dep_copy_trc20"), Markup.button.callback("💎  Auto Verify  ·  Instant", "dep_auto_trc20")],
           [Markup.button.callback("‹  Back",          "dep_back_methods")],
         ]),
       }
@@ -1821,7 +1821,7 @@ export function startShopBot(token: string) {
   bot.action("dep_method_bep20", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("bep20", "🔷")} <b>USDT BEP20</b>  ·  BNB Smart Chain\n` +
+      `${ae("bep20", "🔷")} <b>USDT BEP20</b>  ·  BSC  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send USDT (BEP20) to this address:\n\n` +
       `<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
@@ -1831,7 +1831,7 @@ export function startShopBot(token: string) {
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("📋  Copy Address", "dep_copy_bep20"), Markup.button.callback("🔷  Auto Verify", "dep_auto_bep20")],
+          [Markup.button.callback("📋  Copy Address", "dep_copy_bep20"), Markup.button.callback("🔷  Auto Verify  ·  Instant", "dep_auto_bep20")],
           [Markup.button.callback("‹  Back",          "dep_back_methods")],
         ]),
       }
@@ -2511,10 +2511,10 @@ export function startShopBot(token: string) {
   // Returns the clean method-select keyboard (full-width buttons per method)
   function depositMethodKeyboard(withBack = false) {
     const rows: ReturnType<typeof Markup.button.callback>[][] = [
-      [Markup.button.callback("⚡  Binance Pay  ·  Instant",  "dep_method_binance")],
-      [Markup.button.callback("💎  USDT TRC20  ·  Tron",      "dep_method_trc20")],
-      [Markup.button.callback("🔷  USDT BEP20  ·  BSC",       "dep_method_bep20")],
-      [Markup.button.callback("🇮🇳  UPI  ·  India",            "dep_method_upi")],
+      [Markup.button.callback("⚡  Binance Pay  ·  Instant",         "dep_method_binance")],
+      [Markup.button.callback("💎  USDT TRC20  ·  Tron  ·  Instant", "dep_method_trc20")],
+      [Markup.button.callback("🔷  USDT BEP20  ·  BSC  ·  Instant",  "dep_method_bep20")],
+      [Markup.button.callback("🇮🇳  UPI  ·  India",                   "dep_method_upi")],
     ];
     if (withBack) rows.push([Markup.button.callback("🛍  Back to Shop", "shop_back_products")]);
     return Markup.inlineKeyboard(rows);
@@ -2574,7 +2574,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "TRC20" });
     return safeEdit(ctx,
-      `${ae("diamond", "💎")} <b>Auto Verify — USDT TRC20</b>\n\n` +
+      `${ae("diamond", "💎")} <b>USDT TRC20</b>  ·  Tron  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>\n\n` +
@@ -2591,7 +2591,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "BEP20" });
     return safeEdit(ctx,
-      `${ae("bep20", "🔷")} <b>Auto Verify — USDT BEP20</b>\n\n` +
+      `${ae("bep20", "🔷")} <b>USDT BEP20</b>  ·  BSC  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>\n\n` +
