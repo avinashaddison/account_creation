@@ -359,6 +359,7 @@ const SHOP_KB = {
   RESTOCK:       "🔔  RESTOCK NOTIFY",
   STOCK:         "🗄  STOCK MANAGER",
   MANUAL_ORDERS: "📬  MANUAL ORDERS",
+  EMOJI:         "✨  EMOJI SETTINGS",
   BACK:          "↩  BACK",
 } as const;
 
@@ -370,6 +371,7 @@ const SHOP_KEYBOARD = Markup.keyboard([
   [SHOP_KB.SEARCH,        SHOP_KB.REFER_REWARD],
   [SHOP_KB.PROMO_CODES,   SHOP_KB.RESTOCK],
   [SHOP_KB.STOCK,         SHOP_KB.MANUAL_ORDERS],
+  [SHOP_KB.EMOJI],
   [SHOP_KB.BACK],
 ]).resize();
 
@@ -3285,6 +3287,14 @@ export function startTelegramBot(config: BotConfig) {
   bot.hears(SHOP_KB.MANUAL_ORDERS, async (ctx) => {
     await clearShopMenu(ctx);
     return renderManualOrdersPanel(ctx, "reply");
+  });
+
+  bot.hears(SHOP_KB.EMOJI, async (ctx) => {
+    await clearShopMenu(ctx);
+    await ctx.reply(emojiPanelText(), {
+      parse_mode: "HTML",
+      ...emojiPanelKeyboard(),
+    });
   });
   // ─────────────────────────────────────────────────────────────────────────
 
