@@ -1821,7 +1821,7 @@ export function startShopBot(token: string) {
   bot.action("dep_method_bep20", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `🔷 <b>USDT BEP20  (BSC)</b>\n` +
+      `${ae("bep20", "🔷")} <b>USDT BEP20  (BSC)</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send USDT to this BEP20 address:\n\n` +
       `<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
@@ -1841,7 +1841,7 @@ export function startShopBot(token: string) {
   bot.action("dep_method_upi", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `🇮🇳 <b>UPI  (India)</b>\n` +
+      `${ae("upi", "🇮🇳")} <b>UPI  (India)</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send to this UPI ID:\n\n` +
       `<code>  avinashaddison-8@okaxis</code>\n\n` +
@@ -2558,7 +2558,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "BINANCE_PAY" });
     return safeEdit(ctx,
-      `⚡ <b>Auto Verify — Binance Pay</b>\n\n` +
+      `${ae("bolt", "⚡")} <b>Auto Verify — Binance Pay</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>`,
@@ -2574,7 +2574,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "TRC20" });
     return safeEdit(ctx,
-      `💎 <b>Auto Verify — USDT TRC20</b>\n\n` +
+      `${ae("diamond", "💎")} <b>Auto Verify — USDT TRC20</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>\n\n` +
@@ -2591,7 +2591,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "BEP20" });
     return safeEdit(ctx,
-      `🔷 <b>Auto Verify — USDT BEP20</b>\n\n` +
+      `${ae("bep20", "🔷")} <b>Auto Verify — USDT BEP20</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>\n\n` +

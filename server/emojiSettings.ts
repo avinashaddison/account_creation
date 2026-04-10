@@ -6,6 +6,8 @@ export const EMOJI_SLOTS = {
   card:    { label: "💳 Card (ADD FUNDS header)",      fallback: "💳", default: "5382116965029829100" },
   bolt:    { label: "⚡ Bolt (Auto Verify / speed)",   fallback: "⚡", default: "5219005168305143806" },
   diamond: { label: "💎 Diamond (TRC20)",              fallback: "💎", default: "5471952986970267627" },
+  bep20:   { label: "🔷 BEP20 (BSC / BNB Chain)",     fallback: "🔷", default: "5348139998284975051" },
+  upi:     { label: "🇮🇳 UPI (India payments)",        fallback: "🇮🇳", default: "5415051041602009099" },
   money:   { label: "💰 Money (wallet / balance)",     fallback: "💰", default: "5371260806527499265" },
   fire:    { label: "🔥 Fire (header / branding)",     fallback: "🔥", default: "5368324170671202286" },
   star:    { label: "⭐ Star (VIP / featured)",        fallback: "⭐", default: "5376425420038527205" },
