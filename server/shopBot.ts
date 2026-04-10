@@ -1,5 +1,6 @@
 import { Telegraf, Markup } from "telegraf";
 import { Pool, PoolClient } from "pg";
+import QRCode from "qrcode";
 import {
   pendingActivations, adminApprovalStates as _adminApprovalStates,
   buildActivationCountdownMsg,
@@ -2512,12 +2513,11 @@ export function startShopBot(token: string) {
         upiFlow.amountInr = amtInr;
         // Keep step as waiting_amount until user taps "I've Paid"
 
-        // Build dynamic UPI deep-link and QR code URL
+        // Build UPI deep-link — amount pre-filled so the user just scans & confirms
         const upiPayload = `upi://pay?pa=avinashaddison-8@okaxis&pn=Project%20Addison&am=${amtInr.toFixed(2)}&cu=INR`;
-        const qrUrl      = `https://quickchart.io/qr?text=${encodeURIComponent(upiPayload)}&size=320&margin=2&dark=000000&light=ffffff`;
 
         const caption =
-          `${ae("upi", "🇮🇳")} <b>UPI Auto Verify  ·  ${ae("bolt", "⚡")} Instant</b>\n` +
+          `${ae("upi", "🇮🇳")} <b>UPI Auto Verify  ·  ⚡ Instant</b>\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
           `📱 <b>Scan the QR code</b> with any UPI app\n` +
           `<i>(GPay, PhonePe, Paytm, BHIM — amount is pre-filled)</i>\n\n` +
@@ -2537,18 +2537,21 @@ export function startShopBot(token: string) {
         };
 
         try {
-          // Download QR image on our server, then upload to Telegram as a buffer
-          // (passing a URL directly causes DOCUMENT_INVALID from Telegram's side)
-          const qrRes    = await fetch(qrUrl);
-          const qrBuf    = Buffer.from(await qrRes.arrayBuffer());
+          // Generate QR locally — no external API call, guaranteed valid PNG buffer
+          const qrBuf = await QRCode.toBuffer(upiPayload, {
+            type: "png",
+            width: 360,
+            margin: 2,
+            color: { dark: "#000000", light: "#ffffff" },
+          });
           await ctx.telegram.sendPhoto(
             ctx.chat.id,
-            { source: qrBuf, filename: "upi_qr.png" },
+            { source: qrBuf },
             { caption, parse_mode: "HTML", reply_markup: replyMarkup }
           );
         } catch (photoErr: any) {
           console.error("[UPI QR] Failed to send QR photo:", photoErr?.message);
-          // Fallback to text if QR image fails for any reason
+          // Fallback to text if photo send fails for any reason
           await safeReply(ctx, caption, {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
