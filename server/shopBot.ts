@@ -2517,7 +2517,7 @@ export function startShopBot(token: string) {
         const upiPayload = `upi://pay?pa=avinashaddison-8@okaxis&pn=Project%20Addison&am=${amtInr.toFixed(2)}&cu=INR`;
 
         const caption =
-          `${ae("upi", "🇮🇳")} <b>UPI Auto Verify  ·  ⚡ Instant</b>\n` +
+          `🇮🇳 <b>UPI Auto Verify  ·  ⚡ Instant</b>\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
           `📱 <b>Scan the QR code</b> with any UPI app\n` +
           `<i>(GPay, PhonePe, Paytm, BHIM — amount is pre-filled)</i>\n\n` +
