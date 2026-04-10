@@ -2512,24 +2512,47 @@ export function startShopBot(token: string) {
         upiFlow.amountInr = amtInr;
         // Keep step as waiting_amount until user taps "I've Paid"
 
-        return safeReply(ctx,
+        // Build dynamic UPI deep-link and QR code URL
+        const upiPayload = `upi://pay?pa=avinashaddison-8@okaxis&pn=Project%20Addison&am=${amtInr.toFixed(2)}&cu=INR`;
+        const qrUrl      = `https://quickchart.io/qr?text=${encodeURIComponent(upiPayload)}&size=320&margin=2&dark=000000&light=ffffff`;
+
+        const caption =
           `${ae("upi", "🇮🇳")} <b>UPI Auto Verify  ·  ${ae("bolt", "⚡")} Instant</b>\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-          `Please send the exact amount to our UPI ID:\n\n` +
+          `📱 <b>Scan the QR code</b> with any UPI app\n` +
+          `<i>(GPay, PhonePe, Paytm, BHIM — amount is pre-filled)</i>\n\n` +
+          `Or pay manually:\n` +
           `<b>Amount:</b>  <code>₹${amtInr.toFixed(2)}</code>\n` +
           `<b>UPI ID:</b>  <code>avinashaddison-8@okaxis</code>\n\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-          `After completing the payment, tap <b>I've Paid</b> and enter your <b>UTR number</b> to get your balance credited instantly.\n\n` +
-          `<i>Rate: $1 = ₹${UPI_RATE}  ·  You pay: ₹${amtInr.toFixed(2)}  →  Get: $${amtUsd.toFixed(2)} USDT</i>`,
-          {
+          `After paying, tap <b>I've Paid</b> and enter your UTR for instant credit.\n\n` +
+          `<i>You pay: ₹${amtInr.toFixed(2)}  →  Get: $${amtUsd.toFixed(2)} USDT</i>`;
+
+        try {
+          await ctx.telegram.sendPhoto(ctx.chat.id, { url: qrUrl }, {
+            caption,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "✅  I've Paid — Enter UTR", callback_data: "dep_upi_paid" }],
+                [{ text: "📋  Copy UPI ID",            callback_data: "dep_copy_upi"  }],
+                [{ text: "✖  Cancel",                  callback_data: "dep_upi_cancel" }],
+              ],
+            },
+          });
+        } catch (photoErr: any) {
+          // Fallback to text if QR image fails
+          console.error("[UPI QR] Failed to send QR photo:", photoErr?.message);
+          await safeReply(ctx, caption, {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
               [Markup.button.callback("✅  I've Paid — Enter UTR", "dep_upi_paid")],
               [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi")],
               [Markup.button.callback("✖  Cancel", "dep_upi_cancel")],
             ]),
-          }
-        );
+          });
+        }
+        return;
       }
 
       if (upiFlow.step === "waiting_utr") {
