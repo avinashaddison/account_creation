@@ -2528,21 +2528,27 @@ export function startShopBot(token: string) {
           `After paying, tap <b>I've Paid</b> and enter your UTR for instant credit.\n\n` +
           `<i>You pay: ₹${amtInr.toFixed(2)}  →  Get: $${amtUsd.toFixed(2)} USDT</i>`;
 
+        const replyMarkup = {
+          inline_keyboard: [
+            [{ text: "✅  I've Paid — Enter UTR", callback_data: "dep_upi_paid" }],
+            [{ text: "📋  Copy UPI ID",            callback_data: "dep_copy_upi"  }],
+            [{ text: "✖  Cancel",                  callback_data: "dep_upi_cancel" }],
+          ],
+        };
+
         try {
-          await ctx.telegram.sendPhoto(ctx.chat.id, { url: qrUrl }, {
-            caption,
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "✅  I've Paid — Enter UTR", callback_data: "dep_upi_paid" }],
-                [{ text: "📋  Copy UPI ID",            callback_data: "dep_copy_upi"  }],
-                [{ text: "✖  Cancel",                  callback_data: "dep_upi_cancel" }],
-              ],
-            },
-          });
+          // Download QR image on our server, then upload to Telegram as a buffer
+          // (passing a URL directly causes DOCUMENT_INVALID from Telegram's side)
+          const qrRes    = await fetch(qrUrl);
+          const qrBuf    = Buffer.from(await qrRes.arrayBuffer());
+          await ctx.telegram.sendPhoto(
+            ctx.chat.id,
+            { source: qrBuf, filename: "upi_qr.png" },
+            { caption, parse_mode: "HTML", reply_markup: replyMarkup }
+          );
         } catch (photoErr: any) {
-          // Fallback to text if QR image fails
           console.error("[UPI QR] Failed to send QR photo:", photoErr?.message);
+          // Fallback to text if QR image fails for any reason
           await safeReply(ctx, caption, {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
