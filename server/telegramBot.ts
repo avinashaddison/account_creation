@@ -1,5 +1,6 @@
 import { Telegraf, Markup } from "telegraf";
 import { Pool } from "pg";
+import { EMOJI_SLOTS, getEmojiId, setEmojiId, resetEmojiId, loadEmojiSettings, type EmojiKey } from "./emojiSettings";
 import {
   getAvailableDomain, createTempEmail, getAuthToken,
   fetchMessages, fetchMessageContent, generateRandomUsername,
@@ -167,7 +168,8 @@ interface ShopAdminFlow {
 }
 interface UserState {
   lastCopiedIds?: string[];
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit";
+  emojiEditKey?: string;
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
@@ -1053,6 +1055,100 @@ export function startTelegramBot(config: BotConfig) {
       `<code>myEmoji: "${customEmojis[0].custom_emoji_id}",</code>`,
       { parse_mode: "HTML" }
     );
+  });
+
+  // ── /emoji — Animated emoji settings panel ───────────────────────────────
+  function emojiPanelText(): string {
+    const lines = (Object.keys(EMOJI_SLOTS) as EmojiKey[]).map(key => {
+      const slot = EMOJI_SLOTS[key];
+      const id   = getEmojiId(key);
+      const custom = id !== slot.default ? " ✏️" : "";
+      return `<tg-emoji emoji-id="${id}">${slot.fallback}</tg-emoji>  <b>${key}</b>${custom}\n<code>${id}</code>`;
+    });
+    return (
+      `<tg-emoji emoji-id="5382116965029829100">💳</tg-emoji> <b>ANIMATED EMOJI SETTINGS</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      lines.join("\n\n") + "\n\n" +
+      `<i>Tap an emoji slot to change its ID.\nCustomised slots show ✏️</i>`
+    );
+  }
+
+  function emojiPanelKeyboard() {
+    const keys = Object.keys(EMOJI_SLOTS) as EmojiKey[];
+    const rows = [];
+    for (let i = 0; i < keys.length; i += 3) {
+      rows.push(keys.slice(i, i + 3).map(k =>
+        Markup.button.callback(`${EMOJI_SLOTS[k].fallback} ${k}`, `emoji_edit_${k}`)
+      ));
+    }
+    rows.push([Markup.button.callback("🔄 Reload settings", "emoji_reload")]);
+    return Markup.inlineKeyboard(rows);
+  }
+
+  bot.command("emoji", async (ctx) => {
+    await ctx.reply(emojiPanelText(), {
+      parse_mode: "HTML",
+      ...emojiPanelKeyboard(),
+    });
+  });
+
+  bot.action("emoji_reload", async (ctx) => {
+    await ctx.answerCbQuery("Reloading…").catch(() => {});
+    await loadEmojiSettings();
+    await ctx.editMessageText(emojiPanelText(), {
+      parse_mode: "HTML",
+      ...emojiPanelKeyboard(),
+    }).catch(() => {});
+  });
+
+  // Edit a specific emoji slot
+  const emojiKeys = Object.keys(EMOJI_SLOTS) as EmojiKey[];
+  for (const key of emojiKeys) {
+    bot.action(`emoji_edit_${key}`, async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      const uid  = ctx.from.id;
+      const slot = EMOJI_SLOTS[key];
+      const cur  = getEmojiId(key);
+      const st   = getState(uid);
+      st.awaitingText = "emoji_edit";
+      st.emojiEditKey = key;
+      await ctx.reply(
+        `✏️ <b>Edit emoji: ${slot.fallback} ${key}</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `${slot.label}\n\n` +
+        `<b>Current ID:</b> <code>${cur}</code>\n\n` +
+        `Send a message containing your animated emoji (use /getemoji to find its ID first), <b>or</b> paste the numeric ID directly:\n\n` +
+        `<i>Example: <code>5368324170671202286</code></i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("↩️ Reset to default", `emoji_reset_${key}`)],
+            [Markup.button.callback("❌ Cancel",           "emoji_cancel")],
+          ]),
+        }
+      );
+    });
+
+    bot.action(`emoji_reset_${key}`, async (ctx) => {
+      await ctx.answerCbQuery().catch(() => {});
+      const uid  = ctx.from.id;
+      const st   = getState(uid);
+      st.awaitingText = undefined;
+      st.emojiEditKey = undefined;
+      await resetEmojiId(key);
+      await ctx.reply(
+        `✅ <b>${key}</b> reset to default: <code>${EMOJI_SLOTS[key].default}</code>`,
+        { parse_mode: "HTML" }
+      );
+    });
+  }
+
+  bot.action("emoji_cancel", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const st = getState(ctx.from.id);
+    st.awaitingText = undefined;
+    st.emojiEditKey = undefined;
+    await ctx.reply("❌ Cancelled.", { parse_mode: "HTML" });
   });
 
   // ── /stats ────────────────────────────────────────────────────────────────
@@ -5222,6 +5318,44 @@ export function startTelegramBot(config: BotConfig) {
     }
 
     if (!st.awaitingText) return;
+
+    // ── Emoji edit flow ────────────────────────────────────────────────────
+    if (st.awaitingText === "emoji_edit") {
+      const key = st.emojiEditKey as EmojiKey | undefined;
+      if (!key || !(key in EMOJI_SLOTS)) {
+        st.awaitingText = undefined;
+        return ctx.reply("❌ No emoji slot selected. Use /emoji to start again.");
+      }
+
+      // Try to extract custom emoji ID from message entities first
+      const entities = (ctx.message as any).entities ?? [];
+      const customEmojiEntity = entities.find((e: any) => e.type === "custom_emoji");
+      let newId: string | undefined;
+
+      if (customEmojiEntity?.custom_emoji_id) {
+        newId = customEmojiEntity.custom_emoji_id;
+      } else if (/^\d{15,25}$/.test(text.trim())) {
+        newId = text.trim();
+      }
+
+      if (!newId) {
+        return ctx.reply(
+          `⚠️ Couldn't detect an emoji ID.\n\nEither paste the animated emoji directly, or enter its numeric ID (15–25 digits).\nUse /getemoji to find IDs.`,
+          { parse_mode: "HTML" }
+        );
+      }
+
+      await setEmojiId(key, newId);
+      st.awaitingText = undefined;
+      st.emojiEditKey = undefined;
+
+      return ctx.reply(
+        `✅ <b>${key}</b> updated!\n\n` +
+        `<tg-emoji emoji-id="${newId}">${EMOJI_SLOTS[key].fallback}</tg-emoji>  New ID: <code>${newId}</code>\n\n` +
+        `<i>The shop bot will use this emoji immediately. Use /emoji to manage all slots.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
 
     if (st.awaitingText === "proxy") {
       if (!text.startsWith("http")) return ctx.reply("URL must start with http. Try again.");

@@ -7,6 +7,7 @@ import {
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
 import { createOrder, setOnPaymentPaid } from "./crypto/orderService";
+import { ae as aeFromSettings, loadEmojiSettings } from "./emojiSettings";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -64,29 +65,12 @@ function escHtml(s: string) {
 // ── Telegram Premium animated custom emoji ────────────────────────────────────
 // These IDs reference Telegram's built-in animated emoji sticker packs.
 // Users without Premium see the plain-text fallback instead.
-const ANIM_EMOJI = {
-  fire:    "5368324170671202286",  // 🔥
-  bolt:    "5219005168305143806",  // ⚡
-  diamond: "5471952986970267627",  // 💎
-  robot:   "5392571666582032261",  // 🤖
-  money:   "5371260806527499265",  // 💰
-  star:    "5376425420038527205",  // ⭐ (distinct ID from fire)
-  rocket:  "5380004077456738553",  // 🚀
-  check:   "5404870433004043254",  // ✅
-  crown:   "5379748062124056162",  // 👑
-  card:    "5382116965029829100",  // 💳
-  gift:    "5436040711104178070",  // 🎁
-  bell:    "5361541227376957276",  // 🔔
-} as const;
-
 /**
- * Animated custom emoji helper.
- * Generates <tg-emoji emoji-id="..."> tags which render as animated emoji
- * in Telegram clients that support them (iOS, Android, Desktop).
- * Falls back to the plain emoji character on older clients.
+ * Animated emoji helper — reads IDs from the database (via emojiSettings).
+ * Falls back to default IDs if the setting hasn't been customised.
  */
-function ae(id: string, fallback: string): string {
-  return `<tg-emoji emoji-id="${id}">${fallback}</tg-emoji>`;
+function ae(key: Parameters<typeof aeFromSettings>[0], fallback?: string): string {
+  return aeFromSettings(key, fallback);
 }
 
 /**
@@ -847,6 +831,7 @@ async function ensureShopTables() {
     );
   `);
   console.log("[ShopBot] Tables ready");
+  await loadEmojiSettings();
 }
 
 // ── Safe messaging helpers ───────────────────────────────────────────────────
@@ -937,14 +922,14 @@ function insufficientFundsMsg(opts: {
     ? `\n║  ${productEmoji ?? "📦"}  <b>${escHtml(productName)}</b>\n╠══════════════════════════════════════╣`
     : "";
   return (
-    `${ae(ANIM_EMOJI.card, "💳")}  <b>INSUFFICIENT FUNDS</b>  ${ae(ANIM_EMOJI.money, "💰")}\n` +
+    `${ae("card", "💳")}  <b>INSUFFICIENT FUNDS</b>  ${ae("money", "💰")}\n` +
     `╔══════════════════════════════════════╗` +
     `${productLine}\n` +
     `║\n` +
     `║  <code>${pad("Balance",  col)} ›   ${balStr}</code>\n` +
     `║  <code>${pad("Required", col)} ›   ${reqStr}</code>\n` +
     `║  <code>───────────────────────────</code>\n` +
-    `║  ${ae(ANIM_EMOJI.bolt, "⚡")}  <code>${pad("Shortfall",col)} ›   ${shortStr}</code>\n` +
+    `║  ${ae("bolt", "⚡")}  <code>${pad("Shortfall",col)} ›   ${shortStr}</code>\n` +
     `║\n` +
     `╚══════════════════════════════════════╝\n\n` +
     `💬  To top up, contact ${escHtml(SUPPORT_CONTACT)}`
@@ -1111,7 +1096,7 @@ export function startShopBot(token: string) {
       const uname2 = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
       await ctx.reply(
         truncate(
-          `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
+          `${ae("fire", "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae("fire", "🔥")}\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
           `      Global AI Tools Marketplace\n` +
           `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -1143,7 +1128,7 @@ export function startShopBot(token: string) {
     // Welcome card — inline CTA buttons (no reply keyboard, no auto-open)
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
+        `${ae("fire", "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae("fire", "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -1190,7 +1175,7 @@ export function startShopBot(token: string) {
     }
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
+        `${ae("fire", "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae("fire", "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -1235,11 +1220,11 @@ export function startShopBot(token: string) {
     const spend = parseFloat(row?.total_spend ?? "0");
     const bal   = parseFloat(row?.balance ?? "0");
     const statusLine = vip
-      ? `${ae(ANIM_EMOJI.crown, "👑")} <b>VIP Member</b>`
+      ? `${ae("crown", "👑")} <b>VIP Member</b>`
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend`;
     await ctx.reply(
       `╔══════════════════════════════════════╗\n` +
-      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae(ANIM_EMOJI.crown, "👑")}` : ""}  ║\n` +
+      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae("crown", "👑")}` : ""}  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `${statusLine}\n\n` +
       `<code>  💰  Balance   ›  ${fmt$(bal)}\n` +
@@ -1796,12 +1781,12 @@ export function startShopBot(token: string) {
   bot.action("dep_method_binance", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae(ANIM_EMOJI.money, "🟡")} <b>Binance Pay</b>\n` +
+      `${ae("money", "🟡")} <b>Binance Pay</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send USDT to this Binance ID:\n\n` +
       `<code>  510120124</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae(ANIM_EMOJI.bolt, "⚡")} <b>Auto Verify</b> — Get a unique transfer note. Your balance is credited instantly after Binance confirms.\n\n` +
+      `${ae("bolt", "⚡")} <b>Auto Verify</b> — Get a unique transfer note. Your balance is credited instantly after Binance confirms.\n\n` +
       `<i>Min deposit: <b>$1.00 USDT</b></i>`,
       {
         parse_mode: "HTML",
@@ -1816,12 +1801,12 @@ export function startShopBot(token: string) {
   bot.action("dep_method_trc20", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae(ANIM_EMOJI.diamond, "💎")} <b>USDT TRC20  (Tron)</b>\n` +
+      `${ae("diamond", "💎")} <b>USDT TRC20  (Tron)</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send USDT to this TRC20 address:\n\n` +
       `<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae(ANIM_EMOJI.bolt, "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
+      `${ae("bolt", "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
       `<i>Min deposit: <b>$1.00 USDT</b></i>`,
       {
         parse_mode: "HTML",
@@ -1841,7 +1826,7 @@ export function startShopBot(token: string) {
       `Send USDT to this BEP20 address:\n\n` +
       `<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae(ANIM_EMOJI.bolt, "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
+      `${ae("bolt", "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
       `<i>Min deposit: <b>$1.00 USDT</b></i>`,
       {
         parse_mode: "HTML",
@@ -2494,11 +2479,11 @@ export function startShopBot(token: string) {
     const vip     = row?.vip ?? false;
     const spend   = parseFloat(row?.total_spend ?? "0");
     const statusLine = vip
-      ? `${ae(ANIM_EMOJI.crown, "👑")} <b>VIP Member</b>`
+      ? `${ae("crown", "👑")} <b>VIP Member</b>`
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend  <i>(${fmt$(spend)} so far)</i>`;
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.money, "💰")}  <b>MY WALLET</b>  ║\n` +
+      `║  ${ae("money", "💰")}  <b>MY WALLET</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  💵 Balance    ›  ${fmt$(balance)}\n` +
       `  🆔 User ID    ›  ${uid}</code>\n\n` +
@@ -2514,7 +2499,7 @@ export function startShopBot(token: string) {
   // ── Deposit ───────────────────────────────────────────────────────────────
   function depositText(uid: number): string {
     return (
-      `${ae(ANIM_EMOJI.card, "💳")} <b>ADD FUNDS</b>\n` +
+      `${ae("card", "💳")} <b>ADD FUNDS</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Select a payment method below to deposit USDT into your wallet.\n\n` +
       `<code>  🪪  Your ID   ›  ${uid}\n` +
@@ -2679,7 +2664,7 @@ export function startShopBot(token: string) {
 
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.check, "✅")}  <b>PROOF SUBMITTED!</b>  ║\n` +
+      `║  ${ae("check", "✅")}  <b>PROOF SUBMITTED!</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  📋 Request ID  ›  ${reqId}\n` +
       `  🆔 Your ID     ›  ${uid}</code>\n\n` +
@@ -2747,11 +2732,11 @@ export function startShopBot(token: string) {
     const spend = parseFloat(row?.total_spend ?? "0");
     const bal   = parseFloat(row?.balance ?? "0");
     const statusLine = vip
-      ? `${ae(ANIM_EMOJI.crown, "👑")} <b>VIP Member</b>`
+      ? `${ae("crown", "👑")} <b>VIP Member</b>`
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend`;
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae(ANIM_EMOJI.crown, "👑")}` : ""}  ║\n` +
+      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae("crown", "👑")}` : ""}  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  🔖 Username    ›  ${uname}\n` +
       `  🆔 User ID     ›  ${uid}\n` +
@@ -2944,7 +2929,7 @@ export function startShopBot(token: string) {
     const balance = await getBalance(uid);
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.money, "💰")}  <b>MY WALLET</b>  ║\n` +
+      `║  ${ae("money", "💰")}  <b>MY WALLET</b>  ║\n` +
       `╚══════════════════════════════════════╝\n\n` +
       `<code>  💵 Balance   ›  ${fmt$(balance)}\n` +
       `  🆔 User ID   ›  ${uid}</code>\n\n` +
@@ -2984,7 +2969,7 @@ export function startShopBot(token: string) {
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     await ctx.reply(
       truncate(
-        `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
+        `${ae("fire", "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae("fire", "🔥")}\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
         `      Global AI Tools Marketplace\n` +
         `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
@@ -3016,7 +3001,7 @@ export function startShopBot(token: string) {
     const name = ctx.from.first_name || ctx.from.username || "User";
     await safeReply(
       ctx,
-      `${ae(ANIM_EMOJI.fire, "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae(ANIM_EMOJI.fire, "🔥")}\n` +
+      `${ae("fire", "🔥")}  <b>${toBold("PROJECT ADDISON v2")}</b>  ${ae("fire", "🔥")}\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈\n` +
       `      Global AI Tools Marketplace\n` +
       `◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
