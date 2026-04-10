@@ -2526,11 +2526,10 @@ export function startShopBot(token: string) {
   // Returns the clean method-select keyboard (full-width buttons per method)
   function depositMethodKeyboard(withBack = false) {
     const rows: ReturnType<typeof Markup.button.callback>[][] = [
-      [Markup.button.callback("🟡  Binance Pay",          "dep_method_binance")],
-      [Markup.button.callback("💎  USDT TRC20  (Tron)",   "dep_method_trc20")],
-      [Markup.button.callback("🔷  USDT BEP20  (BSC)",    "dep_method_bep20")],
-      [Markup.button.callback("🇮🇳  UPI  (India)",         "dep_method_upi")],
-      [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+      [Markup.button.callback("🟡  Binance Pay",        "dep_method_binance")],
+      [Markup.button.callback("💎  USDT TRC20  (Tron)", "dep_method_trc20")],
+      [Markup.button.callback("🔷  USDT BEP20  (BSC)",  "dep_method_bep20")],
+      [Markup.button.callback("🇮🇳  UPI  (India)",       "dep_method_upi")],
     ];
     if (withBack) rows.push([Markup.button.callback("🛍  Back to Shop", "shop_back_products")]);
     return Markup.inlineKeyboard(rows);
