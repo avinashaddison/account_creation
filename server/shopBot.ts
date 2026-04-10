@@ -1781,18 +1781,18 @@ export function startShopBot(token: string) {
   bot.action("dep_method_binance", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("money", "🟡")} <b>Binance Pay</b>\n` +
+      `${ae("money", "🟡")} <b>Binance Pay</b>  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send USDT to this Binance ID:\n\n` +
-      `<code>  510120124</code>\n\n` +
+      `<code>  🟡  Binance ID  ›  510120124</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae("bolt", "⚡")} <b>Auto Verify</b> — Get a unique transfer note. Your balance is credited instantly after Binance confirms.\n\n` +
+      `${ae("bolt", "⚡")} Balance credited <b>instantly</b> after Binance confirms — tap <b>Auto Verify</b> to get your unique transfer note.\n\n` +
       `<i>Min deposit: <b>$1.00 USDT</b></i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("📋  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("⚡  Auto Verify", "dep_auto_binance")],
-          [Markup.button.callback("‹  Back",             "dep_back_methods")],
+          [Markup.button.callback("📋  Copy ID", "dep_copy_binance"), Markup.button.callback("⚡  Auto Verify  ·  Instant", "dep_auto_binance")],
+          [Markup.button.callback("‹  Back",     "dep_back_methods")],
         ]),
       }
     );
@@ -1801,13 +1801,13 @@ export function startShopBot(token: string) {
   bot.action("dep_method_trc20", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("diamond", "💎")} <b>USDT TRC20  (Tron)</b>\n` +
+      `${ae("diamond", "💎")} <b>USDT TRC20</b>  ·  Tron Network\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `Send USDT to this TRC20 address:\n\n` +
+      `Send USDT (TRC20) to this address:\n\n` +
       `<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae("bolt", "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
-      `<i>Min deposit: <b>$1.00 USDT</b></i>`,
+      `${ae("bolt", "⚡")} <b>Auto Verify</b> — We assign you a unique amount so your payment is matched automatically once the blockchain confirms.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT</b>  ·  Network: <b>TRON (TRC20)</b></i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1821,13 +1821,13 @@ export function startShopBot(token: string) {
   bot.action("dep_method_bep20", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("bep20", "🔷")} <b>USDT BEP20  (BSC)</b>\n` +
+      `${ae("bep20", "🔷")} <b>USDT BEP20</b>  ·  BNB Smart Chain\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `Send USDT to this BEP20 address:\n\n` +
+      `Send USDT (BEP20) to this address:\n\n` +
       `<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `${ae("bolt", "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
-      `<i>Min deposit: <b>$1.00 USDT</b></i>`,
+      `${ae("bolt", "⚡")} <b>Auto Verify</b> — We assign you a unique amount so your payment is matched automatically once the blockchain confirms.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT</b>  ·  Network: <b>BNB Smart Chain (BEP20)</b></i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1841,18 +1841,18 @@ export function startShopBot(token: string) {
   bot.action("dep_method_upi", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     return safeEdit(ctx,
-      `${ae("upi", "🇮🇳")} <b>UPI  (India)</b>\n` +
+      `${ae("upi", "🇮🇳")} <b>UPI</b>  ·  India\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Send to this UPI ID:\n\n` +
-      `<code>  avinashaddison-8@okaxis</code>\n\n` +
+      `<code>  🇮🇳  UPI ID  ›  avinashaddison-8@okaxis</code>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `After sending, tap <b>📸 Submit Proof</b> to upload your payment screenshot for manual review.\n\n` +
-      `<i>Min deposit: <b>$1.00 USDT equivalent</b></i>`,
+      `${ae("check", "✅")} After sending, tap <b>Submit Proof</b> to upload your screenshot — our team will confirm and credit your balance.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT equivalent</b>  ·  Manual review</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("📋  Copy UPI ID",         "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
-          [Markup.button.callback("‹  Back",                 "dep_back_methods")],
+          [Markup.button.callback("📋  Copy UPI ID", "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
+          [Markup.button.callback("‹  Back",         "dep_back_methods")],
         ]),
       }
     );
@@ -2511,10 +2511,10 @@ export function startShopBot(token: string) {
   // Returns the clean method-select keyboard (full-width buttons per method)
   function depositMethodKeyboard(withBack = false) {
     const rows: ReturnType<typeof Markup.button.callback>[][] = [
-      [Markup.button.callback("🟡  Binance Pay",        "dep_method_binance")],
-      [Markup.button.callback("💎  USDT TRC20  (Tron)", "dep_method_trc20")],
-      [Markup.button.callback("🔷  USDT BEP20  (BSC)",  "dep_method_bep20")],
-      [Markup.button.callback("🇮🇳  UPI  (India)",       "dep_method_upi")],
+      [Markup.button.callback("⚡  Binance Pay  ·  Instant",  "dep_method_binance")],
+      [Markup.button.callback("💎  USDT TRC20  ·  Tron",      "dep_method_trc20")],
+      [Markup.button.callback("🔷  USDT BEP20  ·  BSC",       "dep_method_bep20")],
+      [Markup.button.callback("🇮🇳  UPI  ·  India",            "dep_method_upi")],
     ];
     if (withBack) rows.push([Markup.button.callback("🛍  Back to Shop", "shop_back_products")]);
     return Markup.inlineKeyboard(rows);
@@ -2558,7 +2558,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     cryptoDepositFlows.set(uid, { step: "waiting_amount", chain: "BINANCE_PAY" });
     return safeEdit(ctx,
-      `${ae("bolt", "⚡")} <b>Auto Verify — Binance Pay</b>\n\n` +
+      `${ae("money", "🟡")} <b>Binance Pay</b>  ·  ${ae("bolt", "⚡")} <b>Instant</b>\n\n` +
       `${divider()}\n\n` +
       `How much USDT do you want to deposit?\n\n` +
       `<i>Type the amount (e.g. <code>10</code> or <code>25.50</code>).\nMinimum: <b>$1.00 USDT</b></i>`,
