@@ -1062,16 +1062,16 @@ export function startTelegramBot(config: BotConfig) {
   // ── /emoji — Animated emoji settings panel ───────────────────────────────
   function emojiPanelText(): string {
     const lines = (Object.keys(EMOJI_SLOTS) as EmojiKey[]).map(key => {
-      const slot = EMOJI_SLOTS[key];
-      const id   = getEmojiId(key);
+      const slot   = EMOJI_SLOTS[key];
+      const id     = getEmojiId(key);
       const custom = id !== slot.default ? " ✏️" : "";
-      return `<tg-emoji emoji-id="${id}">${slot.fallback}</tg-emoji>  <b>${key}</b>${custom}\n<code>${id}</code>`;
+      return `${slot.fallback}  <b>${slot.label}</b>${custom}\n<code>${id}</code>`;
     });
     return (
-      `<tg-emoji emoji-id="5382116965029829100">💳</tg-emoji> <b>ANIMATED EMOJI SETTINGS</b>\n` +
+      `✨ <b>ANIMATED EMOJI SETTINGS</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
       lines.join("\n\n") + "\n\n" +
-      `<i>Tap an emoji slot to change its ID.\nCustomised slots show ✏️</i>`
+      `<i>Tap a slot below to change its animated emoji ID.\nCustomised slots show ✏️</i>`
     );
   }
 
@@ -1097,10 +1097,10 @@ export function startTelegramBot(config: BotConfig) {
   bot.action("emoji_reload", async (ctx) => {
     await ctx.answerCbQuery("Reloading…").catch(() => {});
     await loadEmojiSettings();
-    await ctx.editMessageText(emojiPanelText(), {
+    await safeEdit(ctx, emojiPanelText(), {
       parse_mode: "HTML",
       ...emojiPanelKeyboard(),
-    }).catch(() => {});
+    });
   });
 
   // Edit a specific emoji slot
