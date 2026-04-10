@@ -1025,6 +1025,36 @@ export function startTelegramBot(config: BotConfig) {
     }
   });
 
+  // ── /getemoji — extract custom animated emoji IDs from a message ─────────
+  bot.command("getemoji", async (ctx) => {
+    const msg = ctx.message;
+    const entities = msg.entities ?? [];
+    const customEmojis = entities.filter((e: any) => e.type === "custom_emoji");
+
+    if (customEmojis.length === 0) {
+      return ctx.reply(
+        `⚠️ <b>No custom emoji found.</b>\n\n` +
+        `Send the command in the same message as your animated emoji.\n` +
+        `Example: type <code>/getemoji</code> then paste your emoji right after it.`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    const lines = customEmojis.map((e: any, i: number) => {
+      const char = msg.text?.slice(e.offset, e.offset + e.length) ?? "?";
+      return `<code>${i + 1}. ${char}  →  ${e.custom_emoji_id}</code>`;
+    });
+
+    return ctx.reply(
+      `<tg-emoji emoji-id="5368324170671202286">⚡</tg-emoji> <b>Custom Emoji IDs</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      lines.join("\n") + "\n\n" +
+      `Add to <b>ANIM_EMOJI</b> in <code>server/shopBot.ts</code>:\n` +
+      `<code>myEmoji: "${customEmojis[0].custom_emoji_id}",</code>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
   // ── /stats ────────────────────────────────────────────────────────────────
   bot.command("stats", async (ctx) => {
     const { text, mode } = await buildStatsText();
