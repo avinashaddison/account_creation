@@ -1221,12 +1221,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     await safeReply(ctx, depositText(uid), {
       parse_mode: "HTML",
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback("🟡  Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20 addr", "dep_copy_trc20"), Markup.button.callback("🔷  BEP20 addr", "dep_copy_bep20")],
-        [Markup.button.callback("🇮🇳  UPI", "dep_copy_upi")],
-        [Markup.button.callback("⚡  Auto: Binance Pay", "dep_auto_binance"), Markup.button.callback("💎  Auto: TRC20", "dep_auto_trc20"), Markup.button.callback("🔷  Auto: BEP20", "dep_auto_bep20")],
-        [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
-      ]),
+      ...depositMethodKeyboard(),
     });
   });
 
@@ -1773,13 +1768,7 @@ export function startShopBot(token: string) {
     const uid = ctx.from.id;
     await safeEdit(ctx, depositText(uid), {
       parse_mode: "HTML",
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback("🟡  Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20 addr", "dep_copy_trc20"), Markup.button.callback("🔷  BEP20 addr", "dep_copy_bep20")],
-        [Markup.button.callback("🇮🇳  UPI", "dep_copy_upi")],
-        [Markup.button.callback("⚡  Auto: Binance Pay", "dep_auto_binance"), Markup.button.callback("💎  Auto: TRC20", "dep_auto_trc20"), Markup.button.callback("🔷  Auto: BEP20", "dep_auto_bep20")],
-        [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
-        [Markup.button.callback("🛍  BACK TO SHOP",           "shop_back_products")],
-      ]),
+      ...depositMethodKeyboard(true),
     });
   });
 
@@ -1794,6 +1783,94 @@ export function startShopBot(token: string) {
   });
   bot.action("dep_copy_upi", async (ctx) => {
     await ctx.answerCbQuery("🇮🇳 UPI → avinashaddison-8@okaxis", { show_alert: true });
+  });
+
+  // ── Back to method selection ───────────────────────────────────────────────
+  bot.action("dep_back_methods", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    return safeEdit(ctx, depositText(uid), { parse_mode: "HTML", ...depositMethodKeyboard(false) });
+  });
+
+  // ── Payment method detail screens ─────────────────────────────────────────
+  bot.action("dep_method_binance", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    return safeEdit(ctx,
+      `${ae(ANIM_EMOJI.money, "🟡")} <b>Binance Pay</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Send USDT to this Binance ID:\n\n` +
+      `<code>  510120124</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `${ae(ANIM_EMOJI.bolt, "⚡")} <b>Auto Verify</b> — Get a unique transfer note. Your balance is credited instantly after Binance confirms.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📋  Copy Binance ID", "dep_copy_binance"), Markup.button.callback("⚡  Auto Verify", "dep_auto_binance")],
+          [Markup.button.callback("‹  Back",             "dep_back_methods")],
+        ]),
+      }
+    );
+  });
+
+  bot.action("dep_method_trc20", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    return safeEdit(ctx,
+      `${ae(ANIM_EMOJI.diamond, "💎")} <b>USDT TRC20  (Tron)</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Send USDT to this TRC20 address:\n\n` +
+      `<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `${ae(ANIM_EMOJI.bolt, "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📋  Copy Address", "dep_copy_trc20"), Markup.button.callback("💎  Auto Verify", "dep_auto_trc20")],
+          [Markup.button.callback("‹  Back",          "dep_back_methods")],
+        ]),
+      }
+    );
+  });
+
+  bot.action("dep_method_bep20", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    return safeEdit(ctx,
+      `🔷 <b>USDT BEP20  (BSC)</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Send USDT to this BEP20 address:\n\n` +
+      `<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `${ae(ANIM_EMOJI.bolt, "⚡")} <b>Auto Verify</b> — Get a unique send amount. Your balance is credited once the blockchain confirms.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📋  Copy Address", "dep_copy_bep20"), Markup.button.callback("🔷  Auto Verify", "dep_auto_bep20")],
+          [Markup.button.callback("‹  Back",          "dep_back_methods")],
+        ]),
+      }
+    );
+  });
+
+  bot.action("dep_method_upi", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    return safeEdit(ctx,
+      `🇮🇳 <b>UPI  (India)</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Send to this UPI ID:\n\n` +
+      `<code>  avinashaddison-8@okaxis</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `After sending, tap <b>📸 Submit Proof</b> to upload your payment screenshot for manual review.\n\n` +
+      `<i>Min deposit: <b>$1.00 USDT equivalent</b></i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📋  Copy UPI ID",         "dep_copy_upi"), Markup.button.callback("📸  Submit Proof", "dep_submit_proof")],
+          [Markup.button.callback("‹  Back",                 "dep_back_methods")],
+        ]),
+      }
+    );
   });
 
   // ── Activation Service — keyboard button handlers ─────────────────────────
@@ -2437,34 +2514,33 @@ export function startShopBot(token: string) {
   // ── Deposit ───────────────────────────────────────────────────────────────
   function depositText(uid: number): string {
     return (
-      `╔══════════════════════════════════════╗\n` +
-      `║  ${ae(ANIM_EMOJI.card, "💳")}  <b>ADD FUNDS</b>  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `🟡  <b>Binance ID</b>\n<code>510120124</code>\n\n` +
-      `${divider()}\n\n` +
-      `💎  <b>USDT TRC20</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
-      `${divider()}\n\n` +
-      `🔷  <b>USDT BEP20</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
-      `${divider()}\n\n` +
-      `🇮🇳  <b>UPI (India)</b>\n<code>avinashaddison-8@okaxis</code>\n\n` +
-      `${divider()}\n\n` +
-      `🪪  Your ID: <code>${uid}</code>\n` +
-      `⚡  Minimum deposit: <b>$1.00</b>\n\n` +
-      `<i>Choose <b>⚡ Auto Verify</b> to get a unique payment note and have your balance credited instantly after Binance confirms the transfer.\n` +
-      `Or tap <b>📸 Submit Proof</b> for manual review.</i>`
+      `${ae(ANIM_EMOJI.card, "💳")} <b>ADD FUNDS</b>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Select a payment method below to deposit USDT into your wallet.\n\n` +
+      `<code>  🪪  Your ID   ›  ${uid}\n` +
+      `  ⚡  Minimum  ›  $1.00 USDT</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`
     );
+  }
+
+  // Returns the clean method-select keyboard (full-width buttons per method)
+  function depositMethodKeyboard(withBack = false) {
+    const rows: ReturnType<typeof Markup.button.callback>[][] = [
+      [Markup.button.callback("🟡  Binance Pay",          "dep_method_binance")],
+      [Markup.button.callback("💎  USDT TRC20  (Tron)",   "dep_method_trc20")],
+      [Markup.button.callback("🔷  USDT BEP20  (BSC)",    "dep_method_bep20")],
+      [Markup.button.callback("🇮🇳  UPI  (India)",         "dep_method_upi")],
+      [Markup.button.callback("📸  Submit Payment Proof", "dep_submit_proof")],
+    ];
+    if (withBack) rows.push([Markup.button.callback("🛍  Back to Shop", "shop_back_products")]);
+    return Markup.inlineKeyboard(rows);
   }
 
   bot.hears(BTN.DEPOSIT, async (ctx) => {
     const uid = ctx.from.id;
     await safeReply(ctx, depositText(uid), {
       parse_mode: "HTML",
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback("🟡  Binance ID", "dep_copy_binance"), Markup.button.callback("💎  TRC20 addr", "dep_copy_trc20"), Markup.button.callback("🔷  BEP20 addr", "dep_copy_bep20")],
-        [Markup.button.callback("🇮🇳  UPI", "dep_copy_upi")],
-        [Markup.button.callback("⚡  Auto: Binance Pay", "dep_auto_binance"), Markup.button.callback("💎  Auto: TRC20", "dep_auto_trc20"), Markup.button.callback("🔷  Auto: BEP20", "dep_auto_bep20")],
-        [Markup.button.callback("📸  SUBMIT PAYMENT PROOF", "dep_submit_proof")],
-      ]),
+      ...depositMethodKeyboard(),
     });
   });
 
