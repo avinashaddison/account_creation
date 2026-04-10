@@ -46,6 +46,17 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
+  // Always exclude playwright and its native sub-packages regardless of whether
+  // they appear in package.json — they ship pre-compiled binaries that cannot
+  // be bundled by esbuild.
+  const alwaysExternal = [
+    "playwright",
+    "playwright-core",
+    "@playwright/test",
+    "chromium-bidi",
+    "fsevents",
+  ];
+
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
@@ -56,7 +67,7 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    external: [...new Set([...externals, ...alwaysExternal])],
     logLevel: "info",
   });
 }
