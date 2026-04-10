@@ -1377,6 +1377,15 @@ export interface UpiPaymentInfo {
   senderBank: string | null;
 }
 
+/** Decode quoted-printable encoding used in Axis Bank email bodies */
+function decodeQP(raw: string): string {
+  return raw
+    .replace(/=\r?\n/g, "")                                             // soft line breaks
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    );
+}
+
 function parseAxisBankEmail(subject: string, body: string): UpiPaymentInfo | null {
   // Extract amount from subject
   const amtMatch = subject.match(/INR\s+([\d,]+\.?\d*)\s+was credited/i);
@@ -1384,12 +1393,15 @@ function parseAxisBankEmail(subject: string, body: string): UpiPaymentInfo | nul
   const amountInr = parseFloat(amtMatch[1].replace(/,/g, ""));
   if (isNaN(amountInr) || amountInr <= 0) return null;
 
+  // Decode quoted-printable encoding so UPI strings are intact
+  const decoded = decodeQP(body);
+
   // Extract UTR, sender name, sender bank from body
   // Patterns: UPI/P2A/UTR/NAME/BANK/Sent  or  UPI/P2P/UTR/NAME/BANK/Sent
-  const txMatch = body.match(/UPI\/P2[AP]\/(\d{6,})\/?([^\/\r\n]*)?\/?([^\/\r\n]*)?/i);
+  const txMatch = decoded.match(/UPI\/P2[AP]\/(\d{6,})\/([^\/\r\n]*)\/([^\/\r\n]*)/i);
   if (!txMatch) {
     // Fallback: look for a standalone 12-digit UTR
-    const utrOnly = body.match(/\b(\d{12})\b/);
+    const utrOnly = decoded.match(/\b(\d{12})\b/);
     if (!utrOnly) return null;
     return { utr: utrOnly[1], amountInr, senderName: null, senderBank: null };
   }
