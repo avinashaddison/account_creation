@@ -2544,11 +2544,22 @@ export function startShopBot(token: string) {
             margin: 2,
             color: { dark: "#000000", light: "#ffffff" },
           });
-          await ctx.telegram.sendPhoto(
-            ctx.chat.id,
-            { source: qrBuf },
-            { caption, parse_mode: "HTML", reply_markup: replyMarkup }
+
+          // Use raw multipart FormData upload — most reliable way to send binary
+          // files to Telegram (Telegraf's source:{} wrapper can cause DOCUMENT_INVALID)
+          const form = new FormData();
+          form.append("chat_id",      String(ctx.chat.id));
+          form.append("caption",      caption);
+          form.append("parse_mode",   "HTML");
+          form.append("reply_markup", JSON.stringify(replyMarkup));
+          form.append("photo",        new Blob([qrBuf], { type: "image/png" }), "upi_qr.png");
+
+          const tgRes = await fetch(
+            `https://api.telegram.org/bot${token}/sendPhoto`,
+            { method: "POST", body: form }
           );
+          const tgJson = await tgRes.json() as any;
+          if (!tgJson.ok) throw new Error(tgJson.description ?? "Telegram sendPhoto failed");
         } catch (photoErr: any) {
           console.error("[UPI QR] Failed to send QR photo:", photoErr?.message);
           // Fallback to text if photo send fails for any reason
