@@ -3561,19 +3561,21 @@ export function startTelegramBot(config: BotConfig) {
       );
     }
     let t = `\n📦 <b>MANAGE PRODUCTS</b>  <code>${rows.length} total</code>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-    for (const p of rows) {
-      const badge = p.active ? "🟢 ON" : "🔴 OFF";
-      t += `${badge}  <b>${p.name}</b>  <code>$${parseFloat(p.price).toFixed(2)}</code>\n`;
+    rows.forEach((p: any, i: number) => {
+      const badge = p.active ? "🟢" : "🔴";
+      const pos = `${i + 1}`;
+      t += `${badge}  <b>${p.name}</b>  <code>$${parseFloat(p.price).toFixed(2)}</code>  <code>#${pos}</code>\n`;
       t += `<code>  ${p.account_type}  ·  filter: ${p.status_filter}</code>\n\n`;
-    }
+    });
     return t.trimEnd();
   }
 
   function buildProductsListButtons(rows: any[]) {
-    const buttons: ReturnType<typeof Markup.button.callback>[][] = rows.map((p: any) => [
-      Markup.button.callback(p.active ? `⏸  Deactivate` : `▶  Activate`, `shop_toggle_${p.id}`),
-      Markup.button.callback(`✏  ${p.name.slice(0, 14)}`, `shop_edit_${p.id}`),
-      Markup.button.callback(`🗑`, `shop_delete_confirm_${p.id}`),
+    const buttons: ReturnType<typeof Markup.button.callback>[][] = rows.map((p: any, i: number) => [
+      Markup.button.callback(i === 0 ? `·` : `⬆`, i === 0 ? `shop_noop` : `shop_move_up_${p.id}`),
+      Markup.button.callback(i === rows.length - 1 ? `·` : `⬇`, i === rows.length - 1 ? `shop_noop` : `shop_move_down_${p.id}`),
+      Markup.button.callback(`✏  ${p.name.slice(0, 18)}`, `shop_edit_${p.id}`),
+      Markup.button.callback(p.active ? `⏸` : `▶`, `shop_toggle_${p.id}`),
     ]);
     buttons.push([
       Markup.button.callback("➕  ADD PRODUCT", "shop_admin_add_product"),
@@ -3581,6 +3583,36 @@ export function startTelegramBot(config: BotConfig) {
     ]);
     return Markup.inlineKeyboard(buttons);
   }
+
+  bot.action("shop_noop", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+  });
+
+  async function moveProduct(ctx: any, productId: string, direction: "up" | "down") {
+    await ctx.answerCbQuery().catch(() => {});
+    const all = await dbQuery(`SELECT id FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    const rows: any[] = all.rows;
+    const idx = rows.findIndex((r: any) => r.id === productId);
+    if (idx < 0) return;
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= rows.length) return;
+    // Swap positions in array
+    [rows[idx], rows[swapIdx]] = [rows[swapIdx], rows[idx]];
+    // Write normalized sort_order for every product so future queries are stable
+    for (let i = 0; i < rows.length; i++) {
+      await dbQuery(`UPDATE shop_products SET sort_order = $1 WHERE id = $2`, [i, rows[i].id]);
+    }
+    const fresh = await dbQuery(`SELECT * FROM shop_products ORDER BY sort_order ASC, created_at ASC`);
+    await safeEdit(ctx, buildProductsListMsg(fresh.rows), { parse_mode: "HTML", ...buildProductsListButtons(fresh.rows) });
+  }
+
+  bot.action(/^shop_move_up_([0-9a-f-]{36})$/, async (ctx) => {
+    await moveProduct(ctx, (ctx.match as RegExpExecArray)[1], "up");
+  });
+
+  bot.action(/^shop_move_down_([0-9a-f-]{36})$/, async (ctx) => {
+    await moveProduct(ctx, (ctx.match as RegExpExecArray)[1], "down");
+  });
 
   bot.action("shop_admin_products", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
