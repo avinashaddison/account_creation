@@ -289,6 +289,32 @@ async function isNewCustomer(uid: number): Promise<boolean> {
   return r.rows.length === 0;
 }
 
+function maskHandle(name: string): string {
+  const s = name.trim();
+  if (!s) return "User****";
+  const show = Math.max(1, Math.ceil(s.length / 2));
+  return s.slice(0, show) + "****";
+}
+
+async function notifyChannelNewUser(bot: any, username?: string, firstName?: string): Promise<void> {
+  try {
+    const display = username ? `@${username}` : (firstName || "");
+    const masked  = maskHandle(display);
+    const now     = new Date();
+    const dateStr = now.toUTCString().replace(" GMT", " UTC");
+    const countRes = await dbQuery(`SELECT COUNT(*) AS cnt FROM shop_customers`);
+    const total   = parseInt(countRes.rows[0]?.cnt ?? "0").toLocaleString();
+    const text =
+      `🆕 <b>New User Alert</b>\n\n` +
+      `👤  <b>${masked}</b>\n` +
+      `📅  ${dateStr}\n` +
+      `👥  Total members: <b>${total}</b>`;
+    await bot.telegram.sendMessage("@projectaddison", text, { parse_mode: "HTML" });
+  } catch {
+    // Never propagate — channel alert is best-effort
+  }
+}
+
 async function getBalance(uid: number): Promise<number> {
   const r = await dbQuery(`SELECT balance FROM shop_customers WHERE telegram_id = $1`, [uid]);
   return parseFloat(r.rows[0]?.balance ?? "0");
@@ -1162,6 +1188,11 @@ export function startShopBot(token: string) {
     const isNew = await isNewCustomer(uid);
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name, referredBy);
     pushMenuButton(ctx.chat.id).catch(() => {});   // reset any old per-chat override
+
+    // Fire-and-forget: alert @projectaddison channel about the new user
+    if (isNew) {
+      notifyChannelNewUser(bot, ctx.from.username, ctx.from.first_name).catch(() => {});
+    }
 
     // Credit referrer $0.50 when new user joins
     if (isNew && referredBy) {
