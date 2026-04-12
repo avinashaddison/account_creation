@@ -230,6 +230,22 @@ interface BuyFlow {
 }
 const buyFlows = new Map<number, BuyFlow>();
 
+// Direct checkout flow (no balance required)
+type CheckoutChain = "BINANCE_PAY" | "BYBIT_PAY" | "TRC20" | "BEP20";
+interface CheckoutSession {
+  productId:       string;
+  productName:     string;
+  qty:             number;
+  unitPrice:       number;
+  totalAmount:     number;
+  cryptoOrderId?:  string;
+  note?:           string;
+  exactAmount?:    number;
+  chain?:          CheckoutChain;
+  customQtyStep?:  boolean;
+}
+const checkoutSessions = new Map<number, CheckoutSession>();
+
 // Deposit screenshot flow
 interface DepositFlow {
   step: "waiting_screenshot";
@@ -1541,22 +1557,6 @@ export function startShopBot(token: string) {
       );
     }
 
-    const balance = await getBalance(uid);
-    const price   = parseFloat(prod.price);
-
-    if (balance < price) {
-      return safeEdit(ctx,
-        insufficientFundsMsg({ productName: prod.name, required: price, balance }),
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("💸  ADD FUNDS", "shop_deposit_info")],
-            [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
-          ]),
-        }
-      );
-    }
-
     if (prod.stock === 0) {
       return safeEdit(ctx,
         `${header("❌ OUT OF STOCK")}\n\n` +
@@ -1569,26 +1569,344 @@ export function startShopBot(token: string) {
       );
     }
 
-    // ── Confirmation screen ───────────────────────────────────────────────────
-    const emoji = platformEmoji(prod.account_type);
-    buyFlows.set(uid, { productId, step: "confirm" });
+    // ── Quantity selection ────────────────────────────────────────────────────
+    const price = parseFloat(prod.price);
     return safeEdit(ctx,
-      `${emoji} <b>Confirm Purchase</b>\n\n` +
+      `🛒 <b>Select Quantity</b>\n\n` +
       `${divider()}\n\n` +
       `📦 <b>${escHtml(prod.name)}</b>\n` +
-      `💵 Price: <b>${fmt$(price)}</b>\n` +
-      `💰 Balance after: <b>${fmt$(balance - price)}</b>\n\n` +
-      `${divider()}\n` +
-      `<i>Have a promo code? Apply it for a discount!</i>`,
+      `💰 ${fmt$(price)} / code\n\n` +
+      `How many codes do you want?`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`✅  Confirm Purchase  —  ${fmt$(price)}`, `buyconfirm_${productId}`)],
-          [Markup.button.callback("🏷️  Apply Promo Code", `buypromo_${productId}`)],
-          [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
+          [1, 2, 3, 5].map(q => Markup.button.callback(`${q}`, `shop_qty_${productId}_${q}`)),
+          [10, 15, 20, 25].map(q => Markup.button.callback(`${q}`, `shop_qty_${productId}_${q}`)),
+          [Markup.button.callback("✏️  Custom Amount", `shop_qty_custom_${productId}`)],
+          [Markup.button.callback("⬅️  Back to Product", `shop_product_${productId}`)],
+          [Markup.button.callback("🏠  Main Menu", "shop_main_menu")],
         ]),
       }
     );
+  });
+
+  // ── Checkout: order summary ───────────────────────────────────────────────
+  bot.action(/^shop_qty_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const qty       = parseInt((ctx.match as RegExpExecArray)[2], 10);
+    if (!qty || qty < 1) return;
+    const prod = await getProductById(productId);
+    if (!prod || !prod.active) {
+      return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    }
+    const unitPrice   = parseFloat(prod.price);
+    const totalAmount = parseFloat((unitPrice * qty).toFixed(2));
+    checkoutSessions.set(uid, { productId, productName: prod.name, qty, unitPrice, totalAmount });
+    return safeEdit(ctx,
+      `📋 <b>Order Summary</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)}</b>\n` +
+      `🔢 Quantity: <b>${qty}</b>\n\n` +
+      `💵 Total: <b>${fmt$(totalAmount)} USDT</b>\n\n` +
+      `${divider()}`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅  Confirm & Choose Payment`, `shop_qconf_${productId}_${qty}`)],
+          [Markup.button.callback("🔢  Change Quantity", `shop_buy_${productId}`)],
+          [Markup.button.callback("🏠  Main Menu", "shop_main_menu")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: custom quantity prompt ─────────────────────────────────────
+  bot.action(/^shop_qty_custom_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const prod = await getProductById(productId);
+    if (!prod || !prod.active) {
+      return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    }
+    checkoutSessions.set(uid, {
+      productId, productName: prod.name, qty: 0,
+      unitPrice: parseFloat(prod.price), totalAmount: 0,
+      customQtyStep: true,
+    });
+    return safeEdit(ctx,
+      `✏️ <b>Custom Quantity</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)}</b>\n` +
+      `💰 ${fmt$(parseFloat(prod.price))} / code\n\n` +
+      `Type the number of codes you want:`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("⬅️  Back", `shop_buy_${productId}`)]]),
+      }
+    );
+  });
+
+  // ── Checkout: payment method selection ───────────────────────────────────
+  bot.action(/^shop_qconf_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const qty       = parseInt((ctx.match as RegExpExecArray)[2], 10);
+    const session   = checkoutSessions.get(uid);
+    const prod      = await getProductById(productId);
+    if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    const unitPrice   = parseFloat(prod.price);
+    const totalAmount = parseFloat((unitPrice * qty).toFixed(2));
+    // Refresh session
+    checkoutSessions.set(uid, { ...session, productId, productName: prod.name, qty, unitPrice, totalAmount });
+    return safeEdit(ctx,
+      `💳 <b>Select Payment Method</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
+      `💵 Total: <b>${fmt$(totalAmount)} USDT</b>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🟡  Binance Pay",         `shop_qpay_binance_${productId}_${qty}`)],
+          [Markup.button.callback("🟠  ByBit Pay",           `shop_qpay_bybit_${productId}_${qty}`)],
+          [Markup.button.callback("🔵  USDT (BEP20 - BSC)",  `shop_qpay_bep20_${productId}_${qty}`)],
+          [Markup.button.callback("🟣  USDT (TRC20 - Tron)", `shop_qpay_trc20_${productId}_${qty}`)],
+          [Markup.button.callback("🔢  Change Quantity",     `shop_buy_${productId}`)],
+          [Markup.button.callback("🏠  Main Menu",           "shop_main_menu")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: Binance Pay payment instructions ───────────────────────────
+  bot.action(/^shop_qpay_binance_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Creating order…").catch(() => {});
+    const uid     = ctx.from.id;
+    const prodId  = (ctx.match as RegExpExecArray)[1];
+    const qty     = parseInt((ctx.match as RegExpExecArray)[2], 10);
+    const session = checkoutSessions.get(uid) ?? {} as Partial<CheckoutSession>;
+    const prod    = await getProductById(prodId);
+    if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    const total = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
+    const order = await createOrder({ userId: String(uid), amount: total, chain: "BINANCE_PAY" });
+    const shortId = `ORD-${order.orderId.toUpperCase().slice(0, 10)}`;
+    checkoutSessions.set(uid, {
+      ...session, productId: prodId, productName: prod.name, qty,
+      unitPrice: parseFloat(prod.price), totalAmount: total,
+      cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BINANCE_PAY",
+    });
+    return safeEdit(ctx,
+      `🟡 <b>Pay via Binance Pay</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
+      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
+      `Order: <code>${shortId}</code>\n\n` +
+      `${divider()}\n\n` +
+      `Open your <b>Binance</b> app\n` +
+      `Go to <b>Pay → Send</b>\n` +
+      `Send to UID: <code>${order.binanceUID || "510120124"}</code>\n` +
+      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
+      `Add this note exactly:\n<code>${order.note}</code>\n\n` +
+      `${divider()}\n\n` +
+      `The note is <b>required</b> to verify your payment.\n` +
+      `<i>If Binance shows its own order or transaction ID after payment, keep it in case support asks for it.\n\n` +
+      `Waiting for payment… (expires in 30 min)</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
+          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
+          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: ByBit Pay ──────────────────────────────────────────────────
+  bot.action(/^shop_qpay_bybit_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Creating order…").catch(() => {});
+    const uid    = ctx.from.id;
+    const prodId = (ctx.match as RegExpExecArray)[1];
+    const qty    = parseInt((ctx.match as RegExpExecArray)[2], 10);
+    const session = checkoutSessions.get(uid) ?? {} as Partial<CheckoutSession>;
+    const prod   = await getProductById(prodId);
+    if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    const total = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
+    const order = await createOrder({ userId: String(uid), amount: total, chain: "BINANCE_PAY" });
+    const shortId = `ORD-${order.orderId.toUpperCase().slice(0, 10)}`;
+    checkoutSessions.set(uid, {
+      ...session, productId: prodId, productName: prod.name, qty,
+      unitPrice: parseFloat(prod.price), totalAmount: total,
+      cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BYBIT_PAY",
+    });
+    const bybitUID = process.env.BYBIT_UID || "127442363";
+    return safeEdit(ctx,
+      `🟠 <b>Pay via ByBit Pay</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
+      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
+      `Order: <code>${shortId}</code>\n\n` +
+      `${divider()}\n\n` +
+      `Open your <b>ByBit</b> app\n` +
+      `Go to <b>Pay → Send</b>\n` +
+      `Send to UID: <code>${bybitUID}</code>\n` +
+      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
+      `Add this note exactly:\n<code>${order.note}</code>\n\n` +
+      `${divider()}\n\n` +
+      `The note is <b>required</b> to verify your payment.\n` +
+      `<i>Waiting for payment… (expires in 30 min)</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
+          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
+          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: USDT BEP20 ─────────────────────────────────────────────────
+  bot.action(/^shop_qpay_bep20_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Creating order…").catch(() => {});
+    const uid     = ctx.from.id;
+    const prodId  = (ctx.match as RegExpExecArray)[1];
+    const qty     = parseInt((ctx.match as RegExpExecArray)[2], 10);
+    const session = checkoutSessions.get(uid) ?? {} as Partial<CheckoutSession>;
+    const prod    = await getProductById(prodId);
+    if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    const total = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
+    const order = await createOrder({ userId: String(uid), amount: total, chain: "BEP20" });
+    const shortId = `ORD-${order.orderId.toUpperCase().slice(0, 10)}`;
+    checkoutSessions.set(uid, {
+      ...session, productId: prodId, productName: prod.name, qty,
+      unitPrice: parseFloat(prod.price), totalAmount: total,
+      cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BEP20",
+    });
+    return safeEdit(ctx,
+      `🔵 <b>Pay via USDT BEP20 (BSC)</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
+      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
+      `Order: <code>${shortId}</code>\n\n` +
+      `${divider()}\n\n` +
+      `Send <b>exactly</b> this amount:\n\n` +
+      `<b>Amount:</b>  <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `<b>Network:</b>  <code>BNB Smart Chain (BEP20)</code>\n` +
+      `<b>Address:</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
+      `${divider()}\n\n` +
+      `⚠️ Send the <b>exact</b> amount shown above.\n` +
+      `<i>Your order will be confirmed automatically once the transfer is detected.\n\n` +
+      `Waiting for payment… (expires in 30 min)</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
+          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
+          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: USDT TRC20 ─────────────────────────────────────────────────
+  bot.action(/^shop_qpay_trc20_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Creating order…").catch(() => {});
+    const uid     = ctx.from.id;
+    const prodId  = (ctx.match as RegExpExecArray)[1];
+    const qty     = parseInt((ctx.match as RegExpExecArray)[2], 10);
+    const session = checkoutSessions.get(uid) ?? {} as Partial<CheckoutSession>;
+    const prod    = await getProductById(prodId);
+    if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
+    const total = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
+    const order = await createOrder({ userId: String(uid), amount: total, chain: "TRC20" });
+    const shortId = `ORD-${order.orderId.toUpperCase().slice(0, 10)}`;
+    checkoutSessions.set(uid, {
+      ...session, productId: prodId, productName: prod.name, qty,
+      unitPrice: parseFloat(prod.price), totalAmount: total,
+      cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "TRC20",
+    });
+    return safeEdit(ctx,
+      `🟣 <b>Pay via USDT TRC20 (Tron)</b>\n\n` +
+      `${divider()}\n\n` +
+      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
+      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
+      `Order: <code>${shortId}</code>\n\n` +
+      `${divider()}\n\n` +
+      `Send <b>exactly</b> this amount:\n\n` +
+      `<b>Amount:</b>  <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `<b>Network:</b>  <code>TRON (TRC20)</code>\n` +
+      `<b>Address:</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
+      `${divider()}\n\n` +
+      `⚠️ Send the <b>exact</b> amount shown above.\n` +
+      `<i>Your order will be confirmed automatically once the transfer is detected.\n\n` +
+      `Waiting for payment… (expires in 30 min)</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
+          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
+          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: Check payment status ───────────────────────────────────────
+  bot.action("shop_chk_pay", async (ctx) => {
+    await ctx.answerCbQuery("Checking…").catch(() => {});
+    const uid     = ctx.from.id;
+    const session = checkoutSessions.get(uid);
+    if (!session?.cryptoOrderId) {
+      return safeEdit(ctx,
+        `⚠️ <i>No active payment order found. Please start a new order.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+    return safeEdit(ctx,
+      `⏳ <b>Still waiting for payment…</b>\n\n` +
+      `${divider()}\n\n` +
+      `Our system checks every ~25 seconds. Your order will be fulfilled automatically once payment is detected.\n\n` +
+      `<b>Amount:</b> <code>${session.exactAmount?.toFixed(2) ?? session.totalAmount.toFixed(2)} USDT</code>\n` +
+      (session.note ? `<b>Note:</b> <code>${session.note}</code>\n` : ""),
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄  Check Again",  "shop_chk_pay")],
+          [Markup.button.callback("❌  Cancel Order", "shop_cancel_pay")],
+        ]),
+      }
+    );
+  });
+
+  // ── Checkout: Cancel ─────────────────────────────────────────────────────
+  bot.action("shop_cancel_pay", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    checkoutSessions.delete(uid);
+    return safeEdit(ctx, `❌ <i>Order cancelled.</i>`, { parse_mode: "HTML" });
+  });
+
+  // ── Main Menu shortcut ────────────────────────────────────────────────────
+  bot.action("shop_main_menu", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    checkoutSessions.delete(uid);
+    buyFlows.delete(uid);
+    const products = await getProductsWithStock();
+    if (products.length === 0) {
+      return safeEdit(ctx,
+        `🛍  <b>LIVE MARKETPLACE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ No products available right now.\n→ ${escHtml(SUPPORT_CONTACT)}`,
+        { parse_mode: "HTML" }
+      );
+    }
+    return safeEdit(ctx, buildMarketplaceText(products), {
+      parse_mode: "HTML",
+      ...buildMarketplaceKeyboard(products),
+    });
   });
 
   // ── Promo code entry ──────────────────────────────────────────────────────
@@ -2452,6 +2770,41 @@ export function startShopBot(token: string) {
   bot.on("text", async (ctx: any, next: any) => {
     const uid  = ctx.from?.id;
     if (!uid) return next();
+
+    // ── Checkout: custom quantity input ───────────────────────────────────────
+    const coSession = checkoutSessions.get(uid);
+    if (coSession?.customQtyStep) {
+      const raw = ctx.message.text?.trim() ?? "";
+      const qty = parseInt(raw, 10);
+      await ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
+      if (isNaN(qty) || qty < 1 || qty > 999) {
+        return safeReply(ctx,
+          `⚠️ <b>Invalid quantity.</b> Please enter a number between 1 and 999:`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("⬅️  Back", `shop_buy_${coSession.productId}`)]]),
+          }
+        );
+      }
+      const totalAmount = parseFloat((coSession.unitPrice * qty).toFixed(2));
+      checkoutSessions.set(uid, { ...coSession, qty, totalAmount, customQtyStep: false });
+      return safeReply(ctx,
+        `📋 <b>Order Summary</b>\n\n` +
+        `${divider()}\n\n` +
+        `📦 <b>${escHtml(coSession.productName)}</b>\n` +
+        `🔢 Quantity: <b>${qty}</b>\n\n` +
+        `💵 Total: <b>${fmt$(totalAmount)} USDT</b>\n\n` +
+        `${divider()}`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback(`✅  Confirm & Choose Payment`, `shop_qconf_${coSession.productId}_${qty}`)],
+            [Markup.button.callback("🔢  Change Quantity", `shop_buy_${coSession.productId}`)],
+            [Markup.button.callback("🏠  Main Menu", "shop_main_menu")],
+          ]),
+        }
+      );
+    }
 
     // ── Crypto auto-verify — amount input ─────────────────────────────────────
     const cryptoFlow = cryptoDepositFlows.get(uid);
@@ -3658,7 +4011,65 @@ export function startShopBot(token: string) {
     const telegramId = parseInt(order.userId, 10);
     const amount     = parseFloat(order.amount);
 
-    // Credit balance in shop_customers (upsert-safe: only if the row exists)
+    // ── Direct checkout: auto-fulfill product(s) ─────────────────────────────
+    const session = checkoutSessions.get(telegramId);
+    if (session?.cryptoOrderId === order.orderId) {
+      checkoutSessions.delete(telegramId);
+      cryptoDepositFlows.delete(telegramId);
+
+      // Credit balance so purchaseProduct() can deduct it
+      await dbQuery(
+        `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
+        [amount.toFixed(2), telegramId]
+      );
+
+      const deliveredItems: string[] = [];
+      let pendingDelivery = false;
+      let lastOrderId = "";
+
+      for (let i = 0; i < session.qty; i++) {
+        const result = await purchaseProduct(telegramId, session.productId, 0);
+        if (result.success) {
+          lastOrderId = result.orderId;
+          if (result.deliveryPending) {
+            pendingDelivery = true;
+          } else if (result.redeemLink) {
+            deliveredItems.push(`${i + 1}. <code>${escHtml(result.redeemLink)}</code>`);
+          } else if (result.accountEmail) {
+            deliveredItems.push(`${i + 1}. <code>${escHtml(result.accountEmail)}:${escHtml(result.accountPassword ?? "")}</code>`);
+          }
+        }
+      }
+
+      let deliveryMsg = "";
+      if (pendingDelivery) {
+        deliveryMsg =
+          `╔══════════════════════════════════════╗\n` +
+          `║  ✅  <b>PAYMENT CONFIRMED!</b>  ║\n` +
+          `╚══════════════════════════════════════╝\n\n` +
+          `📦 <b>${escHtml(session.productName)} × ${session.qty}</b>\n\n` +
+          `Your order is being processed. You will receive your items shortly.\n` +
+          `<i>Order ID: <code>${lastOrderId}</code></i>`;
+      } else if (deliveredItems.length > 0) {
+        deliveryMsg =
+          `╔══════════════════════════════════════╗\n` +
+          `║  ✅  <b>ORDER DELIVERED!</b>  ║\n` +
+          `╚══════════════════════════════════════╝\n\n` +
+          `📦 <b>${escHtml(session.productName)} × ${session.qty}</b>\n\n` +
+          `${deliveredItems.join("\n")}\n\n` +
+          `<i>Thank you for your purchase! 🎉</i>`;
+      } else {
+        deliveryMsg =
+          `✅ <b>Payment confirmed</b> for ${escHtml(session.productName)} × ${session.qty}.\n` +
+          `<i>Contact support if you have any issues: ${escHtml(SUPPORT_CONTACT)}</i>`;
+      }
+
+      await bot.telegram.sendMessage(telegramId, deliveryMsg, { parse_mode: "HTML" })
+        .catch((err: any) => console.error(`[ShopBot] checkout delivery msg failed:`, err?.message));
+      return;
+    }
+
+    // ── Regular deposit: just credit balance ─────────────────────────────────
     await dbQuery(
       `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
       [amount.toFixed(2), telegramId]
