@@ -179,7 +179,6 @@ async function buildShopKeyboard() {
     [BTN.BALANCE,   BTN.ORDERS],
     [BTN.DEPOSIT,   BTN.SUPPORT],
     [BTN.IDENTITY,  BTN.REFER],
-    [BTN.BIZ_MAIL],
   ]).resize().oneTime();
 }
 
@@ -3462,9 +3461,17 @@ export function startShopBot(token: string) {
     if (loadMsg) {
       await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined, card, {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[Markup.button.callback("📩  My Mails", "bizmail_list")]]),
       }).catch(() => {});
     }
+
+    await bot.telegram.sendMessage(chatId,
+      `⏳ <b>Waiting for Mail…</b>\n\n` +
+      `Your inbox is live. Any email delivered to <code>${escHtml(address)}</code> will appear here instantly.\n\n` +
+      `📬 <b>Webmail:</b>  <a href="https://app.smtp.dev">app.smtp.dev</a>\n` +
+      `📥 <b>IMAP:</b>     <code>imap.smtp.dev:993</code>  <i>(SSL)</i>\n` +
+      `📤 <b>SMTP:</b>     <code>smtp.smtp.dev:587</code>  <i>(STARTTLS)</i>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
   });
 
   bot.action("bizmail_list", async (ctx) => {
