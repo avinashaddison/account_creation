@@ -10,6 +10,11 @@ import {
 import { createOrder, setOnPaymentPaid } from "./crypto/orderService";
 import { ae as aeFromSettings, loadEmojiSettings } from "./emojiSettings";
 import { searchUpiPaymentEmail } from "./mailService";
+import {
+  createAccount as smtpDevCreate,
+  getFullInbox as smtpDevInbox,
+} from "./smtpDevService";
+import { storage } from "./storage";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -128,6 +133,7 @@ const BTN = {
   IDENTITY:     "👤  𝗠𝗬  𝗣𝗥𝗢𝗙𝗜𝗟𝗘",
   SUPPORT:      "🎧  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
+  BIZ_MAIL:     "📩  𝗕𝗨𝗦𝗜𝗡𝗘𝗦𝗦  𝗠𝗔𝗜𝗟",
 } as const;
 
 // Cycling hot-product emoji for sticky keyboard buttons
@@ -173,6 +179,7 @@ async function buildShopKeyboard() {
     [BTN.BALANCE,   BTN.ORDERS],
     [BTN.DEPOSIT,   BTN.SUPPORT],
     [BTN.IDENTITY,  BTN.REFER],
+    [BTN.BIZ_MAIL],
   ]).resize().oneTime();
 }
 
@@ -3380,6 +3387,181 @@ export function startShopBot(token: string) {
       setTimeout(() => launch(attempt + 1), delay);
     }
   }
+  // ── Business Mail ─────────────────────────────────────────────────────────
+  // Per-account inbox seen-ID tracker (survives process but resets on restart)
+  const bizSeenIds = new Map<string, Set<string>>(); // smtpAccountId → set of seen msg IDs
+
+  function genBizPassword(): string {
+    const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!";
+    return Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  }
+
+  function alertAdminBizMailAllocated(email: string, password: string, telegramId: number, username: string | undefined) {
+    const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+    const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!adminToken || adminIds.length === 0) return;
+    const uname = username ? `@${username}` : `ID ${telegramId}`;
+    const text =
+      `📩 <b>BIZ MAIL ALLOCATED</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📧 Email:     <code>${escHtml(email)}</code>\n` +
+      `🔑 Password:  <code>${escHtml(password)}</code>\n` +
+      `👤 User:      ${escHtml(uname)}  <code>(${telegramId})</code>\n\n` +
+      `<i>Realtime inbox monitoring active for this user.</i>`;
+    for (const id of adminIds) {
+      fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: id, text, parse_mode: "HTML" }),
+      }).catch(() => {});
+    }
+  }
+
+  async function startBizInboxPoller(smtpAccountId: string, email: string, telegramId: number) {
+    if (!bizSeenIds.has(smtpAccountId)) bizSeenIds.set(smtpAccountId, new Set());
+    const seen = bizSeenIds.get(smtpAccountId)!;
+    console.log(`[ShopBot/BizMail] Starting inbox poller for ${email} → user ${telegramId}`);
+    (async () => {
+      while (true) {
+        try {
+          const msgs = await smtpDevInbox(smtpAccountId);
+          for (const msg of msgs) {
+            if (seen.has(msg.id)) continue;
+            seen.add(msg.id);
+            const body = (msg.text || msg.subject || "(no content)").substring(0, 3000);
+            await bot.telegram.sendMessage(
+              telegramId,
+              `📬 <b>New Business Email!</b>\n\n` +
+              `💼 <b>To:</b> <code>${escHtml(email)}</code>\n` +
+              `👤 <b>From:</b> <code>${escHtml(msg.from)}</code>\n` +
+              `📌 <b>Subject:</b> ${escHtml(msg.subject)}\n` +
+              `📅 <b>Date:</b> ${new Date(msg.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
+              `<pre>${escHtml(body)}</pre>`,
+              { parse_mode: "HTML" }
+            ).catch(() => {});
+          }
+        } catch (e: any) {
+          // silently retry
+        }
+        await new Promise(r => setTimeout(r, 3_000));
+      }
+    })();
+  }
+
+  async function showBizMailPanel(chatId: number, uid: number, username?: string) {
+    const mails = await storage.getBizMailsByTelegramId(uid);
+    const active = mails.filter(m => !m.deletedAt);
+
+    let text =
+      `📩 <b>BUSINESS MAIL</b>  ·  <i>@addison.asia</i>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    if (active.length === 0) {
+      text += `<i>You have no active business email addresses yet.\nTap Generate to create one exclusively for you.</i>\n\n`;
+    } else {
+      text += `<b>Your Allocated Addresses:</b>\n\n`;
+      for (const m of active) {
+        const since = m.allocatedAt
+          ? new Date(m.allocatedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })
+          : "—";
+        text += `📧 <code>${escHtml(m.email)}</code>\n🔑 <code>${escHtml(m.password)}</code>\n📅 Since: ${since}\n\n`;
+      }
+      text += `<b>Webmail:</b> <a href="https://app.smtp.dev">app.smtp.dev</a>\n`;
+      text += `<b>IMAP:</b> <code>imap.smtp.dev:993 (SSL)</code>\n`;
+      text += `<b>SMTP:</b> <code>smtp.smtp.dev:587 (STARTTLS)</code>\n\n`;
+      text += `<i>New emails are forwarded here in realtime.</i>`;
+    }
+
+    await bot.telegram.sendMessage(chatId, text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("📩  Generate New Mail", "bizmail_generate")],
+      ]),
+    }).catch(() => {});
+  }
+
+  bot.hears(BTN.BIZ_MAIL, async (ctx) => {
+    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+    await showBizMailPanel(ctx.chat.id, ctx.from.id, ctx.from.username);
+  });
+
+  bot.action("bizmail_generate", async (ctx) => {
+    await ctx.answerCbQuery("Creating your business email…").catch(() => {});
+    const uid      = ctx.from.id;
+    const chatId   = ctx.chat!.id;
+    const username = ctx.from.username;
+
+    const loadMsg = await bot.telegram.sendMessage(chatId,
+      `⏳ <b>Creating your business email address…</b>`,
+      { parse_mode: "HTML" }
+    ).catch(() => null);
+
+    const address  = `user${uid}m${Date.now() % 100000}@addison.asia`;
+    const password = genBizPassword();
+
+    let smtpAccountId: string;
+    try {
+      const { account } = await smtpDevCreate(address, password);
+      smtpAccountId = account.id;
+    } catch (err: any) {
+      if (loadMsg) {
+        await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+          `❌ <b>Failed to create email account</b>\n<code>${escHtml(err.message?.substring(0, 200))}</code>`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
+      }
+      return;
+    }
+
+    await storage.registerBizMailAccount(null, address, password, {
+      allocatedTo:   uid,
+      smtpAccountId,
+    });
+
+    alertAdminBizMailAllocated(address, password, uid, username);
+    startBizInboxPoller(smtpAccountId, address, uid);
+
+    const card =
+      `📩 <b>Business Email Allocated!</b>\n\n` +
+      `📧 <b>Email:</b>     <code>${escHtml(address)}</code>\n` +
+      `🔑 <b>Password:</b>  <code>${escHtml(password)}</code>\n\n` +
+      `🌐 <b>Webmail:</b>   <a href="https://app.smtp.dev">app.smtp.dev</a>\n` +
+      `📮 <b>IMAP:</b>      <code>imap.smtp.dev:993 (SSL)</code>\n` +
+      `📤 <b>SMTP:</b>      <code>smtp.smtp.dev:587 (STARTTLS)</code>\n\n` +
+      `<b>This address is exclusively yours.</b>\n` +
+      `<i>Any emails sent to it will be forwarded here in realtime.</i>`;
+
+    if (loadMsg) {
+      await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined, card, {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📩  My Mails", "bizmail_list")],
+        ]),
+      }).catch(() => {});
+    }
+  });
+
+  bot.action("bizmail_list", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    await showBizMailPanel(ctx.chat!.id, ctx.from!.id, ctx.from?.username);
+  });
+
+  // On startup: resume inbox polling for all previously allocated accounts
+  (async () => {
+    try {
+      const all = await storage.getAllAllocatedBizMails();
+      for (const acc of all) {
+        if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
+          startBizInboxPoller(acc.smtpAccountId, acc.email, acc.allocatedTo);
+          await new Promise(r => setTimeout(r, 100)); // gentle stagger
+        }
+      }
+      if (all.length > 0) console.log(`[ShopBot/BizMail] Resumed polling for ${all.length} allocated accounts`);
+    } catch (e: any) {
+      console.error("[ShopBot/BizMail] Startup resume error:", e.message);
+    }
+  })();
+
   // ── Wire crypto payment-confirmed callback ────────────────────────────────
   // Called by the background payment checker when it detects a matched USDT
   // transfer on Binance.  Credits the customer balance and notifies via bot.

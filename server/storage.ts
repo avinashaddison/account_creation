@@ -106,7 +106,7 @@ export interface IStorage {
   getUsedBizMailNums(): Promise<number[]>;
   getBizMailByNum(accountNum: number): Promise<BizMailAccount | undefined>;
   getBizMailByEmail(email: string): Promise<BizMailAccount | undefined>;
-  registerBizMailAccount(accountNum: number | null, email: string, password: string): Promise<BizMailAccount>;
+  registerBizMailAccount(accountNum: number | null, email: string, password: string, opts?: { allocatedTo?: number; smtpAccountId?: string }): Promise<BizMailAccount>;
   markBizMailDeleted(accountNum: number): Promise<void>;
   markBizMailDeletedByEmail(email: string): Promise<void>;
   reactivateBizMailAccount(accountNum: number, password: string): Promise<void>;
@@ -114,6 +114,8 @@ export interface IStorage {
   getDeletedBizMailAccounts(): Promise<BizMailAccount[]>;
   getActiveBizMailAccounts(): Promise<BizMailAccount[]>;
   getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]>;
+  getBizMailsByTelegramId(telegramId: number): Promise<BizMailAccount[]>;
+  getAllAllocatedBizMails(): Promise<BizMailAccount[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -704,9 +706,17 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async registerBizMailAccount(accountNum: number | null, email: string, password: string): Promise<BizMailAccount> {
+  async registerBizMailAccount(accountNum: number | null, email: string, password: string, opts?: { allocatedTo?: number; smtpAccountId?: string }): Promise<BizMailAccount> {
     const [row] = await db.insert(bizMailAccounts)
-      .values({ accountNum, email, password, isActive: true })
+      .values({
+        accountNum,
+        email,
+        password,
+        isActive: true,
+        allocatedTo:   opts?.allocatedTo   ?? null,
+        smtpAccountId: opts?.smtpAccountId ?? null,
+        allocatedAt:   opts?.allocatedTo ? new Date() : null,
+      })
       .returning();
     return row;
   }
@@ -752,6 +762,18 @@ export class DatabaseStorage implements IStorage {
       .where(isNull(bizMailAccounts.deletedAt))
       .orderBy(bizMailAccounts.createdAt)
       .limit(limit);
+  }
+
+  async getBizMailsByTelegramId(telegramId: number): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(eq(bizMailAccounts.allocatedTo, telegramId))
+      .orderBy(desc(bizMailAccounts.allocatedAt));
+  }
+
+  async getAllAllocatedBizMails(): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(isNotNull(bizMailAccounts.allocatedTo))
+      .orderBy(desc(bizMailAccounts.allocatedAt));
   }
 }
 
