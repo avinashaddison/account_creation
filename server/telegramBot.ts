@@ -910,13 +910,17 @@ async function notifyChannelStock(productId: string, productName: string, addedC
       `🔔 <b>${addedCount} new stock added for ${escapeHtml(productName)}!</b>\n\n` +
       `⚡ Available: <b>${availableCount} items</b>\n` +
       `💰 Price: <b>${parseFloat(price).toFixed(2)} USDT</b>`;
-    const replyMarkup = JSON.stringify({
-      inline_keyboard: [[{ text: `${productName} (${addedCount})`, callback_data: `shop_product_${productId}` }]]
-    });
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: "@projectaddison", text, parse_mode: "HTML", reply_markup: replyMarkup }),
+      body: JSON.stringify({
+        chat_id: "@projectaddison",
+        text,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[{ text: `${productName} (${addedCount})`, callback_data: `shop_product_${productId}` }]]
+        },
+      }),
     });
   } catch { /* best-effort */ }
 }
@@ -5450,6 +5454,10 @@ export function startTelegramBot(config: BotConfig) {
         }
         st.shopAdminFlow = undefined;
         await dbQuery(`UPDATE shop_products SET manual_stock = $1 WHERE id = $2`, [n, productId]);
+        // Channel alert (fire-and-forget)
+        const msProd = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [productId]);
+        const msProdRow = msProd.rows[0];
+        if (msProdRow) notifyChannelStock(productId, msProdRow.name, n, n, msProdRow.price).catch(() => {});
         return ctx.reply(
           `✅ Manual stock set to <b>${n}</b>.\n\nCustomers will be able to purchase up to this quantity.`,
           {
