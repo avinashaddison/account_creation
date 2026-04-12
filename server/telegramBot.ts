@@ -902,40 +902,57 @@ function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-async function notifyChannelStock(productId: string, productName: string, addedCount: number, availableCount: number, price: string): Promise<void> {
+async function notifyAdminStock(adminId: number, productId: string, productName: string, availableCount: number, price: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN_2;
   if (!token) return;
   try {
+    const priceFmt = `$${parseFloat(price).toFixed(2)}`;
     const text =
-      `🔔 <b>${addedCount} new stock added for ${escapeHtml(productName)}!</b>\n\n` +
-      `⚡ Available: <b>${availableCount} items</b>\n` +
-      `💰 Price: <b>${parseFloat(price).toFixed(2)} USDT</b>`;
+      `🔔 <b>Stock Updated — ${escapeHtml(productName)}</b>\n\n` +
+      `📦 Available: <b>${availableCount} items</b>\n` +
+      `💰 Price: <b>${priceFmt}</b> / account\n\n` +
+      `<i>Delivery is automatic after payment confirmation.</i>`;
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: "@projectaddison",
+        chat_id: adminId,
         text,
         parse_mode: "HTML",
         reply_markup: {
-          inline_keyboard: [[{ text: `${productName} (${addedCount})`, callback_data: `shop_product_${productId}` }]]
+          inline_keyboard: [
+            [{ text: `🛒  Buy Now  —  ${priceFmt}`, callback_data: `shop_buy_${productId}` }],
+            [{ text: `🛍  BACK TO SHOP`, callback_data: `shop_back_products` }],
+          ],
         },
       }),
     });
   } catch { /* best-effort */ }
 }
 
-async function notifyChannelPriceUpdate(productName: string, newPrice: string): Promise<void> {
+async function notifyAdminPrice(adminId: number, productId: string, productName: string, newPrice: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN_2;
   if (!token) return;
   try {
+    const priceFmt = `$${parseFloat(newPrice).toFixed(2)}`;
     const text =
-      `💰 <b>Price updated for ${escapeHtml(productName)}!</b>\n\n` +
-      `📦 New price: <b>${parseFloat(newPrice).toFixed(2)} USDT</b>`;
+      `💰 <b>Price Updated — ${escapeHtml(productName)}</b>\n\n` +
+      `📦 New price: <b>${priceFmt}</b> / account\n\n` +
+      `<i>Delivery is automatic after payment confirmation.</i>`;
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: "@projectaddison", text, parse_mode: "HTML" }),
+      body: JSON.stringify({
+        chat_id: adminId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `🛒  Buy Now  —  ${priceFmt}`, callback_data: `shop_buy_${productId}` }],
+            [{ text: `🛍  BACK TO SHOP`, callback_data: `shop_back_products` }],
+          ],
+        },
+      }),
     });
   } catch { /* best-effort */ }
 }
@@ -4988,10 +5005,10 @@ export function startTelegramBot(config: BotConfig) {
             return ctx.reply(`🔴 Invalid price. Send a positive number like <code>1.50</code>:`, { parse_mode: "HTML" });
           }
           await dbQuery(`UPDATE shop_products SET price = $1 WHERE id = $2`, [price.toFixed(2), pid]);
-          // Channel alert (fire-and-forget)
+          // Notify admin via Bot 2 DM (fire-and-forget)
           const pnRes = await dbQuery(`SELECT name FROM shop_products WHERE id = $1`, [pid]);
           const pName = pnRes.rows[0]?.name;
-          if (pName) notifyChannelPriceUpdate(pName, price.toFixed(2)).catch(() => {});
+          if (pName) notifyAdminPrice(ctx.from!.id, pid, pName, price.toFixed(2)).catch(() => {});
         }
 
         else if (flow.step === "edit_account_type") {
@@ -5313,9 +5330,9 @@ export function startTelegramBot(config: BotConfig) {
               `🌀 Available: <b>${newStock} items</b>\n` +
               `💰 Price: <b>${parseFloat(prod.price).toFixed(2)} USDT</b>`;
             const broadKb = JSON.stringify({ inline_keyboard: [[{ text: `${prod.name} (${added})`, callback_data: `shop_product_${prodId}` }]] });
+            const adminId = ctx.from!.id;
             (async () => {
-              // Channel alert first
-              await notifyChannelStock(prodId, prod.name, added, newStock, prod.price);
+              await notifyAdminStock(adminId, prodId, prod.name, newStock, prod.price);
               for (const c of custs.rows) {
                 try {
                   await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
@@ -5387,9 +5404,9 @@ export function startTelegramBot(config: BotConfig) {
               `🌀 Available: <b>${newStock} items</b>\n` +
               `💰 Price: <b>${parseFloat(prod.price).toFixed(2)} USDT</b>`;
             const broadKb = JSON.stringify({ inline_keyboard: [[{ text: `${prod.name} (${added})`, callback_data: `shop_product_${prodId}` }]] });
+            const adminId = ctx.from!.id;
             (async () => {
-              // Channel alert first
-              await notifyChannelStock(prodId, prod.name, added, newStock, prod.price);
+              await notifyAdminStock(adminId, prodId, prod.name, newStock, prod.price);
               for (const c of custs.rows) {
                 try {
                   await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
@@ -5454,10 +5471,10 @@ export function startTelegramBot(config: BotConfig) {
         }
         st.shopAdminFlow = undefined;
         await dbQuery(`UPDATE shop_products SET manual_stock = $1 WHERE id = $2`, [n, productId]);
-        // Channel alert (fire-and-forget)
+        // Notify admin via Bot 2 DM (fire-and-forget)
         const msProd = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [productId]);
         const msProdRow = msProd.rows[0];
-        if (msProdRow) notifyChannelStock(productId, msProdRow.name, n, n, msProdRow.price).catch(() => {});
+        if (msProdRow) notifyAdminStock(ctx.from!.id, productId, msProdRow.name, n, msProdRow.price).catch(() => {});
         return ctx.reply(
           `✅ Manual stock set to <b>${n}</b>.\n\nCustomers will be able to purchase up to this quantity.`,
           {
