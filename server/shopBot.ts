@@ -177,9 +177,9 @@ async function buildShopKeyboard() {
     ...stickyRows,
     [BTN.ACCOUNTS],
     [BTN.BALANCE,   BTN.ORDERS],
-    [BTN.DEPOSIT,   BTN.SUPPORT],
+    [BTN.DEPOSIT,   BTN.BIZ_MAIL],
     [BTN.IDENTITY,  BTN.REFER],
-    [BTN.BIZ_MAIL],
+    [BTN.SUPPORT],
   ]).resize().oneTime();
 }
 
