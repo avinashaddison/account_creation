@@ -2105,7 +2105,7 @@ export function startShopBot(token: string) {
     if (at === "chatgpt_plus" || at === "replit_core") {
       await showActivationMenu(ctx, at as ActivationService, true);
     } else {
-      shopState.set(ctx.from.id, { selectedProductId: match.id });
+      getState(ctx.from.id).selectedProductId = match.id;
       await showProductList(ctx);
     }
   });
