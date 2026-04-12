@@ -298,8 +298,8 @@ function maskHandle(name: string): string {
 
 async function notifyChannelNewUser(bot: any, username?: string, firstName?: string): Promise<void> {
   try {
-    const display = username ? `@${username}` : (firstName || "");
-    const masked  = maskHandle(display);
+    const rawDisplay = username ? `@${username}` : (firstName || "");
+    const masked     = escHtml(maskHandle(rawDisplay));
     const now     = new Date();
     const dateStr = now.toUTCString().replace(" GMT", " UTC");
     const countRes = await dbQuery(`SELECT COUNT(*) AS cnt FROM shop_customers`);
