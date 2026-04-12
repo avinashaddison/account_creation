@@ -336,12 +336,7 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
       // Install Playwright browsers in the background after server is up
       ensurePlaywrightBrowsersAsync();
-      // Set up JMAP routing so all @addison.asia biz mail arrives in admin inbox
-      import("./mailService").then(({ setupAllBizMailJmapRouting }) => {
-        setupAllBizMailJmapRouting().catch((e: any) =>
-          console.warn("[startup] BizMail JMAP routing setup error:", e?.message)
-        );
-      });
+      // smtp.dev handles all @addison.asia biz mail routing automatically
     },
   );
 })();

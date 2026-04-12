@@ -21991,7 +21991,7 @@ export async function registerChatGptAccount(
 }
 
 // ── ChatGPT account creation using business email (addison.asia) ─────────────
-// Signs up on chatgpt.com with a biz mail address and verifies via mailbux HTTP API
+// Signs up on chatgpt.com with a biz mail address and verifies via smtp.dev API
 // (no Playwright Outlook login needed — verification is fetched over HTTP).
 export async function registerChatGptAccountViaBizMail(
   bizEmail: string,
@@ -22198,11 +22198,11 @@ export async function registerChatGptAccountViaBizMail(
       log("⚠️ No password field — may already be on verification step");
     }
 
-    // ── STEP 4: Get verification from mailbux HTTP API (no browser) ───────────
+    // ── STEP 4: Get verification from smtp.dev API (no browser) ───────────────
     log(`📬 Waiting for OpenAI verification email in ${bizEmail}...`);
     const { fetchOpenAICodeFromBizMail } = await import("./mailService");
     const verResult = await fetchOpenAICodeFromBizMail(bizEmail, bizPassword, signupStart, log, 180_000);
-    if (!verResult) throw new Error("Verification not received within 3 minutes — check mailbux inbox");
+    if (!verResult) throw new Error("Verification not received within 3 minutes — check smtp.dev inbox");
 
     // Navigate to verify link OR enter OTP code
     if (verResult.link) {

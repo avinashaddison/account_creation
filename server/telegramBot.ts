@@ -5,8 +5,6 @@ import {
   getAvailableDomain, createTempEmail, getAuthToken,
   fetchMessages, fetchMessageContent, generateRandomUsername,
   detectProviderFromDomain,
-  createBizMailAccount, deleteBizMailAccount,
-  createBizMailForwarder, listBizMailForwarders,
   pollBizMailViaGmail, getGmailAddress, type BizMailMessage,
 } from "./mailService";
 import {
