@@ -391,8 +391,8 @@ export const bizMailAccounts = pgTable("biz_mail_accounts", {
   createdAt:     timestamp("created_at").notNull().defaultNow(),
   deletedAt:     timestamp("deleted_at"),
   // Shop bot allocation — links a mail exclusively to a Telegram user
-  allocatedTo:   bigint("allocated_to", { mode: "number" }),   // Telegram user ID
-  smtpAccountId: text("smtp_account_id"),                      // smtp.dev account ID for polling
+  allocatedTo:   bigint("allocated_to_telegram_id", { mode: "number" }),   // Telegram user ID
+  smtpAccountId: text("smtp_dev_id"),                                       // smtp.dev account ID for polling
   allocatedAt:   timestamp("allocated_at"),
 });
 
