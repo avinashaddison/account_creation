@@ -902,6 +902,37 @@ function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+async function notifyAdminNewProduct(adminId: number, productId: string, productName: string, price: string, accountType: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN_2;
+  if (!token) return;
+  try {
+    const priceFmt = `$${parseFloat(price).toFixed(2)}`;
+    const text =
+      `🆕  <b>New Product Listed</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escapeHtml(productName)}</b>\n` +
+      `💰  Price: <b>${priceFmt}</b> / account\n` +
+      `🗂  Type: <code>${escapeHtml(accountType)}</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `<i>Stock is empty — add accounts to make it available.</i>`;
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: adminId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `🛒  View in Shop`, callback_data: `shop_buy_${productId}` }],
+            [{ text: `🛍  Back to Shop`, callback_data: `shop_back_products` }],
+          ],
+        },
+      }),
+    });
+  } catch { /* best-effort */ }
+}
+
 async function notifyAdminStock(adminId: number, productId: string, productName: string, availableCount: number, price: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN_2;
   if (!token) return;
@@ -4962,12 +4993,17 @@ export function startTelegramBot(config: BotConfig) {
       if (flow.step === "status_filter") {
         flow.statusFilter = text.toLowerCase().trim();
         try {
-          await dbQuery(
+          const insertRes = await dbQuery(
             `INSERT INTO shop_products (name, description, price, account_type, status_filter)
-             VALUES ($1, $2, $3, $4, $5)`,
+             VALUES ($1, $2, $3, $4, $5) RETURNING id`,
             [flow.name, flow.description || null, flow.price, flow.accountType, flow.statusFilter]
           );
+          const newProductId = insertRes.rows[0]?.id?.toString() ?? "";
           st.shopAdminFlow = undefined;
+          // Notify via Bot 2 (fire-and-forget)
+          if (newProductId) {
+            notifyAdminNewProduct(ctx.from!.id, newProductId, flow.name!, flow.price!.toString(), flow.accountType!).catch(() => {});
+          }
           return ctx.reply(
             `🟢  <b>PRODUCT ADDED</b>\n\n` +
             `<code>◈ Name    →  ${flow.name}\n` +
