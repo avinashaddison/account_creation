@@ -231,7 +231,7 @@ interface BuyFlow {
 const buyFlows = new Map<number, BuyFlow>();
 
 // Direct checkout flow (no balance required)
-type CheckoutChain = "BINANCE_PAY" | "BYBIT_PAY" | "TRC20" | "BEP20";
+type CheckoutChain = "BINANCE_PAY" | "TRC20" | "BEP20" | "UPI";
 interface CheckoutSession {
   productId:       string;
   productName:     string;
@@ -1662,20 +1662,21 @@ export function startShopBot(token: string) {
     const totalAmount = parseFloat((unitPrice * qty).toFixed(2));
     // Refresh session
     checkoutSessions.set(uid, { ...session, productId, productName: prod.name, qty, unitPrice, totalAmount });
+    const inr = (totalAmount * UPI_RATE).toFixed(0);
     return safeEdit(ctx,
       `💳 <b>Select Payment Method</b>\n\n` +
       `${divider()}\n\n` +
       `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `💵 Total: <b>${fmt$(totalAmount)} USDT</b>`,
+      `💵 Total: <b>${fmt$(totalAmount)} USDT</b>  ·  <b>₹${inr}</b>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🟡  Binance Pay",         `shop_qpay_binance_${productId}_${qty}`)],
-          [Markup.button.callback("🟠  ByBit Pay",           `shop_qpay_bybit_${productId}_${qty}`)],
-          [Markup.button.callback("🔵  USDT (BEP20 - BSC)",  `shop_qpay_bep20_${productId}_${qty}`)],
-          [Markup.button.callback("🟣  USDT (TRC20 - Tron)", `shop_qpay_trc20_${productId}_${qty}`)],
-          [Markup.button.callback("🔢  Change Quantity",     `shop_buy_${productId}`)],
-          [Markup.button.callback("🏠  Main Menu",           "shop_main_menu")],
+          [Markup.button.callback("⚡  Binance Pay  ·  Instant",         `shop_qpay_binance_${productId}_${qty}`)],
+          [Markup.button.callback("💎  USDT TRC20  ·  Tron  ·  Instant", `shop_qpay_trc20_${productId}_${qty}`)],
+          [Markup.button.callback("💠  USDT BEP20  ·  BSC  ·  Instant",  `shop_qpay_bep20_${productId}_${qty}`)],
+          [Markup.button.callback("🇮🇳  UPI Payment  ·  Instant",        `shop_qpay_upi_${productId}_${qty}`)],
+          [Markup.button.callback("🔢  Change Quantity",                  `shop_buy_${productId}`)],
+          [Markup.button.callback("🏠  Main Menu",                        "shop_main_menu")],
         ]),
       }
     );
@@ -1725,45 +1726,41 @@ export function startShopBot(token: string) {
     );
   });
 
-  // ── Checkout: ByBit Pay ──────────────────────────────────────────────────
-  bot.action(/^shop_qpay_bybit_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
-    await ctx.answerCbQuery("Creating order…").catch(() => {});
-    const uid    = ctx.from.id;
-    const prodId = (ctx.match as RegExpExecArray)[1];
-    const qty    = parseInt((ctx.match as RegExpExecArray)[2], 10);
+  // ── Checkout: UPI Payment ────────────────────────────────────────────────
+  bot.action(/^shop_qpay_upi_([0-9a-f-]{36})_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid     = ctx.from.id;
+    const prodId  = (ctx.match as RegExpExecArray)[1];
+    const qty     = parseInt((ctx.match as RegExpExecArray)[2], 10);
     const session = checkoutSessions.get(uid) ?? {} as Partial<CheckoutSession>;
-    const prod   = await getProductById(prodId);
+    const prod    = await getProductById(prodId);
     if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
-    const total = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
-    const order = await createOrder({ userId: String(uid), amount: total, chain: "BINANCE_PAY" });
-    const shortId = `ORD-${order.orderId.toUpperCase().slice(0, 10)}`;
+    const totalUsd = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
+    const totalInr = Math.round(totalUsd * UPI_RATE * 100) / 100;
+    // Update checkout session (no cryptoOrderId needed — UTR-verified)
     checkoutSessions.set(uid, {
       ...session, productId: prodId, productName: prod.name, qty,
-      unitPrice: parseFloat(prod.price), totalAmount: total,
-      cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BYBIT_PAY",
+      unitPrice: parseFloat(prod.price), totalAmount: totalUsd, chain: "UPI",
     });
-    const bybitUID = process.env.BYBIT_UID || "127442363";
+    // Start UPI flow pre-filled with amounts, skip to waiting_utr
+    upiDepositFlows.set(uid, { step: "waiting_utr", amountUsd: totalUsd, amountInr: totalInr });
     return safeEdit(ctx,
-      `🟠 <b>Pay via ByBit Pay</b>\n\n` +
+      `🇮🇳 <b>UPI Payment  ·  Instant</b>\n\n` +
       `${divider()}\n\n` +
       `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
-      `Order: <code>${shortId}</code>\n\n` +
+      `💵 <b>${totalUsd.toFixed(2)} USDT</b>  ·  <b>₹${totalInr.toFixed(2)}</b>\n\n` +
       `${divider()}\n\n` +
-      `Open your <b>ByBit</b> app\n` +
-      `Go to <b>Pay → Send</b>\n` +
-      `Send to UID: <code>${bybitUID}</code>\n` +
-      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
-      `Add this note exactly:\n<code>${order.note}</code>\n\n` +
+      `Send exactly <b>₹${totalInr.toFixed(2)}</b> to:\n\n` +
+      `<b>UPI ID:</b>  <code>avinashaddison-8@okaxis</code>\n\n` +
       `${divider()}\n\n` +
-      `The note is <b>required</b> to verify your payment.\n` +
-      `<i>Waiting for payment… (expires in 30 min)</i>`,
+      `After paying, tap <b>I've Paid</b> and enter the <b>UTR / Reference number</b> from your payment app to confirm your order automatically.\n\n` +
+      `<i>Rate: $1 = ₹${UPI_RATE}</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
-          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
-          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+          [Markup.button.callback("✅  I've Paid — Enter UTR", "dep_upi_paid")],
+          [Markup.button.callback("❌  Cancel Order",           "shop_cancel_pay")],
+          [Markup.button.callback("🏠  Main Menu",              "shop_main_menu")],
         ]),
       }
     );
@@ -3072,6 +3069,62 @@ export function startShopBot(token: string) {
         );
 
         upiDepositFlows.delete(uid);
+
+        // ── UPI Checkout auto-fulfillment ──────────────────────────────────────
+        const upiCheckoutSession = checkoutSessions.get(uid);
+        if (upiCheckoutSession?.chain === "UPI") {
+          checkoutSessions.delete(uid);
+
+          const deliveredItems: string[] = [];
+          let pendingDelivery = false;
+          let lastOrderId = "";
+
+          for (let i = 0; i < upiCheckoutSession.qty; i++) {
+            const result = await purchaseProduct(uid, upiCheckoutSession.productId, 0);
+            if (result.success) {
+              lastOrderId = result.orderId;
+              if (result.deliveryPending) {
+                pendingDelivery = true;
+              } else if (result.redeemLink) {
+                deliveredItems.push(`${i + 1}. <code>${escHtml(result.redeemLink)}</code>`);
+              } else if (result.accountEmail) {
+                deliveredItems.push(`${i + 1}. <code>${escHtml(result.accountEmail)}:${escHtml(result.accountPassword ?? "")}</code>`);
+              }
+            }
+          }
+
+          let deliveryMsg = "";
+          if (pendingDelivery) {
+            deliveryMsg =
+              `╔══════════════════════════════════════╗\n` +
+              `║  ✅  <b>PAYMENT CONFIRMED!</b>  ║\n` +
+              `╚══════════════════════════════════════╝\n\n` +
+              `📦 <b>${escHtml(upiCheckoutSession.productName)} × ${upiCheckoutSession.qty}</b>\n` +
+              `🇮🇳 <b>₹${payInfo.amountInr.toFixed(2)}</b>  ·  UTR: <code>${utr}</code>\n\n` +
+              `Your order is being processed. You will receive your items shortly.\n` +
+              `<i>Order ID: <code>${lastOrderId}</code></i>`;
+          } else if (deliveredItems.length > 0) {
+            deliveryMsg =
+              `╔══════════════════════════════════════╗\n` +
+              `║  ✅  <b>ORDER DELIVERED!</b>  ║\n` +
+              `╚══════════════════════════════════════╝\n\n` +
+              `📦 <b>${escHtml(upiCheckoutSession.productName)} × ${upiCheckoutSession.qty}</b>\n` +
+              `🇮🇳 <b>₹${payInfo.amountInr.toFixed(2)}</b>  ·  UTR: <code>${utr}</code>\n\n` +
+              `${deliveredItems.join("\n")}\n\n` +
+              `<i>Thank you for your purchase! 🎉</i>`;
+          } else {
+            deliveryMsg =
+              `✅ <b>UPI payment confirmed</b> for ${escHtml(upiCheckoutSession.productName)} × ${upiCheckoutSession.qty}.\n` +
+              `<i>Contact support if you have any issues: ${escHtml(SUPPORT_CONTACT)}</i>`;
+          }
+
+          await safeReply(ctx, deliveryMsg, { parse_mode: "HTML" });
+
+          const uname2 = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Unknown";
+          notifyAdminsUpiPayment(uid, uname2, utr, payInfo.amountInr, amtUsd, payInfo.senderName, payInfo.senderBank);
+          return;
+        }
+        // ── End UPI Checkout ───────────────────────────────────────────────────
 
         const newBal = await getBalance(uid);
 
