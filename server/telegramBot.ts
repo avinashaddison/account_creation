@@ -902,6 +902,40 @@ function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+async function notifyChannelStock(productId: string, productName: string, addedCount: number, availableCount: number, price: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN_2;
+  if (!token) return;
+  try {
+    const text =
+      `🔔 <b>${addedCount} new stock added for ${escapeHtml(productName)}!</b>\n\n` +
+      `⚡ Available: <b>${availableCount} items</b>\n` +
+      `💰 Price: <b>${parseFloat(price).toFixed(2)} USDT</b>`;
+    const replyMarkup = JSON.stringify({
+      inline_keyboard: [[{ text: `${productName} (${addedCount})`, callback_data: `shop_product_${productId}` }]]
+    });
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: "@projectaddison", text, parse_mode: "HTML", reply_markup: replyMarkup }),
+    });
+  } catch { /* best-effort */ }
+}
+
+async function notifyChannelPriceUpdate(productName: string, newPrice: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN_2;
+  if (!token) return;
+  try {
+    const text =
+      `💰 <b>Price updated for ${escapeHtml(productName)}!</b>\n\n` +
+      `📦 New price: <b>${parseFloat(newPrice).toFixed(2)} USDT</b>`;
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: "@projectaddison", text, parse_mode: "HTML" }),
+    });
+  } catch { /* best-effort */ }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export interface BotConfig {
   token: string;
@@ -4950,6 +4984,10 @@ export function startTelegramBot(config: BotConfig) {
             return ctx.reply(`🔴 Invalid price. Send a positive number like <code>1.50</code>:`, { parse_mode: "HTML" });
           }
           await dbQuery(`UPDATE shop_products SET price = $1 WHERE id = $2`, [price.toFixed(2), pid]);
+          // Channel alert (fire-and-forget)
+          const pnRes = await dbQuery(`SELECT name FROM shop_products WHERE id = $1`, [pid]);
+          const pName = pnRes.rows[0]?.name;
+          if (pName) notifyChannelPriceUpdate(pName, price.toFixed(2)).catch(() => {});
         }
 
         else if (flow.step === "edit_account_type") {
@@ -5259,7 +5297,7 @@ export function startTelegramBot(config: BotConfig) {
         );
         const newStock = parseInt(countRes.rows[0]?.cnt ?? "0");
 
-        // ── Broadcast new stock to all customers (fire-and-forget) ──────────────
+        // ── Broadcast new stock to all customers + channel (fire-and-forget) ────
         if (added > 0) {
           const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;
           const pRes = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [prodId]);
@@ -5272,6 +5310,8 @@ export function startTelegramBot(config: BotConfig) {
               `💰 Price: <b>${parseFloat(prod.price).toFixed(2)} USDT</b>`;
             const broadKb = JSON.stringify({ inline_keyboard: [[{ text: `${prod.name} (${added})`, callback_data: `shop_product_${prodId}` }]] });
             (async () => {
+              // Channel alert first
+              await notifyChannelStock(prodId, prod.name, added, newStock, prod.price);
               for (const c of custs.rows) {
                 try {
                   await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
@@ -5331,7 +5371,7 @@ export function startTelegramBot(config: BotConfig) {
         );
         const newStock = parseInt(countRes.rows[0]?.cnt ?? "0");
 
-        // ── Broadcast new stock to all customers (fire-and-forget) ──────────────
+        // ── Broadcast new stock to all customers + channel (fire-and-forget) ────
         if (added > 0) {
           const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;
           const pRes = await dbQuery(`SELECT name, price FROM shop_products WHERE id = $1`, [prodId]);
@@ -5344,6 +5384,8 @@ export function startTelegramBot(config: BotConfig) {
               `💰 Price: <b>${parseFloat(prod.price).toFixed(2)} USDT</b>`;
             const broadKb = JSON.stringify({ inline_keyboard: [[{ text: `${prod.name} (${added})`, callback_data: `shop_product_${prodId}` }]] });
             (async () => {
+              // Channel alert first
+              await notifyChannelStock(prodId, prod.name, added, newStock, prod.price);
               for (const c of custs.rows) {
                 try {
                   await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
