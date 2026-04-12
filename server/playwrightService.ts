@@ -13544,11 +13544,10 @@ export async function registerLovableAccount(
       }
     })();
 
-    // Replace real Turnstile script with a fake that STORES the callback (doesn't fire immediately)
-    // The callback will be fired later with the REAL CapSolver token via page.evaluate()
-    await page.route("**challenges.cloudflare.com/turnstile/v0/api.js**", async (route: any) => {
-      const fakeTurnstileScript = `
-(function() {
+    // Inject fake Turnstile API via addInitScript so it runs before any page script.
+    // NOTE: addInitScript serializes the function body as plain JS — no TypeScript types allowed.
+    // (page.route does not intercept requests with the ZenRows remote browser)
+    await page.addInitScript(`(function() {
   window.__pendingTsCallbacks = [];
   window.__tsCurrentToken = null;
   function makeFakeApi() {
@@ -13556,7 +13555,6 @@ export async function registerLovableAccount(
       render: function(container, params) {
         console.log("[TS] fake turnstile.render() called, sitekey=" + (params && params.sitekey));
         if (params && typeof params.callback === "function") {
-          // If we already have the real token, fire immediately; otherwise queue it
           if (window.__tsCurrentToken) {
             console.log("[TS] firing render callback immediately with real token");
             setTimeout(function() { params.callback(window.__tsCurrentToken); }, 50);
@@ -13567,7 +13565,7 @@ export async function registerLovableAccount(
         }
         return "fake-widget-id-0";
       },
-      getResponse: function(wid) { return window.__tsCurrentToken || null; },
+      getResponse: function() { return window.__tsCurrentToken || null; },
       reset: function() {},
       remove: function() {},
       isExpired: function() { return !window.__tsCurrentToken; },
@@ -13582,20 +13580,27 @@ export async function registerLovableAccount(
       }
     };
   }
-  window.turnstile = makeFakeApi();
-  // Fire the "turnstile loaded" event that Lovable's widget listens for
-  document.dispatchEvent(new Event("turnstile-loaded"));
-  window.dispatchEvent(new Event("turnstile-loaded"));
-  console.log("[TS] fake Turnstile API installed — callbacks queued until real token arrives");
-})();
-`;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/javascript",
-        body: fakeTurnstileScript,
-      });
-      log("Fake Turnstile script served — render() callbacks queued until real CapSolver token");
+  var fakeApi = makeFakeApi();
+  window.__fakeTurnstile = fakeApi;
+  // Lock window.turnstile so the real Turnstile script can't overwrite our fake
+  try {
+    Object.defineProperty(window, "turnstile", {
+      configurable: true, enumerable: true,
+      get: function() { return window.__fakeTurnstile; },
+      set: function(v) { console.log("[TS] real turnstile set() intercepted — keeping fake"); }
     });
+  } catch(e) {
+    window.turnstile = fakeApi;
+  }
+  // Dispatch turnstile-loaded event after DOM is ready so Lovable's widget init fires
+  document.addEventListener("DOMContentLoaded", function() {
+    document.dispatchEvent(new Event("turnstile-loaded"));
+    window.dispatchEvent(new Event("turnstile-loaded"));
+    console.log("[TS] fake Turnstile API ready — callbacks queued until real CapSolver token fires them");
+  });
+  console.log("[TS] fake Turnstile pre-installed via addInitScript");
+})()`);
+    log("Fake Turnstile init script registered (runs before page scripts via addInitScript)");
 
     // Log relevant API responses for debugging
     let capturedFirebaseIdToken: string | null = null;
@@ -13793,12 +13798,35 @@ export async function registerLovableAccount(
       'input[type="submit"]',
     ], "Continue");
 
-    log("Waiting for page response (7s)...");
-    await waitMs(7000);
+    log("Waiting for page response after Continue (up to 20s)...");
+    await waitMs(3000); // initial settle
+    // Actively wait for a meaningful page state: password field, email text, or URL change
+    try {
+      await Promise.race([
+        page.waitForSelector('input[type="password"]', { timeout: 17000 }),
+        page.waitForFunction(() => {
+          const t = document.body?.innerText || "";
+          return t.length > 80 || t.toLowerCase().includes("password") ||
+            t.toLowerCase().includes("check your email") || t.toLowerCase().includes("magic link");
+        }, { timeout: 17000 }),
+        page.waitForURL((url: any) => {
+          const href = typeof url === "string" ? url : (url.href || url.toString());
+          return !href.includes("signup") || href.includes("login") || href.includes("builder") || href.includes("dashboard");
+        }, { timeout: 17000 }),
+      ]);
+      log("Page state resolved — reading content...");
+    } catch {
+      log("⚠️ State wait timed out after 20s — reading page anyway");
+    }
 
     const afterUrl = page.url();
     const afterContent = await page.content();
-    const afterText = await page.evaluate(() => document.body?.innerText || "");
+    let afterText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    // If innerText is empty, wait another 5s and try again
+    if (!afterText || afterText.trim().length < 30) {
+      await waitMs(5000);
+      afterText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    }
     log(`URL after Continue: ${afterUrl}`);
     log(`Text snippet: ${afterText.substring(0, 200).replace(/\s+/g, " ")}`);
 
