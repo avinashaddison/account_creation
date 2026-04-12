@@ -173,6 +173,8 @@ interface ShopAdminFlow {
 }
 interface UserState {
   lastCopiedIds?: string[];
+  lastBatchAccountIds?: string[];
+  lastBatchTable?: string;
   awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit";
   emojiEditKey?: string;
   createFlow?: CreateFlow;
@@ -2338,7 +2340,8 @@ export function startTelegramBot(config: BotConfig) {
 
   async function streamBatchLogs(
     chatId: number, msgId: number,
-    batchId: string, svc: ServiceConfig, totalCount: number, startTime: number
+    batchId: string, svc: ServiceConfig, totalCount: number, startTime: number,
+    adminUid: number
   ) {
     let since = 0;
     let allLines: string[] = [];
@@ -2352,7 +2355,7 @@ export function startTelegramBot(config: BotConfig) {
     }
 
     const completionKeyboard = Markup.inlineKeyboard([
-      [Markup.button.callback("👥 View Accounts", "list_processing"), Markup.button.callback("🏗 Create More", "create_more")],
+      [Markup.button.callback("👁 View This Batch", "view_last_batch"), Markup.button.callback("🏗 Create More", "create_more")],
     ]);
 
     async function poll() {
@@ -2450,11 +2453,15 @@ export function startTelegramBot(config: BotConfig) {
             try {
               const batchStart = new Date(startTime).toISOString();
               const newAccounts = (await dbQuery(
-                `SELECT email, password, coupon_code FROM ${acctTable}
+                `SELECT id, email, password, coupon_code FROM ${acctTable}
                  WHERE created_at >= $1 AND (error IS NULL OR error = '')
                  ORDER BY created_at DESC LIMIT $2`,
                 [batchStart, created]
               )).rows;
+
+              // Store batch IDs so "View This Batch" shows only these accounts
+              getState(adminUid).lastBatchAccountIds = newAccounts.map((r: any) => String(r.id));
+              getState(adminUid).lastBatchTable = acctTable;
 
               for (const row of newAccounts) {
                 const em = row.email || "";
@@ -2565,7 +2572,7 @@ export function startTelegramBot(config: BotConfig) {
 
     const chatId = ctx.chat!.id;
     const msgId = ctx.callbackQuery.message!.message_id;
-    await streamBatchLogs(chatId, msgId, batchId, svc, flow.count, startTime);
+    await streamBatchLogs(chatId, msgId, batchId, svc, flow.count, startTime, uid);
   });
 
   bot.action("create_more", async (ctx) => {
@@ -2585,6 +2592,60 @@ export function startTelegramBot(config: BotConfig) {
         ]),
       }
     );
+  });
+
+  // ── View last batch accounts ──────────────────────────────────────────────
+  bot.action("view_last_batch", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    const st  = getState(uid);
+    const ids   = st.lastBatchAccountIds;
+    const table = st.lastBatchTable;
+
+    if (!ids || ids.length === 0 || !table) {
+      return ctx.reply(`⚠️ No batch data found. It may have expired — use Copy Accounts to browse all.`, { parse_mode: "HTML" });
+    }
+
+    const placeholders = ids.map((_: string, i: number) => `$${i + 1}`).join(",");
+    const res = await dbQuery(
+      `SELECT id, email, password, coupon_code FROM ${table}
+       WHERE id IN (${placeholders}) ORDER BY created_at DESC`,
+      ids
+    );
+
+    if (res.rows.length === 0) {
+      return ctx.reply(`⚠️ Could not retrieve accounts for this batch.`, { parse_mode: "HTML" });
+    }
+
+    const svcEntry = Object.values(SERVICE_CONFIGS).find((s: any) => s.outlookTable === table) as any;
+    const svcEmoji = svcEntry?.emoji ?? "🔵";
+    const svcLabel = svcEntry?.label ?? table;
+
+    const header = `${svcEmoji}  <b>${escapeHtml(svcLabel)} — Batch (${res.rows.length} account${res.rows.length !== 1 ? "s" : ""})</b>\n\n`;
+    const cards = res.rows.map((row: any, i: number) => {
+      const em = row.email || "";
+      const pw = row.password || "";
+      let card = `<b>#${i + 1}</b>  <code>${escapeHtml(em)}</code>\n`;
+      card += `🔑  <code>${escapeHtml(pw)}</code>`;
+      if (row.coupon_code) card += `\n🎟  <code>${escapeHtml(row.coupon_code)}</code>`;
+      return card;
+    }).join("\n\n");
+
+    const chunks = [];
+    let current = header;
+    for (const card of cards.split("\n\n")) {
+      if ((current + "\n\n" + card).length > 3800) {
+        chunks.push(current);
+        current = card;
+      } else {
+        current += (current === header ? "" : "\n\n") + card;
+      }
+    }
+    chunks.push(current);
+
+    for (const chunk of chunks) {
+      await ctx.reply(chunk, { parse_mode: "HTML" });
+    }
   });
 
   bot.action("create_cancel", async (ctx) => {
