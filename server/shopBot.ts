@@ -981,7 +981,7 @@ async function editMsg(ctx: any, msg: any, text: string, extra: any = {}) {
 
 // ── UI builders ──────────────────────────────────────────────────────────────
 function divider(): string {
-  return "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+  return "";
 }
 
 function insufficientFundsMsg(opts: {
@@ -2839,11 +2839,9 @@ export function startShopBot(token: string) {
       ? `${ae("crown", "👑")} <b>VIP Member</b>`
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend  <i>(${fmt$(spend)} so far)</i>`;
     await safeReply(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  ${ae("money", "💰")}  <b>MY WALLET</b>  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `<code>  💵 Balance    ›  ${fmt$(balance)}\n` +
-      `  🆔 User ID    ›  ${uid}</code>\n\n` +
+      `${ae("money", "💰")}  <b>MY WALLET</b>\n\n` +
+      `<blockquote>💵  Balance    →  <b>${fmt$(balance)}</b>\n` +
+      `🆔  User ID    →  <code>${uid}</code></blockquote>\n` +
       `${statusLine}\n\n` +
       `<i>Tap below to add funds to your wallet.</i>`,
       {
@@ -3064,16 +3062,12 @@ export function startShopBot(token: string) {
   // ── Support ───────────────────────────────────────────────────────────────
   bot.hears((t) => t === BTN.SUPPORT, async (ctx) => {
     await safeReply(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  🎧  <b>SUPPORT</b>  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `We can help with:\n` +
-      `  · Account access issues\n` +
-      `  · Balance top-ups &amp; deposits\n` +
-      `  · Order problems or disputes\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `💬 Contact: <b>${SUPPORT_CONTACT}</b>\n` +
-      `🆔 Your ID: <code>${ctx.from.id}</code>\n\n` +
+      `🎧  <b>SUPPORT</b>\n\n` +
+      `<blockquote>· Account access issues\n` +
+      `· Balance top-ups &amp; deposits\n` +
+      `· Order problems or disputes</blockquote>\n` +
+      `💬  Contact  →  <a href="https://t.me/${SUPPORT_CONTACT.replace("@", "")}">${escHtml(SUPPORT_CONTACT)}</a>\n` +
+      `🆔  Your ID  →  <code>${ctx.from.id}</code>\n\n` +
       `<i>Include your User ID when reaching out.</i>`,
       { parse_mode: "HTML" }
     );
@@ -3092,13 +3086,11 @@ export function startShopBot(token: string) {
       ? `${ae("crown", "👑")} <b>VIP Member</b>`
       : `🎯 VIP at <b>${fmt$(VIP_THRESHOLD)}</b> total spend`;
     await safeReply(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  👤  <b>MY PROFILE</b>${vip ? `  ${ae("crown", "👑")}` : ""}  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `<code>  🔖 Username    ›  ${uname}\n` +
-      `  🆔 User ID     ›  ${uid}\n` +
-      `  💰 Balance     ›  ${fmt$(bal)}\n` +
-      `  💳 Total Spent ›  ${fmt$(spend)}</code>\n\n` +
+      `👤  <b>MY PROFILE</b>${vip ? `  ${ae("crown", "👑")}` : ""}\n\n` +
+      `<blockquote>🔖  Username     →  ${escHtml(uname)}\n` +
+      `🆔  User ID      →  <code>${uid}</code>\n` +
+      `💰  Balance      →  <b>${fmt$(bal)}</b>\n` +
+      `💳  Total Spent  →  ${fmt$(spend)}</blockquote>\n` +
       `${statusLine}\n\n` +
       `<i>Share your User ID when contacting support.</i>`,
       { parse_mode: "HTML" }
@@ -3135,16 +3127,11 @@ export function startShopBot(token: string) {
     const totalEarned    = rewardedCount * referReward;
 
     await safeReply(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  🔗  <b>REFER &amp; EARN</b>  ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
-      `Invite friends and earn <b>${fmt$(referReward)}</b> for every new user who joins using your link.\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🔗 <b>Your Referral Link</b>\n` +
-      `<code>${referralLink}</code>\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `<code>Friends referred:   ${totalReferred}\n` +
-      `Rewards earned:     $${totalEarned.toFixed(2)}</code>\n\n` +
+      `🔗  <b>REFER &amp; EARN</b>\n\n` +
+      `Invite friends and earn <b>${fmt$(referReward)}</b> per referral.\n\n` +
+      `<blockquote>🔗  Your Link\n<code>${referralLink}</code></blockquote>\n` +
+      `<blockquote>👥  Friends referred  →  ${totalReferred}\n` +
+      `💰  Rewards earned   →  <b>$${totalEarned.toFixed(2)}</b></blockquote>\n` +
       `<i>Reward is credited instantly when your friend joins.</i>`,
       {
         parse_mode: "HTML",
@@ -3180,9 +3167,7 @@ export function startShopBot(token: string) {
 
     if (res.rows.length === 0) {
       const text =
-        `╔══════════════════════════════════════╗\n` +
-        `║  📋  <b>ORDER HISTORY</b>  ║\n` +
-        `╚══════════════════════════════════════╝\n\n` +
+        `📋  <b>ORDER HISTORY</b>\n\n` +
         `<i>No purchases yet.</i>\n\n` +
         `Browse the marketplace to get started:`;
       const kb = Markup.inlineKeyboard([[Markup.button.callback("🛍  Browse Marketplace", "shop_back_products")]]);
@@ -3191,10 +3176,7 @@ export function startShopBot(token: string) {
     }
 
     const lines: string[] = [
-      `╔══════════════════════════════════════╗\n` +
-      `║  📋  <b>ORDER HISTORY</b>  ║\n` +
-      `║  <i>Last ${res.rows.length} purchase${res.rows.length !== 1 ? "s" : ""}</i>  ║\n` +
-      `╚══════════════════════════════════════╝\n`
+      `📋  <b>ORDER HISTORY</b>  ·  <i>Last ${res.rows.length} purchase${res.rows.length !== 1 ? "s" : ""}</i>\n`
     ];
 
     const buttons = res.rows.map((o: any, i: number) => {
@@ -3209,7 +3191,7 @@ export function startShopBot(token: string) {
       return [Markup.button.callback(btnLabel, `shop_creds_${o.id}`)];
     });
 
-    lines.push(`\n${divider()}\n<i>Tap an order to view details or reveal credentials.</i>`);
+    lines.push(`\n<i>Tap an order below to reveal credentials.</i>`);
 
     const text = lines.join("\n");
     const kb   = Markup.inlineKeyboard(buttons);
@@ -3408,8 +3390,8 @@ export function startShopBot(token: string) {
   // Shows the main Temp Mail menu with two options
   async function showBizMailPanel(chatId: number, _uid: number) {
     await bot.telegram.sendMessage(chatId,
-      `📩 <b>TEMP MAIL</b>  ·  <i>@addison.asia</i>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `📩  <b>TEMP MAIL</b>  ·  <i>@addison.asia</i>\n\n` +
+      `<blockquote>Get a private, instant inbox — no sign-up needed.\nEmails arrive in real time.</blockquote>\n` +
       `Choose an option below:`,
       {
         parse_mode: "HTML",
