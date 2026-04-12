@@ -133,7 +133,7 @@ const BTN = {
   IDENTITY:     "👤  𝗠𝗬  𝗣𝗥𝗢𝗙𝗜𝗟𝗘",
   SUPPORT:      "🎧  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
-  BIZ_MAIL:     "📩  𝗕𝗨𝗦𝗜𝗡𝗘𝗦𝗦  𝗠𝗔𝗜𝗟",
+  BIZ_MAIL:     "📩  𝗧𝗘𝗠𝗣  𝗠𝗔𝗜𝗟",
 } as const;
 
 // Cycling hot-product emoji for sticky keyboard buttons
@@ -179,6 +179,7 @@ async function buildShopKeyboard() {
     [BTN.BALANCE,   BTN.ORDERS],
     [BTN.DEPOSIT,   BTN.SUPPORT],
     [BTN.IDENTITY,  BTN.REFER],
+    [BTN.BIZ_MAIL],
   ]).resize().oneTime();
 }
 
@@ -3466,10 +3467,7 @@ export function startShopBot(token: string) {
 
     await bot.telegram.sendMessage(chatId,
       `⏳ <b>Waiting for Mail…</b>\n\n` +
-      `Your inbox is live. Any email delivered to <code>${escHtml(address)}</code> will appear here instantly.\n\n` +
-      `📬 <b>Webmail:</b>  <a href="https://app.smtp.dev">app.smtp.dev</a>\n` +
-      `📥 <b>IMAP:</b>     <code>imap.smtp.dev:993</code>  <i>(SSL)</i>\n` +
-      `📤 <b>SMTP:</b>     <code>smtp.smtp.dev:587</code>  <i>(STARTTLS)</i>`,
+      `Your inbox is live. Any email delivered to <code>${escHtml(address)}</code> will appear here instantly.`,
       { parse_mode: "HTML" }
     ).catch(() => {});
   });
