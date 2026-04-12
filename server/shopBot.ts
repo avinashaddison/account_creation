@@ -1717,8 +1717,12 @@ export function startShopBot(token: string) {
       `       <code>${bUID}</code>\n` +
       `  ④  Amount:\n` +
       `       <code>${order.amount.toFixed(2)} USDT</code>\n` +
-      `  ⑤  Note / Ref  <b>(required)</b>:\n` +
-      `       <code>${order.note}</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `⚠️  <b>STEP ⑤ — NOTE / REF  (CRITICAL)</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `This exact code <b>must</b> be pasted in the\n` +
+      `<b>Note / Remark</b> field — it triggers auto-delivery:\n\n` +
+      `<code>${order.note}</code>\n` +
       `<code>─────────────────────────────────────</code>\n` +
       `⏳  <i>Awaiting payment · Auto-confirmed</i>`,
       {
