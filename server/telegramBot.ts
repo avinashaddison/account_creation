@@ -4703,7 +4703,10 @@ export function startTelegramBot(config: BotConfig) {
         const defaults = getBotMenuDefaults();
         const current  = getBotMenuConfig();
         const merged: Record<string, string> = { ...defaults, ...current, [key]: label };
-        await storage.setSetting("shop_bot_menu_config", JSON.stringify(merged));
+        await dbQuery(
+          `INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2`,
+          ["shop_bot_menu_config", JSON.stringify(merged)]
+        );
         await reloadBotMenu();
         return ctx.reply(
           `✅ <b>Button updated!</b>\n\n` +
