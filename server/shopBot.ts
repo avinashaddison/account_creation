@@ -1572,19 +1572,20 @@ export function startShopBot(token: string) {
     // ── Quantity selection ────────────────────────────────────────────────────
     const price = parseFloat(prod.price);
     return safeEdit(ctx,
-      `🛒 <b>Select Quantity</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)}</b>\n` +
-      `💰 ${fmt$(price)} / code\n\n` +
+      `╔══════════════════════════════════════╗\n` +
+      `║       🛒  SELECT QUANTITY            ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
+      `📦  <b>${escHtml(prod.name)}</b>\n` +
+      `💲  <b>${fmt$(price)}</b> per code\n\n` +
+      `<code>──────────────────────────────────────</code>\n` +
       `How many codes do you want?`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [1, 2, 3, 5].map(q => Markup.button.callback(`${q}`, `shop_qty_${productId}_${q}`)),
-          [10, 15, 20, 25].map(q => Markup.button.callback(`${q}`, `shop_qty_${productId}_${q}`)),
-          [Markup.button.callback("✏️  Custom Amount", `shop_qty_custom_${productId}`)],
-          [Markup.button.callback("⬅️  Back to Product", `shop_product_${productId}`)],
-          [Markup.button.callback("🏠  Main Menu", "shop_main_menu")],
+          [1, 2, 3, 5].map(q => Markup.button.callback(`  ${q}  `, `shop_qty_${productId}_${q}`)),
+          [10, 15, 20, 25].map(q => Markup.button.callback(`  ${q}  `, `shop_qty_${productId}_${q}`)),
+          [Markup.button.callback("✏️  Enter Custom Amount", `shop_qty_custom_${productId}`)],
+          [Markup.button.callback("⬅️  Back", `shop_product_${productId}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
         ]),
       }
     );
@@ -1604,19 +1605,23 @@ export function startShopBot(token: string) {
     const unitPrice   = parseFloat(prod.price);
     const totalAmount = parseFloat((unitPrice * qty).toFixed(2));
     checkoutSessions.set(uid, { productId, productName: prod.name, qty, unitPrice, totalAmount });
+    const pad = (s: string, w: number) => s.padEnd(w);
     return safeEdit(ctx,
-      `📋 <b>Order Summary</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)}</b>\n` +
-      `🔢 Quantity: <b>${qty}</b>\n\n` +
-      `💵 Total: <b>${fmt$(totalAmount)} USDT</b>\n\n` +
-      `${divider()}`,
+      `╔══════════════════════════════════════╗\n` +
+      `║         🧾  ORDER SUMMARY            ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(prod.name)}</b>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  <code>${pad("Qty",   12)} ›   ${qty} code${qty > 1 ? "s" : ""}</code>\n` +
+      `║  <code>${pad("Price", 12)} ›   ${fmt$(unitPrice)} each</code>\n` +
+      `║  <code>──────────────────────────────</code>\n` +
+      `║  <code>${pad("TOTAL", 12)} ›   ${fmt$(totalAmount)} USDT</code>\n` +
+      `╚══════════════════════════════════════╝`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`✅  Confirm & Choose Payment`, `shop_qconf_${productId}_${qty}`)],
-          [Markup.button.callback("🔢  Change Quantity", `shop_buy_${productId}`)],
-          [Markup.button.callback("🏠  Main Menu", "shop_main_menu")],
+          [Markup.button.callback(`💳  Choose Payment Method`, `shop_qconf_${productId}_${qty}`)],
+          [Markup.button.callback("🔢  Change Qty", `shop_buy_${productId}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
         ]),
       }
     );
@@ -1637,11 +1642,13 @@ export function startShopBot(token: string) {
       customQtyStep: true,
     });
     return safeEdit(ctx,
-      `✏️ <b>Custom Quantity</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)}</b>\n` +
-      `💰 ${fmt$(parseFloat(prod.price))} / code\n\n` +
-      `Type the number of codes you want:`,
+      `╔══════════════════════════════════════╗\n` +
+      `║      ✏️  CUSTOM QUANTITY             ║\n` +
+      `╚══════════════════════════════════════╝\n\n` +
+      `📦  <b>${escHtml(prod.name)}</b>\n` +
+      `💲  <b>${fmt$(parseFloat(prod.price))}</b> per code\n\n` +
+      `<code>──────────────────────────────────────</code>\n` +
+      `Type the number of codes you want <i>(1–999)</i>:`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[Markup.button.callback("⬅️  Back", `shop_buy_${productId}`)]]),
@@ -1664,10 +1671,13 @@ export function startShopBot(token: string) {
     checkoutSessions.set(uid, { ...session, productId, productName: prod.name, qty, unitPrice, totalAmount });
     const inr = (totalAmount * UPI_RATE).toFixed(0);
     return safeEdit(ctx,
-      `💳 <b>Select Payment Method</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `💵 Total: <b>${fmt$(totalAmount)} USDT</b>  ·  <b>₹${inr}</b>`,
+      `╔══════════════════════════════════════╗\n` +
+      `║       💳  PAYMENT METHOD             ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `║  💵  <b>${fmt$(totalAmount)} USDT</b>  ·  <b>₹${inr}</b>\n` +
+      `╚══════════════════════════════════════╝\n\n` +
+      `<i>Select your preferred payment method:</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1675,8 +1685,7 @@ export function startShopBot(token: string) {
           [Markup.button.callback("💎  USDT TRC20  ·  Tron  ·  Instant", `shop_qpay_trc20_${productId}_${qty}`)],
           [Markup.button.callback("💠  USDT BEP20  ·  BSC  ·  Instant",  `shop_qpay_bep20_${productId}_${qty}`)],
           [Markup.button.callback("🇮🇳  UPI Payment  ·  Instant",        `shop_qpay_upi_${productId}_${qty}`)],
-          [Markup.button.callback("🔢  Change Quantity",                  `shop_buy_${productId}`)],
-          [Markup.button.callback("🏠  Main Menu",                        "shop_main_menu")],
+          [Markup.button.callback("🔢  Change Qty", `shop_buy_${productId}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
         ]),
       }
     );
@@ -1699,28 +1708,31 @@ export function startShopBot(token: string) {
       unitPrice: parseFloat(prod.price), totalAmount: total,
       cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BINANCE_PAY",
     });
+    const bUID = order.binanceUID || "510120124";
     return safeEdit(ctx,
-      `🟡 <b>Pay via Binance Pay</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
-      `Order: <code>${shortId}</code>\n\n` +
-      `${divider()}\n\n` +
-      `Open your <b>Binance</b> app\n` +
-      `Go to <b>Pay → Send</b>\n` +
-      `Send to UID: <code>${order.binanceUID || "510120124"}</code>\n` +
-      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
-      `Add this note exactly:\n<code>${order.note}</code>\n\n` +
-      `${divider()}\n\n` +
-      `The note is <b>required</b> to verify your payment.\n` +
-      `<i>If Binance shows its own order or transaction ID after payment, keep it in case support asks for it.\n\n` +
-      `Waiting for payment… (expires in 30 min)</i>`,
+      `╔══════════════════════════════════════╗\n` +
+      `║     ⚡  BINANCE PAY  ·  INSTANT      ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `║  💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  How to Pay:\n` +
+      `║\n` +
+      `║  ① Open <b>Binance</b> app\n` +
+      `║  ② Go to  <b>Pay → Send</b>\n` +
+      `║  ③ Send to Binance ID:\n` +
+      `║     <code>${bUID}</code>\n` +
+      `║  ④ Amount: <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `║  ⑤ Note / Ref <b>(required)</b>:\n` +
+      `║     <code>${order.note}</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  ⏳ Awaiting payment · Auto-confirmed ║\n` +
+      `╚══════════════════════════════════════╝`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
-          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
-          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay"), Markup.button.callback("❌  Cancel", "shop_cancel_pay")],
+          [Markup.button.callback("⬅️  Change Method",  `shop_qconf_${prodId}_${qty}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
         ]),
       }
     );
@@ -1737,33 +1749,53 @@ export function startShopBot(token: string) {
     if (!prod) return safeEdit(ctx, `⚠️ <b>Product no longer available.</b>`, { parse_mode: "HTML" });
     const totalUsd = parseFloat((parseFloat(prod.price) * qty).toFixed(2));
     const totalInr = Math.round(totalUsd * UPI_RATE * 100) / 100;
-    // Update checkout session (no cryptoOrderId needed — UTR-verified)
     checkoutSessions.set(uid, {
       ...session, productId: prodId, productName: prod.name, qty,
       unitPrice: parseFloat(prod.price), totalAmount: totalUsd, chain: "UPI",
     });
-    // Start UPI flow pre-filled with amounts, skip to waiting_utr
     upiDepositFlows.set(uid, { step: "waiting_utr", amountUsd: totalUsd, amountInr: totalInr });
-    return safeEdit(ctx,
-      `🇮🇳 <b>UPI Payment  ·  Instant</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `💵 <b>${totalUsd.toFixed(2)} USDT</b>  ·  <b>₹${totalInr.toFixed(2)}</b>\n\n` +
-      `${divider()}\n\n` +
-      `Send exactly <b>₹${totalInr.toFixed(2)}</b> to:\n\n` +
-      `<b>UPI ID:</b>  <code>avinashaddison-8@okaxis</code>\n\n` +
-      `${divider()}\n\n` +
-      `After paying, tap <b>I've Paid</b> and enter the <b>UTR / Reference number</b> from your payment app to confirm your order automatically.\n\n` +
-      `<i>Rate: $1 = ₹${UPI_RATE}</i>`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("✅  I've Paid — Enter UTR", "dep_upi_paid")],
-          [Markup.button.callback("❌  Cancel Order",           "shop_cancel_pay")],
-          [Markup.button.callback("🏠  Main Menu",              "shop_main_menu")],
-        ]),
-      }
-    );
+
+    const upiPayload = `upi://pay?pa=avinashaddison-8@okaxis&pn=Project%20Addison&am=${totalInr.toFixed(2)}&cu=INR`;
+    const caption =
+      `╔══════════════════════════════════════╗\n` +
+      `║    🇮🇳  UPI PAYMENT  ·  INSTANT      ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `║  💵  <b>${totalUsd.toFixed(2)} USDT</b>  →  <b>₹${totalInr.toFixed(2)}</b>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📱 Scan QR  or  pay manually:\n` +
+      `║\n` +
+      `║  Pay exactly:\n` +
+      `║    <code>₹${totalInr.toFixed(2)}</code>\n` +
+      `║  UPI ID:\n` +
+      `║    <code>avinashaddison-8@okaxis</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  After paying, tap ✅ I've Paid      ║\n` +
+      `║  and enter your UTR to confirm.      ║\n` +
+      `╚══════════════════════════════════════╝`;
+    const replyMarkup = {
+      inline_keyboard: [
+        [{ text: "✅  I've Paid — Enter UTR", callback_data: "dep_upi_paid" }],
+        [{ text: "⬅️  Change Method", callback_data: `shop_qconf_${prodId}_${qty}` }, { text: "🏠  Menu", callback_data: "shop_main_menu" }],
+      ],
+    };
+    // Delete old message first so we can send photo separately
+    await ctx.deleteMessage().catch(() => {});
+    try {
+      const qrBuf = await QRCode.toBuffer(upiPayload, { width: 380, margin: 2, color: { dark: "#000000", light: "#ffffff" } });
+      const form = new FormData();
+      form.append("chat_id",      String(ctx.chat.id));
+      form.append("caption",      caption);
+      form.append("parse_mode",   "HTML");
+      form.append("reply_markup", JSON.stringify(replyMarkup));
+      form.append("photo",        new Blob([qrBuf], { type: "image/png" }), "upi_qr.png");
+      const tgRes  = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
+      const tgJson = await tgRes.json() as any;
+      if (!tgJson.ok) throw new Error(tgJson.description ?? "sendPhoto failed");
+    } catch (qrErr: any) {
+      console.error("[UPI Checkout QR] Failed:", qrErr?.message);
+      await ctx.reply(caption, { parse_mode: "HTML", reply_markup: replyMarkup }).catch(() => {});
+    }
   });
 
   // ── Checkout: USDT BEP20 ─────────────────────────────────────────────────
@@ -1784,26 +1816,29 @@ export function startShopBot(token: string) {
       cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BEP20",
     });
     return safeEdit(ctx,
-      `🔵 <b>Pay via USDT BEP20 (BSC)</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
-      `Order: <code>${shortId}</code>\n\n` +
-      `${divider()}\n\n` +
-      `Send <b>exactly</b> this amount:\n\n` +
-      `<b>Amount:</b>  <code>${order.amount.toFixed(2)} USDT</code>\n` +
-      `<b>Network:</b>  <code>BNB Smart Chain (BEP20)</code>\n` +
-      `<b>Address:</b>\n<code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n\n` +
-      `${divider()}\n\n` +
-      `⚠️ Send the <b>exact</b> amount shown above.\n` +
-      `<i>Your order will be confirmed automatically once the transfer is detected.\n\n` +
-      `Waiting for payment… (expires in 30 min)</i>`,
+      `╔══════════════════════════════════════╗\n` +
+      `║  💠  USDT BEP20  ·  BSC  ·  INSTANT ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `║  💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  Send <b>exactly</b> this amount:\n` +
+      `║\n` +
+      `║  Amount:\n` +
+      `║    <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `║  Network:\n` +
+      `║    <code>BNB Smart Chain (BEP20)</code>\n` +
+      `║  Address:\n` +
+      `║    <code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  ⚠️  Wrong network = lost funds!      ║\n` +
+      `║  ⏳ Awaiting · Auto-confirmed on-chain ║\n` +
+      `╚══════════════════════════════════════╝`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
-          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
-          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay"), Markup.button.callback("❌  Cancel", "shop_cancel_pay")],
+          [Markup.button.callback("⬅️  Change Method",  `shop_qconf_${prodId}_${qty}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
         ]),
       }
     );
@@ -1827,26 +1862,29 @@ export function startShopBot(token: string) {
       cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "TRC20",
     });
     return safeEdit(ctx,
-      `🟣 <b>Pay via USDT TRC20 (Tron)</b>\n\n` +
-      `${divider()}\n\n` +
-      `📦 <b>${escHtml(prod.name)} x ${qty}</b>\n` +
-      `Amount: <b>${order.amount.toFixed(2)} USDT</b>\n` +
-      `Order: <code>${shortId}</code>\n\n` +
-      `${divider()}\n\n` +
-      `Send <b>exactly</b> this amount:\n\n` +
-      `<b>Amount:</b>  <code>${order.amount.toFixed(2)} USDT</code>\n` +
-      `<b>Network:</b>  <code>TRON (TRC20)</code>\n` +
-      `<b>Address:</b>\n<code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n\n` +
-      `${divider()}\n\n` +
-      `⚠️ Send the <b>exact</b> amount shown above.\n` +
-      `<i>Your order will be confirmed automatically once the transfer is detected.\n\n` +
-      `Waiting for payment… (expires in 30 min)</i>`,
+      `╔══════════════════════════════════════╗\n` +
+      `║  💎  USDT TRC20  ·  TRON  ·  INSTANT ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `║  💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  Send <b>exactly</b> this amount:\n` +
+      `║\n` +
+      `║  Amount:\n` +
+      `║    <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `║  Network:\n` +
+      `║    <code>TRON (TRC20)</code>\n` +
+      `║  Address:\n` +
+      `║    <code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  ⚠️  Wrong network = lost funds!      ║\n` +
+      `║  ⏳ Awaiting · Auto-confirmed on-chain ║\n` +
+      `╚══════════════════════════════════════╝`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay")],
-          [Markup.button.callback("❌  Cancel Order",  "shop_cancel_pay")],
-          [Markup.button.callback("🏠  Main Menu",     "shop_main_menu")],
+          [Markup.button.callback("🔄  Check Status",  "shop_chk_pay"), Markup.button.callback("❌  Cancel", "shop_cancel_pay")],
+          [Markup.button.callback("⬅️  Change Method",  `shop_qconf_${prodId}_${qty}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
         ]),
       }
     );
@@ -1859,21 +1897,28 @@ export function startShopBot(token: string) {
     const session = checkoutSessions.get(uid);
     if (!session?.cryptoOrderId) {
       return safeEdit(ctx,
-        `⚠️ <i>No active payment order found. Please start a new order.</i>`,
-        { parse_mode: "HTML" }
+        `╔══════════════════════════════════════╗\n` +
+        `║  ⚠️  No active order found           ║\n` +
+        `╚══════════════════════════════════════╝\n\n` +
+        `<i>Start a new order from the shop.</i>`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("🏠  Main Menu", "shop_main_menu")]]) }
       );
     }
+    const amtDisplay = (session.exactAmount ?? session.totalAmount).toFixed(2);
     return safeEdit(ctx,
-      `⏳ <b>Still waiting for payment…</b>\n\n` +
-      `${divider()}\n\n` +
-      `Our system checks every ~25 seconds. Your order will be fulfilled automatically once payment is detected.\n\n` +
-      `<b>Amount:</b> <code>${session.exactAmount?.toFixed(2) ?? session.totalAmount.toFixed(2)} USDT</code>\n` +
-      (session.note ? `<b>Note:</b> <code>${session.note}</code>\n` : ""),
+      `╔══════════════════════════════════════╗\n` +
+      `║     ⏳  AWAITING PAYMENT             ║\n` +
+      `╠══════════════════════════════════════╣\n` +
+      `║  📦  <b>${escHtml(session.productName)} × ${session.qty}</b>\n` +
+      `║  💵  <b>${amtDisplay} USDT</b>\n` +
+      (session.note ? `║  📝  <code>${session.note}</code>\n` : "") +
+      `╠══════════════════════════════════════╣\n` +
+      `║  Scanning every ~25 s — auto-confirm ║\n` +
+      `╚══════════════════════════════════════╝`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔄  Check Again",  "shop_chk_pay")],
-          [Markup.button.callback("❌  Cancel Order", "shop_cancel_pay")],
+          [Markup.button.callback("🔄  Check Again",  "shop_chk_pay"), Markup.button.callback("❌  Cancel", "shop_cancel_pay")],
         ]),
       }
     );
@@ -2785,19 +2830,23 @@ export function startShopBot(token: string) {
       }
       const totalAmount = parseFloat((coSession.unitPrice * qty).toFixed(2));
       checkoutSessions.set(uid, { ...coSession, qty, totalAmount, customQtyStep: false });
+      const padC = (s: string, w: number) => s.padEnd(w);
       return safeReply(ctx,
-        `📋 <b>Order Summary</b>\n\n` +
-        `${divider()}\n\n` +
-        `📦 <b>${escHtml(coSession.productName)}</b>\n` +
-        `🔢 Quantity: <b>${qty}</b>\n\n` +
-        `💵 Total: <b>${fmt$(totalAmount)} USDT</b>\n\n` +
-        `${divider()}`,
+        `╔══════════════════════════════════════╗\n` +
+        `║         🧾  ORDER SUMMARY            ║\n` +
+        `╠══════════════════════════════════════╣\n` +
+        `║  📦  <b>${escHtml(coSession.productName)}</b>\n` +
+        `╠══════════════════════════════════════╣\n` +
+        `║  <code>${padC("Qty",   12)} ›   ${qty} code${qty > 1 ? "s" : ""}</code>\n` +
+        `║  <code>${padC("Price", 12)} ›   ${fmt$(coSession.unitPrice)} each</code>\n` +
+        `║  <code>──────────────────────────────</code>\n` +
+        `║  <code>${padC("TOTAL", 12)} ›   ${fmt$(totalAmount)} USDT</code>\n` +
+        `╚══════════════════════════════════════╝`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.callback(`✅  Confirm & Choose Payment`, `shop_qconf_${coSession.productId}_${qty}`)],
-            [Markup.button.callback("🔢  Change Quantity", `shop_buy_${coSession.productId}`)],
-            [Markup.button.callback("🏠  Main Menu", "shop_main_menu")],
+            [Markup.button.callback(`💳  Choose Payment Method`, `shop_qconf_${coSession.productId}_${qty}`)],
+            [Markup.button.callback("🔢  Change Qty", `shop_buy_${coSession.productId}`), Markup.button.callback("🏠  Menu", "shop_main_menu")],
           ]),
         }
       );
