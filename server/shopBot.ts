@@ -1572,12 +1572,11 @@ export function startShopBot(token: string) {
     // ── Quantity selection ────────────────────────────────────────────────────
     const price = parseFloat(prod.price);
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║       🛒  SELECT QUANTITY            ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
+      `🛒  <b>SELECT QUANTITY</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
       `📦  <b>${escHtml(prod.name)}</b>\n` +
-      `💲  <b>${fmt$(price)}</b> per code\n\n` +
-      `<code>──────────────────────────────────────</code>\n` +
+      `💲  <b>${fmt$(price)}</b>  per code\n` +
+      `<code>─────────────────────────────────────</code>\n` +
       `How many codes do you want?`,
       {
         parse_mode: "HTML",
@@ -1607,16 +1606,14 @@ export function startShopBot(token: string) {
     checkoutSessions.set(uid, { productId, productName: prod.name, qty, unitPrice, totalAmount });
     const pad = (s: string, w: number) => s.padEnd(w);
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║         🧾  ORDER SUMMARY            ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(prod.name)}</b>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  <code>${pad("Qty",   12)} ›   ${qty} code${qty > 1 ? "s" : ""}</code>\n` +
-      `║  <code>${pad("Price", 12)} ›   ${fmt$(unitPrice)} each</code>\n` +
-      `║  <code>──────────────────────────────</code>\n` +
-      `║  <code>${pad("TOTAL", 12)} ›   ${fmt$(totalAmount)} USDT</code>\n` +
-      `╚══════════════════════════════════════╝`,
+      `🧾  <b>ORDER SUMMARY</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(prod.name)}</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `<code>${pad("Qty",   8)} ›  ${qty} code${qty > 1 ? "s" : ""}</code>\n` +
+      `<code>${pad("Price", 8)} ›  ${fmt$(unitPrice)} each</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `<code>${pad("TOTAL", 8)} ›  ${fmt$(totalAmount)} USDT</code>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1642,12 +1639,11 @@ export function startShopBot(token: string) {
       customQtyStep: true,
     });
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║      ✏️  CUSTOM QUANTITY             ║\n` +
-      `╚══════════════════════════════════════╝\n\n` +
+      `✏️  <b>CUSTOM QUANTITY</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
       `📦  <b>${escHtml(prod.name)}</b>\n` +
-      `💲  <b>${fmt$(parseFloat(prod.price))}</b> per code\n\n` +
-      `<code>──────────────────────────────────────</code>\n` +
+      `💲  <b>${fmt$(parseFloat(prod.price))}</b>  per code\n` +
+      `<code>─────────────────────────────────────</code>\n` +
       `Type the number of codes you want <i>(1–999)</i>:`,
       {
         parse_mode: "HTML",
@@ -1671,12 +1667,11 @@ export function startShopBot(token: string) {
     checkoutSessions.set(uid, { ...session, productId, productName: prod.name, qty, unitPrice, totalAmount });
     const inr = (totalAmount * UPI_RATE).toFixed(0);
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║       💳  PAYMENT METHOD             ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
-      `║  💵  <b>${fmt$(totalAmount)} USDT</b>  ·  <b>₹${inr}</b>\n` +
-      `╚══════════════════════════════════════╝\n\n` +
+      `💳  <b>PAYMENT METHOD</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `💵  <b>${fmt$(totalAmount)} USDT</b>  ·  ₹${inr}\n` +
+      `<code>─────────────────────────────────────</code>\n` +
       `<i>Select your preferred payment method:</i>`,
       {
         parse_mode: "HTML",
@@ -1710,24 +1705,22 @@ export function startShopBot(token: string) {
     });
     const bUID = order.binanceUID || "510120124";
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║     ⚡  BINANCE PAY  ·  INSTANT      ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
-      `║  💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  How to Pay:\n` +
-      `║\n` +
-      `║  ① Open <b>Binance</b> app\n` +
-      `║  ② Go to  <b>Pay → Send</b>\n` +
-      `║  ③ Send to Binance ID:\n` +
-      `║     <code>${bUID}</code>\n` +
-      `║  ④ Amount: <code>${order.amount.toFixed(2)} USDT</code>\n` +
-      `║  ⑤ Note / Ref <b>(required)</b>:\n` +
-      `║     <code>${order.note}</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  ⏳ Awaiting payment · Auto-confirmed ║\n` +
-      `╚══════════════════════════════════════╝`,
+      `⚡  <b>BINANCE PAY  ·  INSTANT</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `<b>How to Pay:</b>\n\n` +
+      `  ①  Open <b>Binance</b> app\n` +
+      `  ②  Go to  <b>Pay → Send</b>\n` +
+      `  ③  Binance ID:\n` +
+      `       <code>${bUID}</code>\n` +
+      `  ④  Amount:\n` +
+      `       <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `  ⑤  Note / Ref  <b>(required)</b>:\n` +
+      `       <code>${order.note}</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `⏳  <i>Awaiting payment · Auto-confirmed</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1757,22 +1750,18 @@ export function startShopBot(token: string) {
 
     const upiPayload = `upi://pay?pa=avinashaddison-8@okaxis&pn=Project%20Addison&am=${totalInr.toFixed(2)}&cu=INR`;
     const caption =
-      `╔══════════════════════════════════════╗\n` +
-      `║    🇮🇳  UPI PAYMENT  ·  INSTANT      ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
-      `║  💵  <b>${totalUsd.toFixed(2)} USDT</b>  →  <b>₹${totalInr.toFixed(2)}</b>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📱 Scan QR  or  pay manually:\n` +
-      `║\n` +
-      `║  Pay exactly:\n` +
-      `║    <code>₹${totalInr.toFixed(2)}</code>\n` +
-      `║  UPI ID:\n` +
-      `║    <code>avinashaddison-8@okaxis</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  After paying, tap ✅ I've Paid      ║\n` +
-      `║  and enter your UTR to confirm.      ║\n` +
-      `╚══════════════════════════════════════╝`;
+      `🇮🇳  <b>UPI PAYMENT  ·  INSTANT</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `💵  <b>${totalUsd.toFixed(2)} USDT</b>  →  <b>₹${totalInr.toFixed(2)}</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📱  Scan QR  or  pay manually:\n\n` +
+      `  Pay exactly:\n` +
+      `    <code>₹${totalInr.toFixed(2)}</code>\n` +
+      `  UPI ID:\n` +
+      `    <code>avinashaddison-8@okaxis</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `After paying, tap ✅ <b>I've Paid</b> and enter your UTR to confirm your order.`;
     const replyMarkup = {
       inline_keyboard: [
         [{ text: "✅  I've Paid — Enter UTR", callback_data: "dep_upi_paid" }],
@@ -1816,24 +1805,21 @@ export function startShopBot(token: string) {
       cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "BEP20",
     });
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  💠  USDT BEP20  ·  BSC  ·  INSTANT ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
-      `║  💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  Send <b>exactly</b> this amount:\n` +
-      `║\n` +
-      `║  Amount:\n` +
-      `║    <code>${order.amount.toFixed(2)} USDT</code>\n` +
-      `║  Network:\n` +
-      `║    <code>BNB Smart Chain (BEP20)</code>\n` +
-      `║  Address:\n` +
-      `║    <code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  ⚠️  Wrong network = lost funds!      ║\n` +
-      `║  ⏳ Awaiting · Auto-confirmed on-chain ║\n` +
-      `╚══════════════════════════════════════╝`,
+      `💠  <b>USDT BEP20  ·  BSC  ·  INSTANT</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `Send <b>exactly</b> this amount:\n\n` +
+      `  Amount:\n` +
+      `    <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `  Network:\n` +
+      `    <code>BNB Smart Chain (BEP20)</code>\n` +
+      `  Address:\n` +
+      `    <code>0x107fc554bba4cadd5c4e9f1e189d7dd93770202e</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `⚠️  Wrong network = funds lost\n` +
+      `⏳  <i>Awaiting · Auto-confirmed on-chain</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1862,24 +1848,21 @@ export function startShopBot(token: string) {
       cryptoOrderId: order.orderId, note: order.note, exactAmount: order.amount, chain: "TRC20",
     });
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║  💎  USDT TRC20  ·  TRON  ·  INSTANT ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
-      `║  💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  Send <b>exactly</b> this amount:\n` +
-      `║\n` +
-      `║  Amount:\n` +
-      `║    <code>${order.amount.toFixed(2)} USDT</code>\n` +
-      `║  Network:\n` +
-      `║    <code>TRON (TRC20)</code>\n` +
-      `║  Address:\n` +
-      `║    <code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  ⚠️  Wrong network = lost funds!      ║\n` +
-      `║  ⏳ Awaiting · Auto-confirmed on-chain ║\n` +
-      `╚══════════════════════════════════════╝`,
+      `💎  <b>USDT TRC20  ·  TRON  ·  INSTANT</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(prod.name)} × ${qty}</b>\n` +
+      `💵  <b>${order.amount.toFixed(2)} USDT</b>  ·  Ref: <code>${shortId}</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `Send <b>exactly</b> this amount:\n\n` +
+      `  Amount:\n` +
+      `    <code>${order.amount.toFixed(2)} USDT</code>\n` +
+      `  Network:\n` +
+      `    <code>TRON (TRC20)</code>\n` +
+      `  Address:\n` +
+      `    <code>TTvcMqHZ2BDYp6G9QQVd7jxMCmarrUjGaB</code>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `⚠️  Wrong network = funds lost\n` +
+      `⏳  <i>Awaiting · Auto-confirmed on-chain</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1897,24 +1880,21 @@ export function startShopBot(token: string) {
     const session = checkoutSessions.get(uid);
     if (!session?.cryptoOrderId) {
       return safeEdit(ctx,
-        `╔══════════════════════════════════════╗\n` +
-        `║  ⚠️  No active order found           ║\n` +
-        `╚══════════════════════════════════════╝\n\n` +
+        `⚠️  <b>No active order found</b>\n` +
+        `<code>─────────────────────────────────────</code>\n` +
         `<i>Start a new order from the shop.</i>`,
         { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("🏠  Main Menu", "shop_main_menu")]]) }
       );
     }
     const amtDisplay = (session.exactAmount ?? session.totalAmount).toFixed(2);
     return safeEdit(ctx,
-      `╔══════════════════════════════════════╗\n` +
-      `║     ⏳  AWAITING PAYMENT             ║\n` +
-      `╠══════════════════════════════════════╣\n` +
-      `║  📦  <b>${escHtml(session.productName)} × ${session.qty}</b>\n` +
-      `║  💵  <b>${amtDisplay} USDT</b>\n` +
-      (session.note ? `║  📝  <code>${session.note}</code>\n` : "") +
-      `╠══════════════════════════════════════╣\n` +
-      `║  Scanning every ~25 s — auto-confirm ║\n` +
-      `╚══════════════════════════════════════╝`,
+      `⏳  <b>AWAITING PAYMENT</b>\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📦  <b>${escHtml(session.productName)} × ${session.qty}</b>\n` +
+      `💵  <b>${amtDisplay} USDT</b>\n` +
+      (session.note ? `📝  <code>${session.note}</code>\n` : "") +
+      `<code>─────────────────────────────────────</code>\n` +
+      `<i>Scanning every ~25 s · Auto-confirmed on detection</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -2832,16 +2812,14 @@ export function startShopBot(token: string) {
       checkoutSessions.set(uid, { ...coSession, qty, totalAmount, customQtyStep: false });
       const padC = (s: string, w: number) => s.padEnd(w);
       return safeReply(ctx,
-        `╔══════════════════════════════════════╗\n` +
-        `║         🧾  ORDER SUMMARY            ║\n` +
-        `╠══════════════════════════════════════╣\n` +
-        `║  📦  <b>${escHtml(coSession.productName)}</b>\n` +
-        `╠══════════════════════════════════════╣\n` +
-        `║  <code>${padC("Qty",   12)} ›   ${qty} code${qty > 1 ? "s" : ""}</code>\n` +
-        `║  <code>${padC("Price", 12)} ›   ${fmt$(coSession.unitPrice)} each</code>\n` +
-        `║  <code>──────────────────────────────</code>\n` +
-        `║  <code>${padC("TOTAL", 12)} ›   ${fmt$(totalAmount)} USDT</code>\n` +
-        `╚══════════════════════════════════════╝`,
+        `🧾  <b>ORDER SUMMARY</b>\n` +
+        `<code>─────────────────────────────────────</code>\n` +
+        `📦  <b>${escHtml(coSession.productName)}</b>\n` +
+        `<code>─────────────────────────────────────</code>\n` +
+        `<code>${padC("Qty",   8)} ›  ${qty} code${qty > 1 ? "s" : ""}</code>\n` +
+        `<code>${padC("Price", 8)} ›  ${fmt$(coSession.unitPrice)} each</code>\n` +
+        `<code>─────────────────────────────────────</code>\n` +
+        `<code>${padC("TOTAL", 8)} ›  ${fmt$(totalAmount)} USDT</code>`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
