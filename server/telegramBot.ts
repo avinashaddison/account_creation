@@ -361,6 +361,7 @@ const SHOP_KB = {
   STOCK:         "🗄  STOCK MANAGER",
   MANUAL_ORDERS: "📬  MANUAL ORDERS",
   EMOJI:         "✨  EMOJI SETTINGS",
+  MENU_MGMT:     "🎛  MENU MANAGEMENT",
   BACK:          "↩  BACK",
 } as const;
 
@@ -372,7 +373,7 @@ const SHOP_KEYBOARD = Markup.keyboard([
   [SHOP_KB.SEARCH,        SHOP_KB.REFER_REWARD],
   [SHOP_KB.PROMO_CODES,   SHOP_KB.RESTOCK],
   [SHOP_KB.STOCK,         SHOP_KB.MANUAL_ORDERS],
-  [SHOP_KB.EMOJI],
+  [SHOP_KB.EMOJI,         SHOP_KB.MENU_MGMT],
   [SHOP_KB.BACK],
 ]).resize();
 
@@ -3299,6 +3300,23 @@ export function startTelegramBot(config: BotConfig) {
       parse_mode: "HTML",
       ...emojiPanelKeyboard(),
     });
+  });
+
+  bot.hears(SHOP_KB.MENU_MGMT, async (ctx) => {
+    await clearShopMenu(ctx);
+    const config   = getBotMenuConfig();
+    const defaults = getBotMenuDefaults();
+    const keys     = Object.keys(defaults) as string[];
+    const rows     = keys.map(k => [
+      Markup.button.callback(`${config[k] ?? defaults[k]}`, `shop_menu_edit:${k}`),
+    ]);
+    await ctx.reply(
+      `🎛 <b>MENU MANAGEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Tap any button below to rename it.\n` +
+      `You can change both the emoji and the text.\n\n` +
+      `<i>Changes take effect immediately for new keyboard sends.</i>`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) }
+    );
   });
   // ─────────────────────────────────────────────────────────────────────────
 
