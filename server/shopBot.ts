@@ -188,7 +188,8 @@ interface ShopUserState {
   selectedProductId?: string;
 }
 const userState   = new Map<number, ShopUserState>();
-const bizSeenIds  = new Map<string, Set<string>>(); // smtpAccountId → seen message IDs
+const bizSeenIds        = new Map<string, Set<string>>(); // smtpAccountId → seen message IDs
+const bizActiveInbox    = new Map<number, string>();      // userId → active smtpAccountId
 function getState(uid: number): ShopUserState {
   if (!userState.has(uid)) userState.set(uid, {});
   return userState.get(uid)!;
@@ -3361,21 +3362,24 @@ export function startShopBot(token: string) {
     (async () => {
       while (true) {
         try {
-          const msgs = await smtpDevInbox(smtpAccountId);
-          for (const msg of msgs) {
-            if (seen.has(msg.id)) continue;
-            seen.add(msg.id);
-            const body = (msg.text || msg.subject || "(no content)").substring(0, 3000);
-            await bot.telegram.sendMessage(
-              telegramId,
-              `📬 <b>New Business Email!</b>\n\n` +
-              `💼 <b>To:</b> <code>${escHtml(email)}</code>\n` +
-              `👤 <b>From:</b> <code>${escHtml(msg.from)}</code>\n` +
-              `📌 <b>Subject:</b> ${escHtml(msg.subject)}\n` +
-              `📅 <b>Date:</b> ${new Date(msg.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
-              `<pre>${escHtml(body)}</pre>`,
-              { parse_mode: "HTML" }
-            ).catch(() => {});
+          // Only deliver emails when this inbox is the user's active one
+          if (bizActiveInbox.get(telegramId) === smtpAccountId) {
+            const msgs = await smtpDevInbox(smtpAccountId);
+            for (const msg of msgs) {
+              if (seen.has(msg.id)) continue;
+              seen.add(msg.id);
+              const body = (msg.text || msg.subject || "(no content)").substring(0, 3000);
+              await bot.telegram.sendMessage(
+                telegramId,
+                `📬 <b>New Mail Received!</b>\n\n` +
+                `📧 <b>To:</b> <code>${escHtml(email)}</code>\n` +
+                `👤 <b>From:</b> <code>${escHtml(msg.from)}</code>\n` +
+                `📌 <b>Subject:</b> ${escHtml(msg.subject)}\n` +
+                `📅 <b>Date:</b> ${new Date(msg.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}\n\n` +
+                `<pre>${escHtml(body)}</pre>`,
+                { parse_mode: "HTML" }
+              ).catch(() => {});
+            }
           }
         } catch (_e) { /* retry silently */ }
         await new Promise(r => setTimeout(r, 3_000));
@@ -3383,31 +3387,55 @@ export function startShopBot(token: string) {
     })();
   }
 
-  async function showBizMailPanel(chatId: number, uid: number) {
+  // Shows the main Temp Mail menu with two options
+  async function showBizMailPanel(chatId: number, _uid: number) {
+    await bot.telegram.sendMessage(chatId,
+      `📩 <b>TEMP MAIL</b>  ·  <i>@addison.asia</i>\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Choose an option below:`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📩  Generate New Mail", "bizmail_generate")],
+          [Markup.button.callback("📋  All My Mails",      "bizmail_list")],
+        ]),
+      }
+    ).catch(() => {});
+  }
+
+  // Shows all allocated mails with an Open button for each
+  async function showBizMailList(chatId: number, uid: number) {
     const mails  = await storage.getBizMailsByTelegramId(uid);
     const active = mails.filter(m => !m.deletedAt);
-    let text =
-      `📩 <b>BUSINESS MAIL</b>  ·  <i>@addison.asia</i>\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
     if (active.length === 0) {
-      text += `<i>You have no active business email addresses yet.\nTap Generate to create one exclusively for you.</i>\n\n`;
-    } else {
-      text += `<b>Your Allocated Addresses:</b>\n\n`;
-      for (const m of active) {
-        const since = m.allocatedAt
-          ? new Date(m.allocatedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })
-          : "—";
-        text += `📧 <code>${escHtml(m.email)}</code>\n🔑 <code>${escHtml(m.password)}</code>\n📅 Since: ${since}\n\n`;
-      }
-      text += `🌐 <b>Webmail:</b> <a href="https://app.smtp.dev">app.smtp.dev</a>\n`;
-      text += `📮 <b>IMAP:</b>    <code>imap.smtp.dev:993 (SSL)</code>\n`;
-      text += `📤 <b>SMTP:</b>    <code>smtp.smtp.dev:587 (STARTTLS)</code>\n\n`;
-      text += `<i>New emails are forwarded here in realtime.</i>`;
+      await bot.telegram.sendMessage(chatId,
+        `📋 <b>All My Mails</b>\n\n<i>You have no allocated addresses yet.\nTap Generate New Mail to create one.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("📩  Generate New Mail", "bizmail_generate")]]),
+        }
+      ).catch(() => {});
+      return;
     }
-    await bot.telegram.sendMessage(chatId, text, {
-      parse_mode: "HTML",
-      ...Markup.inlineKeyboard([[Markup.button.callback("📩  Generate New Mail", "bizmail_generate")]]),
-    }).catch(() => {});
+
+    const currentActive = bizActiveInbox.get(uid);
+    const rows = active.map(m => {
+      const label = currentActive === m.smtpAccountId
+        ? `✅  ${m.email}`
+        : `📥  ${m.email}`;
+      return [Markup.button.callback(label, `bizmail_open:${m.smtpAccountId}`)];
+    });
+
+    await bot.telegram.sendMessage(chatId,
+      `📋 <b>All My Mails</b>\n\n` +
+      `Tap any address to open its inbox in realtime.\n` +
+      `<i>✅ = currently active inbox</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard(rows),
+      }
+    ).catch(() => {});
   }
 
   // ── Business Mail (Bot 2) — handlers ─────────────────────────────────────
@@ -3417,13 +3445,13 @@ export function startShopBot(token: string) {
   });
 
   bot.action("bizmail_generate", async (ctx) => {
-    await ctx.answerCbQuery("Creating your business email…").catch(() => {});
+    await ctx.answerCbQuery("Creating your temp email…").catch(() => {});
     const uid      = ctx.from.id;
     const chatId   = ctx.chat!.id;
     const username = ctx.from.username;
 
     const loadMsg = await bot.telegram.sendMessage(chatId,
-      `⏳ <b>Creating your business email address…</b>`, { parse_mode: "HTML" }
+      `⏳ <b>Creating your temp email address…</b>`, { parse_mode: "HTML" }
     ).catch(() => null);
 
     const address  = `user${uid}m${Date.now() % 100000}@addison.asia`;
@@ -3447,15 +3475,15 @@ export function startShopBot(token: string) {
       allocatedTo: uid, smtpAccountId,
     });
     alertAdminBizMailAllocated(address, password, uid, username);
+
+    // Auto-set as active inbox and start polling
+    bizActiveInbox.set(uid, smtpAccountId);
     startBizInboxPoller(smtpAccountId, address, uid);
 
     const card =
-      `📩 <b>Business Email Allocated!</b>\n\n` +
+      `📩 <b>Temp Mail Allocated!</b>\n\n` +
       `📧 <b>Email:</b>     <code>${escHtml(address)}</code>\n` +
       `🔑 <b>Password:</b>  <code>${escHtml(password)}</code>\n\n` +
-      `🌐 <b>Webmail:</b>   <a href="https://app.smtp.dev">app.smtp.dev</a>\n` +
-      `📮 <b>IMAP:</b>      <code>imap.smtp.dev:993 (SSL)</code>\n` +
-      `📤 <b>SMTP:</b>      <code>smtp.smtp.dev:587 (STARTTLS)</code>\n\n` +
       `<b>This address is exclusively yours.</b>\n` +
       `<i>Any emails sent to it will be forwarded here in realtime.</i>`;
 
@@ -3474,13 +3502,51 @@ export function startShopBot(token: string) {
 
   bot.action("bizmail_list", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    await showBizMailPanel(ctx.chat!.id, ctx.from!.id);
+    await showBizMailList(ctx.chat!.id, ctx.from!.id);
+  });
+
+  // Open a specific inbox — switch active inbox to this address
+  bot.action(/^bizmail_open:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Switching inbox…").catch(() => {});
+    const uid          = ctx.from!.id;
+    const chatId       = ctx.chat!.id;
+    const smtpId       = (ctx.match as RegExpMatchArray)[1];
+
+    const mails  = await storage.getBizMailsByTelegramId(uid);
+    const target = mails.find(m => m.smtpAccountId === smtpId && !m.deletedAt);
+    if (!target) {
+      await ctx.answerCbQuery("Mailbox not found.").catch(() => {});
+      return;
+    }
+
+    bizActiveInbox.set(uid, smtpId);
+
+    await bot.telegram.sendMessage(chatId,
+      `✅ <b>Inbox Switched!</b>\n\n` +
+      `📧 <b>Active:</b> <code>${escHtml(target.email)}</code>\n\n` +
+      `⏳ <b>Waiting for Mail…</b>\n` +
+      `Any email arriving at this address will appear here in realtime.`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
   });
 
   // Resume inbox polling for all allocated accounts on startup
   (async () => {
     try {
       const all = await storage.getAllAllocatedBizMails();
+      // Group by user and pick the most recently allocated as default active
+      const latestPerUser = new Map<number, string>(); // userId → smtpAccountId
+      for (const acc of all) {
+        if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
+          // The list is ordered by allocatedAt desc — first one per user wins
+          if (!latestPerUser.has(acc.allocatedTo)) {
+            latestPerUser.set(acc.allocatedTo, acc.smtpAccountId);
+          }
+        }
+      }
+      for (const [userId, smtpId] of latestPerUser) {
+        bizActiveInbox.set(userId, smtpId);
+      }
       for (const acc of all) {
         if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
           startBizInboxPoller(acc.smtpAccountId, acc.email, acc.allocatedTo);
