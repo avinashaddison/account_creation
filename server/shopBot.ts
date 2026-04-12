@@ -125,7 +125,9 @@ function stockLine(stock: number): string {
 }
 
 // ── Main reply keyboard ──────────────────────────────────────────────────────
-const BTN = {
+// Menu button labels — mutable so Bot 1 admin can update them live
+type BtnKey = "ACCOUNTS" | "BALANCE" | "ORDERS" | "DEPOSIT" | "IDENTITY" | "SUPPORT" | "REFER" | "BIZ_MAIL";
+const BTN_DEFAULTS: Record<BtnKey, string> = {
   ACCOUNTS:     "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
   BALANCE:      "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
   ORDERS:       "📋  𝗢𝗥𝗗𝗘𝗥𝗦",
@@ -134,7 +136,22 @@ const BTN = {
   SUPPORT:      "🎧  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
   BIZ_MAIL:     "📩  𝗧𝗘𝗠𝗣  𝗠𝗔𝗜𝗟",
-} as const;
+};
+let BTN: Record<BtnKey, string> = { ...BTN_DEFAULTS };
+
+export function getBotMenuConfig(): Record<string, string> { return { ...BTN }; }
+export function getBotMenuDefaults(): Record<string, string> { return { ...BTN_DEFAULTS }; }
+export async function reloadBotMenu(): Promise<void> {
+  try {
+    const raw = await storage.getSetting("shop_bot_menu_config");
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<Record<BtnKey, string>>;
+      for (const k of Object.keys(BTN_DEFAULTS) as BtnKey[]) {
+        if (saved[k]) BTN[k] = saved[k]!;
+      }
+    }
+  } catch { /* ignore parse errors */ }
+}
 
 // Cycling hot-product emoji for sticky keyboard buttons
 const STICKY_EMOJI = ["🔥", "⚡", "✨", "💎", "🌟", "🚀", "💥", "👑"];
@@ -893,6 +910,7 @@ async function ensureShopTables() {
   `);
   console.log("[ShopBot] Tables ready");
   await loadEmojiSettings();
+  await reloadBotMenu();
 }
 
 // ── Safe messaging helpers ───────────────────────────────────────────────────
@@ -1329,7 +1347,7 @@ export function startShopBot(token: string) {
     }
   }
 
-  bot.hears(BTN.ACCOUNTS, async (ctx) => {
+  bot.hears((t) => t === BTN.ACCOUNTS, async (ctx) => {
     await showProductList(ctx);
   });
 
@@ -2809,7 +2827,7 @@ export function startShopBot(token: string) {
   });
 
   // ── My Balance ────────────────────────────────────────────────────────────
-  bot.hears(BTN.BALANCE, async (ctx) => {
+  bot.hears((t) => t === BTN.BALANCE, async (ctx) => {
     const uid = ctx.from.id;
     await upsertCustomer(uid, ctx.from.username, ctx.from.first_name);
     const r = await dbQuery(`SELECT balance, vip, total_spend FROM shop_customers WHERE telegram_id = $1`, [uid]);
@@ -2859,7 +2877,7 @@ export function startShopBot(token: string) {
     return Markup.inlineKeyboard(rows);
   }
 
-  bot.hears(BTN.DEPOSIT, async (ctx) => {
+  bot.hears((t) => t === BTN.DEPOSIT, async (ctx) => {
     const uid = ctx.from.id;
     await safeReply(ctx, depositText(uid), {
       parse_mode: "HTML",
@@ -3044,7 +3062,7 @@ export function startShopBot(token: string) {
   });
 
   // ── Support ───────────────────────────────────────────────────────────────
-  bot.hears(BTN.SUPPORT, async (ctx) => {
+  bot.hears((t) => t === BTN.SUPPORT, async (ctx) => {
     await safeReply(ctx,
       `╔══════════════════════════════════════╗\n` +
       `║  🎧  <b>SUPPORT</b>  ║\n` +
@@ -3062,7 +3080,7 @@ export function startShopBot(token: string) {
   });
 
   // ── My ID / Profile ───────────────────────────────────────────────────────
-  bot.hears(BTN.IDENTITY, async (ctx) => {
+  bot.hears((t) => t === BTN.IDENTITY, async (ctx) => {
     const uid   = ctx.from.id;
     const uname = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "—";
     const r = await dbQuery(`SELECT vip, total_spend, balance FROM shop_customers WHERE telegram_id = $1`, [uid]);
@@ -3100,7 +3118,7 @@ export function startShopBot(token: string) {
   });
 
   // ── Refer & Earn ──────────────────────────────────────────────────────────
-  bot.hears(BTN.REFER, async (ctx) => {
+  bot.hears((t) => t === BTN.REFER, async (ctx) => {
     const uid         = ctx.from.id;
     const botUsername = ctx.botInfo.username;
     const referralLink = `https://t.me/${botUsername}?start=ref_${uid}`;
@@ -3138,7 +3156,7 @@ export function startShopBot(token: string) {
   });
 
   // ── My Orders (keyboard button) ────────────────────────────────────────────
-  bot.hears(BTN.ORDERS, async (ctx) => {
+  bot.hears((t) => t === BTN.ORDERS, async (ctx) => {
     const uid = ctx.from.id;
     await showOrders(ctx, uid, false);
   });
@@ -3439,7 +3457,7 @@ export function startShopBot(token: string) {
   }
 
   // ── Business Mail (Bot 2) — handlers ─────────────────────────────────────
-  bot.hears(BTN.BIZ_MAIL, async (ctx) => {
+  bot.hears((t) => t === BTN.BIZ_MAIL, async (ctx) => {
     await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
     await showBizMailPanel(ctx.chat.id, ctx.from.id);
   });

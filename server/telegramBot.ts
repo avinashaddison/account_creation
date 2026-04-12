@@ -17,6 +17,7 @@ import {
   startActivationCountdown,
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
+import { getBotMenuConfig, getBotMenuDefaults, reloadBotMenu } from "./shopBot";
 
 const SERVER_PORT = process.env.PORT || 5000;
 const BASE_URL = `http://localhost:${SERVER_PORT}`;
@@ -143,7 +144,9 @@ interface ShopAdminFlow {
        | "stock_add_links"
        | "stock_set_override"
        | "stock_set_manual_stock"
-       | "manual_fulfill";
+       | "manual_fulfill"
+       | "menu_btn_label";
+  menuEditKey?: string;
   name?: string;
   description?: string;
   price?: string;
@@ -2954,6 +2957,9 @@ export function startTelegramBot(config: BotConfig) {
         Markup.button.callback("🗄  STOCK MANAGER",       "shop_admin_stock"),
         Markup.button.callback("📬  MANUAL ORDERS",       "shop_admin_manual_orders"),
       ],
+      [
+        Markup.button.callback("🎛  MENU MANAGEMENT",    "shop_admin_menu_mgmt"),
+      ],
     ]);
 
     if (edit) {
@@ -4581,6 +4587,51 @@ export function startTelegramBot(config: BotConfig) {
     return html;
   }
 
+  // ── Menu Management actions ───────────────────────────────────────────────
+  bot.action("shop_admin_menu_mgmt", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const config   = getBotMenuConfig();
+    const defaults = getBotMenuDefaults();
+    const keys = Object.keys(defaults) as string[];
+    const rows = keys.map(k => [
+      Markup.button.callback(
+        `${config[k] ?? defaults[k]}`,
+        `shop_menu_edit:${k}`
+      ),
+    ]);
+    rows.push([Markup.button.callback("↩  Back to Shop", "shop_admin_back")]);
+    await safeEdit(ctx,
+      `🎛 <b>MENU MANAGEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Tap any button below to rename it.\n` +
+      `You can change both the emoji and the text.\n\n` +
+      `<i>Changes take effect immediately for new keyboard sends.</i>`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) }
+    );
+  });
+
+  bot.action(/^shop_menu_edit:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid  = ctx.from!.id;
+    const key  = (ctx.match as RegExpMatchArray)[1];
+    const st   = getState(uid);
+    const config   = getBotMenuConfig();
+    const defaults = getBotMenuDefaults();
+    const current  = config[key] ?? defaults[key] ?? key;
+    st.shopAdminFlow = { step: "menu_btn_label", menuEditKey: key };
+    await ctx.reply(
+      `🎛 <b>Editing button:</b> <code>${key}</code>\n\n` +
+      `Current label:\n<code>${current}</code>\n\n` +
+      `Send the new label now.\n` +
+      `<i>You can include any emoji at the start, e.g.:\n💳  ADD FUNDS</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  bot.action("shop_admin_back", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    await showShopAdminMenu(ctx, true);
+  });
+
   // ── Text message handler ──────────────────────────────────────────────────
   bot.on("text", async (ctx) => {
     const uid = ctx.from.id;
@@ -4622,6 +4673,27 @@ export function startTelegramBot(config: BotConfig) {
           console.error("[TelegramBot] Countdown error:", e.message)
         );
         return;
+      }
+
+      // ── Menu Management: save new button label ───────────────────────────
+      if (flow.step === "menu_btn_label" && flow.menuEditKey) {
+        const key = flow.menuEditKey;
+        st.shopAdminFlow = undefined;
+        const label = text.trim();
+        if (!label) return ctx.reply("🔴 Label cannot be empty.");
+        // Load current config, update key, save
+        const defaults = getBotMenuDefaults();
+        const current  = getBotMenuConfig();
+        const merged: Record<string, string> = { ...defaults, ...current, [key]: label };
+        await storage.setSetting("shop_bot_menu_config", JSON.stringify(merged));
+        await reloadBotMenu();
+        return ctx.reply(
+          `✅ <b>Button updated!</b>\n\n` +
+          `🔑 Key: <code>${key}</code>\n` +
+          `🏷 New label: <code>${label}</code>\n\n` +
+          `<i>Users will see the new label next time the keyboard is sent to them.</i>`,
+          { parse_mode: "HTML" }
+        );
       }
 
       if (flow.step === "name") {
