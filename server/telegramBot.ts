@@ -145,6 +145,9 @@ interface ShopAdminFlow {
        | "stock_set_override"
        | "stock_set_manual_stock"
        | "manual_fulfill"
+       | "fulfill_email"
+       | "fulfill_password"
+       | "fulfill_link"
        | "menu_btn_label";
   menuEditKey?: string;
   name?: string;
@@ -166,6 +169,7 @@ interface ShopAdminFlow {
   manualStockProductId?: string;
   fulfillOrderId?: string;
   fulfillCustomerId?: number;
+  fulfillEmail?: string;
 }
 interface UserState {
   lastCopiedIds?: string[];
@@ -4509,13 +4513,48 @@ export function startTelegramBot(config: BotConfig) {
       fulfillCustomerId: parseInt(o.telegram_id),
     };
     return ctx.reply(
-      `\n📦 <b>FULFILL ORDER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `Product:  <b>${escapeHtml(o.product_name)}</b>\n` +
-      `Amount:   <b>$${parseFloat(o.amount).toFixed(2)}</b>\n` +
-      `Customer: <b>${escapeHtml(custName)}</b>  <code>(${o.telegram_id})</code>\n` +
-      `Order ID: <code>${orderId}</code>\n\n` +
-      `› Type and send the <b>delivery content</b> (credentials, link, etc.).\n` +
-      `<i>It will be sent directly to the customer.</i>`,
+      `📦  <b>FULFILL ORDER</b>\n\n` +
+      `<code>Product   ${escapeHtml(o.product_name)}\n` +
+      `Amount    $${parseFloat(o.amount).toFixed(2)}\n` +
+      `Customer  ${escapeHtml(custName)} (${o.telegram_id})\n` +
+      `Order ID  ${orderId}</code>\n\n` +
+      `Choose the delivery type:`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔐  Login Credentials", `shop_fulfill_type_creds_${orderId}`)],
+          [Markup.button.callback("🔗  Redeem Link",       `shop_fulfill_type_link_${orderId}`)],
+        ]),
+      }
+    );
+  });
+
+  // ── Fulfill type: Login Credentials ──────────────────────────────────────
+  bot.action(/^shop_fulfill_type_creds_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const orderId = (ctx.match as RegExpExecArray)[1];
+    const uid = ctx.from.id;
+    const st  = getState(uid);
+    if (!st.shopAdminFlow?.fulfillOrderId) return ctx.reply("⚠️ Session expired. Please click Fulfill again.");
+    st.shopAdminFlow = { ...st.shopAdminFlow, step: "fulfill_email", fulfillOrderId: orderId };
+    return ctx.reply(
+      `🔐  <b>Login Credentials</b>\n\n` +
+      `Step 1 of 2 — Send the <b>email address</b>:`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Fulfill type: Redeem Link ─────────────────────────────────────────────
+  bot.action(/^shop_fulfill_type_link_([0-9a-f-]{36})$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const orderId = (ctx.match as RegExpExecArray)[1];
+    const uid = ctx.from.id;
+    const st  = getState(uid);
+    if (!st.shopAdminFlow?.fulfillOrderId) return ctx.reply("⚠️ Session expired. Please click Fulfill again.");
+    st.shopAdminFlow = { ...st.shopAdminFlow, step: "fulfill_link", fulfillOrderId: orderId };
+    return ctx.reply(
+      `🔗  <b>Redeem Link</b>\n\n` +
+      `Send the <b>redeem link</b> for this order:`,
       { parse_mode: "HTML" }
     );
   });
@@ -5285,104 +5324,124 @@ export function startTelegramBot(config: BotConfig) {
         );
       }
 
-      // ── Manual order fulfillment ─────────────────────────────────────────────
-      if (flow.step === "manual_fulfill") {
-        const orderId    = flow.fulfillOrderId!;
-        const customerId = flow.fulfillCustomerId!;
-
-        // Require non-empty delivery content before proceeding
-        if (!text || text.trim().length === 0) {
-          return ctx.reply(
-            `⚠️ Fulfillment content cannot be empty. Please send the delivery text/credentials for this order.`,
-            { parse_mode: "HTML" }
-          );
-        }
-
-        st.shopAdminFlow = undefined;
-
+      // ── Shared deliver helper ────────────────────────────────────────────────
+      async function deliverOrder(orderId: string, customerId: number, deliveryText: string, noteText: string): Promise<"ok" | string> {
         const shopToken2 = process.env.TELEGRAM_BOT_TOKEN_2;
-        if (!shopToken2) {
-          return ctx.reply(`⚠️ Shop bot token not configured. Cannot deliver.`, { parse_mode: "HTML" });
-        }
-
-        // Step 1: Atomically claim the order by transitioning pending_delivery → fulfilling.
-        // This prevents a second admin from delivering the same order concurrently.
+        if (!shopToken2) return "Shop bot token not configured.";
         const claimRes = await dbQuery(
-          `UPDATE shop_orders
-           SET delivery_status = 'fulfilling'
-           WHERE id = $1 AND delivery_status = 'pending_delivery'
-           RETURNING id`,
+          `UPDATE shop_orders SET delivery_status = 'fulfilling'
+           WHERE id = $1 AND delivery_status = 'pending_delivery' RETURNING id`,
           [orderId]
         );
         if (!claimRes.rows[0]) {
-          // Check whether the order exists at all or was already claimed/delivered
-          const statusRes = await dbQuery(
-            `SELECT delivery_status FROM shop_orders WHERE id = $1`,
-            [orderId]
-          );
-          const existingStatus = statusRes.rows[0]?.delivery_status ?? "not found";
-          return ctx.reply(
-            `⚠️ Could not claim order <code>${orderId}</code> — current status: <b>${existingStatus}</b>. No action taken.`,
-            {
-              parse_mode: "HTML",
-              ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
-            }
-          );
+          const s = await dbQuery(`SELECT delivery_status FROM shop_orders WHERE id = $1`, [orderId]);
+          return `Order status is already <b>${s.rows[0]?.delivery_status ?? "not found"}</b>.`;
         }
-
-        // Step 2: Send the delivery message to the customer.
-        // Use plain text (no parse_mode) so credentials with <, >, & are safe.
-        let tgOk = false;
-        let tgErrMsg = "";
+        let tgOk = false; let tgErr = "";
         try {
-          const tgRes = await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
+          const r = await fetch(`https://api.telegram.org/bot${shopToken2}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: customerId,
-              text: `✅ ORDER DELIVERED!\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${text}\n\nThank you for your purchase!`,
-            }),
+            body: JSON.stringify({ chat_id: customerId, text: deliveryText }),
           });
-          const tgJson = await tgRes.json() as { ok: boolean; description?: string };
-          tgOk      = tgJson.ok === true;
-          tgErrMsg  = tgJson.description ?? "Unknown Telegram error";
-        } catch (e) {
-          tgErrMsg = (e as Error).message;
-        }
-
+          const j = await r.json() as { ok: boolean; description?: string };
+          tgOk = j.ok === true; tgErr = j.description ?? "Unknown Telegram error";
+        } catch (e) { tgErr = (e as Error).message; }
         if (!tgOk) {
-          // Telegram send failed — revert order back to pending so the admin can retry
-          await dbQuery(
-            `UPDATE shop_orders SET delivery_status = 'pending_delivery' WHERE id = $1`,
-            [orderId]
-          );
-          return ctx.reply(
-            `⚠️ <b>Delivery failed</b> — order reverted to <i>pending</i>.\n\n` +
-            `Telegram error: <code>${escapeHtml(tgErrMsg)}</code>\n\n` +
-            `Please try fulfilling the order again.`,
-            {
-              parse_mode: "HTML",
-              ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
-            }
-          );
+          await dbQuery(`UPDATE shop_orders SET delivery_status = 'pending_delivery' WHERE id = $1`, [orderId]);
+          return `Telegram error: ${tgErr}`;
         }
-
-        // Step 3: Telegram confirmed — finalize to delivered with fulfillment note
         await dbQuery(
-          `UPDATE shop_orders
-           SET delivery_status = 'delivered', fulfillment_note = $1
-           WHERE id = $2`,
-          [text, orderId]
+          `UPDATE shop_orders SET delivery_status = 'delivered', fulfillment_note = $1 WHERE id = $2`,
+          [noteText, orderId]
         );
+        return "ok";
+      }
 
+      // ── fulfill_email: received email, ask for password ───────────────────────
+      if (flow.step === "fulfill_email") {
+        if (!text || !text.includes("@")) {
+          return ctx.reply(`⚠️ That doesn't look like a valid email. Send the <b>email address</b> again:`, { parse_mode: "HTML" });
+        }
+        st.shopAdminFlow = { ...flow, step: "fulfill_password", fulfillEmail: text.trim() };
         return ctx.reply(
-          `\n✅ <b>ORDER FULFILLED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-          `Delivery sent to customer <code>${customerId}</code>.\n` +
-          `Order <code>${orderId}</code> marked as <b>delivered</b>.`,
-          {
+          `✅ Email saved: <code>${escapeHtml(text.trim())}</code>\n\n` +
+          `Step 2 of 2 — Send the <b>password</b>:`,
+          { parse_mode: "HTML" }
+        );
+      }
+
+      // ── fulfill_password: received password, send credentials to buyer ────────
+      if (flow.step === "fulfill_password") {
+        const orderId    = flow.fulfillOrderId!;
+        const customerId = flow.fulfillCustomerId!;
+        const email      = flow.fulfillEmail!;
+        const password   = text.trim();
+        st.shopAdminFlow = undefined;
+        const deliveryText =
+          `✅ ORDER DELIVERED!\n\nHere are your login credentials:\n\nEmail: ${email}\nPassword: ${password}\n\nThank you for your purchase!`;
+        const result = await deliverOrder(orderId, customerId, deliveryText, `Email: ${email}\nPassword: ${password}`);
+        if (result !== "ok") {
+          return ctx.reply(`⚠️ <b>Delivery failed</b>\n\n${result}\n\nPlease try fulfilling the order again.`, {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
-          }
+          });
+        }
+        return ctx.reply(
+          `✅  <b>ORDER FULFILLED</b>\n\n` +
+          `<code>Credentials sent to ${customerId}\nOrder ${orderId} → delivered</code>`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]) }
+        );
+      }
+
+      // ── fulfill_link: received redeem link, send to buyer ────────────────────
+      if (flow.step === "fulfill_link") {
+        const orderId    = flow.fulfillOrderId!;
+        const customerId = flow.fulfillCustomerId!;
+        const link       = text.trim();
+        st.shopAdminFlow = undefined;
+        if (!link.startsWith("http")) {
+          st.shopAdminFlow = flow;
+          return ctx.reply(`⚠️ That doesn't look like a valid link. Send a URL starting with <code>http</code>:`, { parse_mode: "HTML" });
+        }
+        const deliveryText =
+          `✅ ORDER DELIVERED!\n\nHere is your redeem link:\n\n${link}\n\nThank you for your purchase!`;
+        const result = await deliverOrder(orderId, customerId, deliveryText, `Link: ${link}`);
+        if (result !== "ok") {
+          return ctx.reply(`⚠️ <b>Delivery failed</b>\n\n${result}\n\nPlease try fulfilling the order again.`, {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
+          });
+        }
+        return ctx.reply(
+          `✅  <b>ORDER FULFILLED</b>\n\n` +
+          `<code>Redeem link sent to ${customerId}\nOrder ${orderId} → delivered</code>`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]) }
+        );
+      }
+
+      // ── Manual order fulfillment (legacy free-text fallback) ──────────────────
+      if (flow.step === "manual_fulfill") {
+        const orderId    = flow.fulfillOrderId!;
+        const customerId = flow.fulfillCustomerId!;
+        if (!text || text.trim().length === 0) {
+          return ctx.reply(`⚠️ Content cannot be empty. Send the delivery text:`, { parse_mode: "HTML" });
+        }
+        st.shopAdminFlow = undefined;
+        const result = await deliverOrder(orderId, customerId,
+          `✅ ORDER DELIVERED!\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${text}\n\nThank you for your purchase!`,
+          text
+        );
+        if (result !== "ok") {
+          return ctx.reply(`⚠️ <b>Delivery failed</b>\n\n${escapeHtml(result)}\n\nPlease try again.`, {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]),
+          });
+        }
+        return ctx.reply(
+          `✅  <b>ORDER FULFILLED</b>\n\n` +
+          `<code>Delivery sent to ${customerId}\nOrder ${orderId} → delivered</code>`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📬  Back to Manual Orders", "shop_admin_manual_orders")]]) }
         );
       }
 
