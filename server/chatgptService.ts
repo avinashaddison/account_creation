@@ -28,7 +28,7 @@ export interface ChatGPTResult {
   error?: string;
 }
 
-// ── Main automation ────────────────────────────────────────────────────────────
+// ── Main automation ─────────────────────────────────────────────────────────
 export async function createChatGPTAccount(opts: {
   email: string;
   smtpDevId: string;
@@ -60,35 +60,44 @@ export async function createChatGPTAccount(opts: {
     });
     const page = await context.newPage();
 
-    // ── Step 1: Load registration page ────────────────────────────────────────
-    log(`[ChatGPT] Opening registration page…`);
-    await page.goto("https://auth.openai.com/create-account", {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    });
-
-    // ── Snapshot existing inbox to filter later ────────────────────────────────
+    // ── Snapshot existing inbox to filter OTP later ──────────────────────────
     const existingMsgs = await getFullInbox(smtpDevId).catch(() => [] as any[]);
     const existingIds  = new Set((existingMsgs as any[]).map((m: any) => m.id));
 
-    // ── Step 2: Fill email ────────────────────────────────────────────────────
+    // ── Step 1: Load chatgpt.com ─────────────────────────────────────────────
+    log(`[ChatGPT] Opening chatgpt.com…`);
+    await page.goto("https://chatgpt.com", {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await page.waitForTimeout(3000);
+
+    // ── Step 2: Click "Sign up for free" ────────────────────────────────────
+    log(`[ChatGPT] Clicking Sign up…`);
+    await page.click('button:has-text("Sign up for free")');
+    await page.waitForTimeout(2000);
+
+    // ── Step 3: Fill email in the modal ─────────────────────────────────────
     log(`[ChatGPT] Entering email: ${email}`);
     const emailInput = await page.waitForSelector(
-      'input[type="email"], input[name="username"], input[name="email"], input[autocomplete*="email"]',
-      { timeout: 25_000 }
+      'input#email, input[name="email"], input[type="email"]',
+      { timeout: 20_000 }
     );
     await emailInput.click();
     await emailInput.fill(email);
 
-    // Try Turnstile if present (before clicking Continue)
+    // Solve Turnstile if present
     await solveTurnstileIfPresent(page, log);
 
-    await page.click('button[type="submit"]').catch(() =>
-      page.click('button:has-text("Continue")')
-    );
-    log(`[ChatGPT] Continue clicked — waiting for OTP email…`);
+    // Click the plain "Continue" button (exact match — not "Continue with Google/Apple/phone")
+    try {
+      await page.getByRole("button", { name: "Continue", exact: true }).click({ timeout: 8000 });
+    } catch {
+      await emailInput.press("Enter");
+    }
+    log(`[ChatGPT] Email submitted — polling for OTP…`);
 
-    // ── Step 3: Poll smtp.dev for OTP ─────────────────────────────────────────
+    // ── Step 4: Poll smtp.dev for OTP ────────────────────────────────────────
     let otp: string | null = null;
     const deadline = Date.now() + 120_000;
     while (!otp && Date.now() < deadline) {
@@ -106,17 +115,19 @@ export async function createChatGPTAccount(opts: {
     if (!otp) throw new Error("OTP email not received within 2 minutes");
     log(`[ChatGPT] OTP received: ${otp}`);
 
-    // ── Step 4: Enter OTP ─────────────────────────────────────────────────────
+    // ── Step 5: Enter OTP ────────────────────────────────────────────────────
+    // Try single code input first
     const codeInput = await page.waitForSelector(
-      'input[name="code"], input[autocomplete="one-time-code"], input[type="text"][maxlength="6"]',
+      'input[name="code"], input[autocomplete="one-time-code"], input[type="text"][maxlength="6"], input[inputmode="numeric"]',
       { timeout: 30_000 }
     ).catch(() => null);
 
     if (codeInput) {
+      await codeInput.click();
       await codeInput.fill(otp);
     } else {
-      // Some flows render individual digit boxes
-      const digitInputs = await page.$$('input[type="text"][maxlength="1"]');
+      // Individual digit boxes
+      const digitInputs = await page.$$('input[type="text"][maxlength="1"], input[inputmode="numeric"][maxlength="1"]');
       if (digitInputs.length >= 6) {
         for (let i = 0; i < 6; i++) await digitInputs[i].fill(otp[i]);
       } else {
@@ -130,40 +141,49 @@ export async function createChatGPTAccount(opts: {
     );
     log(`[ChatGPT] OTP submitted`);
 
-    // ── Step 5: Name + Age ────────────────────────────────────────────────────
-    await page.waitForURL(/about-you|create-account/, { timeout: 30_000 }).catch(() => {});
-    log(`[ChatGPT] Filling name: ${first} ${last}  age: ${age}`);
-
+    // ── Step 6: Name + Age ───────────────────────────────────────────────────
+    // Wait for a name input to appear (could be on same page or redirected)
+    log(`[ChatGPT] Waiting for name/age fields…`);
     const nameInput = await page.waitForSelector(
-      'input[name="full_name"], input[name="name"], input[placeholder*="Full name" i]',
-      { timeout: 20_000 }
-    );
-    await nameInput.fill(`${first} ${last}`);
-
-    const ageInput = await page.waitForSelector(
-      'input[name="age"], input[placeholder*="Age" i]',
-      { timeout: 10_000 }
+      'input[name="full_name"], input[name="name"], input[placeholder*="name" i], input[placeholder*="Name" i]',
+      { timeout: 30_000 }
     ).catch(() => null);
-    if (ageInput) await ageInput.fill(age);
 
-    await page.click('button:has-text("Finish creating account")').catch(() =>
-      page.click('button[type="submit"]')
-    );
-    log(`[ChatGPT] Submitted name / age`);
+    if (nameInput) {
+      log(`[ChatGPT] Filling name: ${first} ${last}  age: ${age}`);
+      await nameInput.fill(`${first} ${last}`);
 
-    // ── Step 6: Skip interest survey ─────────────────────────────────────────
-    try {
-      await page.waitForSelector('button:has-text("Skip"), a:has-text("Skip")', { timeout: 15_000 });
-      await page.click('button:has-text("Skip"), a:has-text("Skip")');
-      log(`[ChatGPT] Skipped interest survey`);
-    } catch { /* page may auto-advance */ }
+      const ageInput = await page.waitForSelector(
+        'input[name="age"], input[placeholder*="age" i], input[placeholder*="Age" i]',
+        { timeout: 10_000 }
+      ).catch(() => null);
+      if (ageInput) await ageInput.fill(age);
 
-    // ── Step 7: Confirm we landed on chatgpt.com ──────────────────────────────
-    await page.waitForURL(/chatgpt\.com/, { timeout: 30_000 }).catch(() => {
-      log(`[ChatGPT] Note: URL may not have changed to chatgpt.com — continuing anyway`);
-    });
+      await page.click('button:has-text("Finish creating account")').catch(() =>
+        page.click('button[type="submit"]')
+      );
+      log(`[ChatGPT] Name/age submitted`);
+    } else {
+      log(`[ChatGPT] No name/age step detected — skipping`);
+    }
 
-    // ── Step 8: Save to DB ────────────────────────────────────────────────────
+    // ── Step 7: Skip optional steps ─────────────────────────────────────────
+    for (const skipText of ["Skip for now", "Skip", "Maybe later"]) {
+      const skipBtn = page.locator(`button:has-text("${skipText}"), a:has-text("${skipText}")`).first();
+      if (await skipBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await skipBtn.click().catch(() => {});
+        log(`[ChatGPT] Clicked: ${skipText}`);
+        await page.waitForTimeout(1500);
+      }
+    }
+
+    // ── Step 8: Verify we're logged in ──────────────────────────────────────
+    const finalUrl = page.url();
+    log(`[ChatGPT] Final URL: ${finalUrl}`);
+    const isSuccess = finalUrl.includes("chatgpt.com") || finalUrl.includes("openai.com");
+    if (!isSuccess) throw new Error(`Unexpected final URL: ${finalUrl}`);
+
+    // ── Step 9: Save to DB ───────────────────────────────────────────────────
     await storage.saveChatGptAccount({
       email,
       password: mailPassword,
@@ -179,7 +199,6 @@ export async function createChatGPTAccount(opts: {
   } catch (err: any) {
     const msg = err.message || String(err);
     log(`[ChatGPT] ❌ Failed: ${msg}`);
-    // Record failure in DB
     try {
       await storage.saveChatGptAccount({
         email,
@@ -191,14 +210,13 @@ export async function createChatGPTAccount(opts: {
         createdBy: "bot_automation",
       });
     } catch { /* ignore */ }
-    return { success: false, error: msg };
+    return { success: false, email, error: msg };
   } finally {
     await browser?.close().catch(() => {});
   }
 }
 
 // ── Batch registration ────────────────────────────────────────────────────────
-// Picks the next N unregistered biz mail accounts and creates ChatGPT accounts.
 export async function batchCreateChatGPTAccounts(opts: {
   count: number;
   log?: (msg: string) => void;
@@ -207,9 +225,8 @@ export async function batchCreateChatGPTAccounts(opts: {
 
   const { db } = await import("./db");
   const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
-  const { sql, isNull, isNotNull, notInArray, and } = await import("drizzle-orm");
+  const { isNull, isNotNull, notInArray, and } = await import("drizzle-orm");
 
-  // Get biz mail accounts not yet in chatgpt_accounts
   const registered = await db.select({ email: chatgptAccounts.email }).from(chatgptAccounts);
   const registeredEmails = registered.map(r => r.email);
 
@@ -257,7 +274,6 @@ export async function batchCreateChatGPTAccounts(opts: {
     });
     results.push(r);
     if (r.success) succeeded++; else failed++;
-    // Brief pause between accounts to avoid rate limits
     await sleep(3_000);
   }
 
@@ -265,7 +281,7 @@ export async function batchCreateChatGPTAccounts(opts: {
   return { total: candidates.length, succeeded, failed, results };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
