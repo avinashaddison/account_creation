@@ -219,7 +219,7 @@ export async function batchCreateChatGPTAccounts(opts: {
       .from(bizMailAccounts)
       .where(and(
         isNull(bizMailAccounts.deletedAt),
-        isNotNull(bizMailAccounts.smtpDevId),
+        isNotNull(bizMailAccounts.smtpAccountId),
         notInArray(bizMailAccounts.email, registeredEmails)
       ))
       .limit(count);
@@ -228,7 +228,7 @@ export async function batchCreateChatGPTAccounts(opts: {
       .from(bizMailAccounts)
       .where(and(
         isNull(bizMailAccounts.deletedAt),
-        isNotNull(bizMailAccounts.smtpDevId)
+        isNotNull(bizMailAccounts.smtpAccountId)
       ))
       .limit(count);
   }
@@ -243,7 +243,7 @@ export async function batchCreateChatGPTAccounts(opts: {
   let succeeded = 0, failed = 0;
 
   for (const acct of candidates) {
-    if (!acct.smtpDevId) {
+    if (!acct.smtpAccountId) {
       log(`[ChatGPT/Batch] Skipping ${acct.email} — no smtp_dev_id`);
       failed++;
       results.push({ success: false, email: acct.email, error: "No smtp_dev_id" });
@@ -251,7 +251,7 @@ export async function batchCreateChatGPTAccounts(opts: {
     }
     const r = await createChatGPTAccount({
       email: acct.email,
-      smtpDevId: acct.smtpDevId,
+      smtpDevId: acct.smtpAccountId,
       mailPassword: acct.password,
       log,
     });

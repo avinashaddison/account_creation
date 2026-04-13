@@ -3955,7 +3955,7 @@ export function startTelegramBot(config: BotConfig) {
         .from(bizMailAccounts)
         .where(and(
           isNull(bizMailAccounts.deletedAt),
-          isNotNull(bizMailAccounts.smtpDevId),
+          isNotNull(bizMailAccounts.smtpAccountId),
           notInArray(bizMailAccounts.email, regEmails)
         ));
     } else {
@@ -3963,7 +3963,7 @@ export function startTelegramBot(config: BotConfig) {
         .from(bizMailAccounts)
         .where(and(
           isNull(bizMailAccounts.deletedAt),
-          isNotNull(bizMailAccounts.smtpDevId)
+          isNotNull(bizMailAccounts.smtpAccountId)
         ));
     }
     const avail = available.length;
