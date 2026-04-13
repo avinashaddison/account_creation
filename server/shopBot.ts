@@ -1428,38 +1428,31 @@ export function startShopBot(token: string) {
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
 
-    // ── Referral verification prompt ──────────────────────────────────────────
-    // Show whenever this user has an un-rewarded referrer in the DB.
-    // Works for new users AND returning users who joined via an invite link
-    // before this feature existed, or who had an existing account.
-    // The referrer is NOT credited until the referred user taps the button.
+    // ── Referral auto-credit ───────────────────────────────────────────────────
+    // Auto-process whenever a referral link was used — no button tap needed.
+    // processReferralReward is idempotent (guards against double-credit internally)
+    // and applies the 5/24h fraud gate, so it is safe to call unconditionally.
     if (referredBy) {
       const refState = await dbQuery(
         `SELECT referred_by, referral_rewarded FROM shop_customers WHERE telegram_id = $1`, [uid]
       );
       const rs = refState.rows[0];
-      // Only show if referrer is stored and reward hasn't been issued yet
       if (rs?.referred_by && !rs.referral_rewarded) {
+        // Auto-credit now — no manual tap required
+        processReferralReward(uid, bot).catch(() => {});
+
         const refName = await dbQuery(
           `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [rs.referred_by]
         );
         const r = refName.rows[0];
         const inviterName = r?.username ? `@${r.username}` : (r?.first_name ? escHtml(r.first_name) : `a friend`);
         ctx.reply(
-          `👋  <b>You were invited!</b>\n\n` +
+          `🎉  <b>You were invited by ${inviterName}!</b>\n\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-          `<b>${inviterName}</b> invited you to\n` +
-          `Project Addison — AI Tools Marketplace.\n\n` +
-          `<blockquote>Tap the button below to confirm you've arrived.\n` +
-          `This lets your inviter earn their referral reward.\n` +
-          `It takes just one tap — no data needed.</blockquote>\n` +
+          `<blockquote>Your arrival has been counted automatically.\n` +
+          `Your inviter just earned their referral reward!</blockquote>\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback("✅  I'm Here — Confirm My Arrival", "shop_ref_verify")],
-            ]),
-          }
+          { parse_mode: "HTML" }
         ).catch(() => {});
       }
     }
@@ -4585,7 +4578,27 @@ export function startShopBot(token: string) {
     });
   });
 
+  // ── One-time backfill: process referrals missed before auto-credit was added ─
+  async function backfillUnprocessedReferrals() {
+    try {
+      const res = await dbQuery(
+        `SELECT telegram_id FROM shop_customers
+         WHERE referred_by IS NOT NULL AND referral_rewarded = false`
+      );
+      if (res.rows.length === 0) return;
+      console.log(`[ShopBot/Referral] Backfilling ${res.rows.length} unprocessed referral(s)…`);
+      for (const row of res.rows) {
+        await processReferralReward(parseInt(row.telegram_id), bot).catch(() => {});
+      }
+      console.log(`[ShopBot/Referral] Backfill complete.`);
+    } catch (e: any) {
+      console.error("[ShopBot/Referral] Backfill error:", e.message);
+    }
+  }
+
   launch();
+  // Delay backfill slightly so bot polling is ready before we send messages
+  setTimeout(() => backfillUnprocessedReferrals(), 8000);
 
   process.once("SIGINT",  () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
