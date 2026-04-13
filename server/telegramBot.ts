@@ -175,7 +175,7 @@ interface UserState {
   lastCopiedIds?: string[];
   lastBatchAccountIds?: string[];
   lastBatchTable?: string;
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit" | "alloc_mail_uid";
   emojiEditKey?: string;
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
@@ -3153,14 +3153,17 @@ export function startTelegramBot(config: BotConfig) {
   }
 
   async function showSectionCustomers(ctx: any) {
+    const unallocatedCount = (await storage.getUnallocatedBizMails()).length;
+    const mailBadge = unallocatedCount > 0 ? `  ·  ${unallocatedCount} free` : "";
     await ctx.reply(
-      `👥  <b>CUSTOMERS</b>\n<code>─────────────────────────────────────</code>\n<i>View, search and fund customer accounts.</i>`,
+      `👥  <b>CUSTOMERS</b>\n<code>─────────────────────────────────────</code>\n<i>View, search, fund accounts and allocate business mail.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("👥  View Customers",   "shop_admin_customers"),
            Markup.button.callback("🔍  Search Customer",  "shop_admin_search")],
           [Markup.button.callback("💰  Fund Account",     "shop_admin_topup")],
+          [Markup.button.callback(`📩  Allocate Business Mail${mailBadge}`, "shop_admin_alloc_mail")],
         ]),
       }
     );
@@ -3914,6 +3917,82 @@ export function startTelegramBot(config: BotConfig) {
       `› Enter a <b>Telegram ID</b> or <b>@username</b>:`,
       { parse_mode: "HTML" }
     );
+  });
+
+  // ── Allocate Business Mail ────────────────────────────────────────────────
+  bot.action("shop_admin_alloc_mail", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+    getState(uid).awaitingText = "alloc_mail_uid";
+    await ctx.reply(
+      `📩  <b>ALLOCATE BUSINESS MAIL</b>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Enter the <b>Telegram ID</b> of the user you want to allocate a mail to:\n\n` +
+      `<i>Example: 123456789</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // Dynamically matched: shop_admin_pick_mail_{mailId}_{targetUid}
+  bot.action(/^shop_admin_pick_mail_(\d+)_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Allocating…").catch(() => {});
+    const mailId    = parseInt(ctx.match[1]);
+    const targetUid = parseInt(ctx.match[2]);
+    const shop2Token = process.env.TELEGRAM_BOT_TOKEN_2;
+
+    // Look up the mail row by ID
+    const mailRes = await dbQuery(
+      `SELECT email, password, smtp_dev_id FROM biz_mail_accounts WHERE id = $1 AND deleted_at IS NULL`,
+      [mailId]
+    );
+    const mailRow = mailRes.rows[0];
+    if (!mailRow) {
+      return ctx.reply(`❌ Mail account not found or already deleted.`);
+    }
+
+    // Look up customer
+    const custRes = await dbQuery(
+      `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [targetUid]
+    );
+    const cust    = custRes.rows[0];
+    const uName   = cust?.username ? `@${cust.username}` : (cust?.first_name ?? `ID ${targetUid}`);
+
+    // Do the allocation
+    const allocated = await storage.allocateBizMailToUser(mailRow.email, targetUid);
+    if (!allocated) {
+      return ctx.reply(`❌ Allocation failed — mail may already be allocated.`);
+    }
+
+    // Confirm to admin
+    await safeEdit(ctx,
+      `✅  <b>MAIL ALLOCATED</b>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `📧  Email:     <code>${escHtml(mailRow.email)}</code>\n` +
+      `🔑  Password:  <code>${escHtml(mailRow.password)}</code>\n` +
+      `👤  User:      <b>${escHtml(uName)}</b>  <code>(${targetUid})</code>\n\n` +
+      `<i>User has been notified via Bot 2.</i>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
+      { parse_mode: "HTML" }
+    );
+
+    // Notify the user via Bot 2
+    if (shop2Token) {
+      const userMsg =
+        `📬  <b>Business Mail Allocated to You!</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `An admin has assigned a business mail address to your account.\n\n` +
+        `📧  <b>Email:</b>   <code>${escHtml(mailRow.email)}</code>\n` +
+        `🔑  <b>Password:</b>  <code>${escHtml(mailRow.password)}</code>\n\n` +
+        `<blockquote>✦  Real-time inbox monitoring is now active\n` +
+        `✦  New emails will be forwarded to you here\n` +
+        `✦  Tap the menu → Business Mail to manage</blockquote>\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`;
+      fetch(`https://api.telegram.org/bot${shop2Token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: targetUid, text: userMsg, parse_mode: "HTML" }),
+      }).catch(() => {});
+    }
   });
 
   // ── Deposit requests ──────────────────────────────────────────────────────
@@ -5637,6 +5716,62 @@ export function startTelegramBot(config: BotConfig) {
       await runBizBulkCreate(ctx.chat!.id, uid, count);
       return;
     }
+
+    if (st.awaitingText === "alloc_mail_uid") {
+      st.awaitingText = undefined;
+      const targetUid = parseInt(text.trim());
+      if (isNaN(targetUid)) {
+        await ctx.reply("⚠️  Invalid Telegram ID. Please enter a numeric ID like <code>123456789</code>.", { parse_mode: "HTML" });
+        return;
+      }
+
+      // Verify user exists in shop_customers
+      const custRes = await dbQuery(
+        `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [targetUid]
+      );
+      if (!custRes.rows[0]) {
+        await ctx.reply(
+          `❌  User <code>${targetUid}</code> is not in the bot yet.\n\n<i>They must open the shop bot at least once before you can allocate a mail.</i>`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+      const cust  = custRes.rows[0];
+      const uName = cust.username ? `@${cust.username}` : (cust.first_name ?? `ID ${targetUid}`);
+
+      // Show available unallocated mails
+      const mails = await storage.getUnallocatedBizMails();
+      if (mails.length === 0) {
+        await ctx.reply(
+          `📭  <b>No unallocated business mails available.</b>\n\n<i>Generate new accounts from the Mail section first.</i>`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
+      // Build inline keyboard — up to 10 mails shown, one per row
+      const rows = mails.slice(0, 10).map(m =>
+        [Markup.button.callback(`📧  ${m.email}`, `shop_admin_pick_mail_${m.id}_${targetUid}`)]
+      );
+      rows.push([Markup.button.callback("❌  Cancel", "shop_admin_alloc_cancel")]);
+
+      await ctx.reply(
+        `📩  <b>PICK A MAIL FOR ${escHtml(uName)}</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `<b>${mails.length}</b> address${mails.length !== 1 ? "es" : ""} available — tap one to allocate:\n\n` +
+        `<i>Showing first 10 of ${mails.length}.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard(rows),
+        }
+      );
+      return;
+    }
+  });
+
+  bot.action("shop_admin_alloc_cancel", async (ctx) => {
+    await ctx.answerCbQuery("Cancelled").catch(() => {});
+    await safeEdit(ctx, `❌  <b>Allocation cancelled.</b>`, { parse_mode: "HTML" });
   });
 
   // ── Launch with auto-retry on transient polling errors ───────────────────

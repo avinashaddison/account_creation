@@ -4412,6 +4412,28 @@ export function startShopBot(token: string) {
     }
   })();
 
+  // ── Periodic scan: pick up admin-allocated accounts (every 30 s) ──────────
+  // When Bot 1 admin allocates a mail to a user, the poller won't be running
+  // yet. This interval checks the DB every 30 s and starts a poller for any
+  // newly allocated account that isn't already tracked.
+  setInterval(async () => {
+    try {
+      const all = await storage.getAllAllocatedBizMails();
+      for (const acc of all) {
+        if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
+          if (!bizSeenIds.has(acc.smtpAccountId)) {
+            // New allocation found — start its poller
+            startBizInboxPoller(acc.smtpAccountId, acc.email, acc.allocatedTo);
+            // Set as active inbox if user doesn't have one yet
+            if (!bizActiveInbox.has(acc.allocatedTo)) {
+              bizActiveInbox.set(acc.allocatedTo, acc.smtpAccountId);
+            }
+          }
+        }
+      }
+    } catch (_e) { /* retry silently next interval */ }
+  }, 30_000);
+
   // ── Fallback: any unrecognised text → info card only, NO keyboard ────────
   // Intentionally no reply keyboard here — sending a keyboard on every message
   // keeps it permanently active, which hides the "Menu" button in the input bar.

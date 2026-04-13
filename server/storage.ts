@@ -116,6 +116,8 @@ export interface IStorage {
   getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]>;
   getBizMailsByTelegramId(telegramId: number): Promise<BizMailAccount[]>;
   getAllAllocatedBizMails(): Promise<BizMailAccount[]>;
+  getUnallocatedBizMails(): Promise<BizMailAccount[]>;
+  allocateBizMailToUser(email: string, telegramId: number): Promise<BizMailAccount | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -774,6 +776,20 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(bizMailAccounts)
       .where(isNotNull(bizMailAccounts.allocatedTo))
       .orderBy(desc(bizMailAccounts.allocatedAt));
+  }
+
+  async getUnallocatedBizMails(): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(and(isNull(bizMailAccounts.allocatedTo), isNull(bizMailAccounts.deletedAt)))
+      .orderBy(bizMailAccounts.createdAt);
+  }
+
+  async allocateBizMailToUser(email: string, telegramId: number): Promise<BizMailAccount | null> {
+    const [row] = await db.update(bizMailAccounts)
+      .set({ allocatedTo: telegramId, allocatedAt: new Date() })
+      .where(and(eq(bizMailAccounts.email, email), isNull(bizMailAccounts.deletedAt)))
+      .returning();
+    return row ?? null;
   }
 }
 
