@@ -3969,9 +3969,9 @@ export function startTelegramBot(config: BotConfig) {
     await safeEdit(ctx,
       `✅  <b>MAIL ALLOCATED</b>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `📧  Email:     <code>${escHtml(mailRow.email)}</code>\n` +
-      `🔑  Password:  <code>${escHtml(mailRow.password)}</code>\n` +
-      `👤  User:      <b>${escHtml(uName)}</b>  <code>(${targetUid})</code>\n\n` +
+      `📧  Email:     <code>${escapeHtml(mailRow.email)}</code>\n` +
+      `🔑  Password:  <code>${escapeHtml(mailRow.password)}</code>\n` +
+      `👤  User:      <b>${escapeHtml(uName)}</b>  <code>(${targetUid})</code>\n\n` +
       `<i>User has been notified via Bot 2.</i>\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
       { parse_mode: "HTML" }
@@ -3983,8 +3983,8 @@ export function startTelegramBot(config: BotConfig) {
         `📬  <b>Business Mail Allocated to You!</b>\n\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
         `An admin has assigned a business mail address to your account.\n\n` +
-        `📧  <b>Email:</b>   <code>${escHtml(mailRow.email)}</code>\n` +
-        `🔑  <b>Password:</b>  <code>${escHtml(mailRow.password)}</code>\n\n` +
+        `📧  <b>Email:</b>   <code>${escapeHtml(mailRow.email)}</code>\n` +
+        `🔑  <b>Password:</b>  <code>${escapeHtml(mailRow.password)}</code>\n\n` +
         `<blockquote>✦  Real-time inbox monitoring is now active\n` +
         `✦  New emails will be forwarded to you here\n` +
         `✦  Tap the menu → Business Mail to manage</blockquote>\n` +
@@ -5745,7 +5745,7 @@ export function startTelegramBot(config: BotConfig) {
       st.allocMailTargetUid = targetUid;
       st.awaitingText = "alloc_mail_email";
       await ctx.reply(
-        `📩  <b>ALLOCATE MAIL TO ${escHtml(uName)}</b>\n\n` +
+        `📩  <b>ALLOCATE MAIL TO ${escapeHtml(uName)}</b>\n\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
         `Now enter the <b>email address</b> you want to allocate:\n\n` +
         `<i>Example: matthewthomas@addison.asia</i>`,
@@ -5778,7 +5778,7 @@ export function startTelegramBot(config: BotConfig) {
       const mailRow = mailRes.rows[0];
       if (!mailRow) {
         await ctx.reply(
-          `❌  <code>${escHtml(email)}</code> not found in the database.\n\n<i>Make sure the email exists in your mail pool.</i>`,
+          `❌  <code>${escapeHtml(email)}</code> not found in the database.\n\n<i>Make sure the email exists in your mail pool.</i>`,
           { parse_mode: "HTML" }
         );
         return;
@@ -5802,9 +5802,9 @@ export function startTelegramBot(config: BotConfig) {
       await ctx.reply(
         `✅  <b>MAIL ALLOCATED</b>\n\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `📧  Email:     <code>${escHtml(mailRow.email)}</code>\n` +
-        `🔑  Password:  <code>${escHtml(mailRow.password)}</code>\n` +
-        `👤  User:      <b>${escHtml(uName)}</b>  <code>(${targetUid})</code>\n\n` +
+        `📧  Email:     <code>${escapeHtml(mailRow.email)}</code>\n` +
+        `🔑  Password:  <code>${escapeHtml(mailRow.password)}</code>\n` +
+        `👤  User:      <b>${escapeHtml(uName)}</b>  <code>(${targetUid})</code>\n\n` +
         `<i>User has been notified via Bot 2.</i>\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
         { parse_mode: "HTML" }
@@ -5817,8 +5817,8 @@ export function startTelegramBot(config: BotConfig) {
           `📬  <b>Business Mail Allocated to You!</b>\n\n` +
           `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
           `An admin has assigned a business mail address to your account.\n\n` +
-          `📧  <b>Email:</b>    <code>${escHtml(mailRow.email)}</code>\n` +
-          `🔑  <b>Password:</b> <code>${escHtml(mailRow.password)}</code>\n\n` +
+          `📧  <b>Email:</b>    <code>${escapeHtml(mailRow.email)}</code>\n` +
+          `🔑  <b>Password:</b> <code>${escapeHtml(mailRow.password)}</code>\n\n` +
           `<blockquote>✦  Real-time inbox monitoring is now active\n` +
           `✦  New emails will be forwarded to you here\n` +
           `✦  Open the bot menu → Business Mail to manage</blockquote>\n` +
