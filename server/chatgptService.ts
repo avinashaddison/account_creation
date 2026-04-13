@@ -207,7 +207,7 @@ export async function batchCreateChatGPTAccounts(opts: {
 
   const { db } = await import("./db");
   const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
-  const { sql, isNull, notInArray, and } = await import("drizzle-orm");
+  const { sql, isNull, isNotNull, notInArray, and } = await import("drizzle-orm");
 
   // Get biz mail accounts not yet in chatgpt_accounts
   const registered = await db.select({ email: chatgptAccounts.email }).from(chatgptAccounts);
@@ -217,12 +217,19 @@ export async function batchCreateChatGPTAccounts(opts: {
   if (registeredEmails.length > 0) {
     candidates = await db.select()
       .from(bizMailAccounts)
-      .where(and(isNull(bizMailAccounts.deletedAt), notInArray(bizMailAccounts.email, registeredEmails)))
+      .where(and(
+        isNull(bizMailAccounts.deletedAt),
+        isNotNull(bizMailAccounts.smtpDevId),
+        notInArray(bizMailAccounts.email, registeredEmails)
+      ))
       .limit(count);
   } else {
     candidates = await db.select()
       .from(bizMailAccounts)
-      .where(isNull(bizMailAccounts.deletedAt))
+      .where(and(
+        isNull(bizMailAccounts.deletedAt),
+        isNotNull(bizMailAccounts.smtpDevId)
+      ))
       .limit(count);
   }
 

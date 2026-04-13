@@ -3945,7 +3945,7 @@ export function startTelegramBot(config: BotConfig) {
     // Count available (unregistered) biz mail accounts
     const { db }             = await import("./db");
     const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
-    const { isNull, notInArray, and } = await import("drizzle-orm");
+    const { isNull, isNotNull, notInArray, and } = await import("drizzle-orm");
 
     const registered  = await db.select({ email: chatgptAccounts.email }).from(chatgptAccounts);
     const regEmails   = registered.map((r: any) => r.email);
@@ -3953,11 +3953,18 @@ export function startTelegramBot(config: BotConfig) {
     if (regEmails.length > 0) {
       available = await db.select({ email: bizMailAccounts.email })
         .from(bizMailAccounts)
-        .where(and(isNull(bizMailAccounts.deletedAt), notInArray(bizMailAccounts.email, regEmails)));
+        .where(and(
+          isNull(bizMailAccounts.deletedAt),
+          isNotNull(bizMailAccounts.smtpDevId),
+          notInArray(bizMailAccounts.email, regEmails)
+        ));
     } else {
       available = await db.select({ email: bizMailAccounts.email })
         .from(bizMailAccounts)
-        .where(isNull(bizMailAccounts.deletedAt));
+        .where(and(
+          isNull(bizMailAccounts.deletedAt),
+          isNotNull(bizMailAccounts.smtpDevId)
+        ));
     }
     const avail = available.length;
 
