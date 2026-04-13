@@ -176,8 +176,9 @@ interface UserState {
   lastCopiedIds?: string[];
   lastBatchAccountIds?: string[];
   lastBatchTable?: string;
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit" | "alloc_mail_uid";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit" | "alloc_mail_uid" | "alloc_mail_email";
   emojiEditKey?: string;
+  allocMailTargetUid?: number;
   createFlow?: CreateFlow;
   accountType?: string;    // currently browsing account type (Accounts section)
   copyType?: string;       // currently selected type for Copy Accounts
@@ -5722,7 +5723,7 @@ export function startTelegramBot(config: BotConfig) {
       st.awaitingText = undefined;
       const targetUid = parseInt(text.trim());
       if (isNaN(targetUid)) {
-        await ctx.reply("⚠️  Invalid Telegram ID. Please enter a numeric ID like <code>123456789</code>.", { parse_mode: "HTML" });
+        await ctx.reply("⚠️  Invalid Telegram ID. Enter a numeric ID like <code>123456789</code>.", { parse_mode: "HTML" });
         return;
       }
 
@@ -5732,7 +5733,7 @@ export function startTelegramBot(config: BotConfig) {
       );
       if (!custRes.rows[0]) {
         await ctx.reply(
-          `❌  User <code>${targetUid}</code> is not in the bot yet.\n\n<i>They must open the shop bot at least once before you can allocate a mail.</i>`,
+          `❌  User <code>${targetUid}</code> hasn't opened the shop bot yet.\n\n<i>They must start the bot at least once first.</i>`,
           { parse_mode: "HTML" }
         );
         return;
@@ -5740,32 +5741,94 @@ export function startTelegramBot(config: BotConfig) {
       const cust  = custRes.rows[0];
       const uName = cust.username ? `@${cust.username}` : (cust.first_name ?? `ID ${targetUid}`);
 
-      // Show available unallocated mails
-      const mails = await storage.getUnallocatedBizMails();
-      if (mails.length === 0) {
+      // Store target UID and ask for the email address
+      st.allocMailTargetUid = targetUid;
+      st.awaitingText = "alloc_mail_email";
+      await ctx.reply(
+        `📩  <b>ALLOCATE MAIL TO ${escHtml(uName)}</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `Now enter the <b>email address</b> you want to allocate:\n\n` +
+        `<i>Example: matthewthomas@addison.asia</i>`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    if (st.awaitingText === "alloc_mail_email") {
+      st.awaitingText = undefined;
+      const targetUid  = st.allocMailTargetUid;
+      st.allocMailTargetUid = undefined;
+
+      if (!targetUid) {
+        await ctx.reply("⚠️  Session expired. Start again from Allocate Business Mail.");
+        return;
+      }
+
+      const email = text.trim().toLowerCase();
+      if (!email.includes("@")) {
+        await ctx.reply("⚠️  That doesn't look like a valid email address. Try again from Allocate Business Mail.");
+        return;
+      }
+
+      // Look up the mail in DB (any status — including already allocated)
+      const mailRes = await dbQuery(
+        `SELECT id, email, password, smtp_dev_id FROM biz_mail_accounts WHERE LOWER(email) = $1 AND deleted_at IS NULL`,
+        [email]
+      );
+      const mailRow = mailRes.rows[0];
+      if (!mailRow) {
         await ctx.reply(
-          `📭  <b>No unallocated business mails available.</b>\n\n<i>Generate new accounts from the Mail section first.</i>`,
+          `❌  <code>${escHtml(email)}</code> not found in the database.\n\n<i>Make sure the email exists in your mail pool.</i>`,
           { parse_mode: "HTML" }
         );
         return;
       }
 
-      // Build inline keyboard — up to 10 mails shown, one per row
-      const rows = mails.slice(0, 10).map(m =>
-        [Markup.button.callback(`📧  ${m.email}`, `shop_admin_pick_mail_${m.id}_${targetUid}`)]
+      // Look up customer display name
+      const custRes = await dbQuery(
+        `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [targetUid]
       );
-      rows.push([Markup.button.callback("❌  Cancel", "shop_admin_alloc_cancel")]);
+      const cust  = custRes.rows[0];
+      const uName = cust?.username ? `@${cust.username}` : (cust?.first_name ?? `ID ${targetUid}`);
 
+      // Do the allocation (overwrites any existing allocation)
+      const allocated = await storage.allocateBizMailToUser(mailRow.email, targetUid);
+      if (!allocated) {
+        await ctx.reply(`❌  Allocation failed — could not update the record.`);
+        return;
+      }
+
+      // Confirm to admin
       await ctx.reply(
-        `📩  <b>PICK A MAIL FOR ${escHtml(uName)}</b>\n\n` +
+        `✅  <b>MAIL ALLOCATED</b>\n\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `<b>${mails.length}</b> address${mails.length !== 1 ? "es" : ""} available — tap one to allocate:\n\n` +
-        `<i>Showing first 10 of ${mails.length}.</i>`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard(rows),
-        }
+        `📧  Email:     <code>${escHtml(mailRow.email)}</code>\n` +
+        `🔑  Password:  <code>${escHtml(mailRow.password)}</code>\n` +
+        `👤  User:      <b>${escHtml(uName)}</b>  <code>(${targetUid})</code>\n\n` +
+        `<i>User has been notified via Bot 2.</i>\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
+        { parse_mode: "HTML" }
       );
+
+      // Notify the user via Bot 2
+      const shop2Token = process.env.TELEGRAM_BOT_TOKEN_2;
+      if (shop2Token) {
+        const userMsg =
+          `📬  <b>Business Mail Allocated to You!</b>\n\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `An admin has assigned a business mail address to your account.\n\n` +
+          `📧  <b>Email:</b>    <code>${escHtml(mailRow.email)}</code>\n` +
+          `🔑  <b>Password:</b> <code>${escHtml(mailRow.password)}</code>\n\n` +
+          `<blockquote>✦  Real-time inbox monitoring is now active\n` +
+          `✦  New emails will be forwarded to you here\n` +
+          `✦  Open the bot menu → Business Mail to manage</blockquote>\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`;
+        fetch(`https://api.telegram.org/bot${shop2Token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: targetUid, text: userMsg, parse_mode: "HTML" }),
+        }).catch(() => {});
+      }
       return;
     }
   });
