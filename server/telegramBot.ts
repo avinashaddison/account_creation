@@ -18,6 +18,7 @@ import {
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
 import { getBotMenuConfig, getBotMenuDefaults, reloadBotMenu } from "./shopBot";
+import { storage } from "./storage";
 
 const SERVER_PORT = process.env.PORT || 5000;
 const BASE_URL = `http://localhost:${SERVER_PORT}`;
