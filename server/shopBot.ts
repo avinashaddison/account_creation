@@ -1321,10 +1321,9 @@ export function startShopBot(token: string) {
       notifyChannelNewUser(bot, ctx.from.username, ctx.from.first_name).catch(() => {});
     }
 
-    // Credit referrer $0.50 when new user joins
-    if (isNew && referredBy) {
-      processReferralReward(uid, bot).catch(() => {});
-    }
+    // NOTE: referral reward is NOT credited automatically on /start.
+    // The referred user must tap the verification button below first.
+    // This blocks bot accounts that auto-/start without any real interaction.
 
     // "Menu" button deep link — show the main menu + reply keyboard directly
     if (payload === "show_menu") {
@@ -1398,6 +1397,33 @@ export function startShopBot(token: string) {
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
 
+    // ── Referral verification prompt (new user, joined via invite link) ────────
+    // Shown only once — on first join via referral. The referrer is NOT credited
+    // until the referred user taps this button. Prevents auto-start bot farms.
+    if (isNew && referredBy) {
+      const refName = await dbQuery(
+        `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [referredBy]
+      );
+      const r = refName.rows[0];
+      const inviterName = r?.username ? `@${r.username}` : (r?.first_name ? escHtml(r.first_name) : `a friend`);
+      ctx.reply(
+        `👋  <b>You were invited!</b>\n\n` +
+        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+        `     <b>${inviterName}</b> invited you to\n` +
+        `     Project Addison — AI Tools Marketplace.\n\n` +
+        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+        `Tap the button below to confirm you're here.\n` +
+        `This lets your inviter earn their referral reward.\n\n` +
+        `<i>Takes one tap — no personal data needed.</i>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("✅  I'm Here — Confirm My Arrival", "shop_ref_verify")],
+          ]),
+        }
+      ).catch(() => {});
+    }
+
     // Referral offer banner — always shown unless milestone already fully claimed
     const botUsername2 = ctx.botInfo.username;
     const refLink2     = `https://t.me/${botUsername2}?start=ref_${uid}`;
@@ -1467,6 +1493,40 @@ export function startShopBot(token: string) {
       ),
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
+  });
+
+  // ── Referral verification — new user confirms arrival, credits referrer ──
+  bot.action("shop_ref_verify", async (ctx) => {
+    await ctx.answerCbQuery("✅ Confirmed!").catch(() => {});
+    const uid = ctx.from.id;
+
+    // Fetch this user's referral state
+    const stateRes = await dbQuery(
+      `SELECT referred_by, referral_rewarded FROM shop_customers WHERE telegram_id = $1`, [uid]
+    );
+    const state = stateRes.rows[0];
+
+    // Guard: nothing to do if no referrer or already rewarded
+    if (!state?.referred_by || state.referral_rewarded) {
+      return safeEdit(ctx,
+        `✅ <b>Already verified!</b>\n\n<i>Your arrival was already confirmed.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    // Update button to "confirmed" immediately so it can't be tapped twice
+    await safeEdit(ctx,
+      `✅ <b>Arrival confirmed!</b>\n\n` +
+      `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+      `     Thanks for confirming — your inviter\n` +
+      `     has been notified and their reward\n` +
+      `     is being processed now.\n\n` +
+      `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>`,
+      { parse_mode: "HTML" }
+    );
+
+    // Now credit the referrer — all fraud gates apply inside here
+    processReferralReward(uid, bot).catch(() => {});
   });
 
   // ── Welcome card inline buttons ─────────────────────────────────────────
