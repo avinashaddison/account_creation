@@ -18,6 +18,7 @@ import {
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
 import { getBotMenuConfig, getBotMenuDefaults, reloadBotMenu } from "./shopBot";
+import { batchCreateChatGPTAccounts } from "./chatgptService";
 import { storage } from "./storage";
 
 const SERVER_PORT = process.env.PORT || 5000;
@@ -176,7 +177,7 @@ interface UserState {
   lastCopiedIds?: string[];
   lastBatchAccountIds?: string[];
   lastBatchTable?: string;
-  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit" | "alloc_mail_uid" | "alloc_mail_email";
+  awaitingText?: "proxy" | "custom_copy" | "coupon_code" | "create_count" | "referral_url" | "checkout_count" | "biz_mail_recover" | "biz_mail_restore_username" | "biz_bulk_count" | "emoji_edit" | "alloc_mail_uid" | "alloc_mail_email" | "chatgpt_count";
   emojiEditKey?: string;
   allocMailTargetUid?: number;
   createFlow?: CreateFlow;
@@ -3166,6 +3167,7 @@ export function startTelegramBot(config: BotConfig) {
            Markup.button.callback("🔍  Search Customer",  "shop_admin_search")],
           [Markup.button.callback("💰  Fund Account",     "shop_admin_topup")],
           [Markup.button.callback(`📩  Allocate Business Mail${mailBadge}`, "shop_admin_alloc_mail")],
+          [Markup.button.callback("🤖  Register ChatGPT Accounts", "shop_admin_chatgpt_reg")],
         ]),
       }
     );
@@ -3931,6 +3933,51 @@ export function startTelegramBot(config: BotConfig) {
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
       `Enter the <b>Telegram ID</b> of the user you want to allocate a mail to:\n\n` +
       `<i>Example: 123456789</i>`,
+      { parse_mode: "HTML" }
+    );
+  });
+
+  // ── Register ChatGPT Accounts ─────────────────────────────────────────────
+  bot.action("shop_admin_chatgpt_reg", async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const uid = ctx.from.id;
+
+    // Count available (unregistered) biz mail accounts
+    const { db }             = await import("./db");
+    const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
+    const { isNull, notInArray, and } = await import("drizzle-orm");
+
+    const registered  = await db.select({ email: chatgptAccounts.email }).from(chatgptAccounts);
+    const regEmails   = registered.map((r: any) => r.email);
+    let available: any[];
+    if (regEmails.length > 0) {
+      available = await db.select({ email: bizMailAccounts.email })
+        .from(bizMailAccounts)
+        .where(and(isNull(bizMailAccounts.deletedAt), notInArray(bizMailAccounts.email, regEmails)));
+    } else {
+      available = await db.select({ email: bizMailAccounts.email })
+        .from(bizMailAccounts)
+        .where(isNull(bizMailAccounts.deletedAt));
+    }
+    const avail = available.length;
+
+    if (avail === 0) {
+      return ctx.reply(
+        `🤖  <b>REGISTER CHATGPT ACCOUNTS</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `❌  No unregistered business mail accounts available.\n\n` +
+        `All biz mail accounts already have a ChatGPT account, or there are no active biz mail accounts.`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    getState(uid).awaitingText = "chatgpt_count";
+    await ctx.reply(
+      `🤖  <b>REGISTER CHATGPT ACCOUNTS</b>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `<b>${avail}</b> unregistered business mail account${avail !== 1 ? "s" : ""} available.\n\n` +
+      `How many ChatGPT accounts do you want to create?\n\n` +
+      `<i>Enter a number between 1 and ${Math.min(avail, 10)}:</i>`,
       { parse_mode: "HTML" }
     );
   });
@@ -5836,6 +5883,56 @@ export function startTelegramBot(config: BotConfig) {
   bot.action("shop_admin_alloc_cancel", async (ctx) => {
     await ctx.answerCbQuery("Cancelled").catch(() => {});
     await safeEdit(ctx, `❌  <b>Allocation cancelled.</b>`, { parse_mode: "HTML" });
+  });
+
+  // ── ChatGPT count text handler ─────────────────────────────────────────────
+  bot.on("text", async (ctx, next) => {
+    if (!isAllowed(ctx.from.id)) return next();
+    const st = getState(ctx.from.id);
+    if (st.awaitingText !== "chatgpt_count") return next();
+    st.awaitingText = undefined;
+
+    const n = parseInt((ctx.message as any).text.trim());
+    if (isNaN(n) || n < 1 || n > 10) {
+      return ctx.reply(`❌  Please enter a number between 1 and 10.`, { parse_mode: "HTML" });
+    }
+
+    await ctx.reply(
+      `🤖  <b>CHATGPT REGISTRATION STARTED</b>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `⏳  Creating <b>${n}</b> account${n > 1 ? "s" : ""} — this may take 2–5 minutes per account.\n\n` +
+      `<i>Results will be sent when each account completes.</i>`,
+      { parse_mode: "HTML" }
+    );
+
+    const adminChatId = ctx.chat.id;
+    const log = (msg: string) => {
+      bot.telegram.sendMessage(adminChatId, `<code>${escapeHtml(msg)}</code>`, { parse_mode: "HTML" }).catch(() => {});
+    };
+
+    // Run in background — don't await
+    batchCreateChatGPTAccounts({ count: n, log }).then(({ total, succeeded, failed, results }) => {
+      const lines = results.map((r, i) => {
+        if (r.success) {
+          return `✅  <code>${escapeHtml(r.email ?? "")}</code>\n` +
+                 `     Name: ${escapeHtml(r.firstName ?? "")} ${escapeHtml(r.lastName ?? "")}\n` +
+                 `     Mail password: <code>${escapeHtml(r.mailPassword ?? "")}</code>`;
+        }
+        return `❌  <code>${escapeHtml(r.email ?? "")}</code>\n     Error: ${escapeHtml(r.error ?? "unknown")}`;
+      }).join("\n\n");
+
+      bot.telegram.sendMessage(
+        adminChatId,
+        `🤖  <b>CHATGPT REGISTRATION COMPLETE</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `✅  Succeeded: <b>${succeeded}</b>   ❌  Failed: <b>${failed}</b>   📊  Total: <b>${total}</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `${lines}`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+    }).catch((err: any) => {
+      bot.telegram.sendMessage(adminChatId, `❌  Batch registration crashed: ${err.message}`, { parse_mode: "HTML" }).catch(() => {});
+    });
   });
 
   // ── Launch with auto-retry on transient polling errors ───────────────────
