@@ -227,6 +227,7 @@ interface BuyFlow {
   step:         "promo" | "confirm";
   promoCode?:   string;
   discountAmt?: number;
+  promoCodeId?: number;   // set when promo is validated — use AFTER purchase
 }
 const buyFlows = new Map<number, BuyFlow>();
 
@@ -507,6 +508,28 @@ async function processReferralReward(newUid: number, bot: any) {
   const referrerId   = parseInt(row.referred_by);
   const rewardAmount = await getReferralReward();
 
+  // ── Anti-fraud rate-limit: max 5 rewarded referrals in 24 h ──────────────
+  const rateRes = await dbQuery(
+    `SELECT COUNT(*) AS cnt FROM shop_customers
+     WHERE referred_by = $1 AND referral_rewarded = true
+     AND created_at > NOW() - INTERVAL '24 hours'`,
+    [referrerId]
+  );
+  const recent24h = parseInt(rateRes.rows[0]?.cnt ?? "0");
+  if (recent24h >= 5) {
+    // Flag the referrer to admins but silently skip crediting
+    const flagMsg =
+      `⚠️ <b>Referral Fraud Alert</b>\n\n` +
+      `🔴 User <code>${referrerId}</code> has ${recent24h + 1} referrals in the last 24 h.\n` +
+      `🆕 Suspicious new join from <code>${newUid}</code> — reward withheld pending review.`;
+    const adminIds = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+    for (const id of adminIds) {
+      bot.telegram.sendMessage(id, flagMsg, { parse_mode: "HTML" }).catch(() => {});
+    }
+    console.warn(`[ShopBot/Ref3] Fraud gate triggered: referrer=${referrerId} recent24h=${recent24h + 1}`);
+    return;
+  }
+
   // Reward referrer balance and mark this join as rewarded
   await dbQuery(
     `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
@@ -517,7 +540,7 @@ async function processReferralReward(newUid: number, bot: any) {
     [newUid]
   );
 
-  // Count total rewarded referrals for this referrer
+  // Count total rewarded referrals for this referrer (includes the one just set)
   const countRes = await dbQuery(
     `SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`,
     [referrerId]
@@ -532,21 +555,23 @@ async function processReferralReward(newUid: number, bot: any) {
   const u = newUserRes.rows[0];
   const newName = u?.username ? `@${u.username}` : (u?.first_name ? escHtml(u.first_name) : `User ${newUid}`);
 
-  const remaining = Math.max(0, 3 - totalRefs);
-  const progressBar = ["⬜","⬜","⬜"].map((_, i) => i < totalRefs ? "🟩" : "⬜").join("");
+  const remaining  = Math.max(0, 3 - totalRefs);
+  const filled     = Math.min(totalRefs, 3);
+  const progressBar = Array.from({ length: 3 }, (_, i) => i < filled ? "🟢" : "⚪").join("  ");
 
   bot.telegram.sendMessage(
     referrerId,
-    `🎉 <b>Referral Reward!</b>\n\n` +
+    `🎉 <b>New Referral!</b>\n\n` +
     `<code>─────────────────────────────────────</code>\n\n` +
-    `👤 <b>${newName}</b> just joined via your link!\n` +
-    `💰 <b>+$${rewardAmount.toFixed(2)}</b> added to your wallet\n\n` +
+    `👤  ${newName} joined via your link\n` +
+    `💰  <b>+$${rewardAmount.toFixed(2)}</b> credited to your wallet\n\n` +
     `<code>─────────────────────────────────────</code>\n` +
-    `🎁 <b>FREE ChatGPT Plus Progress</b>\n` +
-    `${progressBar}  <b>${totalRefs} / 3</b> friends joined\n` +
+    `🤖  <b>ChatGPT Plus Milestone</b>\n\n` +
+    `     ${progressBar}\n` +
+    `     <b>${totalRefs} / 3</b> friends joined\n\n` +
     (remaining > 0
-      ? `<i>Refer ${remaining} more friend${remaining > 1 ? "s" : ""} to unlock 1 month ChatGPT Plus FREE!</i>`
-      : `✅ <b>Milestone reached!</b> Check your next message.`),
+      ? `<i>Invite ${remaining} more friend${remaining > 1 ? "s" : ""} → unlock 1 month ChatGPT Plus FREE!</i>`
+      : `🏆 <b>Milestone complete!</b> Your reward is coming now.`),
     { parse_mode: "HTML" }
   ).catch(() => {});
 
@@ -557,23 +582,16 @@ async function processReferralReward(newUid: number, bot: any) {
 }
 
 async function processRef3Milestone(referrerId: number, bot: any) {
-  // Check not already claimed
-  const check = await dbQuery(
-    `SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`,
-    [referrerId]
-  );
-  if (check.rows[0]?.ref3_milestone_claimed) return;
-
-  // Mark as claimed atomically
+  // Mark as claimed atomically — prevents double-fire from any race condition
   const updated = await dbQuery(
     `UPDATE shop_customers SET ref3_milestone_claimed = true
      WHERE telegram_id = $1 AND ref3_milestone_claimed = false
      RETURNING telegram_id`,
     [referrerId]
   );
-  if (!updated.rows[0]) return; // another process claimed it first
+  if (!updated.rows[0]) return; // already claimed — silent exit
 
-  // Generate unique promo code (100% off, single-use)
+  // Generate unique promo code: 100% off, single-use, bound to this user
   const promoCode = `REF3FREE${referrerId}`;
   await dbQuery(
     `INSERT INTO shop_promo_codes (code, discount_pct, discount_fixed, max_uses, uses_count, active)
@@ -582,7 +600,7 @@ async function processRef3Milestone(referrerId: number, bot: any) {
     [promoCode]
   );
 
-  // Find ChatGPT Plus product
+  // Find ChatGPT Plus product dynamically
   const prodRes = await dbQuery(
     `SELECT id, name, price FROM shop_products
      WHERE active = true AND LOWER(name) LIKE '%chatgpt%'
@@ -590,24 +608,40 @@ async function processRef3Milestone(referrerId: number, bot: any) {
   );
   const prod = prodRes.rows[0];
 
-  const grabCbData = prod
-    ? `shop_ref3grab_${prod.id}_${promoCode}`
-    : `shop_ref3grab_noprod_${promoCode}`;
+  if (!prod) {
+    // Product missing — still inform user and tell them to contact support
+    bot.telegram.sendMessage(
+      referrerId,
+      `🏆 <b>YOU EARNED FREE CHATGPT PLUS!</b>\n\n` +
+      `<code>─────────────────────────────────────</code>\n\n` +
+      `You've referred <b>3 friends</b> — you earned 1 month ChatGPT Plus for free!\n\n` +
+      `🎟  Your reward code:  <code>${promoCode}</code>\n\n` +
+      `<code>─────────────────────────────────────</code>\n\n` +
+      `<i>The ChatGPT Plus product isn't listed right now.\n` +
+      `Please contact support and share your code to claim.</i>`,
+      { parse_mode: "HTML" }
+    ).catch(() => {});
+    return;
+  }
 
   bot.telegram.sendMessage(
     referrerId,
-    `🏆 <b>YOU UNLOCKED FREE CHATGPT PLUS!</b>\n\n` +
-    `<code>─────────────────────────────────────</code>\n\n` +
-    `🎁  <b>1 Month ChatGPT Plus</b>  —  <b>FREE</b>\n` +
-    `🎟  Promo Code: <code>${promoCode}</code>\n\n` +
-    `<code>─────────────────────────────────────</code>\n\n` +
-    `You referred <b>3 friends</b> to Project Addison.\n` +
-    `Your reward is ready — grab it now before it expires!\n\n` +
-    `👇 Tap the button below to claim instantly:`,
+    `🎊  <b>CONGRATULATIONS!</b>\n\n` +
+    `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+    `🏆  You referred <b>3 friends</b> to Project Addison\n` +
+    `     and unlocked your exclusive reward!\n\n` +
+    `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+    `🎁  <b>YOUR REWARD</b>\n\n` +
+    `     🤖  1 Month <b>ChatGPT Plus</b>\n` +
+    `     💲  Value:  <s>${fmt$(parseFloat(prod.price))}</s>  →  <b>FREE</b>\n` +
+    `     🎟  Code:   <code>${promoCode}</code>\n\n` +
+    `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+    `<i>This reward is locked to your account.\n` +
+    `Tap below — the order will be placed automatically.</i>`,
     {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("🚀  Your Free ChatGPT Unlocked — Grab Now!", grabCbData)],
+        [Markup.button.callback("🚀  FREE ChatGPT Plus — Private Account — Grab Now!", `shop_ref3grab_${prod.id}_${promoCode}`)],
       ]),
     }
   ).catch(() => {});
@@ -1364,39 +1398,38 @@ export function startShopBot(token: string) {
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
 
-    // Referral offer banner — show to everyone on /start
+    // Referral offer banner — always shown unless milestone already fully claimed
     const botUsername2 = ctx.botInfo.username;
     const refLink2     = `https://t.me/${botUsername2}?start=ref_${uid}`;
     const shareUrl2    = `https://t.me/share/url?url=${encodeURIComponent(refLink2)}&text=${encodeURIComponent("Join Project Addison — AI Tools Marketplace! Get AI tools at the best prices.")}`;
-    const refCountRes  = await dbQuery(
-      `SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`,
-      [uid]
-    );
-    const refsDone = parseInt(refCountRes.rows[0]?.cnt ?? "0");
-    const refsLeft = Math.max(0, 3 - refsDone);
-    const milestoneRes = await dbQuery(
-      `SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`, [uid]
-    );
-    const alreadyClaimed = milestoneRes.rows[0]?.ref3_milestone_claimed ?? false;
-    const progressBar2   = ["⬜","⬜","⬜"].map((_, i) => i < Math.min(refsDone, 3) ? "🟩" : "⬜").join("");
+    const [refCountRes2, milestoneRes2] = await Promise.all([
+      dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`, [uid]),
+      dbQuery(`SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`, [uid]),
+    ]);
+    const refsDone2      = parseInt(refCountRes2.rows[0]?.cnt ?? "0");
+    const refsLeft2      = Math.max(0, 3 - refsDone2);
+    const alreadyClaimed2 = milestoneRes2.rows[0]?.ref3_milestone_claimed ?? false;
+    const filled2         = Math.min(refsDone2, 3);
+    const progressBar2    = Array.from({ length: 3 }, (_, i) => i < filled2 ? "🟢" : "⚪").join("  ");
 
-    if (!alreadyClaimed) {
+    if (!alreadyClaimed2) {
       ctx.reply(
-        `🎁 <b>SPECIAL OFFER — REFER 3 FRIENDS</b>\n\n` +
-        `<code>─────────────────────────────────────</code>\n\n` +
-        `Invite <b>3 friends</b> to Project Addison and receive:\n\n` +
-        `🤖  <b>1 Month ChatGPT Plus — FREE</b>\n\n` +
-        `<code>─────────────────────────────────────</code>\n` +
-        `📊  <b>Your Progress:</b>\n` +
-        `${progressBar2}  <b>${refsDone} / 3</b> friends joined\n` +
-        (refsLeft > 0
-          ? `<i>Refer ${refsLeft} more friend${refsLeft > 1 ? "s" : ""} to unlock your reward!</i>`
-          : `✅ <i>Milestone complete! Your reward is on its way.</i>`) +
-        `\n\n<code>─────────────────────────────────────</code>`,
+        `🤖  <b>FREE ChatGPT Plus</b>  —  Limited Offer\n\n` +
+        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+        `     Invite just <b>3 friends</b> to this bot\n` +
+        `     and get <b>1 month ChatGPT Plus</b> for FREE.\n\n` +
+        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
+        `📊  <b>YOUR PROGRESS</b>\n\n` +
+        `     ${progressBar2}\n` +
+        `     <b>${refsDone2} of 3</b> friends joined\n\n` +
+        (refsLeft2 > 0
+          ? `     <i>Refer ${refsLeft2} more to unlock your reward</i>`
+          : `     ✅  <b>Milestone reached!</b>`) +
+        `\n\n<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.url("📤  Share My Referral Link", shareUrl2)],
+            [Markup.button.url("📤  Share My Invite Link — Earn Free ChatGPT Plus", shareUrl2)],
           ]),
         }
       ).catch(() => {});
@@ -2116,11 +2149,12 @@ export function startShopBot(token: string) {
   // ── Confirm purchase ──────────────────────────────────────────────────────
   bot.action(/^buyconfirm_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery("Processing…").catch(() => {});
-    const uid       = ctx.from.id;
-    const productId = (ctx.match as RegExpExecArray)[1];
-    const flow      = buyFlows.get(uid);
-    const discount  = flow?.discountAmt ?? 0;
-    const promoCode = flow?.promoCode;
+    const uid           = ctx.from.id;
+    const productId     = (ctx.match as RegExpExecArray)[1];
+    const flow          = buyFlows.get(uid);
+    const discount      = flow?.discountAmt ?? 0;
+    const promoCode     = flow?.promoCode;
+    const promoCodeId   = flow?.promoCodeId;   // deferred-decrement (REF3FREE codes)
     buyFlows.delete(uid);
 
     await safeEdit(ctx, `⚙️ <i>Processing payment…</i>`, { parse_mode: "HTML" });
@@ -2158,6 +2192,9 @@ export function startShopBot(token: string) {
         { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")]]) }
       );
     }
+
+    // Decrement promo code only after confirmed purchase (REF3FREE deferred codes)
+    if (promoCodeId) usePromoCode(promoCodeId).catch(() => {});
 
     // ── Post-purchase tasks ───────────────────────────────────────────────────
     checkAndUpdateVip(uid).catch(() => {});
@@ -2200,12 +2237,38 @@ export function startShopBot(token: string) {
     );
   });
 
-  // ── Ref3 "Grab Now" — pre-applies 100% promo and shows confirm ──────────
+  // ── Ref3 "Grab Now" — secured: ownership check + deferred promo decrement ──
   bot.action(/^shop_ref3grab_([0-9a-f-]{36})_(.+)$/, async (ctx) => {
-    await ctx.answerCbQuery("🎁 Applying your reward…").catch(() => {});
+    await ctx.answerCbQuery("🎁 Unlocking your reward…").catch(() => {});
     const uid       = ctx.from.id;
     const productId = (ctx.match as RegExpExecArray)[1];
     const promoCode = (ctx.match as RegExpExecArray)[2];
+
+    // ── Security: verify this promo belongs to THIS user ──────────────────
+    const embeddedUid = parseInt(promoCode.replace(/^REF3FREE/, ""), 10);
+    if (isNaN(embeddedUid) || embeddedUid !== uid) {
+      console.warn(`[ShopBot/Ref3] Ownership theft attempt: uid=${uid} tried promo owned by ${embeddedUid}`);
+      return safeEdit(ctx,
+        `🔒 <b>Access Denied</b>\n\n` +
+        `<code>─────────────────────────────────────</code>\n\n` +
+        `This reward belongs to a different account.\n\n` +
+        `<i>Each reward code is locked to the account that earned it.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    // ── Security: verify milestone was legitimately claimed ───────────────
+    const milestoneCheck = await dbQuery(
+      `SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`, [uid]
+    );
+    if (!milestoneCheck.rows[0]?.ref3_milestone_claimed) {
+      return safeEdit(ctx,
+        `⚠️ <b>Reward Not Unlocked Yet</b>\n\n` +
+        `You haven't reached the 3-referral milestone.\n\n` +
+        `<i>Refer 3 friends first to unlock this reward.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
 
     const prod = await getProductById(productId);
     if (!prod || !prod.active) {
@@ -2219,34 +2282,37 @@ export function startShopBot(token: string) {
     const validation = await validatePromoCode(promoCode, price);
     if (!validation.valid) {
       return safeEdit(ctx,
-        `⚠️ <b>Promo code issue:</b> ${escHtml(validation.reason)}\n\n` +
-        `<i>Please contact support with code <code>${escHtml(promoCode)}</code>.</i>`,
+        `⚠️ <b>Code issue:</b> ${escHtml(validation.reason)}\n\n` +
+        `<i>Contact support with code <code>${escHtml(promoCode)}</code>.</i>`,
         { parse_mode: "HTML" }
       );
     }
 
     const finalPrice = Math.max(0, price - validation.discountAmt);
+
+    // Store codeId for deferred decrement — code is only consumed after purchase
     buyFlows.set(uid, {
       productId,
       step:        "confirm",
       promoCode:   promoCode.toUpperCase(),
       discountAmt: validation.discountAmt,
+      promoCodeId: validation.codeId,
     });
-    usePromoCode(validation.codeId).catch(() => {});
 
     return safeEdit(ctx,
-      `🏆 <b>FREE ChatGPT Plus — Confirm Order</b>\n\n` +
+      `🏆 <b>FREE ChatGPT Plus — Claim Your Reward</b>\n\n` +
       `<code>─────────────────────────────────────</code>\n\n` +
-      `📦 Product:   <b>${escHtml(prod.name)}</b>\n` +
-      `💲 Original:  <s>${fmt$(price)}</s>\n` +
-      `🎟 Promo:     <b>${escHtml(promoCode)}</b>  (100% off)\n` +
-      `✅ You Pay:   <b>${finalPrice === 0 ? "FREE 🎉" : fmt$(finalPrice)}</b>\n\n` +
+      `📦  <b>${escHtml(prod.name)}</b>\n\n` +
+      `💲  Original price:   <s>${fmt$(price)}</s>\n` +
+      `🎟  Reward code:      <code>${escHtml(promoCode)}</code>\n` +
+      `✅  You pay:          <b>${finalPrice === 0 ? "FREE  🎉" : fmt$(finalPrice)}</b>\n\n` +
       `<code>─────────────────────────────────────</code>\n\n` +
-      `<i>Tap Confirm to receive your account details instantly.</i>`,
+      `Account credentials will be delivered <b>instantly</b> after confirmation.\n` +
+      `<i>This reward can only be claimed once.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.callback(`✅  Confirm — Get My Free ChatGPT Now`, `buyconfirm_${productId}`)],
+          [Markup.button.callback(`🚀  Confirm — Get My Free ChatGPT Plus Now`, `buyconfirm_${productId}`)],
           [Markup.button.callback("❌  Cancel", `buycancel_${productId}`)],
         ]),
       }
