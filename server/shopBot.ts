@@ -285,8 +285,9 @@ async function upsertCustomer(uid: number, username?: string, firstName?: string
       `INSERT INTO shop_customers (telegram_id, username, first_name, referred_by)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (telegram_id) DO UPDATE
-         SET username   = EXCLUDED.username,
-             first_name = EXCLUDED.first_name`,
+         SET username    = EXCLUDED.username,
+             first_name  = EXCLUDED.first_name,
+             referred_by = COALESCE(shop_customers.referred_by, EXCLUDED.referred_by)`,
       [uid, username ?? null, firstName ?? null, referredBy]
     );
   } else {
@@ -1427,31 +1428,40 @@ export function startShopBot(token: string) {
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
 
-    // ── Referral verification prompt (new user, joined via invite link) ────────
-    // Shown only once — on first join via referral. The referrer is NOT credited
-    // until the referred user taps this button. Prevents auto-start bot farms.
-    if (isNew && referredBy) {
-      const refName = await dbQuery(
-        `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [referredBy]
+    // ── Referral verification prompt ──────────────────────────────────────────
+    // Show whenever this user has an un-rewarded referrer in the DB.
+    // Works for new users AND returning users who joined via an invite link
+    // before this feature existed, or who had an existing account.
+    // The referrer is NOT credited until the referred user taps the button.
+    if (referredBy) {
+      const refState = await dbQuery(
+        `SELECT referred_by, referral_rewarded FROM shop_customers WHERE telegram_id = $1`, [uid]
       );
-      const r = refName.rows[0];
-      const inviterName = r?.username ? `@${r.username}` : (r?.first_name ? escHtml(r.first_name) : `a friend`);
-      ctx.reply(
-        `👋  <b>You were invited!</b>\n\n` +
-        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
-        `     <b>${inviterName}</b> invited you to\n` +
-        `     Project Addison — AI Tools Marketplace.\n\n` +
-        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
-        `Tap the button below to confirm you're here.\n` +
-        `This lets your inviter earn their referral reward.\n\n` +
-        `<i>Takes one tap — no personal data needed.</i>`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("✅  I'm Here — Confirm My Arrival", "shop_ref_verify")],
-          ]),
-        }
-      ).catch(() => {});
+      const rs = refState.rows[0];
+      // Only show if referrer is stored and reward hasn't been issued yet
+      if (rs?.referred_by && !rs.referral_rewarded) {
+        const refName = await dbQuery(
+          `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [rs.referred_by]
+        );
+        const r = refName.rows[0];
+        const inviterName = r?.username ? `@${r.username}` : (r?.first_name ? escHtml(r.first_name) : `a friend`);
+        ctx.reply(
+          `👋  <b>You were invited!</b>\n\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `<b>${inviterName}</b> invited you to\n` +
+          `Project Addison — AI Tools Marketplace.\n\n` +
+          `<blockquote>Tap the button below to confirm you've arrived.\n` +
+          `This lets your inviter earn their referral reward.\n` +
+          `It takes just one tap — no data needed.</blockquote>\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("✅  I'm Here — Confirm My Arrival", "shop_ref_verify")],
+            ]),
+          }
+        ).catch(() => {});
+      }
     }
 
     // Referral offer banner — always shown unless milestone already fully claimed
