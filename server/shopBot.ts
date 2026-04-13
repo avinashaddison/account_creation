@@ -591,6 +591,36 @@ async function processRef3Milestone(referrerId: number, bot: any) {
   );
   if (!updated.rows[0]) return; // already claimed — silent exit
 
+  // ── Instant admin alert on Bot 1 ─────────────────────────────────────────
+  const adminToken = process.env.TELEGRAM_BOT_TOKEN;
+  const adminIds   = (process.env.TELEGRAM_ALLOWED_IDS ?? "").split(",").map(s => s.trim()).filter(Boolean);
+  if (adminToken && adminIds.length > 0) {
+    const uRes = await dbQuery(
+      `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`,
+      [referrerId]
+    );
+    const uRow     = uRes.rows[0];
+    const uDisplay = uRow?.username ? `@${uRow.username}` : escHtml(uRow?.first_name ?? "Unknown");
+    const alertMsg =
+      `🏆  <b>REFERRAL MILESTONE COMPLETED</b>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `👤  User:  <b>${uDisplay}</b>\n` +
+      `🆔  ID:    <code>${referrerId}</code>\n\n` +
+      `✅  Referred <b>3 friends</b> — milestone complete!\n` +
+      `🎁  Promo code <code>REF3FREE${referrerId}</code> auto-generated\n` +
+      `🤖  Reward:  <b>1 Month ChatGPT Plus (FREE)</b>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `<i>User has been notified and can claim their reward now.</i>`;
+    for (const id of adminIds) {
+      fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: id, text: alertMsg, parse_mode: "HTML" }),
+      }).catch(() => {});
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Generate unique promo code: 100% off, single-use, bound to this user
   const promoCode = `REF3FREE${referrerId}`;
   await dbQuery(
