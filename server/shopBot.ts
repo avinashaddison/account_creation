@@ -1439,23 +1439,39 @@ export function startShopBot(token: string) {
     const progressBar2    = Array.from({ length: 3 }, (_, i) => i < filled2 ? "🟢" : "⚪").join("  ");
 
     if (!alreadyClaimed2) {
+      // Build individual friend slot lines (✅ joined / ⬜ pending)
+      const friendSlots2 = Array.from({ length: 3 }, (_, i) => {
+        if (i < refsDone2) return `✅  Friend ${i + 1}  —  <b>joined!</b>`;
+        return       `⬜  Friend ${i + 1}  —  <i>waiting for invite</i>`;
+      }).join("\n");
+
+      const statusLine2 = refsLeft2 > 0
+        ? `⏳  <b>${refsLeft2} more friend${refsLeft2 > 1 ? "s" : ""}</b> needed to unlock`
+        : `🏆  <b>Milestone complete</b>  —  reward is on its way!`;
+
       ctx.reply(
-        `🤖  <b>FREE ChatGPT Plus</b>  —  Limited Offer\n\n` +
-        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
-        `     Invite just <b>3 friends</b> to this bot\n` +
-        `     and get <b>1 month ChatGPT Plus</b> for FREE.\n\n` +
-        `<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n` +
-        `📊  <b>YOUR PROGRESS</b>\n\n` +
-        `     ${progressBar2}\n` +
-        `     <b>${refsDone2} of 3</b> friends joined\n\n` +
-        (refsLeft2 > 0
-          ? `     <i>Refer ${refsLeft2} more to unlock your reward</i>`
-          : `     ✅  <b>Milestone reached!</b>`) +
-        `\n\n<code>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</code>`,
+        `🎁  <b>FREE — 1 Month ChatGPT Plus</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `Refer <b>3 friends</b> to this bot and unlock\n` +
+        `<b>1 month ChatGPT Plus</b> — completely free.\n\n` +
+        `<blockquote>✦  GPT-4o  ·  DALL·E  ·  Priority access\n` +
+        `✦  Normally <b>$20/month</b>  —  yours free</blockquote>\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `📋  <b>HOW IT WORKS</b>\n\n` +
+        `<blockquote>① Tap <b>Share My Invite Link</b> below\n` +
+        `② Send it to friends on Telegram\n` +
+        `③ Each friend opens the bot &amp; taps\n` +
+        `   <b>✅ I'm Here — Confirm My Arrival</b>\n` +
+        `④ All 3 confirmed → ChatGPT Plus is yours 🎉</blockquote>\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `📊  <b>YOUR PROGRESS</b>  ·  <b>${refsDone2} / 3</b>\n\n` +
+        `${friendSlots2}\n\n` +
+        `${statusLine2}\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
-            [Markup.button.url("📤  Share My Invite Link — Earn Free ChatGPT Plus", shareUrl2)],
+            [Markup.button.url("📤  Share My Invite Link — Get Free ChatGPT Plus", shareUrl2)],
           ]),
         }
       ).catch(() => {});
@@ -3887,32 +3903,50 @@ export function startShopBot(token: string) {
     const totalEarned    = rewardedCount * referReward;
     const milestoneClmd  = milestoneRes.rows[0]?.ref3_milestone_claimed ?? false;
     const refsLeft       = Math.max(0, 3 - rewardedCount);
-    const progressBar    = ["⬜","⬜","⬜"].map((_, i) => i < Math.min(rewardedCount, 3) ? "🟩" : "⬜").join("");
 
-    const milestoneBlock = milestoneClmd
-      ? `🏆 <b>ChatGPT Plus Milestone:</b> ✅ <b>Claimed!</b>`
-      : `🎁 <b>ChatGPT Plus Milestone:</b>\n` +
-        `${progressBar}  <b>${rewardedCount} / 3</b> friends joined\n` +
+    // Individual friend slots for ChatGPT milestone
+    const friendSlots = Array.from({ length: 3 }, (_, i) => {
+      if (i < rewardedCount) return `✅  Friend ${i + 1}  —  <b>joined!</b>`;
+      return       `⬜  Friend ${i + 1}  —  <i>waiting for invite</i>`;
+    }).join("\n");
+
+    const milestoneSection = milestoneClmd
+      ? `🏆  <b>ChatGPT Plus Milestone</b>\n\n` +
+        `✅  ✅  ✅  —  <b>Claimed!</b>\n` +
+        `<i>You already redeemed your free ChatGPT Plus.</i>`
+      : `🎁  <b>FREE ChatGPT Plus Milestone</b>  ·  <b>${rewardedCount} / 3</b>\n\n` +
+        `${friendSlots}\n\n` +
         (refsLeft > 0
-          ? `<i>Refer ${refsLeft} more friend${refsLeft > 1 ? "s" : ""} → 1 month ChatGPT Plus FREE</i>`
-          : `✅ <i>Milestone complete — reward arriving shortly!</i>`);
+          ? `⏳  <b>${refsLeft} more</b> to unlock 1 month ChatGPT Plus FREE`
+          : `🏆  <b>Milestone complete</b>  —  reward is on its way!`);
 
     await safeReply(ctx,
       `🔗  <b>REFER &amp; EARN</b>\n\n` +
-      `<code>─────────────────────────────────────</code>\n\n` +
-      `Earn <b>${fmt$(referReward)}</b> cash for every friend who joins.\n\n` +
-      `<blockquote>🔗  Your Link\n<code>${referralLink}</code></blockquote>\n\n` +
-      `<code>─────────────────────────────────────</code>\n` +
-      `📊 <b>Your Stats</b>\n` +
-      `<code>Friends joined ...... ${totalReferred}\n` +
-      `Rewards earned ..... $${totalEarned.toFixed(2)}</code>\n\n` +
-      `<code>─────────────────────────────────────</code>\n` +
-      `${milestoneBlock}\n\n` +
-      `<i>Cash reward is credited instantly when your friend joins.</i>`,
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `Earn rewards for every friend you bring in.\n\n` +
+      `<blockquote>💰  <b>${fmt$(referReward)}</b> wallet cash  —  per friend who joins\n` +
+      `🎁  <b>1 month ChatGPT Plus free</b>  —  when 3 join</blockquote>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `📋  <b>HOW IT WORKS</b>\n\n` +
+      `<blockquote>① Tap <b>Share My Invite Link</b> below\n` +
+      `② Your friend opens the bot via your link\n` +
+      `③ They tap <b>✅ I'm Here — Confirm My Arrival</b>\n` +
+      `④ You get <b>${fmt$(referReward)}</b> credited instantly</blockquote>\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `🔗  <b>YOUR INVITE LINK</b>\n\n` +
+      `<code>${referralLink}</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `📊  <b>YOUR STATS</b>\n\n` +
+      `<code>Total invites sent ...... ${totalReferred}\n` +
+      `Confirmed joins ......... ${rewardedCount}\n` +
+      `Cash earned ............. $${totalEarned.toFixed(2)}</code>\n\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+      `${milestoneSection}\n` +
+      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
-          [Markup.button.url("📤  Share My Link", shareUrl)],
+          [Markup.button.url("📤  Share My Invite Link — Earn Rewards", shareUrl)],
         ]),
       }
     );
