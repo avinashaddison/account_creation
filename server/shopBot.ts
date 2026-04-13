@@ -548,31 +548,47 @@ async function processReferralReward(newUid: number, bot: any) {
   );
   const totalRefs = parseInt(countRes.rows[0]?.cnt ?? "0");
 
-  // Notify referrer about new join
-  const newUserRes = await dbQuery(
-    `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`,
-    [newUid]
-  );
-  const u = newUserRes.rows[0];
-  const newName = u?.username ? `@${u.username}` : (u?.first_name ? escHtml(u.first_name) : `User ${newUid}`);
+  // Fetch both users' names for notifications
+  const [newUserRes, referrerRes] = await Promise.all([
+    dbQuery(`SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [newUid]),
+    dbQuery(`SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`, [referrerId]),
+  ]);
+  const u        = newUserRes.rows[0];
+  const ref      = referrerRes.rows[0];
+  const newName  = u?.username   ? `@${u.username}`   : (u?.first_name   ? escHtml(u.first_name)   : `User ${newUid}`);
+  const refName  = ref?.username ? `@${ref.username}` : (ref?.first_name ? escHtml(ref.first_name) : `your inviter`);
 
-  const remaining  = Math.max(0, 3 - totalRefs);
-  const filled     = Math.min(totalRefs, 3);
+  const remaining   = Math.max(0, 3 - totalRefs);
+  const filled      = Math.min(totalRefs, 3);
   const progressBar = Array.from({ length: 3 }, (_, i) => i < filled ? "🟢" : "⚪").join("  ");
 
+  // ── Notify referrer ───────────────────────────────────────────────────────
   bot.telegram.sendMessage(
     referrerId,
     `🎉 <b>New Referral!</b>\n\n` +
-    `<code>─────────────────────────────────────</code>\n\n` +
+    `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
     `👤  ${newName} joined via your link\n` +
     `💰  <b>+$${rewardAmount.toFixed(2)}</b> credited to your wallet\n\n` +
-    `<code>─────────────────────────────────────</code>\n` +
+    `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n` +
     `🤖  <b>ChatGPT Plus Milestone</b>\n\n` +
     `     ${progressBar}\n` +
     `     <b>${totalRefs} / 3</b> friends joined\n\n` +
     (remaining > 0
       ? `<i>Invite ${remaining} more friend${remaining > 1 ? "s" : ""} → unlock 1 month ChatGPT Plus FREE!</i>`
       : `🏆 <b>Milestone complete!</b> Your reward is coming now.`),
+    { parse_mode: "HTML" }
+  ).catch(() => {});
+
+  // ── Notify referred user (newUid) that their referral was confirmed ────────
+  bot.telegram.sendMessage(
+    newUid,
+    `✅  <b>Referral Confirmed!</b>\n\n` +
+    `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+    `<blockquote>You joined via <b>${refName}</b>'s invite link.\n` +
+    `Their referral reward has been credited.\n` +
+    `Thanks for helping them out!</blockquote>\n\n` +
+    `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+    `<i>Now explore the marketplace — tap <b>Shop</b> to get started.</i>`,
     { parse_mode: "HTML" }
   ).catch(() => {});
 
