@@ -5878,61 +5878,57 @@ export function startTelegramBot(config: BotConfig) {
       }
       return;
     }
+
+    if (st.awaitingText === "chatgpt_count") {
+      st.awaitingText = undefined;
+      const n = parseInt(text);
+      if (isNaN(n) || n < 1 || n > 10) {
+        return ctx.reply(`❌  Please enter a number between 1 and 10.`, { parse_mode: "HTML" });
+      }
+
+      await ctx.reply(
+        `🤖  <b>CHATGPT REGISTRATION STARTED</b>\n\n` +
+        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+        `⏳  Creating <b>${n}</b> account${n > 1 ? "s" : ""} — this may take 2–5 minutes per account.\n\n` +
+        `<i>Results will be sent when each account completes.</i>`,
+        { parse_mode: "HTML" }
+      );
+
+      const adminChatId = ctx.chat.id;
+      const log = (msg: string) => {
+        bot.telegram.sendMessage(adminChatId, `<code>${escapeHtml(msg)}</code>`, { parse_mode: "HTML" }).catch(() => {});
+      };
+
+      batchCreateChatGPTAccounts({ count: n, log }).then(({ total, succeeded, failed, results }) => {
+        const lines = results.map((r) => {
+          if (r.success) {
+            return `✅  <code>${escapeHtml(r.email ?? "")}</code>\n` +
+                   `     Name: ${escapeHtml(r.firstName ?? "")} ${escapeHtml(r.lastName ?? "")}\n` +
+                   `     Mail password: <code>${escapeHtml(r.mailPassword ?? "")}</code>`;
+          }
+          return `❌  <code>${escapeHtml(r.email ?? "")}</code>\n     Error: ${escapeHtml(r.error ?? "unknown")}`;
+        }).join("\n\n");
+
+        bot.telegram.sendMessage(
+          adminChatId,
+          `🤖  <b>CHATGPT REGISTRATION COMPLETE</b>\n\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `✅  Succeeded: <b>${succeeded}</b>   ❌  Failed: <b>${failed}</b>   📊  Total: <b>${total}</b>\n\n` +
+          `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
+          `${lines}`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
+      }).catch((err: any) => {
+        bot.telegram.sendMessage(adminChatId, `❌  Batch registration crashed: ${escapeHtml(err.message)}`, { parse_mode: "HTML" }).catch(() => {});
+      });
+
+      return;
+    }
   });
 
   bot.action("shop_admin_alloc_cancel", async (ctx) => {
     await ctx.answerCbQuery("Cancelled").catch(() => {});
     await safeEdit(ctx, `❌  <b>Allocation cancelled.</b>`, { parse_mode: "HTML" });
-  });
-
-  // ── ChatGPT count text handler ─────────────────────────────────────────────
-  bot.on("text", async (ctx, next) => {
-    if (!isAllowed(ctx.from.id)) return next();
-    const st = getState(ctx.from.id);
-    if (st.awaitingText !== "chatgpt_count") return next();
-    st.awaitingText = undefined;
-
-    const n = parseInt((ctx.message as any).text.trim());
-    if (isNaN(n) || n < 1 || n > 10) {
-      return ctx.reply(`❌  Please enter a number between 1 and 10.`, { parse_mode: "HTML" });
-    }
-
-    await ctx.reply(
-      `🤖  <b>CHATGPT REGISTRATION STARTED</b>\n\n` +
-      `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `⏳  Creating <b>${n}</b> account${n > 1 ? "s" : ""} — this may take 2–5 minutes per account.\n\n` +
-      `<i>Results will be sent when each account completes.</i>`,
-      { parse_mode: "HTML" }
-    );
-
-    const adminChatId = ctx.chat.id;
-    const log = (msg: string) => {
-      bot.telegram.sendMessage(adminChatId, `<code>${escapeHtml(msg)}</code>`, { parse_mode: "HTML" }).catch(() => {});
-    };
-
-    // Run in background — don't await
-    batchCreateChatGPTAccounts({ count: n, log }).then(({ total, succeeded, failed, results }) => {
-      const lines = results.map((r, i) => {
-        if (r.success) {
-          return `✅  <code>${escapeHtml(r.email ?? "")}</code>\n` +
-                 `     Name: ${escapeHtml(r.firstName ?? "")} ${escapeHtml(r.lastName ?? "")}\n` +
-                 `     Mail password: <code>${escapeHtml(r.mailPassword ?? "")}</code>`;
-        }
-        return `❌  <code>${escapeHtml(r.email ?? "")}</code>\n     Error: ${escapeHtml(r.error ?? "unknown")}`;
-      }).join("\n\n");
-
-      bot.telegram.sendMessage(
-        adminChatId,
-        `🤖  <b>CHATGPT REGISTRATION COMPLETE</b>\n\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `✅  Succeeded: <b>${succeeded}</b>   ❌  Failed: <b>${failed}</b>   📊  Total: <b>${total}</b>\n\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `${lines}`,
-        { parse_mode: "HTML" }
-      ).catch(() => {});
-    }).catch((err: any) => {
-      bot.telegram.sendMessage(adminChatId, `❌  Batch registration crashed: ${err.message}`, { parse_mode: "HTML" }).catch(() => {});
-    });
   });
 
   // ── Launch with auto-retry on transient polling errors ───────────────────
