@@ -507,7 +507,7 @@ async function processReferralReward(newUid: number, bot: any) {
   const referrerId   = parseInt(row.referred_by);
   const rewardAmount = await getReferralReward();
 
-  // Reward referrer and mark as rewarded
+  // Reward referrer balance and mark this join as rewarded
   await dbQuery(
     `UPDATE shop_customers SET balance = balance + $1 WHERE telegram_id = $2`,
     [rewardAmount.toFixed(2), referrerId]
@@ -517,7 +517,14 @@ async function processReferralReward(newUid: number, bot: any) {
     [newUid]
   );
 
-  // Notify referrer
+  // Count total rewarded referrals for this referrer
+  const countRes = await dbQuery(
+    `SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`,
+    [referrerId]
+  );
+  const totalRefs = parseInt(countRes.rows[0]?.cnt ?? "0");
+
+  // Notify referrer about new join
   const newUserRes = await dbQuery(
     `SELECT username, first_name FROM shop_customers WHERE telegram_id = $1`,
     [newUid]
@@ -525,14 +532,84 @@ async function processReferralReward(newUid: number, bot: any) {
   const u = newUserRes.rows[0];
   const newName = u?.username ? `@${u.username}` : (u?.first_name ? escHtml(u.first_name) : `User ${newUid}`);
 
+  const remaining = Math.max(0, 3 - totalRefs);
+  const progressBar = ["⬜","⬜","⬜"].map((_, i) => i < totalRefs ? "🟩" : "⬜").join("");
+
   bot.telegram.sendMessage(
     referrerId,
     `🎉 <b>Referral Reward!</b>\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `👤 <b>${newName}</b> just joined via your referral link.\n\n` +
-    `💰 <b>+$${rewardAmount.toFixed(2)}</b> added to your wallet!\n\n` +
-    `<i>Keep sharing your link to earn more rewards.</i>`,
+    `<code>─────────────────────────────────────</code>\n\n` +
+    `👤 <b>${newName}</b> just joined via your link!\n` +
+    `💰 <b>+$${rewardAmount.toFixed(2)}</b> added to your wallet\n\n` +
+    `<code>─────────────────────────────────────</code>\n` +
+    `🎁 <b>FREE ChatGPT Plus Progress</b>\n` +
+    `${progressBar}  <b>${totalRefs} / 3</b> friends joined\n` +
+    (remaining > 0
+      ? `<i>Refer ${remaining} more friend${remaining > 1 ? "s" : ""} to unlock 1 month ChatGPT Plus FREE!</i>`
+      : `✅ <b>Milestone reached!</b> Check your next message.`),
     { parse_mode: "HTML" }
+  ).catch(() => {});
+
+  // Check 3-referral milestone
+  if (totalRefs >= 3) {
+    processRef3Milestone(referrerId, bot).catch(() => {});
+  }
+}
+
+async function processRef3Milestone(referrerId: number, bot: any) {
+  // Check not already claimed
+  const check = await dbQuery(
+    `SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`,
+    [referrerId]
+  );
+  if (check.rows[0]?.ref3_milestone_claimed) return;
+
+  // Mark as claimed atomically
+  const updated = await dbQuery(
+    `UPDATE shop_customers SET ref3_milestone_claimed = true
+     WHERE telegram_id = $1 AND ref3_milestone_claimed = false
+     RETURNING telegram_id`,
+    [referrerId]
+  );
+  if (!updated.rows[0]) return; // another process claimed it first
+
+  // Generate unique promo code (100% off, single-use)
+  const promoCode = `REF3FREE${referrerId}`;
+  await dbQuery(
+    `INSERT INTO shop_promo_codes (code, discount_pct, discount_fixed, max_uses, uses_count, active)
+     VALUES ($1, 100, 0, 1, 0, true)
+     ON CONFLICT (code) DO NOTHING`,
+    [promoCode]
+  );
+
+  // Find ChatGPT Plus product
+  const prodRes = await dbQuery(
+    `SELECT id, name, price FROM shop_products
+     WHERE active = true AND LOWER(name) LIKE '%chatgpt%'
+     ORDER BY sort_order, created_at LIMIT 1`
+  );
+  const prod = prodRes.rows[0];
+
+  const grabCbData = prod
+    ? `shop_ref3grab_${prod.id}_${promoCode}`
+    : `shop_ref3grab_noprod_${promoCode}`;
+
+  bot.telegram.sendMessage(
+    referrerId,
+    `🏆 <b>YOU UNLOCKED FREE CHATGPT PLUS!</b>\n\n` +
+    `<code>─────────────────────────────────────</code>\n\n` +
+    `🎁  <b>1 Month ChatGPT Plus</b>  —  <b>FREE</b>\n` +
+    `🎟  Promo Code: <code>${promoCode}</code>\n\n` +
+    `<code>─────────────────────────────────────</code>\n\n` +
+    `You referred <b>3 friends</b> to Project Addison.\n` +
+    `Your reward is ready — grab it now before it expires!\n\n` +
+    `👇 Tap the button below to claim instantly:`,
+    {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("🚀  Your Free ChatGPT Unlocked — Grab Now!", grabCbData)],
+      ]),
+    }
   ).catch(() => {});
 }
 
@@ -1286,6 +1363,44 @@ export function startShopBot(token: string) {
       `<i>👇  Use the menu below to navigate</i>`,
       { parse_mode: "HTML", ...(await buildShopKeyboard()) }
     );
+
+    // Referral offer banner — show to everyone on /start
+    const botUsername2 = ctx.botInfo.username;
+    const refLink2     = `https://t.me/${botUsername2}?start=ref_${uid}`;
+    const shareUrl2    = `https://t.me/share/url?url=${encodeURIComponent(refLink2)}&text=${encodeURIComponent("Join Project Addison — AI Tools Marketplace! Get AI tools at the best prices.")}`;
+    const refCountRes  = await dbQuery(
+      `SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`,
+      [uid]
+    );
+    const refsDone = parseInt(refCountRes.rows[0]?.cnt ?? "0");
+    const refsLeft = Math.max(0, 3 - refsDone);
+    const milestoneRes = await dbQuery(
+      `SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`, [uid]
+    );
+    const alreadyClaimed = milestoneRes.rows[0]?.ref3_milestone_claimed ?? false;
+    const progressBar2   = ["⬜","⬜","⬜"].map((_, i) => i < Math.min(refsDone, 3) ? "🟩" : "⬜").join("");
+
+    if (!alreadyClaimed) {
+      ctx.reply(
+        `🎁 <b>SPECIAL OFFER — REFER 3 FRIENDS</b>\n\n` +
+        `<code>─────────────────────────────────────</code>\n\n` +
+        `Invite <b>3 friends</b> to Project Addison and receive:\n\n` +
+        `🤖  <b>1 Month ChatGPT Plus — FREE</b>\n\n` +
+        `<code>─────────────────────────────────────</code>\n` +
+        `📊  <b>Your Progress:</b>\n` +
+        `${progressBar2}  <b>${refsDone} / 3</b> friends joined\n` +
+        (refsLeft > 0
+          ? `<i>Refer ${refsLeft} more friend${refsLeft > 1 ? "s" : ""} to unlock your reward!</i>`
+          : `✅ <i>Milestone complete! Your reward is on its way.</i>`) +
+        `\n\n<code>─────────────────────────────────────</code>`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📤  Share My Referral Link", shareUrl2)],
+          ]),
+        }
+      ).catch(() => {});
+    }
   });
 
   bot.command("menu", async (ctx) => {
@@ -2080,6 +2195,59 @@ export function startShopBot(token: string) {
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📦  My Orders", "shop_view_orders")],
           [Markup.button.callback("🛍  BACK TO SHOP", "shop_back_products")],
+        ]),
+      }
+    );
+  });
+
+  // ── Ref3 "Grab Now" — pre-applies 100% promo and shows confirm ──────────
+  bot.action(/^shop_ref3grab_([0-9a-f-]{36})_(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("🎁 Applying your reward…").catch(() => {});
+    const uid       = ctx.from.id;
+    const productId = (ctx.match as RegExpExecArray)[1];
+    const promoCode = (ctx.match as RegExpExecArray)[2];
+
+    const prod = await getProductById(productId);
+    if (!prod || !prod.active) {
+      return safeEdit(ctx,
+        `⚠️ <b>Product not found or unavailable.</b>\n\nContact support for assistance.`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    const price      = parseFloat(prod.price);
+    const validation = await validatePromoCode(promoCode, price);
+    if (!validation.valid) {
+      return safeEdit(ctx,
+        `⚠️ <b>Promo code issue:</b> ${escHtml(validation.reason)}\n\n` +
+        `<i>Please contact support with code <code>${escHtml(promoCode)}</code>.</i>`,
+        { parse_mode: "HTML" }
+      );
+    }
+
+    const finalPrice = Math.max(0, price - validation.discountAmt);
+    buyFlows.set(uid, {
+      productId,
+      step:        "confirm",
+      promoCode:   promoCode.toUpperCase(),
+      discountAmt: validation.discountAmt,
+    });
+    usePromoCode(validation.codeId).catch(() => {});
+
+    return safeEdit(ctx,
+      `🏆 <b>FREE ChatGPT Plus — Confirm Order</b>\n\n` +
+      `<code>─────────────────────────────────────</code>\n\n` +
+      `📦 Product:   <b>${escHtml(prod.name)}</b>\n` +
+      `💲 Original:  <s>${fmt$(price)}</s>\n` +
+      `🎟 Promo:     <b>${escHtml(promoCode)}</b>  (100% off)\n` +
+      `✅ You Pay:   <b>${finalPrice === 0 ? "FREE 🎉" : fmt$(finalPrice)}</b>\n\n` +
+      `<code>─────────────────────────────────────</code>\n\n` +
+      `<i>Tap Confirm to receive your account details instantly.</i>`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅  Confirm — Get My Free ChatGPT Now`, `buyconfirm_${productId}`)],
+          [Markup.button.callback("❌  Cancel", `buycancel_${productId}`)],
         ]),
       }
     );
@@ -3581,23 +3749,40 @@ export function startShopBot(token: string) {
     const referralLink = `https://t.me/${botUsername}?start=ref_${uid}`;
     const shareUrl     = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("Join Project Addison — AI Tools Marketplace! Get AI tools at the best prices.")}`;
 
-    const [totalRes, rewardedRes, rewardSetting] = await Promise.all([
+    const [totalRes, rewardedRes, rewardSetting, milestoneRes] = await Promise.all([
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1`, [uid]),
       dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`, [uid]),
       getReferralReward(),
+      dbQuery(`SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`, [uid]),
     ]);
     const totalReferred  = parseInt(totalRes.rows[0]?.cnt ?? "0");
     const rewardedCount  = parseInt(rewardedRes.rows[0]?.cnt ?? "0");
     const referReward    = rewardSetting as number;
     const totalEarned    = rewardedCount * referReward;
+    const milestoneClmd  = milestoneRes.rows[0]?.ref3_milestone_claimed ?? false;
+    const refsLeft       = Math.max(0, 3 - rewardedCount);
+    const progressBar    = ["⬜","⬜","⬜"].map((_, i) => i < Math.min(rewardedCount, 3) ? "🟩" : "⬜").join("");
+
+    const milestoneBlock = milestoneClmd
+      ? `🏆 <b>ChatGPT Plus Milestone:</b> ✅ <b>Claimed!</b>`
+      : `🎁 <b>ChatGPT Plus Milestone:</b>\n` +
+        `${progressBar}  <b>${rewardedCount} / 3</b> friends joined\n` +
+        (refsLeft > 0
+          ? `<i>Refer ${refsLeft} more friend${refsLeft > 1 ? "s" : ""} → 1 month ChatGPT Plus FREE</i>`
+          : `✅ <i>Milestone complete — reward arriving shortly!</i>`);
 
     await safeReply(ctx,
       `🔗  <b>REFER &amp; EARN</b>\n\n` +
-      `Earn <b>${fmt$(referReward)}</b> for every friend who joins.\n\n` +
-      `<blockquote>🔗  Your Link\n<code>${referralLink}</code></blockquote>\n` +
+      `<code>─────────────────────────────────────</code>\n\n` +
+      `Earn <b>${fmt$(referReward)}</b> cash for every friend who joins.\n\n` +
+      `<blockquote>🔗  Your Link\n<code>${referralLink}</code></blockquote>\n\n` +
+      `<code>─────────────────────────────────────</code>\n` +
+      `📊 <b>Your Stats</b>\n` +
       `<code>Friends joined ...... ${totalReferred}\n` +
       `Rewards earned ..... $${totalEarned.toFixed(2)}</code>\n\n` +
-      `<i>Reward is credited instantly when your friend joins.</i>`,
+      `<code>─────────────────────────────────────</code>\n` +
+      `${milestoneBlock}\n\n` +
+      `<i>Cash reward is credited instantly when your friend joins.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([

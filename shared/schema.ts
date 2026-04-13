@@ -330,11 +330,12 @@ export type InsertChatGptAccount = z.infer<typeof insertChatGptAccountSchema>;
 // ── Shop Bot (Project Addison v2) ─────────────────────────────────────────────
 
 export const shopCustomers = pgTable("shop_customers", {
-  telegramId: bigint("telegram_id", { mode: "number" }).primaryKey(),
-  username:   text("username"),
-  firstName:  text("first_name"),
-  balance:    numeric("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
-  createdAt:  timestamp("created_at").notNull().defaultNow(),
+  telegramId:           bigint("telegram_id", { mode: "number" }).primaryKey(),
+  username:             text("username"),
+  firstName:            text("first_name"),
+  balance:              numeric("balance", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  createdAt:            timestamp("created_at").notNull().defaultNow(),
+  ref3MilestoneClaimed: boolean("ref3_milestone_claimed").notNull().default(false),
 });
 
 export const shopProducts = pgTable("shop_products", {
