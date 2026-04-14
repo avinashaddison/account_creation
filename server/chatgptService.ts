@@ -131,21 +131,70 @@ export async function subscribePlusWithUPI(opts: {
   log(`[ChatGPT/Plus] Checkout: ${page.url()}`);
   await sleep(4000);
 
-  // E: Select UPI payment method
-  const upiEl = await findInPageOrFrames(page, [
-    'text="UPI"', 'button:has-text("UPI")', '[role="tab"]:has-text("UPI")',
-    'label:has-text("UPI")', '[data-testid*="upi" i]',
-  ], 8000);
+  // E: Change country to India FIRST (required for UPI to appear as payment option)
+  log("[ChatGPT/Plus] Setting country to India…");
+  const countryDropdown = await findInPageOrFrames(page, [
+    'select[data-elements-stable-field-name="country"]',
+    'select[autocomplete="country"]',
+    'select[name="country"]',
+    'select[id*="country" i]',
+    'select[aria-label*="country" i]',
+  ], 10000);
+  if (countryDropdown) {
+    await countryDropdown.selectOption({ label: "India" }).catch(() =>
+      countryDropdown.selectOption({ value: "IN" }).catch(() => {})
+    );
+    log("[ChatGPT/Plus] Country set to India — waiting for Stripe to reload payment methods…");
+    await sleep(6000);
+  } else {
+    log("[ChatGPT/Plus] Country dropdown not found — taking debug screenshot");
+    const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
+    await sendQRToBot2(dbgShot, notifyTelegramId, `⚠️ <b>Debug: Country dropdown not found</b>\nCould not set country to India.`);
+    throw new Error("Country dropdown not found on checkout page");
+  }
+
+  // F: Select UPI payment method (only visible after India is selected)
+  // Poll across all frames — Stripe may render UPI in a nested iframe
+  const upiSelectors = [
+    '[role="tab"]:has-text("UPI")',
+    'button:has-text("UPI")',
+    'label:has-text("UPI")',
+    '[data-testid*="upi" i]',
+    'div[class*="Tab"]:has-text("UPI")',
+    'p:has-text("UPI")',
+    'span:has-text("UPI")',
+  ];
+
+  let upiEl: any = null;
+  // Poll for up to 20 seconds (Stripe can be slow to reload after country change)
+  for (let attempt = 0; attempt < 4 && !upiEl; attempt++) {
+    upiEl = await findInPageOrFrames(page, upiSelectors, 5000);
+    if (!upiEl) {
+      log(`[ChatGPT/Plus] UPI not yet visible, waiting… (${attempt + 1}/4)`);
+      await sleep(3000);
+    }
+  }
+
   if (upiEl) {
     await upiEl.click();
     await sleep(2000);
     log("[ChatGPT/Plus] UPI payment method selected");
   } else {
-    log("[ChatGPT/Plus] UPI option not found — proceeding (may default to UPI)");
+    log("[ChatGPT/Plus] UPI option not found — sending debug screenshot");
+    const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
+    await sendQRToBot2(dbgShot, notifyTelegramId,
+      `⚠️ <b>Debug: UPI tab not found after India selection</b>\n` +
+      `Account: <code>${email}</code>\n\n` +
+      `Country was set to India but UPI didn't appear. Check screenshot.`
+    );
+    // Also log all frame URLs for debugging
+    for (const f of page.frames()) {
+      log(`  Frame: ${f.url().slice(0, 120)}`);
+    }
+    throw new Error("UPI payment option not found even after selecting India");
   }
 
-  // F: Fill billing address
-  // Helper: fills field in main page or any iframe
+  // G: Fill billing address (now for India)
   async function fillBillingField(selectors: string[], value: string): Promise<void> {
     const el = await findInPageOrFrames(page, selectors, 3000);
     if (!el) return;
@@ -161,28 +210,29 @@ export async function subscribePlusWithUPI(opts: {
   );
   await fillBillingField(
     ['[placeholder*="Address line 1" i]', '[autocomplete="address-line1"]', 'input[name="addressLine1"]', '#billing-address-1'],
-    "Ranchi"
+    "Near Main Road, Ranchi"
   );
   await fillBillingField(
     ['[placeholder*="City" i]', '[autocomplete="address-level2"]', 'input[name="city"]', '#billing-city'],
-    "RANCHI"
+    "Ranchi"
   );
   await fillBillingField(
     ['[placeholder*="PIN" i]', '[placeholder*="Postal" i]', '[placeholder*="Zip" i]', '[autocomplete="postal-code"]', 'input[name="postalCode"]', '#billing-postal'],
     "834005"
   );
 
-  // State dropdown
+  // State dropdown (Jharkhand for India)
   const stateDropdown = await findInPageOrFrames(page, [
     'select[autocomplete="address-level1"]', 'select[name*="state" i]', 'select[id*="state" i]',
-  ], 2000);
+    'select[data-elements-stable-field-name="state"]',
+  ], 4000);
   if (stateDropdown) {
     await stateDropdown.selectOption({ label: "Jharkhand" }).catch(() =>
       stateDropdown.selectOption({ value: "JH" }).catch(() => {})
     );
   }
 
-  log("[ChatGPT/Plus] Billing address filled");
+  log("[ChatGPT/Plus] Billing address filled (India)");
   await sleep(1500);
 
   // G: Click Subscribe
