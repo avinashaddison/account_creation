@@ -131,30 +131,8 @@ export async function subscribePlusWithUPI(opts: {
   log(`[ChatGPT/Plus] Checkout: ${page.url()}`);
   await sleep(4000);
 
-  // E: Change country to India FIRST (required for UPI to appear as payment option)
-  log("[ChatGPT/Plus] Setting country to India…");
-  const countryDropdown = await findInPageOrFrames(page, [
-    'select[data-elements-stable-field-name="country"]',
-    'select[autocomplete="country"]',
-    'select[name="country"]',
-    'select[id*="country" i]',
-    'select[aria-label*="country" i]',
-  ], 10000);
-  if (countryDropdown) {
-    await countryDropdown.selectOption({ label: "India" }).catch(() =>
-      countryDropdown.selectOption({ value: "IN" }).catch(() => {})
-    );
-    log("[ChatGPT/Plus] Country set to India — waiting for Stripe to reload payment methods…");
-    await sleep(6000);
-  } else {
-    log("[ChatGPT/Plus] Country dropdown not found — taking debug screenshot");
-    const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
-    await sendQRToBot2(dbgShot, notifyTelegramId, `⚠️ <b>Debug: Country dropdown not found</b>\nCould not set country to India.`);
-    throw new Error("Country dropdown not found on checkout page");
-  }
-
-  // F: Select UPI payment method (only visible after India is selected)
-  // Poll across all frames — Stripe may render UPI in a nested iframe
+  // E: Select UPI payment method
+  // Indian IP (via proxy) causes Stripe to show UPI natively — poll for it
   const upiSelectors = [
     '[role="tab"]:has-text("UPI")',
     'button:has-text("UPI")',
@@ -166,11 +144,10 @@ export async function subscribePlusWithUPI(opts: {
   ];
 
   let upiEl: any = null;
-  // Poll for up to 20 seconds (Stripe can be slow to reload after country change)
-  for (let attempt = 0; attempt < 4 && !upiEl; attempt++) {
+  for (let attempt = 0; attempt < 5 && !upiEl; attempt++) {
     upiEl = await findInPageOrFrames(page, upiSelectors, 5000);
     if (!upiEl) {
-      log(`[ChatGPT/Plus] UPI not yet visible, waiting… (${attempt + 1}/4)`);
+      log(`[ChatGPT/Plus] Waiting for UPI option… (${attempt + 1}/5)`);
       await sleep(3000);
     }
   }
@@ -183,18 +160,15 @@ export async function subscribePlusWithUPI(opts: {
     log("[ChatGPT/Plus] UPI option not found — sending debug screenshot");
     const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
     await sendQRToBot2(dbgShot, notifyTelegramId,
-      `⚠️ <b>Debug: UPI tab not found after India selection</b>\n` +
+      `⚠️ <b>Debug: UPI tab not found</b>\n` +
       `Account: <code>${email}</code>\n\n` +
-      `Country was set to India but UPI didn't appear. Check screenshot.`
+      `UPI did not appear on the checkout. Check screenshot.\n` +
+      `Frames: ${page.frames().map((f: any) => f.url().slice(0, 80)).join(", ")}`
     );
-    // Also log all frame URLs for debugging
-    for (const f of page.frames()) {
-      log(`  Frame: ${f.url().slice(0, 120)}`);
-    }
-    throw new Error("UPI payment option not found even after selecting India");
+    throw new Error("UPI payment option not found on checkout page");
   }
 
-  // G: Fill billing address (now for India)
+  // F: Fill billing address (India)
   async function fillBillingField(selectors: string[], value: string): Promise<void> {
     const el = await findInPageOrFrames(page, selectors, 3000);
     if (!el) return;
@@ -334,6 +308,11 @@ export async function createChatGPTAccount(opts: {
     const hasDisplay = !!process.env.DISPLAY;
     browser = await chromium.launch({
       headless: !hasDisplay,
+      proxy: {
+        server: "http://proxy.nsocks.com:2312",
+        username: "ns-mrqq7v2x6zlr_area-IN_session-fR44mD0VSI_life-5",
+        password: process.env.NSOCKS_PROXY_PASSWORD ?? "",
+      },
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",

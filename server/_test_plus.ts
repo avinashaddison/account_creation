@@ -1,3 +1,15 @@
+/**
+ * _test_plus.ts — standalone test for Plus subscription via Indian proxy
+ *
+ * NOTE: This test logs into an EXISTING account. The OAuth login flow via
+ * chatgpt.com has known issues through the Indian proxy (the session cookie
+ * flow behaves differently vs direct IP). This does NOT affect the production
+ * flow, where subscribePlusWithUPI() is called immediately after account
+ * creation — no separate login is needed since the browser session is already
+ * authenticated from the signup.
+ *
+ * To test end-to-end: trigger batch account creation from Bot 1 admin.
+ */
 import { chromium } from "playwright-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { subscribePlusWithUPI } from "./chatgptService";
@@ -5,10 +17,15 @@ import { getFullInbox } from "./smtpDevService";
 
 chromium.use(StealthPlugin());
 
-// Use password-path failed account — OpenAI sends OTP for login verification
-const EMAIL       = "user5761573892m50723@addison.asia";
-const SMTP_DEV_ID = "69de01ded0f83aa1f50ac38e"; // for OTP retrieval
+const EMAIL       = "charlessmith@addison.asia";
+const SMTP_DEV_ID = "69d4e30000739311430cdc7e";
 const ADMIN_TG_ID = 1127734159;
+
+const PROXY = {
+  server:   "http://proxy.nsocks.com:2312",
+  username: "ns-mrqq7v2x6zlr_area-IN_session-fR44mD0VSI_life-5",
+  password: process.env.NSOCKS_PROXY_PASSWORD ?? "",
+};
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -27,11 +44,13 @@ async function pollLoginOTP(smtpDevId: string, since: number, log: (m: string) =
 }
 
 async function main() {
-  console.log(`=== Plus Subscription Test ===`);
+  console.log(`=== Plus Subscription Test (Indian Proxy) ===`);
   console.log(`Account: ${EMAIL}\n`);
+  console.log(`Proxy: ${PROXY.server}\n`);
 
   const browser = await chromium.launch({
     headless: true,
+    proxy: PROXY,
     args: [
       "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
       "--disable-blink-features=AutomationControlled", "--window-size=1280,800",
@@ -50,87 +69,73 @@ async function main() {
   const log = (msg: string) => console.log(msg);
 
   try {
-    // ── Log into chatgpt.com via "Log in" button ──────────────────────────
-    log("Navigating to chatgpt.com…");
-    await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30000 });
+    // ── Step 1: Navigate to auth.openai.com directly ──────────────────────
+    log("Navigating to auth.openai.com login…");
+    await page.goto("https://auth.openai.com/log-in", { waitUntil: "domcontentloaded", timeout: 30000 });
     await sleep(4000);
     log(`URL: ${page.url()}`);
+    log(`Page: ${(await page.evaluate(() => document.body?.innerText?.slice(0, 200) ?? "").catch(() => "")).replace(/\n+/g, " ")}`);
 
-    // Click "Log in" if on landing page
-    const loginBtn = page.locator('button:has-text("Log in"), a:has-text("Log in")').first();
-    if (await loginBtn.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await loginBtn.click();
-      log("Clicked Log in");
-      await sleep(3000);
+    // Handle "session has ended" or "continue" interstitial
+    const interstitialBtn = page.locator('button:has-text("Log in"), a:has-text("Log in"), button:has-text("Continue")').first();
+    if (await interstitialBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await interstitialBtn.click();
+      log("Clicked interstitial Log in");
+      await sleep(5000);
+      log(`URL after interstitial: ${page.url()}`);
     }
-    log(`URL after Log in click: ${page.url()}`);
 
-    // Enter email — may be on chatgpt.com modal or auth.openai.com
+    // ── Step 2: Find and fill email input ─────────────────────────────────
     const emailInput = await page.waitForSelector(
-      'input[name="email"], input[type="email"], input[placeholder*="email" i]',
+      'input[name="email"], input[type="email"], input[autocomplete*="email"]',
       { timeout: 15000 }
     ).catch(() => null);
+
     if (!emailInput) {
-      log(`Current URL: ${page.url()}`);
-      log(`Page text: ${(await page.evaluate(() => document.body.innerText.slice(0, 300)).catch(() => ""))}`);
-      throw new Error("Email input not found");
+      log(`URL: ${page.url()}`);
+      log(`Page: ${(await page.evaluate(() => document.body?.innerText?.slice(0, 400) ?? "").catch(() => "")).replace(/\n+/g, " ")}`);
+      throw new Error("Email input not found — login flow changed with proxy");
     }
 
-    const since = Date.now(); // for OTP timestamp comparison
+    const since = Date.now();
     await emailInput.click({ clickCount: 3 });
     await page.keyboard.type(EMAIL, { delay: 40 });
-    log(`Entered email`);
+    log("Entered email");
     await page.keyboard.press("Enter");
-    await sleep(4000);
-
+    await sleep(5000);
     log(`URL after email: ${page.url()}`);
 
-    // Try password first
-    const pwInput = await page.waitForSelector('input[type="password"]', { timeout: 6000 }).catch(() => null);
-    if (pwInput) {
-      await pwInput.click({ clickCount: 3 });
-      await page.keyboard.type(PASSWORD, { delay: 40 });
-      log(`Entered password`);
-      await page.keyboard.press("Enter");
-      await sleep(5000);
-      log(`URL after password: ${page.url()}`);
-    } else {
-      // OpenAI is using OTP for login — poll smtp.dev for the code
-      const pageText = await page.evaluate(() => document.body?.innerText?.slice(0, 300) ?? "").catch(() => "");
-      log(`No password field — OTP login. Page: ${pageText.replace(/\n+/g, " ").slice(0, 150)}`);
-      log(`Polling smtp.dev for login OTP…`);
-      const loginOTP = await pollLoginOTP(SMTP_DEV_ID, since, log);
-      if (!loginOTP) throw new Error("Login OTP not received within 2 minutes");
+    // ── Step 3: Get OTP and submit ─────────────────────────────────────────
+    log("Polling smtp.dev for login OTP…");
+    const loginOTP = await pollLoginOTP(SMTP_DEV_ID, since, log);
+    if (!loginOTP) throw new Error("Login OTP not received within 2 minutes");
 
-      const otpInput = await page.waitForSelector(
-        'input[autocomplete*="one-time"], input[name*="code"], input[maxlength="6"], input[placeholder*="code" i]',
-        { timeout: 10000 }
-      ).catch(() => null);
-      if (!otpInput) throw new Error("OTP input field not found");
-      await otpInput.click({ clickCount: 3 });
-      await page.keyboard.type(loginOTP, { delay: 60 });
-      await page.keyboard.press("Enter");
-      log(`OTP ${loginOTP} submitted`);
-      await sleep(5000);
-    }
+    const otpInput = await page.waitForSelector(
+      'input[autocomplete*="one-time"], input[name*="code"], input[maxlength="6"], input[inputmode="numeric"]',
+      { timeout: 10000 }
+    ).catch(() => null);
+    if (!otpInput) throw new Error("OTP input field not found");
+    await otpInput.click({ clickCount: 3 });
+    await page.keyboard.type(loginOTP, { delay: 60 });
+    log(`OTP ${loginOTP} typed — pressing Enter`);
+    await page.keyboard.press("Enter");
+    await sleep(7000);
+    log(`URL after OTP: ${page.url()}`);
 
-    log(`URL after login attempt: ${page.url()}`);
-
-    // If about-you appears, navigate past it
+    // Skip about-you / workspace if they appear
     if (page.url().includes("about-you") || page.url().includes("workspace")) {
       log(`Skipping ${page.url()} — navigating to chatgpt.com`);
       await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 20000 });
       await sleep(4000);
     }
 
-    // Wait for chatgpt.com
     if (!page.url().startsWith("https://chatgpt.com")) {
       await page.waitForURL((u: URL) => u.toString().startsWith("https://chatgpt.com"), { timeout: 15000 });
     }
-    log(`Logged in — on chatgpt.com`);
+    log("Logged in — on chatgpt.com");
     await sleep(2000);
 
-    // ── Run Plus subscription ──────────────────────────────────────────────
+    // ── Step 4: Subscribe to Plus via UPI ─────────────────────────────────
     await subscribePlusWithUPI({ page, email: EMAIL, notifyTelegramId: ADMIN_TG_ID, log });
 
     log("\n✅ Flow complete");
