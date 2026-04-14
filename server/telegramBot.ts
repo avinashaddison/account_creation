@@ -5911,6 +5911,7 @@ export function startTelegramBot(config: BotConfig) {
           if (r.success) {
             return `✅  <code>${escapeHtml(r.email ?? "")}</code>\n` +
                    `     Name: ${escapeHtml(r.firstName ?? "")} ${escapeHtml(r.lastName ?? "")}\n` +
+                   `     ChatGPT password: <code>${escapeHtml(r.password ?? "")}</code>\n` +
                    `     Mail password: <code>${escapeHtml(r.mailPassword ?? "")}</code>`;
           }
           return `❌  <code>${escapeHtml(r.email ?? "")}</code>\n     Error: ${escapeHtml(r.error ?? "unknown")}`;
