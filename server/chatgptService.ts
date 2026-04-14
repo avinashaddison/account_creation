@@ -263,36 +263,93 @@ export async function subscribePlusWithUPI(opts: {
 
   const isCheckout = (url: string) => url.includes("checkout") || url.includes("stripe.com") || url.includes("pay.openai");
 
-  // D1: Try API-based checkout session (avoids JS-navigation issues)
+  // Set up response interception to capture any checkout URL from network traffic
+  let capturedCheckoutUrl: string | null = null;
+  const capturedApiCalls: Array<{ url: string; status: number; bodyPreview: string }> = [];
+
+  await page.route("**/backend-api/**", async (route: any) => {
+    const req = route.request();
+    try {
+      const resp = await route.fetch();
+      const text = await resp.text().catch(() => "");
+      let data: any = {};
+      try { data = JSON.parse(text); } catch {}
+      const foundUrl = data?.url || data?.checkout_url || data?.redirect_url || data?.session_url;
+      if (foundUrl && isCheckout(foundUrl) && !capturedCheckoutUrl) {
+        capturedCheckoutUrl = foundUrl;
+      }
+      capturedApiCalls.push({ url: req.url(), status: resp.status(), bodyPreview: text.slice(0, 300) });
+      await route.fulfill({ response: resp, body: text });
+    } catch {
+      await route.continue();
+    }
+  }).catch(() => {});
+
+  // D1: Get accessToken from /api/auth/session, then call backend-api for checkout URL
   let checkoutUrl: string | null = null;
   try {
-    log("[ChatGPT/Plus] Calling backend-api for checkout session URL…");
+    log("[ChatGPT/Plus] Fetching session to get accessToken…");
     checkoutUrl = await page.evaluate(async () => {
-      // Try multiple known ChatGPT checkout API endpoints
-      const endpoints = [
-        { url: "/backend-api/purchases/checkout_session", body: { plan_type: "monthly", return_url: "https://chatgpt.com/", subscription_plan_id: "chatgptplusplan" } },
-        { url: "/backend-api/subscriptions/checkout", body: { plan_type: "monthly" } },
-        { url: "/backend-api/checkout", body: { tier: "plus", interval: "monthly" } },
+      // Step 1: Get accessToken + account info from /api/auth/session
+      const sessionResp = await fetch("/api/auth/session", { credentials: "include" });
+      const session = await sessionResp.json() as any;
+      const accessToken = session?.accessToken;
+      const accountId   = session?.account?.id;
+      if (!accessToken) return null;
+
+      const authHeaders = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+      };
+
+      // Step 2: Try known checkout endpoints with Bearer token
+      const checkoutEndpoints = [
+        {
+          url: "/backend-api/purchases/checkout_session",
+          body: { plan_type: "monthly", return_url: "https://chatgpt.com/" },
+        },
+        {
+          url: "/backend-api/subscriptions",
+          body: { plan_type: "monthly", account_id: accountId },
+        },
+        {
+          url: "/backend-api/me/subscription/upgrade",
+          body: { plan: "chatgpt_plus", interval: "monthly", return_url: "https://chatgpt.com/" },
+        },
+        {
+          url: "/backend-api/checkout",
+          body: { plan_type: "chatgpt_plus_monthly", return_url: "https://chatgpt.com/" },
+        },
       ];
-      for (const ep of endpoints) {
+
+      for (const ep of checkoutEndpoints) {
         try {
           const resp = await fetch(ep.url, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders,
             body: JSON.stringify(ep.body),
             credentials: "include",
           });
-          if (resp.ok) {
-            const data = await resp.json() as any;
-            const url = data?.url || data?.checkout_url || data?.redirect_url || data?.session_url;
-            if (url && (url.includes("checkout") || url.includes("stripe"))) return url;
+          const text = await resp.text();
+          let data: any = {};
+          try { data = JSON.parse(text); } catch { /* raw */ }
+          const url = data?.url || data?.checkout_url || data?.redirect_url || data?.session_url || data?.stripe_url;
+          if (url && (url.includes("checkout") || url.includes("stripe"))) return url;
+          // Also log for debug
+          if (!resp.ok || true) {
+            (window as any).__checkoutLog = (window as any).__checkoutLog ?? [];
+            (window as any).__checkoutLog.push({ ep: ep.url, status: resp.status, preview: text.slice(0, 200) });
           }
         } catch { /* skip */ }
       }
       return null;
     }).catch(() => null);
-    if (checkoutUrl) log(`[ChatGPT/Plus] API checkout URL: ${checkoutUrl.slice(0, 100)}`);
-  } catch { /* ignore */ }
+
+    // Retrieve debug log from page
+    const checkoutLog = await page.evaluate(() => (window as any).__checkoutLog ?? []).catch(() => []);
+    if (checkoutLog.length > 0) log(`[ChatGPT/Plus] API attempts: ${JSON.stringify(checkoutLog)}`);
+    if (checkoutUrl) log(`[ChatGPT/Plus] API checkout URL: ${checkoutUrl.slice(0, 120)}`);
+  } catch (e: any) { log(`[ChatGPT/Plus] API checkout error: ${e.message}`); }
 
   if (checkoutUrl) {
     // Navigate to the API-provided checkout URL
@@ -300,7 +357,25 @@ export async function subscribePlusWithUPI(opts: {
     await sleep(4000);
     log(`[ChatGPT/Plus] Checkout page URL: ${page.url()}`);
   } else {
-    // D2: Fallback — navigate to explore/plus and handle redirect
+    // D1.5: Click the claim button and intercept the resulting backend-api call
+    log("[ChatGPT/Plus] D1 API call found no URL — clicking claim button to capture network…");
+    await claimBtn.click({ force: true }).catch(async () => {
+      await claimBtn.evaluate((el: Element) => (el as HTMLElement).click());
+    });
+    await sleep(6000); // Allow XHR to complete
+    if (capturedApiCalls.length > 0) {
+      log(`[ChatGPT/Plus] Intercepted API calls: ${JSON.stringify(capturedApiCalls.map(c => ({ url: c.url, status: c.status, body: c.bodyPreview.slice(0, 150) })))}`);
+    }
+    if (capturedCheckoutUrl) {
+      log(`[ChatGPT/Plus] Captured checkout URL via interception: ${capturedCheckoutUrl.slice(0, 120)}`);
+      await page.unroute("**/backend-api/**").catch(() => {});
+      await page.goto(capturedCheckoutUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await sleep(4000);
+      log(`[ChatGPT/Plus] Checkout page URL: ${page.url()}`);
+    } else if (isCheckout(page.url())) {
+      log(`[ChatGPT/Plus] Claim button navigated directly to checkout: ${page.url()}`);
+    } else {
+      // D2: Fallback — navigate to explore/plus and handle redirect
     const btnHref = await claimBtn.evaluate((el: Element) => (el as HTMLAnchorElement).href ?? "").catch(() => "");
     const exploreUrl = btnHref || "https://chatgpt.com/explore/plus";
     log(`[ChatGPT/Plus] API checkout failed — navigating to ${exploreUrl}…`);
@@ -346,19 +421,61 @@ export async function subscribePlusWithUPI(opts: {
         'button:has-text("Get Plus")',
         'button:has-text("Upgrade")',
       ];
+      // Helper: check if a Stripe payment form is now embedded in the page
+      const stripeFrameVisible = async (): Promise<boolean> => {
+        const frames = page.frames();
+        return frames.some((f: any) => {
+          const u = f.url();
+          return u.includes("stripe.com") || u.includes("js.stripe.com") || u.includes("stripe-js");
+        }) || await page.evaluate(() =>
+          !!document.querySelector('iframe[src*="stripe"], [data-stripe], #modal-account-payment iframe, #modal-account-payment [class*="stripe"]')
+        ).catch(() => false);
+      };
+
       const claimOfferBtn = await findInPageOrFrames(page, claimOfferSelectors, 8000);
       if (claimOfferBtn) {
         const claimText = await claimOfferBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
         log(`[ChatGPT/Plus] Found offer button: "${claimText}" — clicking…`);
         // Use force:true to bypass any overlay interception (modal-account-payment covers viewport)
         await claimOfferBtn.click({ force: true }).catch(async () => {
-          // Fallback: JS click
           await claimOfferBtn.evaluate((el: Element) => (el as HTMLElement).click());
         });
         await sleep(5000);
-        log(`[ChatGPT/Plus] After claim click URL: ${page.url()}`);
+        const afterClickUrl = page.url();
+        log(`[ChatGPT/Plus] After claim click URL: ${afterClickUrl}`);
+
+        // If URL didn't change to checkout, look for embedded Stripe modal
+        if (!isCheckout(afterClickUrl)) {
+          const hasStripe = await stripeFrameVisible();
+          if (hasStripe) {
+            log("[ChatGPT/Plus] Stripe embedded modal detected — skipping URL check, proceeding to UPI…");
+            // Unroute, clean up, and jump straight to UPI selection
+            await page.unroute("**/backend-api/**").catch(() => {});
+            await sleep(2000);
+            // Goto E-G handling below — break out of D2
+            // We fall through to the UPI section by not throwing
+          } else {
+            // Claim offer button might open a nested modal — look for inner pricing modal button
+            log("[ChatGPT/Plus] No Stripe frame after click — looking for modal inner button…");
+            const innerBtn = await findInPageOrFrames(page, [
+              '#modal-account-payment button:has-text("Continue")',
+              '#modal-account-payment button:has-text("Claim")',
+              '#modal-account-payment button:has-text("Subscribe")',
+              '#modal-account-payment button:has-text("Get Plus")',
+            ], 5000);
+            if (innerBtn) {
+              const innerText = await innerBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
+              log(`[ChatGPT/Plus] Found modal inner button: "${innerText}" — clicking…`);
+              await innerBtn.click({ force: true }).catch(async () => {
+                await innerBtn.evaluate((el: Element) => (el as HTMLElement).click());
+              });
+              await sleep(5000);
+              log(`[ChatGPT/Plus] After inner button URL: ${page.url()}`);
+            }
+          }
+        }
       } else {
-        // Try href-based buttons
+        // No claim button — try href-based buttons
         const homeCheckoutBtns = await page.evaluate(() =>
           [...document.querySelectorAll("button, a[href]")]
             .map((b: any) => ({ text: b.textContent?.trim().toLowerCase(), href: b.href ?? "" }))
@@ -377,7 +494,14 @@ export async function subscribePlusWithUPI(opts: {
       }
     }
 
-    if (!isCheckout(page.url())) {
+    // Only wait for URL if we didn't detect an embedded Stripe modal
+    const hasStripeNow = await (async () => {
+      const frames = page.frames();
+      return frames.some((f: any) => f.url().includes("stripe.com")) ||
+        await page.evaluate(() => !!document.querySelector('iframe[src*="stripe"], #modal-account-payment iframe')).catch(() => false);
+    })();
+
+    if (!isCheckout(page.url()) && !hasStripeNow) {
       await page.waitForURL((url: URL) => isCheckout(url.toString()), { timeout: 20_000 }).catch(async () => {
         const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
         await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
@@ -385,9 +509,13 @@ export async function subscribePlusWithUPI(opts: {
         );
         throw new Error(`Checkout not reached — current URL: ${page.url()}`);
       });
+    } else if (hasStripeNow) {
+      log("[ChatGPT/Plus] Stripe embedded payment form active — proceeding to UPI selection…");
     }
-  }
-  log(`[ChatGPT/Plus] Checkout: ${page.url()}`);
+    } // end D2 fallback else
+  } // end D1.5 else
+  await page.unroute("**/backend-api/**").catch(() => {});
+  log(`[ChatGPT/Plus] Checkout page ready — URL: ${page.url()}`);
   await sleep(4000);
 
   // E: Select UPI payment method
