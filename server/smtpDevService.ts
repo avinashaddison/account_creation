@@ -118,6 +118,18 @@ export async function deleteAccount(accountId: string): Promise<void> {
   await call("DELETE", `/accounts/${encodeURIComponent(accountId)}`);
 }
 
+export async function setAccountPassword(accountId: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${SMTP_DEV_BASE}/accounts/${encodeURIComponent(accountId)}`, {
+    method: "PATCH",
+    headers: { "X-API-KEY": apiKey(), "Content-Type": "application/merge-patch+json" },
+    body: JSON.stringify({ password: newPassword }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`smtp.dev PATCH /accounts/${accountId} → ${res.status}: ${text.slice(0, 200)}`);
+  }
+}
+
 function parseFrom(raw: any): string {
   if (!raw) return "unknown";
   if (typeof raw === "string") return raw;

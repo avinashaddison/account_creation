@@ -840,52 +840,70 @@ export async function batchCreateChatGPTAccounts(opts: {
 }): Promise<{ total: number; succeeded: number; failed: number; results: ChatGPTResult[] }> {
   const { count, subscribeAfter = false, adminTelegramId, log = console.log } = opts;
 
-  const { createAccount: smtpCreateAccount } = await import("./smtpDevService");
-  const DOMAIN = "addison.asia";
+  const { pickAvailableBizAccounts, setAccountPassword } = await import("./smtpDevService");
+  const { db } = await import("./db");
+  const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
 
-  log(`[ChatGPT/Batch] Creating ${count} smtp.dev email account(s) on-demand…`);
+  // Build set of already-used addresses: all biz_mail + successful chatgpt accounts
+  const [bizRows, cgRows] = await Promise.all([
+    db.select({ email: bizMailAccounts.email }).from(bizMailAccounts),
+    db.select({ email: chatgptAccounts.email }).from(chatgptAccounts).where(eq(chatgptAccounts.status, "created")),
+  ]);
+  const usedAddresses = new Set([
+    ...bizRows.map((r: any) => r.email.toLowerCase()),
+    ...cgRows.map((r: any) => r.email.toLowerCase()),
+  ]);
+
+  log(`[ChatGPT/Batch] Picking ${count} account(s) from smtp.dev pool (${usedAddresses.size} addresses already used)…`);
+
+  const picked = await pickAvailableBizAccounts(usedAddresses, count);
+  if (picked.length === 0) {
+    log(`[ChatGPT/Batch] No available accounts found in smtp.dev pool`);
+    return { total: 0, succeeded: 0, failed: 0, results: [] };
+  }
+  if (picked.length < count) {
+    log(`[ChatGPT/Batch] Only ${picked.length} of ${count} requested accounts available in pool`);
+  }
+
   const results: ChatGPTResult[] = [];
   let succeeded = 0, failed = 0;
+  const adminId = adminTelegramId ? Number(adminTelegramId) : undefined;
 
-  for (let i = 0; i < count; i++) {
-    // Generate a unique email address for this run
-    const rand1 = Math.floor(Math.random() * 9_000_000_000) + 1_000_000_000;
-    const rand2 = Math.floor(Math.random() * 100_000) + 10_000;
-    const username = `user${rand1}m${rand2}`;
-    const email = `${username}@${DOMAIN}`;
+  for (let i = 0; i < picked.length; i++) {
+    const acct = picked[i];
+    const email = acct.address;
     const mailPwd = generatePassword();
 
-    log(`[ChatGPT/Batch] [${i + 1}/${count}] Creating smtp.dev account: ${email}`);
+    log(`[ChatGPT/Batch] [${i + 1}/${picked.length}] ${email} — setting password & registering…`);
 
-    let smtpDevId: string;
+    // Set a fresh known password on the existing smtp.dev account
     try {
-      const { account } = await smtpCreateAccount(email, mailPwd);
-      smtpDevId = account.id;
-      log(`[ChatGPT/Batch] smtp.dev account created — id: ${smtpDevId}`);
+      await setAccountPassword(acct.id, mailPwd);
+      log(`[ChatGPT/Batch] Password set for ${email}`);
     } catch (e: any) {
-      log(`[ChatGPT/Batch] Failed to create smtp.dev account for ${email}: ${e.message}`);
+      log(`[ChatGPT/Batch] Failed to set password for ${email}: ${e.message}`);
       failed++;
-      results.push({ success: false, email, error: `smtp.dev create failed: ${e.message}` });
-      await sleep(3_000);
+      results.push({ success: false, email, error: `smtp.dev password set failed: ${e.message}` });
+      await sleep(2_000);
       continue;
     }
 
     // Save to biz_mail_accounts and auto-allocate to admin
-    const adminId = adminTelegramId ? Number(adminTelegramId) : undefined;
     try {
       await storage.registerBizMailAccount(null, email, mailPwd, {
-        smtpAccountId: smtpDevId,
+        smtpAccountId: acct.id,
         allocatedTo: adminId,
       });
       log(`[ChatGPT/Batch] Saved & allocated ${email} to admin ${adminId}`);
     } catch (e: any) {
       log(`[ChatGPT/Batch] DB save warning for ${email}: ${e.message}`);
-      // Non-fatal — continue with account creation
+      // Non-fatal — continue
     }
 
     const r = await createChatGPTAccount({
       email,
-      smtpDevId,
+      smtpDevId: acct.id,
       mailPassword: mailPwd,
       subscribeAfter,
       adminTelegramId,
@@ -893,11 +911,11 @@ export async function batchCreateChatGPTAccounts(opts: {
     });
     results.push(r);
     if (r.success) succeeded++; else failed++;
-    if (i < count - 1) await sleep(5_000);
+    if (i < picked.length - 1) await sleep(5_000);
   }
 
   log(`[ChatGPT/Batch] Done — ${succeeded} succeeded, ${failed} failed`);
-  return { total: count, succeeded, failed, results };
+  return { total: picked.length, succeeded, failed, results };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

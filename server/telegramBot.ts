@@ -3945,7 +3945,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.reply(
       `🤖  <b>REGISTER CHATGPT ACCOUNTS</b>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `A fresh <b>@addison.asia</b> email will be created via smtp.dev for each account and allocated to you.\n\n` +
+      `An existing <b>@addison.asia</b> email from the smtp.dev pool will be selected and allocated to you for each account.\n\n` +
       `How many ChatGPT accounts do you want to create?\n\n` +
       `<i>Enter a number between 1 and 10:</i>`,
       { parse_mode: "HTML" }
