@@ -3941,50 +3941,13 @@ export function startTelegramBot(config: BotConfig) {
   bot.action("shop_admin_chatgpt_reg", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     const uid = ctx.from.id;
-
-    // Count available (unregistered) biz mail accounts
-    const { db }             = await import("./db");
-    const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
-    const { isNull, isNotNull, notInArray, and } = await import("drizzle-orm");
-
-    const registered  = await db.select({ email: chatgptAccounts.email }).from(chatgptAccounts);
-    const regEmails   = registered.map((r: any) => r.email);
-    let available: any[];
-    if (regEmails.length > 0) {
-      available = await db.select({ email: bizMailAccounts.email })
-        .from(bizMailAccounts)
-        .where(and(
-          isNull(bizMailAccounts.deletedAt),
-          isNotNull(bizMailAccounts.smtpAccountId),
-          notInArray(bizMailAccounts.email, regEmails)
-        ));
-    } else {
-      available = await db.select({ email: bizMailAccounts.email })
-        .from(bizMailAccounts)
-        .where(and(
-          isNull(bizMailAccounts.deletedAt),
-          isNotNull(bizMailAccounts.smtpAccountId)
-        ));
-    }
-    const avail = available.length;
-
-    if (avail === 0) {
-      return ctx.reply(
-        `🤖  <b>REGISTER CHATGPT ACCOUNTS</b>\n\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `❌  No unregistered business mail accounts available.\n\n` +
-        `All biz mail accounts already have a ChatGPT account, or there are no active biz mail accounts.`,
-        { parse_mode: "HTML" }
-      );
-    }
-
     getState(uid).awaitingText = "chatgpt_count";
     await ctx.reply(
       `🤖  <b>REGISTER CHATGPT ACCOUNTS</b>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `<b>${avail}</b> unregistered business mail account${avail !== 1 ? "s" : ""} available.\n\n` +
+      `A fresh <b>@addison.asia</b> email will be created via smtp.dev for each account and allocated to you.\n\n` +
       `How many ChatGPT accounts do you want to create?\n\n` +
-      `<i>Enter a number between 1 and ${Math.min(avail, 10)}:</i>`,
+      `<i>Enter a number between 1 and 10:</i>`,
       { parse_mode: "HTML" }
     );
   });

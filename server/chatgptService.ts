@@ -840,67 +840,64 @@ export async function batchCreateChatGPTAccounts(opts: {
 }): Promise<{ total: number; succeeded: number; failed: number; results: ChatGPTResult[] }> {
   const { count, subscribeAfter = false, adminTelegramId, log = console.log } = opts;
 
-  const { db } = await import("./db");
-  const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
-  const { isNull, isNotNull, notInArray, and, eq } = await import("drizzle-orm");
+  const { createAccount: smtpCreateAccount } = await import("./smtpDevService");
+  const DOMAIN = "addison.asia";
 
-  // Only exclude accounts that were SUCCESSFULLY created — failed accounts are retried
-  const successful = await db.select({ email: chatgptAccounts.email })
-    .from(chatgptAccounts)
-    .where(eq(chatgptAccounts.status, "created"));
-  const doneEmails = successful.map(r => r.email);
-
-  let candidates: any[];
-  if (doneEmails.length > 0) {
-    candidates = await db.select()
-      .from(bizMailAccounts)
-      .where(and(
-        isNull(bizMailAccounts.deletedAt),
-        isNotNull(bizMailAccounts.smtpAccountId),
-        notInArray(bizMailAccounts.email, doneEmails)
-      ))
-      .limit(count);
-  } else {
-    candidates = await db.select()
-      .from(bizMailAccounts)
-      .where(and(
-        isNull(bizMailAccounts.deletedAt),
-        isNotNull(bizMailAccounts.smtpAccountId)
-      ))
-      .limit(count);
-  }
-
-  if (candidates.length === 0) {
-    log(`[ChatGPT/Batch] No unregistered biz mail accounts available`);
-    return { total: 0, succeeded: 0, failed: 0, results: [] };
-  }
-
-  log(`[ChatGPT/Batch] Starting ${candidates.length} account registration(s)…`);
+  log(`[ChatGPT/Batch] Creating ${count} smtp.dev email account(s) on-demand…`);
   const results: ChatGPTResult[] = [];
   let succeeded = 0, failed = 0;
 
-  for (const acct of candidates) {
-    if (!acct.smtpAccountId) {
-      log(`[ChatGPT/Batch] Skipping ${acct.email} — no smtp_dev_id`);
+  for (let i = 0; i < count; i++) {
+    // Generate a unique email address for this run
+    const rand1 = Math.floor(Math.random() * 9_000_000_000) + 1_000_000_000;
+    const rand2 = Math.floor(Math.random() * 100_000) + 10_000;
+    const username = `user${rand1}m${rand2}`;
+    const email = `${username}@${DOMAIN}`;
+    const mailPwd = generatePassword();
+
+    log(`[ChatGPT/Batch] [${i + 1}/${count}] Creating smtp.dev account: ${email}`);
+
+    let smtpDevId: string;
+    try {
+      const { account } = await smtpCreateAccount(email, mailPwd);
+      smtpDevId = account.id;
+      log(`[ChatGPT/Batch] smtp.dev account created — id: ${smtpDevId}`);
+    } catch (e: any) {
+      log(`[ChatGPT/Batch] Failed to create smtp.dev account for ${email}: ${e.message}`);
       failed++;
-      results.push({ success: false, email: acct.email, error: "No smtp_dev_id" });
+      results.push({ success: false, email, error: `smtp.dev create failed: ${e.message}` });
+      await sleep(3_000);
       continue;
     }
+
+    // Save to biz_mail_accounts and auto-allocate to admin
+    const adminId = adminTelegramId ? Number(adminTelegramId) : undefined;
+    try {
+      await storage.registerBizMailAccount(null, email, mailPwd, {
+        smtpAccountId: smtpDevId,
+        allocatedTo: adminId,
+      });
+      log(`[ChatGPT/Batch] Saved & allocated ${email} to admin ${adminId}`);
+    } catch (e: any) {
+      log(`[ChatGPT/Batch] DB save warning for ${email}: ${e.message}`);
+      // Non-fatal — continue with account creation
+    }
+
     const r = await createChatGPTAccount({
-      email: acct.email,
-      smtpDevId: acct.smtpAccountId,
-      mailPassword: acct.password,
+      email,
+      smtpDevId,
+      mailPassword: mailPwd,
       subscribeAfter,
       adminTelegramId,
       log,
     });
     results.push(r);
     if (r.success) succeeded++; else failed++;
-    await sleep(5_000);
+    if (i < count - 1) await sleep(5_000);
   }
 
   log(`[ChatGPT/Batch] Done — ${succeeded} succeeded, ${failed} failed`);
-  return { total: candidates.length, succeeded, failed, results };
+  return { total: count, succeeded, failed, results };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
