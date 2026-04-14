@@ -61,13 +61,22 @@ export async function createChatGPTAccount(opts: {
   let browser: any;
 
   try {
+    // Use non-headless if DISPLAY is set (xvfb-run), otherwise headless
+    const hasDisplay = !!process.env.DISPLAY;
     browser = await chromium.launch({
-      headless: true,
+      headless: !hasDisplay,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        "--window-size=1280,800",
+        "--lang=en-US",
+        // WebGL spoofing args to appear as a real GPU browser
+        "--use-gl=swiftshader",
+        "--enable-webgl",
+        "--enable-webgl2",
       ],
     });
 
@@ -77,28 +86,144 @@ export async function createChatGPTAccount(opts: {
       viewport: { width: 1280, height: 800 },
       extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
     });
+
+    // Comprehensive stealth: mask all bot-detection signals including WebGL, canvas, screen
+    await context.addInitScript(() => {
+      // 1. Navigator signals
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+      Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+      Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+
+      // 2. Chrome runtime
+      (window as any).chrome = {
+        runtime: { id: "chrome-extension", onMessage: { addListener: () => {} } },
+        loadTimes: () => ({}),
+        csi: () => ({}),
+        app: { isInstalled: false },
+      };
+
+      // 3. Permissions
+      const originalQuery = window.navigator.permissions?.query;
+      if (originalQuery) {
+        Object.defineProperty(navigator, "permissions", {
+          get: () => ({
+            query: (p: any) => p.name === "notifications"
+              ? Promise.resolve({ state: "prompt" } as PermissionStatus)
+              : originalQuery.call(navigator.permissions, p),
+          }),
+        });
+      }
+
+      // 4. WebGL vendor/renderer masking (prevents SwiftShader detection)
+      const origGetParam = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+        if (parameter === 37445) return "Intel Inc.";          // UNMASKED_VENDOR_WEBGL
+        if (parameter === 37446) return "Intel Iris OpenGL Engine"; // UNMASKED_RENDERER_WEBGL
+        return origGetParam.call(this, parameter);
+      };
+      if (typeof WebGL2RenderingContext !== "undefined") {
+        const origGet2 = WebGL2RenderingContext.prototype.getParameter;
+        WebGL2RenderingContext.prototype.getParameter = function(parameter: number) {
+          if (parameter === 37445) return "Intel Inc.";
+          if (parameter === 37446) return "Intel Iris OpenGL Engine";
+          return origGet2.call(this, parameter);
+        };
+      }
+
+      // 5. Screen properties (match viewport)
+      Object.defineProperty(screen, "width", { get: () => 1280 });
+      Object.defineProperty(screen, "height", { get: () => 800 });
+      Object.defineProperty(screen, "availWidth", { get: () => 1280 });
+      Object.defineProperty(screen, "availHeight", { get: () => 800 });
+      Object.defineProperty(screen, "colorDepth", { get: () => 24 });
+      Object.defineProperty(screen, "pixelDepth", { get: () => 24 });
+
+      // 6. Window outer dimensions
+      Object.defineProperty(window, "outerWidth", { get: () => 1280 });
+      Object.defineProperty(window, "outerHeight", { get: () => 800 });
+
+      // 7. Remove cdc_ properties (Playwright/Selenium automation markers)
+      // @ts-ignore
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      // @ts-ignore
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      // @ts-ignore
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    });
+
     const page = await context.newPage();
 
     // Pre-snapshot inbox so we only read new messages later
     const existingMsgs = await getFullInbox(smtpDevId).catch(() => [] as any[]);
     const existingIds  = new Set((existingMsgs as any[]).map((m: any) => m.id));
 
-    // ── Step 1: chatgpt.com ──────────────────────────────────────────────────
+    // ── Step 1: Open chatgpt.com and click "Sign up" ─────────────────────────
     log(`[ChatGPT] Opening chatgpt.com…`);
     await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await sleep(4000);
 
-    // ── Step 2: Click "Sign up for free" via JS (bypasses actionability issues)
-    log(`[ChatGPT] Clicking Sign up for free…`);
-    const signupClicked = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll("button")].find(b =>
-        b.textContent?.trim().toLowerCase().includes("sign up")
-      );
+    // Wait for Cloudflare "Just a moment..." to pass (up to 30s)
+    const title1 = await page.title();
+    if (title1 === "Just a moment..." || title1 === "") {
+      log(`[ChatGPT] CF challenge detected — waiting up to 30s…`);
+      await page.waitForFunction(
+        () => document.title !== "Just a moment..." && document.title !== "",
+        { timeout: 30_000 }
+      ).catch(() => log("[ChatGPT] CF still present after 30s"));
+    }
+    await sleep(3000);
+
+    // ── Step 2: Click "Sign up for free" (via JS to bypass actionability issues)
+    log(`[ChatGPT] Looking for Sign up button…`);
+    const signupTexts = ["sign up", "get started", "start for free", "try chatgpt", "create account"];
+    const signupClicked = await page.evaluate((texts: string[]) => {
+      const btn = [...document.querySelectorAll("button, a")].find(b => {
+        const t = b.textContent?.trim().toLowerCase() ?? "";
+        return texts.some(x => t.includes(x));
+      });
       if (btn) { (btn as HTMLElement).click(); return true; }
       return false;
+    }, signupTexts);
+
+    if (!signupClicked) {
+      const pageTitle = await page.title();
+      const pageText = (await page.evaluate(() => document.body.innerText?.slice(0, 200) ?? "")).replace(/\n+/g," ").trim();
+      log(`[ChatGPT] chatgpt.com title: "${pageTitle}" | text: ${pageText.slice(0,80)}`);
+      // Wait a bit more and retry
+      await sleep(4000);
+      await page.evaluate((texts: string[]) => {
+        const btn = [...document.querySelectorAll("button, a")].find(b =>
+          texts.some(x => (b.textContent?.trim().toLowerCase() ?? "").includes(x))
+        );
+        if (btn) (btn as HTMLElement).click();
+      }, signupTexts);
+    }
+    await sleep(4000);
+    await solveTurnstileIfPresent(page, log);
+    await sleep(1500);
+
+    // ── Step 2b: Wait for email input — either in a modal or on auth page ────
+    // chatgpt.com now shows an in-page modal with email input after clicking Sign Up
+    log(`[ChatGPT] Waiting for email input (modal or auth page)…`);
+    await page.waitForSelector(
+      'input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="email" i]',
+      { timeout: 25_000 }
+    ).catch(async () => {
+      log("[ChatGPT] Email not in modal after 25s — trying direct auth URL…");
+      const DIRECT_URL =
+        "https://auth.openai.com/authorize" +
+        "?client_id=app_X8zY6vW2pQ9tR3dE7nK1jL5gH" +
+        "&scope=openid%20email%20profile%20offline_access%20model.request%20model.read%20organization.read%20organization.write" +
+        "&response_type=code" +
+        "&redirect_uri=https%3A%2F%2Fchatgpt.com%2Fapi%2Fauth%2Fcallback%2Fopenai" +
+        "&audience=https%3A%2F%2Fapi.openai.com%2Fv1" +
+        "&screen_hint=signup";
+      await page.goto(DIRECT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await sleep(8000);
+      log(`[ChatGPT] Direct URL — now at: ${new URL(page.url()).hostname}`);
     });
-    if (!signupClicked) throw new Error("Sign up button not found on chatgpt.com");
-    await sleep(3000);
 
     // ── Step 3: Fill email ───────────────────────────────────────────────────
     log(`[ChatGPT] Entering email: ${email}`);
@@ -114,13 +239,70 @@ export async function createChatGPTAccount(opts: {
 
     const continueClicked = await jsClick(page, "Continue");
     if (!continueClicked) await emailInput.press("Enter");
-    log(`[ChatGPT] Email submitted — waiting…`);
+    log(`[ChatGPT] Email submitted — waiting for navigation…`);
+
+    // Wait for page to load after email submission (navigation may happen)
+    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
     await sleep(3000);
 
     // ── Step 4: Set account password ────────────────────────────────────────
-    const urlAfterEmail = page.url();
-    const contentAfterEmail = await page.evaluate(() => document.body.innerText?.slice(0, 300) ?? "");
+    let urlAfterEmail = page.url();
+    let contentAfterEmail = await page.evaluate(() => document.body?.innerText?.slice(0, 300) ?? "").catch(() => "");
     log(`[ChatGPT] URL: ${urlAfterEmail}`);
+
+    // NEW OpenAI flow: combined login_or_signup authorize page — re-submit email there
+    if (urlAfterEmail.includes("api/accounts/authorize") && urlAfterEmail.includes("login_or_signup")) {
+      log(`[ChatGPT] Combined auth page detected`);
+      // Log page content for diagnosis
+      const authContent = await page.evaluate(() => document.body.innerText?.slice(0, 400) ?? "");
+      log(`[ChatGPT] Auth page content: ${authContent.replace(/\n+/g, " ").trim()}`);
+
+      // If Cloudflare bot verification is blocking, wait for it to auto-resolve
+      if (/security verification|just a moment|checking your browser|verif/i.test(authContent)) {
+        log(`[ChatGPT] CF bot check on auth.openai.com — waiting for auto-resolve (up to 30s)…`);
+        await page.waitForFunction(
+          () => !/security verification|just a moment|checking your browser/i.test(document.body.innerText ?? ""),
+          { timeout: 30_000 }
+        ).catch(() => log("[ChatGPT] CF bot check still present after 30s"));
+        await sleep(3000);
+        const resolvedContent = await page.evaluate(() => document.body.innerText?.slice(0, 200) ?? "");
+        log(`[ChatGPT] Post-CF content: ${resolvedContent.replace(/\n+/g, " ").trim()}`);
+      }
+
+      // Solve Turnstile if still present
+      await solveTurnstileIfPresent(page, log);
+      await sleep(1500);
+
+      // Try to find email input on this page
+      const authEmailInput = await page.$('input[name="email"], input[type="email"], input[id*="email"]');
+      log(`[ChatGPT] Email input found on auth page: ${!!authEmailInput}`);
+      if (authEmailInput) {
+        await authEmailInput.click();
+        await page.keyboard.press("Control+a");
+        await authEmailInput.fill(email);
+        await sleep(500);
+      }
+
+      // Click "Continue" or "Sign up" button
+      const cont2 = await jsClick(page, "Continue");
+      log(`[ChatGPT] Auth-page Continue clicked: ${cont2}`);
+      if (!cont2) {
+        const signupBtn = await page.evaluate(() => {
+          const btn = [...document.querySelectorAll("button, a")].find(b => {
+            const t = b.textContent?.trim().toLowerCase() ?? "";
+            return t.includes("sign up") || t.includes("create account");
+          });
+          if (btn) { (btn as HTMLElement).click(); return true; }
+          return false;
+        });
+        log(`[ChatGPT] Auth-page Sign up clicked: ${signupBtn}`);
+      }
+      log(`[ChatGPT] Auth-page submitted — waiting…`);
+      await sleep(4000);
+      urlAfterEmail = page.url();
+      contentAfterEmail = await page.evaluate(() => document.body.innerText?.slice(0, 300) ?? "");
+      log(`[ChatGPT] Post-auth-submit URL: ${urlAfterEmail}`);
+    }
 
     const isPasswordPage = urlAfterEmail.includes("password") ||
       /create.*password|set.*password|password.*log in/i.test(contentAfterEmail);
@@ -194,32 +376,117 @@ export async function createChatGPTAccount(opts: {
       log(`[ChatGPT] No email verification step — continuing…`);
     }
 
-    // ── Step 6: Name / age (if present) ─────────────────────────────────────
-    log(`[ChatGPT] Checking for name/age step…`);
+    // ── Step 6: about-you page — Full name + Age ────────────────────────────
+    // Actual OpenAI fields: input[name="name"] + input[name="age"] (type=number)
+    // The hidden "birthday" field is computed automatically from age.
+    log(`[ChatGPT] Waiting for about-you form…`);
     const nameInput = await page.waitForSelector(
-      'input[name="full_name"], input[name="name"], input[placeholder*="name" i]',
-      { timeout: 15_000 }
+      'input[name="name"], input[placeholder="Full name"], input[name="full_name"], input[placeholder*="name" i]',
+      { timeout: 20_000 }
     ).catch(() => null);
 
     if (nameInput) {
-      log(`[ChatGPT] Name/age step — filling ${first} ${last}, age ${age}`);
-      await nameInput.fill(`${first} ${last}`);
+      const fullName = `${first} ${last}`;
+      log(`[ChatGPT] Filling about-you — ${fullName}, age ${age}`);
+
+      // Keyboard typing is the most reliable for React controlled inputs
+      await nameInput.click({ clickCount: 3 }); // triple-click selects all
+      await page.keyboard.press("Delete");
+      await page.keyboard.type(fullName, { delay: 40 });
+      await sleep(300);
+
+      // Age field — keyboard type approach (label may intercept clicks)
       const ageInput = await page.waitForSelector(
-        'input[name="age"], input[placeholder*="age" i]',
-        { timeout: 8_000 }
+        'input[name="age"], input[placeholder="Age"], input[placeholder*="age" i]',
+        { timeout: 5_000 }
       ).catch(() => null);
-      if (ageInput) await ageInput.fill(age);
-      await page.click('button:has-text("Finish creating account")').catch(() =>
-        page.click('button[type="submit"]')
-      );
-      log(`[ChatGPT] Name/age submitted`);
+
+      if (ageInput) {
+        try {
+          await ageInput.click({ position: { x: 5, y: 5 }, timeout: 5000 });
+        } catch {
+          await ageInput.scrollIntoViewIfNeeded();
+          await page.evaluate(() => {
+            (document.querySelector<HTMLInputElement>('input[name="age"]'))?.focus();
+          });
+        }
+        await sleep(200);
+        await page.keyboard.press("Control+a");
+        await page.keyboard.press("Delete");
+        await page.keyboard.type(age, { delay: 50 });
+        await page.keyboard.press("Tab"); // blur triggers React state update
+        await sleep(400);
+        const ageVal = await ageInput.evaluate(el => (el as HTMLInputElement).value).catch(() => "?");
+        log(`[ChatGPT] Age set: ${ageVal}`);
+      } else {
+        // Birthday selects fallback
+        const selects = await page.$$("select");
+        if (selects.length >= 3) {
+          log(`[ChatGPT] Using birthday selects`);
+          const birthYear = new Date().getFullYear() - parseInt(age);
+          await selects[0].selectOption({ index: 1 }).catch(() => {});
+          await selects[1].selectOption({ index: 1 }).catch(() => {});
+          await selects[2].selectOption({ value: String(birthYear) }).catch(() => {});
+          await sleep(400);
+        } else {
+          log(`[ChatGPT] No age field found`);
+        }
+      }
+
+      // Solve any Turnstile before submitting
+      await solveTurnstileIfPresent(page, log);
+      await sleep(500);
+
+      // Check and click any required checkboxes (ToS)
+      await page.evaluate(() => {
+        [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].forEach(cb => {
+          if (!cb.checked) cb.click();
+        });
+      }).catch(() => {});
+
+      // Click submit button — try all known text variants
+      const submitTexts = ["Finish creating account", "Continue", "Agree", "Next", "Create account", "Done"];
+      let clickedText: string | null = null;
+      for (const text of submitTexts) {
+        const btn = page.locator(`button`).filter({ hasText: text }).first();
+        if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await btn.scrollIntoViewIfNeeded().catch(() => {});
+          await btn.click({ timeout: 5000 }).catch(() => {});
+          clickedText = text;
+          log(`[ChatGPT] About-you submit: "${text}"`);
+          break;
+        }
+      }
+      if (!clickedText) {
+        const formSubmitted = await page.evaluate(() => {
+          const form = document.querySelector("form");
+          if (form) { form.requestSubmit(); return true; }
+          return false;
+        }).catch(() => false);
+        log(`[ChatGPT] About-you requestSubmit: ${formSubmitted}`);
+      }
+
+      // Wait for navigation away from about-you
       await sleep(3000);
+      await solveTurnstileIfPresent(page, log);
+      await sleep(1000);
+
+      try {
+        await page.waitForURL((url) => !url.includes("about-you"), { timeout: 20_000 });
+        log(`[ChatGPT] Advanced past about-you`);
+      } catch {
+        const stuckUrl = page.url();
+        if (stuckUrl.includes("about-you")) {
+          throw new Error("about-you form did not advance — check age/name validation");
+        }
+      }
+      await sleep(2000);
     } else {
-      log(`[ChatGPT] No name/age step`);
+      log(`[ChatGPT] No about-you step`);
     }
 
     // ── Step 7: Skip optional onboarding ────────────────────────────────────
-    for (const skipText of ["Skip for now", "Skip", "Maybe later"]) {
+    for (const skipText of ["Skip for now", "Skip", "Maybe later", "Done"]) {
       const skipBtn = page.locator(`button:has-text("${skipText}")`).first();
       if (await skipBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
         await skipBtn.click().catch(() => {});
@@ -228,11 +495,19 @@ export async function createChatGPTAccount(opts: {
       }
     }
 
-    // ── Step 8: Verify logged in ─────────────────────────────────────────────
+    // ── Step 8: Verify fully landed on chatgpt.com ───────────────────────────
+    // Must start with chatgpt.com — "includes" would false-positive on redirect_uri params
+    try {
+      await page.waitForURL((url) => url.startsWith("https://chatgpt.com"), { timeout: 15_000 });
+    } catch { /* will check URL below */ }
+
     const finalUrl = page.url();
     log(`[ChatGPT] Final URL: ${finalUrl}`);
-    const isSuccess = finalUrl.includes("chatgpt.com") || finalUrl.includes("openai.com");
-    if (!isSuccess) throw new Error(`Unexpected final URL: ${finalUrl}`);
+
+    // Must be on chatgpt.com — NOT still stuck on auth.openai.com
+    if (!finalUrl.startsWith("https://chatgpt.com")) {
+      throw new Error(`Account not fully set up — stuck at: ${finalUrl}`);
+    }
 
     // ── Step 9: Save to DB ───────────────────────────────────────────────────
     await storage.saveChatGptAccount({
@@ -340,17 +615,56 @@ function sleep(ms: number): Promise<void> {
 
 async function solveTurnstileIfPresent(page: any, log: (m: string) => void): Promise<void> {
   try {
-    const frame = page.frames().find((f: any) => f.url().includes("challenges.cloudflare.com"));
-    if (!frame) return;
+    // Detect CF Turnstile either via frame URL or hidden response input
+    const hasTurnstile = page.frames().some((f: any) => f.url().includes("challenges.cloudflare.com"))
+      || await page.evaluate(() => !!document.querySelector('input[name="cf-turnstile-response"]'));
+    if (!hasTurnstile) return;
+
     log(`[ChatGPT] Turnstile detected — solving via Capsolver…`);
-    const token = await solveAntiTurnstile(page.url(), undefined, log);
-    if (token) {
+
+    // Extract siteKey: try DOM element first, then raw HTML, then known fallback
+    let siteKey: string | null = await page.evaluate(() => {
+      const el = document.querySelector('[data-sitekey]');
+      if (el) return el.getAttribute("data-sitekey");
+      const iframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]') as HTMLIFrameElement;
+      if (iframe?.src) {
+        const m = iframe.src.match(/[?&]k=([^&]+)/);
+        if (m) return m[1];
+      }
+      return null;
+    });
+
+    if (!siteKey) {
+      // Try raw HTML extraction (siteKey often embedded before widgets render)
+      const html = await page.content().catch(() => "");
+      const m = html.match(/data-sitekey="([^"]+)"|sitekey['":\s]+['"]([0-9a-zA-Z_-]{20,})['"]/);
+      siteKey = m?.[1] || m?.[2] || null;
+    }
+
+    if (!siteKey) {
+      log(`[ChatGPT] Turnstile siteKey not found — skipping solve`);
+      return;
+    }
+
+    log(`[ChatGPT] Turnstile siteKey: ${siteKey}`);
+    const result = await solveAntiTurnstile(page.url(), siteKey);
+    if (result?.token) {
       await page.evaluate((t: string) => {
+        // Set the hidden input
         const input = document.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement;
         if (input) { input.value = t; input.dispatchEvent(new Event("change", { bubbles: true })); }
+        // Also call global callback if present
         (window as any).turnstileCallback?.(t);
-      }, token);
-      log(`[ChatGPT] Turnstile solved`);
+        (window as any).__CF_challenge_complete?.(t);
+      }, result.token);
+      log(`[ChatGPT] Turnstile solved — submitting form`);
+      // Submit the CF challenge form
+      await page.evaluate(() => {
+        const form = document.querySelector('#challenge-form, form') as HTMLFormElement;
+        if (form) form.submit();
+      });
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await new Promise(r => setTimeout(r, 3000));
     }
   } catch { /* non-fatal */ }
 }
