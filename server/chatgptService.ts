@@ -47,14 +47,233 @@ export interface ChatGPTResult {
   error?: string;
 }
 
+// ── Telegram Bot 2 helpers ────────────────────────────────────────────────────
+async function sendQRToBot2(imageBuffer: Buffer, chatId: number | string, caption: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN_2;
+  if (!token) { console.error("[ChatGPT/Plus] TELEGRAM_BOT_TOKEN_2 not set"); return; }
+  try {
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("caption", caption);
+    form.append("parse_mode", "HTML");
+    form.append("photo", new Blob([imageBuffer], { type: "image/png" }), "chatgpt_qr.png");
+    const resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
+    const json = await resp.json() as any;
+    if (!json.ok) console.error("[ChatGPT/Plus] sendPhoto failed:", JSON.stringify(json));
+  } catch (e: any) { console.error("[ChatGPT/Plus] sendQRToBot2 error:", e.message); }
+}
+
+async function sendTextToBot2(chatId: number | string, text: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN_2;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: String(chatId), text, parse_mode: "HTML" }),
+  }).catch(() => {});
+}
+
+// ── Locate element across main page and all iframes ───────────────────────────
+async function findInPageOrFrames(page: any, selectors: string[], timeout = 2000): Promise<any | null> {
+  // Try main page first
+  for (const sel of selectors) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible({ timeout }).catch(() => false)) return el;
+  }
+  // Try each iframe
+  for (const frame of page.frames()) {
+    if (!frame.url() || frame.url() === "about:blank") continue;
+    for (const sel of selectors) {
+      try {
+        const el = frame.locator(sel).first();
+        if (await el.isVisible({ timeout: 1500 }).catch(() => false)) return el;
+      } catch { /* skip */ }
+    }
+  }
+  return null;
+}
+
+// ── Plus free trial subscription via UPI ─────────────────────────────────────
+export async function subscribePlusWithUPI(opts: {
+  page: any;
+  email: string;
+  notifyTelegramId: number | string;
+  log: (msg: string) => void;
+}): Promise<void> {
+  const { page, email, notifyTelegramId, log } = opts;
+
+  // A: Navigate to pricing page
+  log("[ChatGPT/Plus] Navigating to chatgpt.com/#pricing…");
+  await page.goto("https://chatgpt.com/#pricing", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await sleep(5000);
+
+  // B: Switch to "Personal" tab (page may default to Business)
+  const personalBtn = await findInPageOrFrames(page, [
+    'button:has-text("Personal")', '[role="tab"]:has-text("Personal")',
+  ], 5000);
+  if (personalBtn) {
+    await personalBtn.click();
+    await sleep(2500);
+    log("[ChatGPT/Plus] Switched to Personal tab");
+  }
+
+  // C: Click "Claim free offer" on Plus plan
+  const claimBtn = await findInPageOrFrames(page, [
+    'button:has-text("Claim free offer")', 'a:has-text("Claim free offer")',
+  ], 15000);
+  if (!claimBtn) throw new Error("Could not find 'Claim free offer' button on pricing page");
+  await claimBtn.click();
+  log("[ChatGPT/Plus] Clicked 'Claim free offer'");
+  await sleep(5000);
+
+  // D: Wait for checkout URL
+  await page.waitForURL((url: URL) => url.toString().includes("checkout"), { timeout: 30_000 });
+  log(`[ChatGPT/Plus] Checkout: ${page.url()}`);
+  await sleep(4000);
+
+  // E: Select UPI payment method
+  const upiEl = await findInPageOrFrames(page, [
+    'text="UPI"', 'button:has-text("UPI")', '[role="tab"]:has-text("UPI")',
+    'label:has-text("UPI")', '[data-testid*="upi" i]',
+  ], 8000);
+  if (upiEl) {
+    await upiEl.click();
+    await sleep(2000);
+    log("[ChatGPT/Plus] UPI payment method selected");
+  } else {
+    log("[ChatGPT/Plus] UPI option not found — proceeding (may default to UPI)");
+  }
+
+  // F: Fill billing address
+  // Helper: fills field in main page or any iframe
+  async function fillBillingField(selectors: string[], value: string): Promise<void> {
+    const el = await findInPageOrFrames(page, selectors, 3000);
+    if (!el) return;
+    try {
+      await el.click({ clickCount: 3 });
+      await el.fill(value);
+    } catch { /* ignore */ }
+  }
+
+  await fillBillingField(
+    ['[placeholder*="Full name" i]', '[autocomplete="name"]', '#billing-name', 'input[name="name"]', 'input[name="fullName"]'],
+    "AJAY KUMAR"
+  );
+  await fillBillingField(
+    ['[placeholder*="Address line 1" i]', '[autocomplete="address-line1"]', 'input[name="addressLine1"]', '#billing-address-1'],
+    "Ranchi"
+  );
+  await fillBillingField(
+    ['[placeholder*="City" i]', '[autocomplete="address-level2"]', 'input[name="city"]', '#billing-city'],
+    "RANCHI"
+  );
+  await fillBillingField(
+    ['[placeholder*="PIN" i]', '[placeholder*="Postal" i]', '[placeholder*="Zip" i]', '[autocomplete="postal-code"]', 'input[name="postalCode"]', '#billing-postal'],
+    "834005"
+  );
+
+  // State dropdown
+  const stateDropdown = await findInPageOrFrames(page, [
+    'select[autocomplete="address-level1"]', 'select[name*="state" i]', 'select[id*="state" i]',
+  ], 2000);
+  if (stateDropdown) {
+    await stateDropdown.selectOption({ label: "Jharkhand" }).catch(() =>
+      stateDropdown.selectOption({ value: "JH" }).catch(() => {})
+    );
+  }
+
+  log("[ChatGPT/Plus] Billing address filled");
+  await sleep(1500);
+
+  // G: Click Subscribe
+  const subscribeBtn = await findInPageOrFrames(page, [
+    'button:has-text("Subscribe")', 'button[type="submit"]:has-text("Subscribe")',
+    'button:has-text("Start free trial")', 'button:has-text("Confirm")',
+  ], 10000);
+  if (!subscribeBtn) throw new Error("Subscribe button not found on checkout page");
+  await subscribeBtn.click();
+  log("[ChatGPT/Plus] Clicked Subscribe");
+  await sleep(6000);
+
+  // H: Capture QR screenshot — poll for QR image to appear (in any frame)
+  log("[ChatGPT/Plus] Waiting for QR code…");
+  let qrScreenshot: Buffer | null = null;
+  for (let i = 0; i < 15; i++) {
+    const hasQR = await page.evaluate(() => {
+      return [...document.querySelectorAll("img")].some(
+        img => img.naturalWidth >= 80 && img.naturalWidth <= 500 && img.naturalHeight >= 80
+      );
+    }).catch(() => false);
+    if (hasQR) {
+      await sleep(800); // wait for full render
+      qrScreenshot = await page.screenshot({ type: "png" }) as Buffer;
+      log("[ChatGPT/Plus] QR screenshot captured");
+      break;
+    }
+    await sleep(2000);
+  }
+  if (!qrScreenshot) {
+    // Capture whatever is on screen
+    qrScreenshot = await page.screenshot({ type: "png" }) as Buffer;
+    log("[ChatGPT/Plus] Screenshot taken (QR may be in Stripe iframe)");
+  }
+
+  // I: Send QR screenshot via Bot 2
+  await sendQRToBot2(
+    qrScreenshot,
+    notifyTelegramId,
+    `🔐 <b>ChatGPT Plus — UPI QR Code</b>\n\n` +
+    `Account: <code>${email}</code>\n\n` +
+    `Scan with your UPI app to activate 1 month free Plus.\n` +
+    `<i>Waiting for your payment to complete…</i>`
+  );
+  log(`[ChatGPT/Plus] QR screenshot sent to Telegram ${notifyTelegramId}`);
+
+  // J: Poll for payment success (up to 10 minutes)
+  log("[ChatGPT/Plus] Polling for payment confirmation (up to 10 min)…");
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const url = page.url();
+    const txt = await page.evaluate(() => document.body?.innerText?.slice(0, 600) ?? "").catch(() => "");
+    const isSuccess = url.includes("success") || url.includes("confirmed")
+      || txt.toLowerCase().includes("payment successful")
+      || txt.toLowerCase().includes("you're subscribed")
+      || txt.toLowerCase().includes("subscription active")
+      || txt.toLowerCase().includes("plus plan")
+      || (url.startsWith("https://chatgpt.com/") && !url.includes("checkout") && !url.includes("pricing"));
+
+    if (isSuccess) {
+      log("[ChatGPT/Plus] Payment confirmed — Plus activated!");
+      // Take success screenshot and notify
+      const successShot = await page.screenshot({ type: "png" }) as Buffer;
+      await sendQRToBot2(
+        successShot,
+        notifyTelegramId,
+        `✅ <b>ChatGPT Plus Activated!</b>\n\nAccount: <code>${email}</code>\n\nYour free 1-month Plus trial is now active.`
+      );
+      return;
+    }
+    await sleep(5000);
+  }
+
+  // Timeout — notify user
+  log("[ChatGPT/Plus] Payment wait timed out (10 min). QR was sent — payment can still complete.");
+  await sendTextToBot2(
+    notifyTelegramId,
+    `⏳ <b>ChatGPT Plus QR timeout</b>\n\nAccount: <code>${email}</code>\n\nThe QR code is still valid. If you already scanned and paid, your Plus subscription will activate shortly.`
+  );
+}
+
 // ── Main automation ──────────────────────────────────────────────────────────
 export async function createChatGPTAccount(opts: {
   email: string;
   smtpDevId: string;
   mailPassword: string;
+  subscribeAfter?: boolean;
+  adminTelegramId?: number | string;
   log?: (msg: string) => void;
 }): Promise<ChatGPTResult> {
-  const { email, smtpDevId, mailPassword, log = console.log } = opts;
+  const { email, smtpDevId, mailPassword, subscribeAfter = false, adminTelegramId, log = console.log } = opts;
   const { first, last } = randomName();
   const age = randomAge();
   const accountPassword = generatePassword();
@@ -416,7 +635,7 @@ export async function createChatGPTAccount(opts: {
         await page.keyboard.type(age, { delay: 50 });
         await page.keyboard.press("Tab"); // blur triggers React state update
         await sleep(400);
-        const ageVal = await ageInput.evaluate(el => (el as HTMLInputElement).value).catch(() => "?");
+        const ageVal = await ageInput.evaluate((el: HTMLInputElement) => el.value).catch(() => "?");
         log(`[ChatGPT] Age set: ${ageVal}`);
       } else {
         // Birthday selects fallback
@@ -472,7 +691,7 @@ export async function createChatGPTAccount(opts: {
       await sleep(1000);
 
       try {
-        await page.waitForURL((url) => !url.includes("about-you"), { timeout: 20_000 });
+        await page.waitForURL((url: URL) => !url.toString().includes("about-you"), { timeout: 20_000 });
         log(`[ChatGPT] Advanced past about-you`);
       } catch {
         const stuckUrl = page.url();
@@ -485,20 +704,28 @@ export async function createChatGPTAccount(opts: {
       log(`[ChatGPT] No about-you step`);
     }
 
-    // ── Step 7: Skip optional onboarding ────────────────────────────────────
-    for (const skipText of ["Skip for now", "Skip", "Maybe later", "Done"]) {
+    // ── Step 7: Skip optional onboarding / workspace pages ──────────────────
+    for (const skipText of ["Skip for now", "Skip", "Maybe later", "Done", "Continue", "Get started", "Go to ChatGPT"]) {
       const skipBtn = page.locator(`button:has-text("${skipText}")`).first();
-      if (await skipBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
+      if (await skipBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
         await skipBtn.click().catch(() => {});
-        log(`[ChatGPT] Skipped: ${skipText}`);
+        log(`[ChatGPT] Skipped/continued: ${skipText}`);
         await sleep(1500);
       }
+    }
+
+    // If stuck on auth.openai.com/workspace or any auth page, navigate directly to chatgpt.com
+    const midUrl = page.url();
+    if (midUrl.includes("openai.com") && !midUrl.startsWith("https://chatgpt.com")) {
+      log(`[ChatGPT] Stuck at ${midUrl} — navigating directly to chatgpt.com`);
+      await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 20_000 });
+      await sleep(3000);
     }
 
     // ── Step 8: Verify fully landed on chatgpt.com ───────────────────────────
     // Must start with chatgpt.com — "includes" would false-positive on redirect_uri params
     try {
-      await page.waitForURL((url) => url.startsWith("https://chatgpt.com"), { timeout: 15_000 });
+      await page.waitForURL((url: URL) => url.toString().startsWith("https://chatgpt.com"), { timeout: 15_000 });
     } catch { /* will check URL below */ }
 
     const finalUrl = page.url();
@@ -520,6 +747,17 @@ export async function createChatGPTAccount(opts: {
     });
 
     log(`[ChatGPT] Account created: ${email}`);
+
+    // ── Step 10: Subscribe to Plus via UPI (optional) ────────────────────────
+    if (subscribeAfter && adminTelegramId) {
+      try {
+        await subscribePlusWithUPI({ page, email, notifyTelegramId: adminTelegramId, log });
+      } catch (plusErr: any) {
+        log(`[ChatGPT/Plus] Subscription step failed: ${plusErr.message}`);
+        // Account creation is still complete — don't throw
+      }
+    }
+
     return { success: true, email, password: accountPassword, mailPassword, firstName: first, lastName: last };
 
   } catch (err: any) {
@@ -543,9 +781,11 @@ export async function createChatGPTAccount(opts: {
 // ── Batch registration ────────────────────────────────────────────────────────
 export async function batchCreateChatGPTAccounts(opts: {
   count: number;
+  subscribeAfter?: boolean;
+  adminTelegramId?: number | string;
   log?: (msg: string) => void;
 }): Promise<{ total: number; succeeded: number; failed: number; results: ChatGPTResult[] }> {
-  const { count, log = console.log } = opts;
+  const { count, subscribeAfter = false, adminTelegramId, log = console.log } = opts;
 
   const { db } = await import("./db");
   const { bizMailAccounts, chatgptAccounts } = await import("@shared/schema");
@@ -597,6 +837,8 @@ export async function batchCreateChatGPTAccounts(opts: {
       email: acct.email,
       smtpDevId: acct.smtpAccountId,
       mailPassword: acct.password,
+      subscribeAfter,
+      adminTelegramId,
       log,
     });
     results.push(r);

@@ -5906,7 +5906,7 @@ export function startTelegramBot(config: BotConfig) {
         bot.telegram.sendMessage(adminChatId, `<code>${escapeHtml(msg)}</code>`, { parse_mode: "HTML" }).catch(() => {});
       };
 
-      batchCreateChatGPTAccounts({ count: n, log }).then(({ total, succeeded, failed, results }) => {
+      batchCreateChatGPTAccounts({ count: n, log, subscribeAfter: true, adminTelegramId: adminChatId }).then(({ total, succeeded, failed, results }) => {
         const lines = results.map((r) => {
           if (r.success) {
             return `✅  <code>${escapeHtml(r.email ?? "")}</code>\n` +
