@@ -169,9 +169,19 @@ export async function subscribePlusWithUPI(opts: {
 }): Promise<void> {
   const { page, email, password, notifyTelegramId, log } = opts;
 
-  // A0: Ensure we're logged in on the proxy browser
+  // A0: Ensure we're logged in on the proxy browser (retry up to 3x for slow proxies)
   log("[ChatGPT/Plus] Checking login state on proxy browser…");
-  await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  let gotoOk = false;
+  for (let attempt = 1; attempt <= 3 && !gotoOk; attempt++) {
+    try {
+      await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 60_000 });
+      gotoOk = true;
+    } catch (e: any) {
+      log(`[ChatGPT/Plus] Proxy navigation attempt ${attempt}/3 failed: ${e.message?.slice(0, 80)} — retrying…`);
+      await sleep(5000);
+    }
+  }
+  if (!gotoOk) throw new Error("Proxy browser could not load chatgpt.com after 3 attempts");
   await sleep(4000);
   const landingUrl = page.url();
   log(`[ChatGPT/Plus] Landing URL: ${landingUrl}`);
@@ -392,22 +402,31 @@ export async function subscribePlusWithUPI(opts: {
       ).catch(() => false);
     };
 
-    // Helper: skip onboarding modals ("What brings you to ChatGPT?" etc.)
-    // Use exact text match to avoid "Skip to content" accessibility links
+    // Helper: dismiss all onboarding/tips dialogs
+    // Handles: "What brings you to ChatGPT?" (Skip), "Tips" (Okay, let's go)
     const skipOnboarding = async () => {
-      for (let i = 0; i < 5; i++) {
-        const skipBtn = await page.evaluate(() => {
+      for (let i = 0; i < 8; i++) {
+        // Find any dismissal button — exact text matches to avoid accessibility links
+        const el = await page.evaluate(() => {
+          const texts = ["Skip", "Okay, let's go", "Okay, lets go", "Okay, let's go!", "Got it"];
           const btns = [...document.querySelectorAll("button")];
-          return btns.find(b => b.textContent?.trim() === "Skip") ? true : false;
+          return btns.find(b => {
+            const t = b.textContent?.trim() ?? "";
+            return texts.includes(t);
+          }) ? true : false;
         }).catch(() => false);
-        if (!skipBtn) break;
-        const el = await page.locator('button').filter({ hasText: /^Skip$/ }).first().elementHandle().catch(() => null);
         if (!el) break;
-        const skipTxt = await el.evaluate((b: Element) => b.textContent?.trim()).catch(() => "Skip");
-        log(`[ChatGPT/Plus] Skipping onboarding: "${skipTxt}"`);
-        await el.click({ force: true }).catch(async () =>
-          el.evaluate((b: Element) => (b as HTMLElement).click())
-        );
+
+        const btn = await page.evaluate(() => {
+          const texts = ["Skip", "Okay, let's go", "Okay, lets go", "Okay, let's go!", "Got it"];
+          const btns = [...document.querySelectorAll("button")];
+          const found = btns.find(b => texts.includes(b.textContent?.trim() ?? ""));
+          if (found) { (found as HTMLElement).click(); return found.textContent?.trim(); }
+          return null;
+        }).catch(() => null);
+
+        if (!btn) break;
+        log(`[ChatGPT/Plus] Dismissed dialog: "${btn}"`);
         await sleep(2000);
       }
     };
@@ -427,8 +446,12 @@ export async function subscribePlusWithUPI(opts: {
       ).catch(() => []);
       log(`[ChatGPT/Plus] Home page buttons: ${JSON.stringify([...new Set(allBtns2)].slice(0, 20))}`);
 
-      // Look for "Claim offer" button (shown on home page for new Plus-eligible users)
+      // Look for upgrade/claim button in header or page
       const claimOfferSelectors = [
+        // "Free offer" badge in the header (shown after onboarding)
+        'a:has-text("Free offer")', 'button:has-text("Free offer")',
+        '[href*="pricing"]:has-text("Free offer")',
+        // Claim variants
         'button:has-text("Claim offer")', 'a:has-text("Claim offer")',
         'button:has-text("Claim free offer")', 'a:has-text("Claim free offer")',
         'button:has-text("Claim")',
@@ -437,7 +460,7 @@ export async function subscribePlusWithUPI(opts: {
         'button:has-text("Upgrade")',
       ];
 
-      // Step 1: Click the outer "Claim offer" button to open modal-account-payment
+      // Step 1: Click the "Free offer" / "Claim offer" button
       const claimOfferBtn = await findInPageOrFrames(page, claimOfferSelectors, 8000);
       if (claimOfferBtn) {
         const claimText = await claimOfferBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
@@ -445,30 +468,46 @@ export async function subscribePlusWithUPI(opts: {
         await claimOfferBtn.click({ force: true }).catch(async () =>
           claimOfferBtn.evaluate((el: Element) => (el as HTMLElement).click())
         );
-        await sleep(4000);
+        await sleep(6000); // Wait for modal / Stripe to start loading
         log(`[ChatGPT/Plus] After step 1 URL: ${page.url()}`);
+
+        // Log all buttons visible now (for debugging)
+        const btnsAfterClick = await page.evaluate(() =>
+          [...document.querySelectorAll("button, a")].map((b: any) => b.textContent?.trim().slice(0, 40)).filter((t: any) => t && t.length > 1)
+        ).catch(() => []);
+        log(`[ChatGPT/Plus] Buttons after step 1: ${JSON.stringify([...new Set(btnsAfterClick)].slice(0, 25))}`);
+
+        // Screenshot to see what opened
+        const shot = await page.screenshot({ type: "png" }) as Buffer;
+        await sendPhotoToAdminBot(shot, notifyTelegramId,
+          `📸 <b>After Free offer click</b>\n<code>${email}</code>\nURL: ${page.url()}\nButtons: ${JSON.stringify([...new Set(btnsAfterClick)].slice(0, 15))}`
+        );
       }
 
-      // Step 2: If modal opened (URL still #pricing), click "Claim free offer" inside modal
+      // Step 2: If modal opened, click "Claim free offer" / "Subscribe" inside
       if (!isCheckout(page.url()) && !(await hasStripeFrame())) {
         const innerSelectors = [
           '#modal-account-payment button:has-text("Claim free offer")',
           '#modal-account-payment button:has-text("Claim offer")',
-          '#modal-account-payment button:has-text("Continue")',
           '#modal-account-payment button:has-text("Subscribe")',
+          '#modal-account-payment button:has-text("Continue")',
           '#modal-account-payment button:has-text("Get Plus")',
-          // Fallbacks without modal scope
+          // Fallbacks without modal scope (wider search)
           'button:has-text("Claim free offer")',
+          'button:has-text("Subscribe to Plus")',
+          '[data-testid*="upgrade"] button',
         ];
-        const innerBtn = await findInPageOrFrames(page, innerSelectors, 6000);
+        const innerBtn = await findInPageOrFrames(page, innerSelectors, 10000);
         if (innerBtn) {
           const innerTxt = await innerBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
           log(`[ChatGPT/Plus] Step 2 — clicking modal inner: "${innerTxt}"…`);
           await innerBtn.click({ force: true }).catch(async () =>
             innerBtn.evaluate((el: Element) => (el as HTMLElement).click())
           );
-          await sleep(4000);
+          await sleep(5000);
           log(`[ChatGPT/Plus] After step 2 URL: ${page.url()}`);
+        } else {
+          log("[ChatGPT/Plus] Step 2 — no inner button found, checking Stripe frames…");
         }
       }
     }
