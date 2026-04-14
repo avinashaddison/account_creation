@@ -6,6 +6,15 @@ import { solveAntiTurnstile } from "./capsolverService";
 
 chromium.use(StealthPlugin());
 
+// Suppress unhandled CDPSession errors when proxy browsers are force-closed
+process.on("unhandledRejection", (reason: any) => {
+  const msg = String(reason?.message ?? reason ?? "");
+  if (msg.includes("Target page, context or browser has been closed") ||
+      msg.includes("cdpSession.send") ||
+      msg.includes("Target closed")) return;
+  console.error("[chatgptService] Unhandled rejection:", msg);
+});
+
 const FIRST_NAMES = ["James","Emily","Liam","Sophia","Noah","Olivia","William","Emma","Benjamin","Ava","Lucas","Isabella","Mason","Mia","Ethan","Charlotte"];
 const LAST_NAMES  = ["Smith","Johnson","Williams","Brown","Jones","Garcia","Miller","Davis","Wilson","Taylor","Anderson","Thomas","Jackson","White","Harris"];
 
@@ -109,41 +118,275 @@ async function findInPageOrFrames(page: any, selectors: string[], timeout = 2000
   return null;
 }
 
+// ── Fresh login helper for proxy browser ─────────────────────────────────────
+async function loginOnProxyBrowser(page: any, email: string, password: string, log: (msg: string) => void): Promise<boolean> {
+  log("[ChatGPT/Plus] Logging in on proxy browser…");
+  await page.goto("https://chatgpt.com/auth/login", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await sleep(4000);
+  log(`[ChatGPT/Plus] Login page URL: ${page.url()}`);
+
+  // Click "Log in" if we're on the landing page
+  const loginBtnEl = page.locator('a[href*="login"], button:text("Log in")').first();
+  if (await loginBtnEl.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await loginBtnEl.click();
+    await sleep(3000);
+  }
+
+  // Look for email input (might be on a modal or a dedicated auth page)
+  const emailInput = await page.$("input[type=email], input[name=email], input[id*=email]");
+  if (!emailInput) {
+    // Try navigating to auth.openai.com login
+    await page.goto("https://auth.openai.com/authorize?response_type=code&redirect_uri=https%3A%2F%2Fchatgpt.com%2Fapi%2Fauth%2Fcallback%2Flogin-web&client_id=pdlLIX2Y72MIl2rhLhTE9VV9bN9LdLpi&scope=openid+profile+email+offline_access&audience=https%3A%2F%2Fapi.openai.com%2Fv1&prompt=login", { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await sleep(4000);
+  }
+
+  const emailInputEl = await page.$("input[type=email], input[name=email]");
+  if (!emailInputEl) { log("[ChatGPT/Plus] No email input found on login page"); return false; }
+
+  await emailInputEl.fill(email);
+  await page.keyboard.press("Enter");
+  await sleep(3000);
+
+  const pwInputEl = await page.$("input[type=password], input[name=password]");
+  if (!pwInputEl) { log("[ChatGPT/Plus] No password input found"); return false; }
+
+  await pwInputEl.fill(password);
+  await page.keyboard.press("Enter");
+  await sleep(7000);
+
+  const finalUrl = page.url();
+  log(`[ChatGPT/Plus] After login URL: ${finalUrl}`);
+  return finalUrl.includes("chatgpt.com") && !finalUrl.includes("login") && !finalUrl.includes("auth.openai.com");
+}
+
 // ── Plus free trial subscription via UPI ─────────────────────────────────────
 export async function subscribePlusWithUPI(opts: {
   page: any;
   email: string;
+  password: string;
   notifyTelegramId: number | string;
   log: (msg: string) => void;
 }): Promise<void> {
-  const { page, email, notifyTelegramId, log } = opts;
+  const { page, email, password, notifyTelegramId, log } = opts;
+
+  // A0: Ensure we're logged in on the proxy browser
+  log("[ChatGPT/Plus] Checking login state on proxy browser…");
+  await page.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await sleep(4000);
+  const landingUrl = page.url();
+  log(`[ChatGPT/Plus] Landing URL: ${landingUrl}`);
+
+  // Check for presence of "Log in" button — if visible, we're not logged in
+  const notLoggedIn = await page.locator('a[href*="login"], button:text("Log in"), a:text("Log in")').first().isVisible({ timeout: 3000 }).catch(() => false);
+  if (notLoggedIn) {
+    log("[ChatGPT/Plus] Session not active on proxy — doing fresh login…");
+    const loginOk = await loginOnProxyBrowser(page, email, password, log);
+    if (!loginOk) throw new Error("Failed to log in on proxy browser");
+    log("[ChatGPT/Plus] Fresh login successful");
+  } else {
+    log("[ChatGPT/Plus] Already logged in on proxy browser");
+  }
 
   // A: Navigate to pricing page
-  log("[ChatGPT/Plus] Navigating to chatgpt.com/#pricing…");
-  await page.goto("https://chatgpt.com/#pricing", { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await sleep(5000);
+  log("[ChatGPT/Plus] Navigating to chatgpt.com/pricing…");
+  await page.goto("https://chatgpt.com/pricing", { waitUntil: "networkidle", timeout: 40_000 }).catch(async () => {
+    // If networkidle times out, just wait for load
+    await page.waitForLoadState("load").catch(() => {});
+  });
+  await sleep(6000);
+  log(`[ChatGPT/Plus] Pricing URL: ${page.url()}`);
 
-  // B: Switch to "Personal" tab (page may default to Business)
+  // Scroll pricing cards into view so lazy-loaded content renders
+  await page.evaluate(() => window.scrollBy(0, 600)).catch(() => {});
+  await sleep(3000);
+
+  // B: Switch to "Personal" / "Individual" tab if present
   const personalBtn = await findInPageOrFrames(page, [
-    'button:has-text("Personal")', '[role="tab"]:has-text("Personal")',
-  ], 5000);
+    'button:has-text("Individual")', '[role="tab"]:has-text("Individual")',
+    'button:has-text("Personal")',   '[role="tab"]:has-text("Personal")',
+  ], 4000);
   if (personalBtn) {
     await personalBtn.click();
     await sleep(2500);
-    log("[ChatGPT/Plus] Switched to Personal tab");
+    log("[ChatGPT/Plus] Switched to Individual tab");
   }
 
-  // C: Click "Claim free offer" on Plus plan
-  const claimBtn = await findInPageOrFrames(page, [
-    'button:has-text("Claim free offer")', 'a:has-text("Claim free offer")',
-  ], 15000);
-  if (!claimBtn) throw new Error("Could not find 'Claim free offer' button on pricing page");
-  await claimBtn.click();
-  log("[ChatGPT/Plus] Clicked 'Claim free offer'");
-  await sleep(5000);
+  // Log all button texts for debugging
+  const allBtns = await page.evaluate(() =>
+    [...document.querySelectorAll("button, a[href]")]
+      .map(b => b.textContent?.trim().replace(/\s+/g, " "))
+      .filter(t => t && t.length > 2 && t.length < 80)
+  ).catch(() => []);
+  log(`[ChatGPT/Plus] Pricing page buttons: ${JSON.stringify([...new Set(allBtns)].slice(0, 30))}`);
 
-  // D: Wait for checkout URL
-  await page.waitForURL((url: URL) => url.toString().includes("checkout"), { timeout: 30_000 });
+  // C: Find the Plus plan button using JS — look for a button/link near a "Plus" heading
+  // This avoids clicking the "Upgrade" nav link by finding the button inside the pricing card
+  const claimBtnHandle = await page.evaluateHandle(() => {
+    const allLinks = [...document.querySelectorAll("button, a")];
+
+    // Priority 1: Button with specific Plus-upgrade texts
+    const plusTexts = [
+      "claim free offer", "get plus", "upgrade to plus", "start free trial",
+      "try plus", "subscribe to plus", "get chatgpt plus",
+    ];
+    const byText = allLinks.find(el => {
+      const t = el.textContent?.trim().toLowerCase() ?? "";
+      return plusTexts.some(pt => t === pt || t.startsWith(pt));
+    });
+    if (byText) return byText;
+
+    // Priority 2: A button that is a sibling/child of a "Plus" plan section
+    const plusSection = [...document.querySelectorAll("h2, h3, h4, [class*='plan'], [class*='tier']")]
+      .find(el => /\bplus\b/i.test(el.textContent ?? ""));
+    if (plusSection) {
+      const container = plusSection.closest("section, article, div[class*='card'], div[class*='plan'], div[class*='tier']") ?? plusSection.parentElement?.parentElement;
+      if (container) {
+        const btn = container.querySelector("button, a[href*='checkout'], a[href*='upgrade']");
+        if (btn) return btn;
+      }
+    }
+    return null;
+  }).catch(() => null);
+
+  const claimBtn = claimBtnHandle && await claimBtnHandle.asElement() ? claimBtnHandle.asElement() : null;
+
+  if (!claimBtn) {
+    const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
+    await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
+      `⚠️ <b>Pricing page — Plus button not found</b>\n\nAccount: <code>${email}</code>\n\nButtons seen: ${JSON.stringify([...new Set(allBtns)].slice(0, 20))}`
+    );
+    throw new Error("Could not find Plus upgrade button on pricing page");
+  }
+  // D: Get checkout URL via ChatGPT backend API using the session cookies from this browser
+  const btnText = await claimBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
+  log(`[ChatGPT/Plus] Plus button found: "${btnText}"`);
+
+  const isCheckout = (url: string) => url.includes("checkout") || url.includes("stripe.com") || url.includes("pay.openai");
+
+  // D1: Try API-based checkout session (avoids JS-navigation issues)
+  let checkoutUrl: string | null = null;
+  try {
+    log("[ChatGPT/Plus] Calling backend-api for checkout session URL…");
+    checkoutUrl = await page.evaluate(async () => {
+      // Try multiple known ChatGPT checkout API endpoints
+      const endpoints = [
+        { url: "/backend-api/purchases/checkout_session", body: { plan_type: "monthly", return_url: "https://chatgpt.com/", subscription_plan_id: "chatgptplusplan" } },
+        { url: "/backend-api/subscriptions/checkout", body: { plan_type: "monthly" } },
+        { url: "/backend-api/checkout", body: { tier: "plus", interval: "monthly" } },
+      ];
+      for (const ep of endpoints) {
+        try {
+          const resp = await fetch(ep.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(ep.body),
+            credentials: "include",
+          });
+          if (resp.ok) {
+            const data = await resp.json() as any;
+            const url = data?.url || data?.checkout_url || data?.redirect_url || data?.session_url;
+            if (url && (url.includes("checkout") || url.includes("stripe"))) return url;
+          }
+        } catch { /* skip */ }
+      }
+      return null;
+    }).catch(() => null);
+    if (checkoutUrl) log(`[ChatGPT/Plus] API checkout URL: ${checkoutUrl.slice(0, 100)}`);
+  } catch { /* ignore */ }
+
+  if (checkoutUrl) {
+    // Navigate to the API-provided checkout URL
+    await page.goto(checkoutUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await sleep(4000);
+    log(`[ChatGPT/Plus] Checkout page URL: ${page.url()}`);
+  } else {
+    // D2: Fallback — navigate to explore/plus and handle redirect
+    const btnHref = await claimBtn.evaluate((el: Element) => (el as HTMLAnchorElement).href ?? "").catch(() => "");
+    const exploreUrl = btnHref || "https://chatgpt.com/explore/plus";
+    log(`[ChatGPT/Plus] API checkout failed — navigating to ${exploreUrl}…`);
+    await page.goto(exploreUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await sleep(5000);
+    log(`[ChatGPT/Plus] After explore/plus URL: ${page.url()}`);
+
+    // If we landed on #pricing (home page), look for checkout button there
+    if (page.url().includes("#pricing") || page.url() === "https://chatgpt.com/" || page.url() === "https://chatgpt.com") {
+      log("[ChatGPT/Plus] Landed on home #pricing — checking session & looking for upgrade button…");
+      await sleep(4000);
+
+      // Check if still logged in by calling /api/auth/session
+      const sessionInfo = await page.evaluate(async () => {
+        try {
+          const resp = await fetch("/api/auth/session", { credentials: "include" });
+          const data = await resp.json() as any;
+          return { ok: resp.ok, email: data?.user?.email ?? null, hasSession: !!data?.user };
+        } catch { return { ok: false, email: null, hasSession: false }; }
+      }).catch(() => ({ ok: false, email: null, hasSession: false }));
+      log(`[ChatGPT/Plus] Session check: ${JSON.stringify(sessionInfo)}`);
+
+      // Screenshot for debug
+      const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
+      await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
+        `ℹ️ <b>Plus — landed on home #pricing</b>\n\nAccount: <code>${email}</code>\nSession: ${JSON.stringify(sessionInfo)}\n\nLooking for upgrade button…`
+      );
+
+      // Look for all buttons/links on the page for logging
+      const allBtns2 = await page.evaluate(() =>
+        [...document.querySelectorAll("button, a")]
+          .map((b: any) => b.textContent?.trim()?.slice(0, 40))
+          .filter((t: any) => t && t.length > 1)
+      ).catch(() => []);
+      log(`[ChatGPT/Plus] Home page buttons: ${JSON.stringify([...new Set(allBtns2)].slice(0, 20))}`);
+
+      // Look for "Claim offer" button (shown on home page for new Plus-eligible users)
+      const claimOfferSelectors = [
+        'button:has-text("Claim offer")', 'a:has-text("Claim offer")',
+        'button:has-text("Claim free offer")', 'a:has-text("Claim free offer")',
+        'button:has-text("Claim")',
+        'button:has-text("Upgrade to Plus")', 'a:has-text("Upgrade to Plus")',
+        'button:has-text("Get Plus")',
+        'button:has-text("Upgrade")',
+      ];
+      const claimOfferBtn = await findInPageOrFrames(page, claimOfferSelectors, 8000);
+      if (claimOfferBtn) {
+        const claimText = await claimOfferBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
+        log(`[ChatGPT/Plus] Found offer button: "${claimText}" — clicking…`);
+        // Use force:true to bypass any overlay interception (modal-account-payment covers viewport)
+        await claimOfferBtn.click({ force: true }).catch(async () => {
+          // Fallback: JS click
+          await claimOfferBtn.evaluate((el: Element) => (el as HTMLElement).click());
+        });
+        await sleep(5000);
+        log(`[ChatGPT/Plus] After claim click URL: ${page.url()}`);
+      } else {
+        // Try href-based buttons
+        const homeCheckoutBtns = await page.evaluate(() =>
+          [...document.querySelectorAll("button, a[href]")]
+            .map((b: any) => ({ text: b.textContent?.trim().toLowerCase(), href: b.href ?? "" }))
+            .filter((b: any) => b.href.includes("checkout") || b.href.includes("stripe") ||
+              b.text.includes("get plus") || b.text.includes("upgrade to plus") || b.text.includes("upgrade"))
+        ).catch(() => []);
+        log(`[ChatGPT/Plus] Home checkout buttons: ${JSON.stringify(homeCheckoutBtns.slice(0, 5))}`);
+        if (homeCheckoutBtns.length > 0) {
+          const btn = homeCheckoutBtns.find((b: any) => b.href.includes("checkout") || b.href.includes("stripe")) ?? homeCheckoutBtns[0];
+          if (btn.href) {
+            await page.goto(btn.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            await sleep(4000);
+            log(`[ChatGPT/Plus] After home btn click URL: ${page.url()}`);
+          }
+        }
+      }
+    }
+
+    if (!isCheckout(page.url())) {
+      await page.waitForURL((url: URL) => isCheckout(url.toString()), { timeout: 20_000 }).catch(async () => {
+        const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
+        await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
+          `⚠️ <b>Plus — checkout not reached</b>\n\nURL: ${page.url()}\nAccount: <code>${email}</code>`
+        );
+        throw new Error(`Checkout not reached — current URL: ${page.url()}`);
+      });
+    }
+  }
   log(`[ChatGPT/Plus] Checkout: ${page.url()}`);
   await sleep(4000);
 
@@ -330,34 +573,28 @@ export async function createChatGPTAccount(opts: {
   try {
     // Use non-headless if DISPLAY is set (xvfb-run), otherwise headless
     const hasDisplay = !!process.env.DISPLAY;
-    browser = await chromium.launch({
-      headless: !hasDisplay,
-      proxy: {
-        server: "http://proxy.nsocks.com:2312",
-        username: "ns-mrqq7v2x6zlr_area-IN_session-fR44mD0VSI_life-5",
-        password: process.env.NSOCKS_PROXY_PASSWORD ?? "",
-      },
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-infobars",
-        "--window-size=1280,800",
-        "--lang=en-US",
-        // WebGL spoofing args to appear as a real GPU browser
-        "--use-gl=swiftshader",
-        "--enable-webgl",
-        "--enable-webgl2",
-      ],
-    });
-
-    const context = await browser.newContext({
+    const BROWSER_ARGS = [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-infobars",
+      "--window-size=1280,800",
+      "--lang=en-US",
+      "--use-gl=swiftshader",
+      "--enable-webgl",
+      "--enable-webgl2",
+    ];
+    const CONTEXT_OPTS = {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       locale: "en-US",
       viewport: { width: 1280, height: 800 },
       extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
-    });
+    };
+    // Account CREATION: NO proxy — the Indian proxy blocks auth.openai.com JS rendering
+    browser = await chromium.launch({ headless: !hasDisplay, args: BROWSER_ARGS });
+
+    const context = await browser.newContext(CONTEXT_OPTS);
 
     // Comprehensive stealth: mask all bot-detection signals including WebGL, canvas, screen
     await context.addInitScript(() => {
@@ -802,12 +1039,39 @@ export async function createChatGPTAccount(opts: {
     log(`[ChatGPT] Account created: ${email}`);
 
     // ── Step 10: Subscribe to Plus via UPI (optional) ────────────────────────
+    // Reopen with Indian proxy (needed for Stripe to show UPI), carrying session cookies
     if (subscribeAfter && adminTelegramId) {
+      let proxyBrowser: any;
       try {
-        await subscribePlusWithUPI({ page, email, notifyTelegramId: adminTelegramId, log });
+        // Export cookies from the current (no-proxy) session
+        const cookies = await context.cookies();
+        const authCookieNames = cookies.filter((c: any) => c.name.includes("token") || c.name.includes("session") || c.name.includes("auth")).map((c: any) => c.name);
+        log(`[ChatGPT/Plus] Exporting ${cookies.length} cookies — auth cookies: ${JSON.stringify(authCookieNames)}`);
+        log("[ChatGPT/Plus] Transferring session to Indian proxy browser…");
+
+        // Generate a fresh proxy session ID each time (avoids expired sessions)
+        const proxySessionId = Math.random().toString(36).slice(2, 12).toUpperCase();
+        proxyBrowser = await chromium.launch({
+          headless: !hasDisplay,
+          proxy: {
+            server: "http://proxy.nsocks.com:2312",
+            username: `ns-mrqq7v2x6zlr_area-IN_session-${proxySessionId}_life-30`,
+            password: process.env.NSOCKS_PROXY_PASSWORD ?? "",
+          },
+          args: BROWSER_ARGS,
+        });
+        log(`[ChatGPT/Plus] Proxy session ID: ${proxySessionId}`);
+        const proxyCtx = await proxyBrowser.newContext(CONTEXT_OPTS);
+        await proxyCtx.addCookies(cookies);
+        const proxyPage = await proxyCtx.newPage();
+
+        log("[ChatGPT/Plus] Proxy browser ready — starting Plus subscription…");
+        await subscribePlusWithUPI({ page: proxyPage, email, password: accountPassword, notifyTelegramId: adminTelegramId, log });
       } catch (plusErr: any) {
         log(`[ChatGPT/Plus] Subscription step failed: ${plusErr.message}`);
         // Account creation is still complete — don't throw
+      } finally {
+        await proxyBrowser?.close().catch(() => {});
       }
     }
 

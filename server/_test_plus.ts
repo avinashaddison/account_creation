@@ -136,7 +136,8 @@ async function main() {
     await sleep(2000);
 
     // ── Step 4: Subscribe to Plus via UPI ─────────────────────────────────
-    await subscribePlusWithUPI({ page, email: EMAIL, notifyTelegramId: ADMIN_TG_ID, log });
+    // Password passed as fallback — login already done above via the manual flow
+    await subscribePlusWithUPI({ page, email: EMAIL, password: "", notifyTelegramId: ADMIN_TG_ID, log });
 
     log("\n✅ Flow complete");
   } catch (err: any) {
