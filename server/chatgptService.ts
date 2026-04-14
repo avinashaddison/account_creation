@@ -383,26 +383,41 @@ export async function subscribePlusWithUPI(opts: {
     await sleep(5000);
     log(`[ChatGPT/Plus] After explore/plus URL: ${page.url()}`);
 
+    // Helper: check if Stripe payment iframe is in the page (defined outside if blocks for reuse)
+    const hasStripeFrame = async () => {
+      const hasFrame = page.frames().some((f: any) => f.url().includes("stripe.com"));
+      if (hasFrame) return true;
+      return page.evaluate(() =>
+        !!document.querySelector('iframe[src*="stripe.com"], #modal-account-payment iframe')
+      ).catch(() => false);
+    };
+
+    // Helper: skip onboarding modals ("What brings you to ChatGPT?" etc.)
+    // Use exact text match to avoid "Skip to content" accessibility links
+    const skipOnboarding = async () => {
+      for (let i = 0; i < 5; i++) {
+        const skipBtn = await page.evaluate(() => {
+          const btns = [...document.querySelectorAll("button")];
+          return btns.find(b => b.textContent?.trim() === "Skip") ? true : false;
+        }).catch(() => false);
+        if (!skipBtn) break;
+        const el = await page.locator('button').filter({ hasText: /^Skip$/ }).first().elementHandle().catch(() => null);
+        if (!el) break;
+        const skipTxt = await el.evaluate((b: Element) => b.textContent?.trim()).catch(() => "Skip");
+        log(`[ChatGPT/Plus] Skipping onboarding: "${skipTxt}"`);
+        await el.click({ force: true }).catch(async () =>
+          el.evaluate((b: Element) => (b as HTMLElement).click())
+        );
+        await sleep(2000);
+      }
+    };
+
     // If we landed on #pricing (home page), look for checkout button there
     if (page.url().includes("#pricing") || page.url() === "https://chatgpt.com/" || page.url() === "https://chatgpt.com") {
-      log("[ChatGPT/Plus] Landed on home #pricing — checking session & looking for upgrade button…");
-      await sleep(4000);
-
-      // Check if still logged in by calling /api/auth/session
-      const sessionInfo = await page.evaluate(async () => {
-        try {
-          const resp = await fetch("/api/auth/session", { credentials: "include" });
-          const data = await resp.json() as any;
-          return { ok: resp.ok, email: data?.user?.email ?? null, hasSession: !!data?.user };
-        } catch { return { ok: false, email: null, hasSession: false }; }
-      }).catch(() => ({ ok: false, email: null, hasSession: false }));
-      log(`[ChatGPT/Plus] Session check: ${JSON.stringify(sessionInfo)}`);
-
-      // Screenshot for debug
-      const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
-      await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
-        `ℹ️ <b>Plus — landed on home #pricing</b>\n\nAccount: <code>${email}</code>\nSession: ${JSON.stringify(sessionInfo)}\n\nLooking for upgrade button…`
-      );
+      log("[ChatGPT/Plus] Landed on home page — skipping onboarding & looking for upgrade button…");
+      // First skip any onboarding modals that may block
+      await skipOnboarding();
+      await sleep(3000);
 
       // Look for all buttons/links on the page for logging
       const allBtns2 = await page.evaluate(() =>
@@ -421,96 +436,72 @@ export async function subscribePlusWithUPI(opts: {
         'button:has-text("Get Plus")',
         'button:has-text("Upgrade")',
       ];
-      // Helper: check if a Stripe payment form is now embedded in the page
-      const stripeFrameVisible = async (): Promise<boolean> => {
-        const frames = page.frames();
-        return frames.some((f: any) => {
-          const u = f.url();
-          return u.includes("stripe.com") || u.includes("js.stripe.com") || u.includes("stripe-js");
-        }) || await page.evaluate(() =>
-          !!document.querySelector('iframe[src*="stripe"], [data-stripe], #modal-account-payment iframe, #modal-account-payment [class*="stripe"]')
-        ).catch(() => false);
-      };
 
+      // Step 1: Click the outer "Claim offer" button to open modal-account-payment
       const claimOfferBtn = await findInPageOrFrames(page, claimOfferSelectors, 8000);
       if (claimOfferBtn) {
         const claimText = await claimOfferBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
-        log(`[ChatGPT/Plus] Found offer button: "${claimText}" — clicking…`);
-        // Use force:true to bypass any overlay interception (modal-account-payment covers viewport)
-        await claimOfferBtn.click({ force: true }).catch(async () => {
-          await claimOfferBtn.evaluate((el: Element) => (el as HTMLElement).click());
-        });
-        await sleep(5000);
-        const afterClickUrl = page.url();
-        log(`[ChatGPT/Plus] After claim click URL: ${afterClickUrl}`);
+        log(`[ChatGPT/Plus] Step 1 — clicking: "${claimText}"…`);
+        await claimOfferBtn.click({ force: true }).catch(async () =>
+          claimOfferBtn.evaluate((el: Element) => (el as HTMLElement).click())
+        );
+        await sleep(4000);
+        log(`[ChatGPT/Plus] After step 1 URL: ${page.url()}`);
+      }
 
-        // If URL didn't change to checkout, look for embedded Stripe modal
-        if (!isCheckout(afterClickUrl)) {
-          const hasStripe = await stripeFrameVisible();
-          if (hasStripe) {
-            log("[ChatGPT/Plus] Stripe embedded modal detected — skipping URL check, proceeding to UPI…");
-            // Unroute, clean up, and jump straight to UPI selection
-            await page.unroute("**/backend-api/**").catch(() => {});
-            await sleep(2000);
-            // Goto E-G handling below — break out of D2
-            // We fall through to the UPI section by not throwing
-          } else {
-            // Claim offer button might open a nested modal — look for inner pricing modal button
-            log("[ChatGPT/Plus] No Stripe frame after click — looking for modal inner button…");
-            const innerBtn = await findInPageOrFrames(page, [
-              '#modal-account-payment button:has-text("Continue")',
-              '#modal-account-payment button:has-text("Claim")',
-              '#modal-account-payment button:has-text("Subscribe")',
-              '#modal-account-payment button:has-text("Get Plus")',
-            ], 5000);
-            if (innerBtn) {
-              const innerText = await innerBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
-              log(`[ChatGPT/Plus] Found modal inner button: "${innerText}" — clicking…`);
-              await innerBtn.click({ force: true }).catch(async () => {
-                await innerBtn.evaluate((el: Element) => (el as HTMLElement).click());
-              });
-              await sleep(5000);
-              log(`[ChatGPT/Plus] After inner button URL: ${page.url()}`);
-            }
-          }
-        }
-      } else {
-        // No claim button — try href-based buttons
-        const homeCheckoutBtns = await page.evaluate(() =>
-          [...document.querySelectorAll("button, a[href]")]
-            .map((b: any) => ({ text: b.textContent?.trim().toLowerCase(), href: b.href ?? "" }))
-            .filter((b: any) => b.href.includes("checkout") || b.href.includes("stripe") ||
-              b.text.includes("get plus") || b.text.includes("upgrade to plus") || b.text.includes("upgrade"))
-        ).catch(() => []);
-        log(`[ChatGPT/Plus] Home checkout buttons: ${JSON.stringify(homeCheckoutBtns.slice(0, 5))}`);
-        if (homeCheckoutBtns.length > 0) {
-          const btn = homeCheckoutBtns.find((b: any) => b.href.includes("checkout") || b.href.includes("stripe")) ?? homeCheckoutBtns[0];
-          if (btn.href) {
-            await page.goto(btn.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
-            await sleep(4000);
-            log(`[ChatGPT/Plus] After home btn click URL: ${page.url()}`);
-          }
+      // Step 2: If modal opened (URL still #pricing), click "Claim free offer" inside modal
+      if (!isCheckout(page.url()) && !(await hasStripeFrame())) {
+        const innerSelectors = [
+          '#modal-account-payment button:has-text("Claim free offer")',
+          '#modal-account-payment button:has-text("Claim offer")',
+          '#modal-account-payment button:has-text("Continue")',
+          '#modal-account-payment button:has-text("Subscribe")',
+          '#modal-account-payment button:has-text("Get Plus")',
+          // Fallbacks without modal scope
+          'button:has-text("Claim free offer")',
+        ];
+        const innerBtn = await findInPageOrFrames(page, innerSelectors, 6000);
+        if (innerBtn) {
+          const innerTxt = await innerBtn.evaluate((el: Element) => el.textContent?.trim()).catch(() => "?");
+          log(`[ChatGPT/Plus] Step 2 — clicking modal inner: "${innerTxt}"…`);
+          await innerBtn.click({ force: true }).catch(async () =>
+            innerBtn.evaluate((el: Element) => (el as HTMLElement).click())
+          );
+          await sleep(4000);
+          log(`[ChatGPT/Plus] After step 2 URL: ${page.url()}`);
         }
       }
     }
 
-    // Only wait for URL if we didn't detect an embedded Stripe modal
-    const hasStripeNow = await (async () => {
-      const frames = page.frames();
-      return frames.some((f: any) => f.url().includes("stripe.com")) ||
-        await page.evaluate(() => !!document.querySelector('iframe[src*="stripe"], #modal-account-payment iframe')).catch(() => false);
-    })();
+    // Step 3: Skip any onboarding modals that appear (after any navigation above)
+    await skipOnboarding();
+    await sleep(3000);
+    log(`[ChatGPT/Plus] After onboarding skip URL: ${page.url()}`);
 
-    if (!isCheckout(page.url()) && !hasStripeNow) {
-      await page.waitForURL((url: URL) => isCheckout(url.toString()), { timeout: 20_000 }).catch(async () => {
-        const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
-        await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
-          `⚠️ <b>Plus — checkout not reached</b>\n\nURL: ${page.url()}\nAccount: <code>${email}</code>`
-        );
-        throw new Error(`Checkout not reached — current URL: ${page.url()}`);
-      });
-    } else if (hasStripeNow) {
-      log("[ChatGPT/Plus] Stripe embedded payment form active — proceeding to UPI selection…");
+    // Step 4: Check if Stripe is embedded or URL is a checkout page
+    let stripeFound = await hasStripeFrame();
+
+    // Step 5: If still not at checkout, navigate back to #pricing to trigger payment modal
+    if (!isCheckout(page.url()) && !stripeFound) {
+      log("[ChatGPT/Plus] Still no checkout — navigating to #pricing again…");
+      await page.goto("https://chatgpt.com/#pricing", { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await sleep(5000);
+      await skipOnboarding();
+      await sleep(3000);
+      log(`[ChatGPT/Plus] #pricing retry URL: ${page.url()}`);
+      stripeFound = await hasStripeFrame();
+    }
+
+    if (isCheckout(page.url())) {
+      log(`[ChatGPT/Plus] At Stripe checkout URL: ${page.url()}`);
+    } else if (stripeFound) {
+      log("[ChatGPT/Plus] Stripe embedded form detected — proceeding to UPI…");
+    } else {
+      const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
+      await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
+        `⚠️ <b>Plus — checkout not reached</b>\n\nURL: ${page.url()}\nAccount: <code>${email}</code>`
+      );
+      throw new Error(`Checkout not reached — current URL: ${page.url()}`);
     }
     } // end D2 fallback else
   } // end D1.5 else
