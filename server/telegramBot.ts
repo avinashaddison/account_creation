@@ -18,7 +18,7 @@ import {
   ACTIVATION_LABEL, ACTIVATION_EMOJI,
 } from "./activationStore";
 import { getBotMenuConfig, getBotMenuDefaults, reloadBotMenu } from "./shopBot";
-import { batchCreateChatGPTAccounts } from "./chatgptService";
+import { batchCreateChatGPTAccounts, resolvePaymentConfirmation } from "./chatgptService";
 import { storage } from "./storage";
 
 const SERVER_PORT = process.env.PORT || 5000;
@@ -5937,6 +5937,24 @@ export function startTelegramBot(config: BotConfig) {
   bot.action("shop_admin_alloc_cancel", async (ctx) => {
     await ctx.answerCbQuery("Cancelled").catch(() => {});
     await safeEdit(ctx, `❌  <b>Allocation cancelled.</b>`, { parse_mode: "HTML" });
+  });
+
+  // ── ChatGPT Plus manual payment confirmation ──────────────────────────────
+  bot.action(/^plus_paid:(.+)$/, async (ctx) => {
+    const email = ctx.match[1];
+    const resolved = resolvePaymentConfirmation(email);
+    if (resolved) {
+      await ctx.answerCbQuery("Payment confirmed — capturing screenshot…").catch(() => {});
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+      await ctx.reply(
+        `✅  <b>Payment Confirmed</b>\n\n` +
+        `Account: <code>${escapeHtml(email)}</code>\n\n` +
+        `<i>Success screenshot will follow shortly.</i>`,
+        { parse_mode: "HTML" }
+      ).catch(() => {});
+    } else {
+      await ctx.answerCbQuery("No pending session found for this account.").catch(() => {});
+    }
   });
 
   // ── Launch with auto-retry on transient polling errors ───────────────────

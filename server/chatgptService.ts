@@ -47,24 +47,40 @@ export interface ChatGPTResult {
   error?: string;
 }
 
-// ── Telegram Bot 2 helpers ────────────────────────────────────────────────────
-async function sendQRToBot2(imageBuffer: Buffer, chatId: number | string, caption: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN_2;
-  if (!token) { console.error("[ChatGPT/Plus] TELEGRAM_BOT_TOKEN_2 not set"); return; }
+// ── Manual payment confirmation map (email → resolve fn) ─────────────────────
+// telegramBot.ts calls resolvePaymentConfirmation(email) when admin taps "Paid"
+export const pendingPaymentConfirmations = new Map<string, () => void>();
+
+export function resolvePaymentConfirmation(email: string): boolean {
+  const resolve = pendingPaymentConfirmations.get(email.toLowerCase());
+  if (resolve) { resolve(); pendingPaymentConfirmations.delete(email.toLowerCase()); return true; }
+  return false;
+}
+
+// ── Telegram Bot 1 (admin) helpers ────────────────────────────────────────────
+async function sendPhotoToAdminBot(
+  imageBuffer: Buffer,
+  chatId: number | string,
+  caption: string,
+  inlineKeyboard?: object,
+): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) { console.error("[ChatGPT/Plus] TELEGRAM_BOT_TOKEN not set"); return; }
   try {
     const form = new FormData();
     form.append("chat_id", String(chatId));
     form.append("caption", caption);
     form.append("parse_mode", "HTML");
     form.append("photo", new Blob([imageBuffer], { type: "image/png" }), "chatgpt_qr.png");
+    if (inlineKeyboard) form.append("reply_markup", JSON.stringify(inlineKeyboard));
     const resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form });
     const json = await resp.json() as any;
     if (!json.ok) console.error("[ChatGPT/Plus] sendPhoto failed:", JSON.stringify(json));
-  } catch (e: any) { console.error("[ChatGPT/Plus] sendQRToBot2 error:", e.message); }
+  } catch (e: any) { console.error("[ChatGPT/Plus] sendPhotoToAdminBot error:", e.message); }
 }
 
-async function sendTextToBot2(chatId: number | string, text: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN_2;
+async function sendTextToAdminBot(chatId: number | string, text: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
@@ -159,7 +175,7 @@ export async function subscribePlusWithUPI(opts: {
   } else {
     log("[ChatGPT/Plus] UPI option not found — sending debug screenshot");
     const dbgShot = await page.screenshot({ type: "png" }) as Buffer;
-    await sendQRToBot2(dbgShot, notifyTelegramId,
+    await sendPhotoToAdminBot(dbgShot, notifyTelegramId,
       `⚠️ <b>Debug: UPI tab not found</b>\n` +
       `Account: <code>${email}</code>\n\n` +
       `UPI did not appear on the checkout. Check screenshot.\n` +
@@ -242,50 +258,58 @@ export async function subscribePlusWithUPI(opts: {
     log("[ChatGPT/Plus] Screenshot taken (QR may be in Stripe iframe)");
   }
 
-  // I: Send QR screenshot via Bot 2
-  await sendQRToBot2(
+  // I: Send QR screenshot to Bot 1 (admin) with "Payment Done" button
+  const emailKey = email.toLowerCase();
+  const manualConfirmPromise = new Promise<void>(resolve => {
+    pendingPaymentConfirmations.set(emailKey, resolve);
+  });
+
+  await sendPhotoToAdminBot(
     qrScreenshot,
     notifyTelegramId,
     `🔐 <b>ChatGPT Plus — UPI QR Code</b>\n\n` +
     `Account: <code>${email}</code>\n\n` +
-    `Scan with your UPI app to activate 1 month free Plus.\n` +
-    `<i>Waiting for your payment to complete…</i>`
-  );
-  log(`[ChatGPT/Plus] QR screenshot sent to Telegram ${notifyTelegramId}`);
-
-  // J: Poll for payment success (up to 10 minutes)
-  log("[ChatGPT/Plus] Polling for payment confirmation (up to 10 min)…");
-  const deadline = Date.now() + 10 * 60 * 1000;
-  while (Date.now() < deadline) {
-    const url = page.url();
-    const txt = await page.evaluate(() => document.body?.innerText?.slice(0, 600) ?? "").catch(() => "");
-    const isSuccess = url.includes("success") || url.includes("confirmed")
-      || txt.toLowerCase().includes("payment successful")
-      || txt.toLowerCase().includes("you're subscribed")
-      || txt.toLowerCase().includes("subscription active")
-      || txt.toLowerCase().includes("plus plan")
-      || (url.startsWith("https://chatgpt.com/") && !url.includes("checkout") && !url.includes("pricing"));
-
-    if (isSuccess) {
-      log("[ChatGPT/Plus] Payment confirmed — Plus activated!");
-      // Take success screenshot and notify
-      const successShot = await page.screenshot({ type: "png" }) as Buffer;
-      await sendQRToBot2(
-        successShot,
-        notifyTelegramId,
-        `✅ <b>ChatGPT Plus Activated!</b>\n\nAccount: <code>${email}</code>\n\nYour free 1-month Plus trial is now active.`
-      );
-      return;
+    `Scan this QR with your UPI app to activate 1 month free Plus.\n` +
+    `<i>Tap the button below after you complete the payment.</i>`,
+    {
+      inline_keyboard: [[
+        { text: "✅ Payment Done", callback_data: `plus_paid:${email}` },
+      ]],
     }
-    await sleep(5000);
-  }
-
-  // Timeout — notify user
-  log("[ChatGPT/Plus] Payment wait timed out (10 min). QR was sent — payment can still complete.");
-  await sendTextToBot2(
-    notifyTelegramId,
-    `⏳ <b>ChatGPT Plus QR timeout</b>\n\nAccount: <code>${email}</code>\n\nThe QR code is still valid. If you already scanned and paid, your Plus subscription will activate shortly.`
   );
+  log(`[ChatGPT/Plus] QR sent to admin Bot 1 (${notifyTelegramId}) — waiting for manual confirmation`);
+
+  // J: Race between manual button tap AND auto-detection (page URL change)
+  log("[ChatGPT/Plus] Waiting for payment (manual button or auto-detect, up to 30 min)…");
+
+  const autoDetectPromise = (async () => {
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await sleep(5000);
+      const url = page.url();
+      const txt = await page.evaluate(() => document.body?.innerText?.slice(0, 600) ?? "").catch(() => "");
+      const isSuccess = url.includes("success") || url.includes("confirmed")
+        || txt.toLowerCase().includes("payment successful")
+        || txt.toLowerCase().includes("you're subscribed")
+        || txt.toLowerCase().includes("subscription active")
+        || txt.toLowerCase().includes("plus plan")
+        || (url.startsWith("https://chatgpt.com/") && !url.includes("checkout") && !url.includes("pricing"));
+      if (isSuccess) { log("[ChatGPT/Plus] Auto-detected payment success"); return; }
+    }
+  })();
+
+  await Promise.race([manualConfirmPromise, autoDetectPromise]);
+  pendingPaymentConfirmations.delete(emailKey); // clean up if auto-detected
+
+  log("[ChatGPT/Plus] Payment confirmed — capturing success screenshot…");
+  await sleep(3000);
+  const successShot = await page.screenshot({ type: "png" }) as Buffer;
+  await sendPhotoToAdminBot(
+    successShot,
+    notifyTelegramId,
+    `✅ <b>ChatGPT Plus Activated!</b>\n\nAccount: <code>${email}</code>\n\nFree 1-month Plus trial is now active.`
+  );
+  log("[ChatGPT/Plus] Done — Plus activated!");
 }
 
 // ── Main automation ──────────────────────────────────────────────────────────
