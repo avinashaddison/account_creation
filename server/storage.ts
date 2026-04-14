@@ -98,6 +98,7 @@ export interface IStorage {
   updateElevenLabsAccount(id: string, data: Partial<InsertElevenLabsAccount>): Promise<ElevenLabsAccount>;
   deleteElevenLabsAccount(id: string): Promise<void>;
   createChatGptAccount(data: InsertChatGptAccount): Promise<ChatGptAccount>;
+  saveChatGptAccount(data: InsertChatGptAccount): Promise<ChatGptAccount | null>;
   getAllChatGptAccounts(): Promise<ChatGptAccount[]>;
   getChatGptAccountsByOwner(ownerId: string): Promise<ChatGptAccount[]>;
   deleteChatGptAccount(id: string): Promise<void>;
@@ -675,6 +676,24 @@ export class DatabaseStorage implements IStorage {
   async createChatGptAccount(data: InsertChatGptAccount): Promise<ChatGptAccount> {
     const [row] = await db.insert(chatgptAccounts).values(data).returning();
     return row;
+  }
+
+  // Upsert: inserts or updates on email conflict — never creates duplicates
+  async saveChatGptAccount(data: InsertChatGptAccount): Promise<ChatGptAccount | null> {
+    const [row] = await db.insert(chatgptAccounts)
+      .values(data)
+      .onConflictDoUpdate({
+        target: chatgptAccounts.email,
+        set: {
+          status:    data.status,
+          error:     data.error    ?? null,
+          firstName: data.firstName ?? null,
+          lastName:  data.lastName  ?? null,
+          createdBy: data.createdBy ?? null,
+        },
+      })
+      .returning();
+    return row ?? null;
   }
 
   async getAllChatGptAccounts(): Promise<ChatGptAccount[]> {
