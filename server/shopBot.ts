@@ -15,7 +15,7 @@ import {
   getFullInbox as smtpDevInbox,
 } from "./smtpDevService";
 import { storage } from "./storage";
-import { fetchUSNumbers, fetchNumberMessages } from "./tempNumberService";
+import { fetchUSNumbers, fetchNumberMessages, TempMessage, TempNumber } from "./tempNumberService";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -4409,7 +4409,7 @@ export function startShopBot(token: string) {
     if (!enabled) {
       return ctx.reply(`📱  <b>Temp Numbers</b> is currently <b>unavailable</b>.\n\nCheck back soon!`, { parse_mode: "HTML" });
     }
-    await sendTempNumberList(ctx, 1, false);
+    await showTempNumHome(ctx);
   });
 
   // ── Fallback: any unrecognised text → info card only, NO keyboard ────────
@@ -4583,112 +4583,168 @@ export function startShopBot(token: string) {
 
   // ── Temp Number feature ───────────────────────────────────────────────────
 
-  async function sendTempNumberList(ctx: any, page = 1, editMsg = false) {
-    if (ctx.callbackQuery) await ctx.answerCbQuery().catch(() => {});
-    const loadingText = `⏳  <b>Fetching US numbers…</b>`;
-    let sentMsg: any = null;
-    if (!editMsg) {
-      sentMsg = await ctx.reply(loadingText, { parse_mode: "HTML" }).catch(() => null);
-    }
-
-    let data: any;
-    try {
-      data = await fetchUSNumbers(page);
-    } catch {
-      const errText = `❌  <b>Failed to fetch numbers.</b>\n\nTemp-number.com may be down. Try again.`;
-      if (editMsg) await ctx.editMessageText(errText, { parse_mode: "HTML" }).catch(() => {});
-      else if (sentMsg) await ctx.telegram.editMessageText(ctx.chat.id, sentMsg.message_id, undefined, errText, { parse_mode: "HTML" }).catch(() => {});
-      return;
-    }
-
-    const lines = data.numbers.map((n: any) =>
-      `${n.isNew ? "🆕" : "📱"}  <code>${n.display}</code>  <i>${n.timeAgo}</i>`
-    ).join("\n");
-
-    const text =
-      `<b>╔══════════════════════════════╗</b>\n` +
-      `<b>║  📱  US TEMP NUMBERS          ║</b>\n` +
-      `<b>╚══════════════════════════════╝</b>\n\n` +
-      `<blockquote>🇺🇸  <b>${data.totalCount.toLocaleString()}</b> numbers available  ·  Page <b>${data.currentPage}</b>/<b>${data.totalPages}</b></blockquote>\n\n` +
-      lines + `\n\n<i>Tap a number to view its inbox</i>`;
-
-    // Build number buttons (3 per row)
-    const numBtns: any[] = data.numbers.map((n: any) =>
-      Markup.button.callback(n.display, `tmpnum_inbox_${n.number}`)
-    );
-    const numRows: any[][] = [];
-    for (let i = 0; i < numBtns.length; i += 3) {
-      numRows.push(numBtns.slice(i, i + 3));
-    }
-
-    // Pagination row
-    const navBtns: any[] = [];
-    if (data.currentPage > 1) navBtns.push(Markup.button.callback("◀ Prev", `tmpnum_page_${data.currentPage - 1}`));
-    if (data.currentPage < data.totalPages) navBtns.push(Markup.button.callback("Next ▶", `tmpnum_page_${data.currentPage + 1}`));
-    navBtns.push(Markup.button.callback("🔄 Refresh", `tmpnum_page_${data.currentPage}`));
-
-    const keyboard = Markup.inlineKeyboard([...numRows, navBtns]);
-
-    if (editMsg) {
-      await ctx.editMessageText(text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
-    } else if (sentMsg) {
-      await ctx.telegram.editMessageText(ctx.chat.id, sentMsg.message_id, undefined, text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
-    }
+  // Active live-watchers: userId → watcher state
+  interface TempWatcher {
+    intervalId: ReturnType<typeof setInterval>;
+    chatId:     number;
+    messageId:  number;
+    number:     string;
+    ticks:      number;
   }
+  const tempNumWatchers = new Map<number, TempWatcher>();
+  const WATCH_MAX_TICKS  = 60;   // 60 × 5 s = 5 minutes
+  const WATCH_INTERVAL   = 5000; // ms
 
-  async function sendNumberInbox(ctx: any, number: string) {
-    if (ctx.callbackQuery) await ctx.answerCbQuery().catch(() => {});
-    const display = `+${number}`;
-    const loadingText = `⏳  <b>Loading inbox for ${display}…</b>`;
-    await ctx.editMessageText(loadingText, { parse_mode: "HTML" }).catch(() => {});
+  function buildInboxText(number: string, messages: TempMessage[], ticks: number): string {
+    const display  = `+${number}`;
+    const secsLeft = Math.max(0, (WATCH_MAX_TICKS - ticks) * 5);
+    const watching = ticks < WATCH_MAX_TICKS;
 
-    let messages: any[];
-    try {
-      messages = await fetchNumberMessages(number);
-    } catch {
-      await ctx.editMessageText(`❌  <b>Failed to load inbox.</b>`, { parse_mode: "HTML" }).catch(() => {});
-      return;
-    }
+    const statusLine = watching
+      ? `⏱  Auto-refresh every 5s  ·  <b>${secsLeft}s</b> left`
+      : `⏹  Watch session ended`;
 
     let text =
       `<b>╔══════════════════════════════╗</b>\n` +
-      `<b>║  📬  INBOX                    ║</b>\n` +
+      `<b>║  📬  LIVE INBOX               ║</b>\n` +
       `<b>╚══════════════════════════════╝</b>\n\n` +
-      `<blockquote>📱  <code>${display}</code>  ·  🇺🇸 United States</blockquote>\n\n`;
+      `<blockquote>📱  <code>${display}</code>  ·  🇺🇸 United States\n${statusLine}</blockquote>\n\n`;
 
     if (messages.length === 0) {
-      text += `<i>No messages received yet. Use this number and check back soon.</i>`;
+      text += `<i>No messages yet. Use this number somewhere and wait for the SMS…</i>`;
     } else {
-      text += `<b>━━━━━━  ${messages.length} MESSAGES  ━━━━━━</b>\n\n`;
+      text += `<b>━━━━━━  ${messages.length} MESSAGE${messages.length > 1 ? "S" : ""}  ━━━━━━</b>\n\n`;
       for (const msg of messages) {
         text += `<b>From:</b> <code>${escHtml(msg.from)}</code>   <i>${escHtml(msg.timeAgo)}</i>\n`;
-        if (msg.otp) text += `🔑  <b>OTP CODE:  <code>${msg.otp}</code></b>\n`;
+        if (msg.otp) text += `🔑  <b>OTP:  <code>${msg.otp}</code></b>\n`;
         text += `<blockquote>${escHtml(msg.body)}</blockquote>\n\n`;
       }
     }
-
-    const keyboard = Markup.inlineKeyboard([
-      [Markup.button.callback("🔄 Refresh Inbox", `tmpnum_inbox_${number}`)],
-      [Markup.button.callback("◀ Back to Numbers", "tmpnum_page_1")],
-    ]);
-
-    await ctx.editMessageText(truncate(text, 4000), { parse_mode: "HTML", ...keyboard }).catch(() => {});
+    return truncate(text, 4000);
   }
 
-  // Pagination
-  bot.action(/^tmpnum_page_(\d+)$/, async (ctx) => {
-    const page = parseInt((ctx.match as RegExpMatchArray)[1]);
+  function buildInboxKeyboard(number: string, watching: boolean) {
+    if (watching) {
+      return Markup.inlineKeyboard([
+        [Markup.button.callback("⏹  Stop Watching", "tmpnum_stop")],
+        [Markup.button.callback("🔢  New Number", "tmpnum_generate")],
+      ]);
+    }
+    return Markup.inlineKeyboard([
+      [Markup.button.callback("🔄  Refresh Now", `tmpnum_refresh_${number}`)],
+      [Markup.button.callback("▶  Watch Again (5 min)", `tmpnum_watch_${number}`)],
+      [Markup.button.callback("🔢  New Number", "tmpnum_generate")],
+    ]);
+  }
+
+  function stopWatching(userId: number) {
+    const w = tempNumWatchers.get(userId);
+    if (w) { clearInterval(w.intervalId); tempNumWatchers.delete(userId); }
+  }
+
+  async function startWatching(chatId: number, messageId: number, number: string, userId: number) {
+    stopWatching(userId);
+    let ticks = 0;
+    const intervalId = setInterval(async () => {
+      ticks++;
+      if (!tempNumWatchers.has(userId)) return;
+      let messages: TempMessage[] = [];
+      try { messages = await fetchNumberMessages(number); } catch {}
+      const stillWatching = ticks < WATCH_MAX_TICKS;
+      await bot.telegram.editMessageText(
+        chatId, messageId, undefined,
+        buildInboxText(number, messages, ticks),
+        { parse_mode: "HTML", ...buildInboxKeyboard(number, stillWatching) }
+      ).catch(() => {});
+      if (!stillWatching) stopWatching(userId);
+    }, WATCH_INTERVAL);
+    tempNumWatchers.set(userId, { intervalId, chatId, messageId, number, ticks });
+  }
+
+  // ── Landing card: shown when user taps the TEMP NUMBER menu button ────────
+  async function showTempNumHome(ctx: any) {
+    const text =
+      `<b>╔══════════════════════════════╗</b>\n` +
+      `<b>║  📱  TEMP US NUMBERS          ║</b>\n` +
+      `<b>╚══════════════════════════════╝</b>\n\n` +
+      `<blockquote>Get a real US phone number instantly.\nReceive SMS &amp; OTPs — no account needed.</blockquote>\n\n` +
+      `Tap <b>Generate</b> to receive a random US number and watch its inbox live.\n` +
+      `Auto-refreshes every <b>5 seconds</b> for up to <b>5 minutes</b>.`;
+    await ctx.reply(text, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.callback("🔢  Generate New Number", "tmpnum_generate")]]),
+    });
+  }
+
+  // ── Generate: pick a random number from page 1 ───────────────────────────
+  bot.action("tmpnum_generate", async (ctx) => {
+    await ctx.answerCbQuery("Generating number…").catch(() => {});
     const enabled = await isTempNumEnabled();
-    if (!enabled) { await ctx.answerCbQuery("Feature disabled").catch(() => {}); return; }
-    await sendTempNumberList(ctx, page, true);
+    if (!enabled) {
+      return ctx.answerCbQuery("Feature currently disabled.", { show_alert: true }).catch(() => {});
+    }
+    let numbers: TempNumber[] = [];
+    try { numbers = (await fetchUSNumbers(1)).numbers; } catch {}
+    if (!numbers.length) {
+      await ctx.editMessageText(`❌  <b>No numbers available right now.</b>\n\nTry again in a moment.`, { parse_mode: "HTML" }).catch(() => {});
+      return;
+    }
+    const picked   = numbers[Math.floor(Math.random() * numbers.length)];
+    const userId   = ctx.from!.id;
+    const chatId   = ctx.chat!.id;
+    const msgId    = (ctx.callbackQuery as any)?.message?.message_id;
+
+    let messages: TempMessage[] = [];
+    try { messages = await fetchNumberMessages(picked.number); } catch {}
+
+    await ctx.editMessageText(
+      buildInboxText(picked.number, messages, 0),
+      { parse_mode: "HTML", ...buildInboxKeyboard(picked.number, true) }
+    ).catch(() => {});
+
+    if (msgId) await startWatching(chatId, msgId, picked.number, userId);
   });
 
-  // Inbox view
-  bot.action(/^tmpnum_inbox_(\d+)$/, async (ctx) => {
+  // ── Stop watching ─────────────────────────────────────────────────────────
+  bot.action("tmpnum_stop", async (ctx) => {
+    await ctx.answerCbQuery("Stopped.").catch(() => {});
+    const userId  = ctx.from!.id;
+    const number  = tempNumWatchers.get(userId)?.number ?? "";
+    stopWatching(userId);
+    let messages: TempMessage[] = [];
+    try { if (number) messages = await fetchNumberMessages(number); } catch {}
+    await ctx.editMessageText(
+      buildInboxText(number, messages, WATCH_MAX_TICKS),
+      { parse_mode: "HTML", ...buildInboxKeyboard(number, false) }
+    ).catch(() => {});
+  });
+
+  // ── Manual refresh (after watch session ends) ─────────────────────────────
+  bot.action(/^tmpnum_refresh_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Refreshing…").catch(() => {});
     const number = (ctx.match as RegExpMatchArray)[1];
-    const enabled = await isTempNumEnabled();
-    if (!enabled) { await ctx.answerCbQuery("Feature disabled").catch(() => {}); return; }
-    await sendNumberInbox(ctx, number);
+    let messages: TempMessage[] = [];
+    try { messages = await fetchNumberMessages(number); } catch {}
+    await ctx.editMessageText(
+      buildInboxText(number, messages, WATCH_MAX_TICKS),
+      { parse_mode: "HTML", ...buildInboxKeyboard(number, false) }
+    ).catch(() => {});
+  });
+
+  // ── Watch again ───────────────────────────────────────────────────────────
+  bot.action(/^tmpnum_watch_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Starting watch…").catch(() => {});
+    const number  = (ctx.match as RegExpMatchArray)[1];
+    const userId  = ctx.from!.id;
+    const chatId  = ctx.chat!.id;
+    const msgId   = (ctx.callbackQuery as any)?.message?.message_id;
+    let messages: TempMessage[] = [];
+    try { messages = await fetchNumberMessages(number); } catch {}
+    await ctx.editMessageText(
+      buildInboxText(number, messages, 0),
+      { parse_mode: "HTML", ...buildInboxKeyboard(number, true) }
+    ).catch(() => {});
+    if (msgId) await startWatching(chatId, msgId, number, userId);
   });
 
   launch();
