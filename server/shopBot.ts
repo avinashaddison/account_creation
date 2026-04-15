@@ -4456,16 +4456,25 @@ export function startShopBot(token: string) {
   }
 
   // ── Launch with retry ─────────────────────────────────────────────────────
-  // IMPORTANT: bot.launch() in long-polling mode blocks forever (resolves only
-  // when bot.stop() is called).  Any code after `await bot.launch()` would NEVER
-  // run.  We must NOT await it — start polling as a background task and then
-  // call registerCommands() immediately after.
+  // Uses the same retry-on-conflict pattern as Bot 1 so that when the dev
+  // server is stopped, the production instance automatically takes over
+  // polling within one retry cycle (≤60 s).
   async function launch(attempt = 1) {
     try {
       await registerCommands();   // ← register BEFORE launch so commands are set
-      bot.launch({ dropPendingUpdates: true }).catch((err: any) => {
-        console.error("[ShopBot] Polling error:", err?.message);
+
+      // Wrap launch in a promise so we can catch 409 Conflict errors and retry.
+      // bot.launch() resolves immediately (fire-and-forget polling loop) so we
+      // race it against a short window to catch synchronous/fast errors.
+      await new Promise<void>((resolve, reject) => {
+        bot.launch({ dropPendingUpdates: true })
+          .then(() => resolve())   // resolves when bot.stop() is called (normal shutdown)
+          .catch(reject);          // rejects on 409 / auth errors
+        // Give the launch a moment to throw synchronous errors; if it doesn't,
+        // consider it successfully started.
+        setTimeout(resolve, 2000);
       });
+
       console.log("[ShopBot] Online — Project Addison v2 Marketplace");
     } catch (err: any) {
       const delay = Math.min(attempt * 5000, 60_000);
