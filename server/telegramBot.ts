@@ -551,6 +551,8 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
     elevenStatus, elevenToday,
     outlookTotal, outlookAvail,
     gmailTotal,
+    shopUsersTotal, shopUsersToday, shopUsersWeek,
+    shopOrdersTotal, shopOrdersToday, shopRevenue,
   ] = await Promise.all([
     q(`SELECT status, COUNT(*) as cnt FROM replit_accounts GROUP BY status ORDER BY cnt DESC`),
     q(`SELECT COUNT(*) as cnt FROM replit_accounts WHERE created_at > NOW() - INTERVAL '24 hours'`),
@@ -571,6 +573,12 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
     q(`SELECT COUNT(*) as cnt FROM private_outlook_accounts`),
     q(`SELECT COUNT(*) as cnt FROM private_outlook_accounts WHERE email NOT IN (SELECT COALESCE(outlook_email,'') FROM replit_accounts)`),
     q(`SELECT COUNT(*) as cnt FROM private_gmail_accounts`),
+    q(`SELECT COUNT(*) as cnt FROM shop_customers`),
+    q(`SELECT COUNT(*) as cnt FROM shop_customers WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT COUNT(*) as cnt FROM shop_customers WHERE created_at > NOW() - INTERVAL '7 days'`),
+    q(`SELECT COUNT(*) as cnt FROM shop_orders`),
+    q(`SELECT COUNT(*) as cnt FROM shop_orders WHERE created_at > NOW() - INTERVAL '24 hours'`),
+    q(`SELECT COALESCE(SUM(amount_usd),0) as total FROM shop_orders WHERE status = 'paid'`),
   ]);
 
   const STAT_EMOJIS: Record<string, string> = {
@@ -667,6 +675,12 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
   t += `<code>  total: ${n(outlookTotal)}  ·  unused: ${n(outlookAvail)}</code>\n`;
   t += `\n📩  <b>GMAIL POOL</b>\n`;
   t += `<code>  total: ${n(gmailTotal)}</code>\n`;
+
+  t += `\n─────────────────────────────────────────\n`;
+  t += `\n🛍  <b>BOT 2 — SHOP</b>\n`;
+  t += `<code>  users: ${n(shopUsersTotal)}  ·  +${n(shopUsersToday)} today  ·  +${n(shopUsersWeek)} week</code>\n`;
+  t += `<code>  orders: ${n(shopOrdersTotal)}  ·  +${n(shopOrdersToday)} today</code>\n`;
+  t += `<code>  revenue: $${parseFloat(shopRevenue[0]?.total ?? "0").toFixed(2)} (paid orders)</code>\n`;
 
   return { text: t, mode: "HTML" };
 }
