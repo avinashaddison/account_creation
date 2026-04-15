@@ -581,106 +581,93 @@ async function buildStatsText(): Promise<{ text: string; mode: "HTML" }> {
     q(`SELECT COALESCE(SUM(amount_usd),0) as total FROM shop_orders WHERE status = 'paid'`),
   ]);
 
-  const STAT_EMOJIS: Record<string, string> = {
-    available: "🟢", sold_out: "✅", processing: "⏳", error: "❌",
+  const SE: Record<string, string> = {
+    available: "🟢", sold_out: "🔵", processing: "⏳", error: "❌",
     working: "🔗", created: "✨", pending_verification: "📨",
-    active: "🟢", banned: "🚫", suspended: "🔴", verified: "✅",
+    active: "🟢", banned: "🚫", suspended: "🔴", verified: "✅", failed: "💀",
   };
-  const se = (s: string) => STAT_EMOJIS[s] ?? "▪️";
+  const se = (s: string) => SE[s] ?? "▸";
 
-  function serviceBlock(
-    emoji: string, label: string,
-    statusRows: any[],
-    extras: string[] = [],
-    todayCnt = 0, weekCnt = -1
-  ): string {
-    const total = statusRows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-    if (total === 0 && todayCnt === 0) return "";
-    let b = `\n${emoji} <b>${label}</b>  <code>${total}</code>\n`;
-    // Status pills
-    const pills = statusRows.map((r: any) => `${se(r.status)} ${r.status.replace(/_/g, " ")}: <b>${r.cnt}</b>`);
-    if (pills.length) b += pills.join("  ·  ") + "\n";
-    if (extras.length) b += extras.join("  ·  ") + "\n";
-    const timeInfo: string[] = [];
-    if (todayCnt > 0) timeInfo.push(`📅 today: <b>${todayCnt}</b>`);
-    if (weekCnt >= 0) timeInfo.push(`📆 week: <b>${weekCnt}</b>`);
-    if (timeInfo.length) b += timeInfo.join("  ·  ") + "\n";
-    return b;
-  }
+  const sum = (rows: any[]) => rows.reduce((s: number, r: any) => s + parseInt(r.cnt || "0"), 0);
 
-  const replitTotal = replitStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const lovableTotal = lovableStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const v0Total = v0Status.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const adobeTotal = adobeStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const chatgptTotal = chatgptStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const elevenTotal = elevenStatus.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
-  const grandTotal = replitTotal + lovableTotal + v0Total + adobeTotal + chatgptTotal + elevenTotal;
+  const replitTotal   = sum(replitStatus);
+  const lovableTotal  = sum(lovableStatus);
+  const v0Total       = sum(v0Status);
+  const adobeTotal    = sum(adobeStatus);
+  const chatgptTotal  = sum(chatgptStatus);
+  const elevenTotal   = sum(elevenStatus);
+  const grandTotal    = replitTotal + lovableTotal + v0Total + adobeTotal + chatgptTotal + elevenTotal;
 
   const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+  const revenue = parseFloat(shopRevenue[0]?.total ?? "0").toFixed(2);
 
-  function svcLine(emoji: string, label: string, statusRows: any[], todayCnt: number, weekCnt = -1, extras: string[] = []): string {
-    const total = statusRows.reduce((s: number, r: any) => s + parseInt(r.cnt), 0);
+  // Build a service block — returns empty string if no data
+  function svc(
+    emoji: string, label: string, total: number,
+    statusRows: any[], todayCnt: number, weekCnt = -1,
+    extras: [string, string | number][] = []
+  ): string {
     if (total === 0 && todayCnt === 0) return "";
 
-    let b = `\n${emoji}  <b>${label}</b>  <code>${total}</code>\n`;
-
-    // Pair status items 2-per-line so lines stay short on mobile
     const items = statusRows
       .filter((r: any) => parseInt(r.cnt) > 0)
-      .map((r: any) => `${se(r.status)} ${r.status.replace(/_/g, " ")}: ${r.cnt}`);
-    if (items.length === 0) {
-      b += `<code>  —</code>\n`;
-    } else {
+      .map((r: any) => `${se(r.status)} <b>${r.cnt}</b> ${r.status.replace(/_/g, " ")}`);
+
+    const timeTag = [
+      todayCnt > 0 ? `📅 <b>+${todayCnt}</b> today` : "",
+      weekCnt > 0  ? `📆 <b>+${weekCnt}</b> wk`     : "",
+    ].filter(Boolean).join("   ");
+
+    const extraTag = extras
+      .filter(([, v]) => Number(v) > 0)
+      .map(([k, v]) => `${k}  <b>${v}</b>`)
+      .join("   ");
+
+    let b = `\n${emoji}  <b>${label}</b>   <code>${total}</code>\n`;
+    if (items.length) {
+      // two per row
       for (let i = 0; i < items.length; i += 2) {
-        const left = items[i];
-        const right = items[i + 1] ? `  ·  ${items[i + 1]}` : "";
-        b += `<code>  ${left}${right}</code>\n`;
+        b += `  ${items[i]}${items[i + 1] ? `   ${items[i + 1]}` : ""}\n`;
       }
     }
-
-    // Pair extras 2-per-line too
-    if (extras.length) {
-      for (let i = 0; i < extras.length; i += 2) {
-        const left = extras[i];
-        const right = extras[i + 1] ? `  ·  ${extras[i + 1]}` : "";
-        b += `<code>  ${left}${right}</code>\n`;
-      }
-    }
-
-    const timeParts = [
-      todayCnt > 0 ? `+${todayCnt} today` : "",
-      weekCnt >= 0 ? `+${weekCnt} week` : "",
-    ].filter(Boolean).join("  ·  ");
-    if (timeParts) b += `<code>  ${timeParts}</code>\n`;
+    if (extraTag) b += `  ${extraTag}\n`;
+    if (timeTag)  b += `  ${timeTag}\n`;
     return b;
   }
 
-  let t = `\n🔷 <b>⚡ ACCOUNT TRACKER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  t += ``;
-  t += `<code>◈ Snapshot  →  ${now}\n`;
-  t += `◈ Total     →  ${grandTotal} accounts</code>\n`;
+  // ── Header ────────────────────────────────────────────────────────────────
+  let t = "";
+  t += `<b>╔══════════════════════════════════╗</b>\n`;
+  t += `<b>║  ⚡  ADDISON PANEL  ·  STATS    ║</b>\n`;
+  t += `<b>╚══════════════════════════════════╝</b>\n`;
+  t += `\n`;
+  t += `<blockquote>🕐  ${now}   ·   📦  <b>${grandTotal}</b> total accounts</blockquote>\n`;
 
-  t += `\n─────────────────────────────────────────\n`;
+  // ── Accounts ──────────────────────────────────────────────────────────────
+  t += `\n<b>━━━━━━  ACCOUNTS  ━━━━━━</b>\n`;
+  t += svc("🔵", "REPLIT",  replitTotal,  replitStatus,  n(replitToday),  n(replitWeek),
+    [["🎟 coupons", n(replitCoupons)], ["🔗 checkout", n(replitCheckout)]]);
+  t += svc("💜", "LOVABLE", lovableTotal, lovableStatus, n(lovableToday), n(lovableWeek));
+  t += svc("⚡", "V0.DEV",  v0Total,      v0Status,      n(v0Today));
+  t += svc("🅰️", "ADOBE",  adobeTotal,   adobeStatus,   n(adobeToday));
+  t += svc("🤖", "CHATGPT",chatgptTotal, chatgptStatus, n(chatgptToday));
+  t += svc("🎙", "11LABS", elevenTotal,  elevenStatus,  n(elevenToday));
 
-  t += svcLine("🔵", "REPLIT", replitStatus, n(replitToday), n(replitWeek),
-    [`coupons: ${n(replitCoupons)}`, `checkout: ${n(replitCheckout)}`]);
-  t += svcLine("💜", "LOVABLE",  lovableStatus,  n(lovableToday), n(lovableWeek));
-  t += svcLine("⚡", "V0.DEV",   v0Status,       n(v0Today));
-  t += svcLine("🅰️", "ADOBE",   adobeStatus,    n(adobeToday));
-  t += svcLine("🤖", "CHATGPT", chatgptStatus,  n(chatgptToday));
-  t += svcLine("🎙", "11LABS",  elevenStatus,   n(elevenToday));
+  // ── Email Pools ───────────────────────────────────────────────────────────
+  t += `\n<b>━━━━━━  EMAIL POOLS  ━━━━━━</b>\n`;
+  t += `\n📬  <b>OUTLOOK</b>   <code>${n(outlookTotal)}</code>\n`;
+  t += `  📥 total  <b>${n(outlookTotal)}</b>   ✅ unused  <b>${n(outlookAvail)}</b>\n`;
+  t += `\n📩  <b>GMAIL</b>   <code>${n(gmailTotal)}</code>\n`;
+  t += `  📥 total  <b>${n(gmailTotal)}</b>\n`;
 
-  t += `\n─────────────────────────────────────────\n`;
-  t += `\n📬  <b>OUTLOOK POOL</b>\n`;
-  t += `<code>  total: ${n(outlookTotal)}  ·  unused: ${n(outlookAvail)}</code>\n`;
-  t += `\n📩  <b>GMAIL POOL</b>\n`;
-  t += `<code>  total: ${n(gmailTotal)}</code>\n`;
-
-  t += `\n─────────────────────────────────────────\n`;
-  t += `\n🛍  <b>BOT 2 — SHOP</b>\n`;
-  t += `<code>  users: ${n(shopUsersTotal)}  ·  +${n(shopUsersToday)} today  ·  +${n(shopUsersWeek)} week</code>\n`;
-  t += `<code>  orders: ${n(shopOrdersTotal)}  ·  +${n(shopOrdersToday)} today</code>\n`;
-  t += `<code>  revenue: $${parseFloat(shopRevenue[0]?.total ?? "0").toFixed(2)} (paid orders)</code>\n`;
+  // ── Shop Bot 2 ────────────────────────────────────────────────────────────
+  t += `\n<b>━━━━━━  BOT 2  ·  SHOP  ━━━━━━</b>\n`;
+  t += `\n🛍  <b>CUSTOMERS</b>   <code>${n(shopUsersTotal)}</code>\n`;
+  t += `  👥 total  <b>${n(shopUsersTotal)}</b>   📅 +<b>${n(shopUsersToday)}</b> today   📆 +<b>${n(shopUsersWeek)}</b> wk\n`;
+  t += `\n🧾  <b>ORDERS</b>   <code>${n(shopOrdersTotal)}</code>\n`;
+  t += `  📋 total  <b>${n(shopOrdersTotal)}</b>   📅 +<b>${n(shopOrdersToday)}</b> today\n`;
+  t += `\n💰  <b>REVENUE</b>\n`;
+  t += `  💵  <b>$${revenue}</b>  from paid orders\n`;
 
   return { text: t, mode: "HTML" };
 }
