@@ -4585,39 +4585,50 @@ export function startShopBot(token: string) {
 
   // Active live-watchers: userId → watcher state
   interface TempWatcher {
-    intervalId: ReturnType<typeof setInterval>;
-    chatId:     number;
-    messageId:  number;
-    number:     string;
-    ticks:      number;
+    intervalId:      ReturnType<typeof setInterval>;
+    chatId:          number;
+    messageId:       number;
+    number:          string;
+    ticks:           number;
+    seenFingerprints: Set<string>;   // messages that existed at generation time
   }
   const tempNumWatchers = new Map<number, TempWatcher>();
-  const WATCH_MAX_TICKS  = 60;   // 60 × 5 s = 5 minutes
-  const WATCH_INTERVAL   = 5000; // ms
+  const WATCH_MAX_TICKS = 60;   // 60 × 5 s = 5 minutes
+  const WATCH_INTERVAL  = 5000; // ms
 
-  function buildInboxText(number: string, messages: TempMessage[], ticks: number): string {
+  function msgFingerprint(m: TempMessage): string {
+    return `${m.from}|${m.body}`;
+  }
+
+  function buildInboxText(
+    number: string,
+    newMessages: TempMessage[],   // only messages that arrived AFTER generation
+    ticks: number,
+    watching: boolean,
+  ): string {
     const display  = `+${number}`;
     const secsLeft = Math.max(0, (WATCH_MAX_TICKS - ticks) * 5);
-    const watching = ticks < WATCH_MAX_TICKS;
 
     const statusLine = watching
-      ? `⏱  Auto-refresh every 5s  ·  <b>${secsLeft}s</b> left`
+      ? `⏱  Watching  ·  refreshes every 5s  ·  <b>${secsLeft}s</b> left`
       : `⏹  Watch session ended`;
 
     let text =
-      `<b>╔══════════════════════════════╗</b>\n` +
-      `<b>║  📬  LIVE INBOX               ║</b>\n` +
-      `<b>╚══════════════════════════════╝</b>\n\n` +
-      `<blockquote>📱  <code>${display}</code>  ·  🇺🇸 United States\n${statusLine}</blockquote>\n\n`;
+      `<b>📱  ${display}</b>  ·  🇺🇸 US\n` +
+      `<blockquote>${statusLine}</blockquote>\n\n`;
 
-    if (messages.length === 0) {
-      text += `<i>No messages yet. Use this number somewhere and wait for the SMS…</i>`;
+    if (newMessages.length === 0) {
+      text += watching
+        ? `<i>Waiting for new SMS…  Use this number and the message will appear here automatically.</i>`
+        : `<i>No new messages arrived during the session.</i>`;
     } else {
-      text += `<b>━━━━━━  ${messages.length} MESSAGE${messages.length > 1 ? "S" : ""}  ━━━━━━</b>\n\n`;
-      for (const msg of messages) {
-        text += `<b>From:</b> <code>${escHtml(msg.from)}</code>   <i>${escHtml(msg.timeAgo)}</i>\n`;
-        if (msg.otp) text += `🔑  <b>OTP:  <code>${msg.otp}</code></b>\n`;
-        text += `<blockquote>${escHtml(msg.body)}</blockquote>\n\n`;
+      text += `<b>━━━━  ${newMessages.length} NEW MESSAGE${newMessages.length > 1 ? "S" : ""}  ━━━━</b>\n\n`;
+      for (const msg of newMessages) {
+        text += `📞  <code>${escHtml(msg.from)}</code>   <i>${escHtml(msg.timeAgo)}</i>\n`;
+        if (msg.otp) {
+          text += `🔑  OTP:  <b><code>${msg.otp}</code></b>\n`;
+        }
+        text += `<blockquote expandable>${escHtml(msg.body)}</blockquote>\n\n`;
       }
     }
     return truncate(text, 4000);
@@ -4642,23 +4653,32 @@ export function startShopBot(token: string) {
     if (w) { clearInterval(w.intervalId); tempNumWatchers.delete(userId); }
   }
 
-  async function startWatching(chatId: number, messageId: number, number: string, userId: number) {
+  async function startWatching(
+    chatId: number,
+    messageId: number,
+    number: string,
+    userId: number,
+    initialMessages: TempMessage[],
+  ) {
     stopWatching(userId);
+    const seenFingerprints = new Set(initialMessages.map(msgFingerprint));
     let ticks = 0;
     const intervalId = setInterval(async () => {
       ticks++;
       if (!tempNumWatchers.has(userId)) return;
-      let messages: TempMessage[] = [];
-      try { messages = await fetchNumberMessages(number); } catch {}
+      let all: TempMessage[] = [];
+      try { all = await fetchNumberMessages(number); } catch {}
+      // Only messages NOT seen at generation time
+      const fresh = all.filter(m => !seenFingerprints.has(msgFingerprint(m)));
       const stillWatching = ticks < WATCH_MAX_TICKS;
       await bot.telegram.editMessageText(
         chatId, messageId, undefined,
-        buildInboxText(number, messages, ticks),
+        buildInboxText(number, fresh, ticks, stillWatching),
         { parse_mode: "HTML", ...buildInboxKeyboard(number, stillWatching) }
       ).catch(() => {});
       if (!stillWatching) stopWatching(userId);
     }, WATCH_INTERVAL);
-    tempNumWatchers.set(userId, { intervalId, chatId, messageId, number, ticks });
+    tempNumWatchers.set(userId, { intervalId, chatId, messageId, number, ticks, seenFingerprints });
   }
 
   // ── Landing card: shown when user taps the TEMP NUMBER menu button ────────
@@ -4694,57 +4714,63 @@ export function startShopBot(token: string) {
     const chatId   = ctx.chat!.id;
     const msgId    = (ctx.callbackQuery as any)?.message?.message_id;
 
-    let messages: TempMessage[] = [];
-    try { messages = await fetchNumberMessages(picked.number); } catch {}
+    // Snapshot existing messages — these become the baseline (won't be shown)
+    let initialMessages: TempMessage[] = [];
+    try { initialMessages = await fetchNumberMessages(picked.number); } catch {}
 
+    // Show inbox immediately with 0 new messages (watch hasn't started yet)
     await ctx.editMessageText(
-      buildInboxText(picked.number, messages, 0),
+      buildInboxText(picked.number, [], 0, true),
       { parse_mode: "HTML", ...buildInboxKeyboard(picked.number, true) }
     ).catch(() => {});
 
-    if (msgId) await startWatching(chatId, msgId, picked.number, userId);
+    if (msgId) await startWatching(chatId, msgId, picked.number, userId, initialMessages);
   });
 
   // ── Stop watching ─────────────────────────────────────────────────────────
   bot.action("tmpnum_stop", async (ctx) => {
     await ctx.answerCbQuery("Stopped.").catch(() => {});
     const userId  = ctx.from!.id;
-    const number  = tempNumWatchers.get(userId)?.number ?? "";
+    const watcher = tempNumWatchers.get(userId);
+    const number  = watcher?.number ?? "";
+    const seenFps = watcher?.seenFingerprints ?? new Set<string>();
     stopWatching(userId);
-    let messages: TempMessage[] = [];
-    try { if (number) messages = await fetchNumberMessages(number); } catch {}
+    let all: TempMessage[] = [];
+    try { if (number) all = await fetchNumberMessages(number); } catch {}
+    const fresh = all.filter(m => !seenFps.has(msgFingerprint(m)));
     await ctx.editMessageText(
-      buildInboxText(number, messages, WATCH_MAX_TICKS),
+      buildInboxText(number, fresh, WATCH_MAX_TICKS, false),
       { parse_mode: "HTML", ...buildInboxKeyboard(number, false) }
     ).catch(() => {});
   });
 
-  // ── Manual refresh (after watch session ends) ─────────────────────────────
+  // ── Manual refresh (after watch session ends) — shows all current msgs ────
   bot.action(/^tmpnum_refresh_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery("Refreshing…").catch(() => {});
     const number = (ctx.match as RegExpMatchArray)[1];
-    let messages: TempMessage[] = [];
-    try { messages = await fetchNumberMessages(number); } catch {}
+    let all: TempMessage[] = [];
+    try { all = await fetchNumberMessages(number); } catch {}
     await ctx.editMessageText(
-      buildInboxText(number, messages, WATCH_MAX_TICKS),
+      buildInboxText(number, all, WATCH_MAX_TICKS, false),
       { parse_mode: "HTML", ...buildInboxKeyboard(number, false) }
     ).catch(() => {});
   });
 
-  // ── Watch again ───────────────────────────────────────────────────────────
+  // ── Watch again — current inbox becomes the new baseline ──────────────────
   bot.action(/^tmpnum_watch_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery("Starting watch…").catch(() => {});
     const number  = (ctx.match as RegExpMatchArray)[1];
     const userId  = ctx.from!.id;
     const chatId  = ctx.chat!.id;
     const msgId   = (ctx.callbackQuery as any)?.message?.message_id;
-    let messages: TempMessage[] = [];
-    try { messages = await fetchNumberMessages(number); } catch {}
+    // Snapshot current messages as baseline — only future ones will be shown
+    let initialMessages: TempMessage[] = [];
+    try { initialMessages = await fetchNumberMessages(number); } catch {}
     await ctx.editMessageText(
-      buildInboxText(number, messages, 0),
+      buildInboxText(number, [], 0, true),
       { parse_mode: "HTML", ...buildInboxKeyboard(number, true) }
     ).catch(() => {});
-    if (msgId) await startWatching(chatId, msgId, number, userId);
+    if (msgId) await startWatching(chatId, msgId, number, userId, initialMessages);
   });
 
   launch();
