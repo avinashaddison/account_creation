@@ -4584,7 +4584,7 @@ export function startShopBot(token: string) {
   // ── Temp Number feature ───────────────────────────────────────────────────
 
   async function sendTempNumberList(ctx: any, page = 1, editMsg = false) {
-    await ctx.answerCbQuery?.().catch(() => {});
+    if (ctx.callbackQuery) await ctx.answerCbQuery().catch(() => {});
     const loadingText = `⏳  <b>Fetching US numbers…</b>`;
     let sentMsg: any = null;
     if (!editMsg) {
@@ -4637,7 +4637,7 @@ export function startShopBot(token: string) {
   }
 
   async function sendNumberInbox(ctx: any, number: string) {
-    await ctx.answerCbQuery?.().catch(() => {});
+    if (ctx.callbackQuery) await ctx.answerCbQuery().catch(() => {});
     const display = `+${number}`;
     const loadingText = `⏳  <b>Loading inbox for ${display}…</b>`;
     await ctx.editMessageText(loadingText, { parse_mode: "HTML" }).catch(() => {});
