@@ -1473,58 +1473,6 @@ export function startShopBot(token: string) {
       }
     }
 
-    // Referral offer banner — always shown unless milestone already fully claimed
-    const botUsername2 = ctx.botInfo.username;
-    const refLink2     = `https://t.me/${botUsername2}?start=ref_${uid}`;
-    const shareUrl2    = `https://t.me/share/url?url=${encodeURIComponent(refLink2)}&text=${encodeURIComponent("Join Project Addison — AI Tools Marketplace! Get AI tools at the best prices.")}`;
-    const [refCountRes2, milestoneRes2] = await Promise.all([
-      dbQuery(`SELECT COUNT(*) as cnt FROM shop_customers WHERE referred_by = $1 AND referral_rewarded = true`, [uid]),
-      dbQuery(`SELECT ref3_milestone_claimed FROM shop_customers WHERE telegram_id = $1`, [uid]),
-    ]);
-    const refsDone2      = parseInt(refCountRes2.rows[0]?.cnt ?? "0");
-    const refsLeft2      = Math.max(0, 3 - refsDone2);
-    const alreadyClaimed2 = milestoneRes2.rows[0]?.ref3_milestone_claimed ?? false;
-    const filled2         = Math.min(refsDone2, 3);
-    const progressBar2    = Array.from({ length: 3 }, (_, i) => i < filled2 ? "🟢" : "⚪").join("  ");
-
-    if (!alreadyClaimed2) {
-      // Build individual friend slot lines (✅ joined / ⬜ pending)
-      const friendSlots2 = Array.from({ length: 3 }, (_, i) => {
-        if (i < refsDone2) return `✅  Friend ${i + 1}  —  <b>joined!</b>`;
-        return       `⬜  Friend ${i + 1}  —  <i>waiting for invite</i>`;
-      }).join("\n");
-
-      const statusLine2 = refsLeft2 > 0
-        ? `⏳  <b>${refsLeft2} more friend${refsLeft2 > 1 ? "s" : ""}</b> needed to unlock`
-        : `🏆  <b>Milestone complete</b>  —  reward is on its way!`;
-
-      ctx.reply(
-        `🎁  <b>FREE — 1 Month ChatGPT Plus</b>\n\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `Refer <b>3 friends</b> to this bot and unlock\n` +
-        `<b>1 month ChatGPT Plus</b> — completely free.\n\n` +
-        `<blockquote>✦  GPT-4o  ·  DALL·E  ·  Priority access\n` +
-        `✦  Normally <b>$20/month</b>  —  yours free</blockquote>\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `📋  <b>HOW IT WORKS</b>\n\n` +
-        `<blockquote>① Tap <b>Share My Invite Link</b> below\n` +
-        `② Send it to friends on Telegram\n` +
-        `③ Each friend opens the bot &amp; taps\n` +
-        `   <b>✅ I'm Here — Confirm My Arrival</b>\n` +
-        `④ All 3 confirmed → ChatGPT Plus is yours 🎉</blockquote>\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-        `📊  <b>YOUR PROGRESS</b>  ·  <b>${refsDone2} / 3</b>\n\n` +
-        `${friendSlots2}\n\n` +
-        `${statusLine2}\n` +
-        `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.url("📤  Share My Invite Link — Get Free ChatGPT Plus", shareUrl2)],
-          ]),
-        }
-      ).catch(() => {});
-    }
   });
 
   bot.command("menu", async (ctx) => {
