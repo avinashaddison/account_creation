@@ -137,7 +137,7 @@ const BTN_DEFAULTS: Record<BtnKey, string> = {
   SUPPORT:      "🎧  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
   BIZ_MAIL:     "📩  𝗧𝗘𝗠𝗣  𝗠𝗔𝗜𝗟",
-  TEMP_NUM:     "📱  𝗧𝗘𝗠𝗣  𝗡𝗨𝗠𝗕𝗘𝗥",
+  TEMP_NUM:     "📞  𝗧𝗘𝗠𝗣  𝗡𝗨𝗠𝗕𝗘𝗥",
 };
 let BTN: Record<BtnKey, string> = { ...BTN_DEFAULTS };
 
@@ -204,8 +204,8 @@ async function buildShopKeyboard() {
     ...stickyRows,
     [BTN.ACCOUNTS],
     [BTN.BALANCE,  BTN.ORDERS],
-    [BTN.DEPOSIT,  BTN.BIZ_MAIL],
-    ...(tempNumOn ? [[BTN.TEMP_NUM, BTN.REFER]] : [[BTN.REFER]]),
+    [BTN.DEPOSIT,  BTN.REFER],
+    ...(tempNumOn ? [[BTN.BIZ_MAIL, BTN.TEMP_NUM]] : [[BTN.BIZ_MAIL]]),
     [BTN.IDENTITY, BTN.SUPPORT],
   ];
   return Markup.keyboard(rows).resize().oneTime();
