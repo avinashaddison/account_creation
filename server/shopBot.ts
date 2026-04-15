@@ -4402,6 +4402,16 @@ export function startShopBot(token: string) {
     } catch (_e) { /* retry silently next interval */ }
   }, 30_000);
 
+  // ── Temp Number — must be above the catch-all text handler ──────────────
+  bot.hears((t) => t === BTN.TEMP_NUM, async (ctx) => {
+    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+    const enabled = await isTempNumEnabled();
+    if (!enabled) {
+      return ctx.reply(`📱  <b>Temp Numbers</b> is currently <b>unavailable</b>.\n\nCheck back soon!`, { parse_mode: "HTML" });
+    }
+    await sendTempNumberList(ctx, 1, false);
+  });
+
   // ── Fallback: any unrecognised text → info card only, NO keyboard ────────
   // Intentionally no reply keyboard here — sending a keyboard on every message
   // keeps it permanently active, which hides the "Menu" button in the input bar.
@@ -4664,16 +4674,6 @@ export function startShopBot(token: string) {
 
     await ctx.editMessageText(truncate(text, 4000), { parse_mode: "HTML", ...keyboard }).catch(() => {});
   }
-
-  // Button: Temp Numbers menu entry
-  bot.hears((t) => t === BTN.TEMP_NUM, async (ctx) => {
-    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
-    const enabled = await isTempNumEnabled();
-    if (!enabled) {
-      return ctx.reply(`📱  <b>Temp Numbers</b> is currently <b>unavailable</b>.\n\nCheck back soon!`, { parse_mode: "HTML" });
-    }
-    await sendTempNumberList(ctx, 1, false);
-  });
 
   // Pagination
   bot.action(/^tmpnum_page_(\d+)$/, async (ctx) => {
