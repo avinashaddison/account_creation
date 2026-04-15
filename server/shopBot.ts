@@ -15,7 +15,7 @@ import {
   getFullInbox as smtpDevInbox,
 } from "./smtpDevService";
 import { storage } from "./storage";
-import { fetchUSNumbers, fetchNumberMessages, TempMessage, TempNumber } from "./tempNumberService";
+import { fetchNumbers, fetchNumberMessages, TempMessage, TempNumber, CountryCode, COUNTRY_META } from "./tempNumberService";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -4583,68 +4583,71 @@ export function startShopBot(token: string) {
 
   // ── Temp Number feature ───────────────────────────────────────────────────
 
-  // Active live-watchers: userId → watcher state
   interface TempWatcher {
-    intervalId:      ReturnType<typeof setInterval>;
-    chatId:          number;
-    messageId:       number;
-    number:          string;
-    ticks:           number;
-    seenFingerprints: Set<string>;   // messages that existed at generation time
+    intervalId:       ReturnType<typeof setInterval>;
+    chatId:           number;
+    messageId:        number;
+    number:           string;
+    country:          CountryCode;
+    ticks:            number;
+    seenFingerprints: Set<string>;
   }
   const tempNumWatchers = new Map<number, TempWatcher>();
   const WATCH_MAX_TICKS = 60;   // 60 × 5 s = 5 minutes
   const WATCH_INTERVAL  = 5000; // ms
 
-  function msgFingerprint(m: TempMessage): string {
-    return `${m.from}|${m.body}`;
-  }
+  function msgFingerprint(m: TempMessage): string { return `${m.from}|${m.body}`; }
 
   function buildInboxText(
     number: string,
-    newMessages: TempMessage[],   // only messages that arrived AFTER generation
+    country: CountryCode,
+    newMessages: TempMessage[],
     ticks: number,
     watching: boolean,
   ): string {
-    const display  = `+${number}`;
+    const { flag, label } = COUNTRY_META[country];
     const secsLeft = Math.max(0, (WATCH_MAX_TICKS - ticks) * 5);
-
     const statusLine = watching
-      ? `⏱  Watching  ·  refreshes every 5s  ·  <b>${secsLeft}s</b> left`
-      : `⏹  Watch session ended`;
+      ? `⏱  Watching · every 5s · <b>${secsLeft}s</b> left`
+      : `⏹  Session ended`;
 
     let text =
-      `<b>📱  ${display}</b>  ·  🇺🇸 US\n` +
+      `<b>📱  +${number}</b>  ·  ${flag} ${label}\n` +
       `<blockquote>${statusLine}</blockquote>\n\n`;
 
     if (newMessages.length === 0) {
       text += watching
-        ? `<i>Waiting for new SMS…  Use this number and the message will appear here automatically.</i>`
+        ? `<i>Waiting for new SMS…\nUse this number and the message will appear here automatically.</i>`
         : `<i>No new messages arrived during the session.</i>`;
     } else {
       text += `<b>━━━━  ${newMessages.length} NEW MESSAGE${newMessages.length > 1 ? "S" : ""}  ━━━━</b>\n\n`;
       for (const msg of newMessages) {
         text += `📞  <code>${escHtml(msg.from)}</code>   <i>${escHtml(msg.timeAgo)}</i>\n`;
-        if (msg.otp) {
-          text += `🔑  OTP:  <b><code>${msg.otp}</code></b>\n`;
-        }
+        if (msg.otp) text += `🔑  OTP:  <b><code>${msg.otp}</code></b>\n`;
         text += `<blockquote expandable>${escHtml(msg.body)}</blockquote>\n\n`;
       }
     }
     return truncate(text, 4000);
   }
 
-  function buildInboxKeyboard(number: string, watching: boolean) {
+  function buildInboxKeyboard(number: string, country: CountryCode, watching: boolean) {
+    const cc = country;
     if (watching) {
       return Markup.inlineKeyboard([
         [Markup.button.callback("⏹  Stop Watching", "tmpnum_stop")],
-        [Markup.button.callback("🔢  New Number", "tmpnum_generate")],
+        [
+          Markup.button.callback("🇺🇸  New US Number", "tmpnum_gen_us"),
+          Markup.button.callback("🇬🇧  New UK Number", "tmpnum_gen_uk"),
+        ],
       ]);
     }
     return Markup.inlineKeyboard([
-      [Markup.button.callback("🔄  Refresh Now", `tmpnum_refresh_${number}`)],
-      [Markup.button.callback("▶  Watch Again (5 min)", `tmpnum_watch_${number}`)],
-      [Markup.button.callback("🔢  New Number", "tmpnum_generate")],
+      [Markup.button.callback("🔄  Refresh Now", `tmpnum_ref_${cc}_${number}`)],
+      [Markup.button.callback("▶  Watch Again (5 min)", `tmpnum_wch_${cc}_${number}`)],
+      [
+        Markup.button.callback("🇺🇸  New US Number", "tmpnum_gen_us"),
+        Markup.button.callback("🇬🇧  New UK Number", "tmpnum_gen_uk"),
+      ],
     ]);
   }
 
@@ -4654,11 +4657,9 @@ export function startShopBot(token: string) {
   }
 
   async function startWatching(
-    chatId: number,
-    messageId: number,
-    number: string,
-    userId: number,
-    initialMessages: TempMessage[],
+    chatId: number, messageId: number,
+    number: string, country: CountryCode,
+    userId: number, initialMessages: TempMessage[],
   ) {
     stopWatching(userId);
     const seenFingerprints = new Set(initialMessages.map(msgFingerprint));
@@ -4667,110 +4668,115 @@ export function startShopBot(token: string) {
       ticks++;
       if (!tempNumWatchers.has(userId)) return;
       let all: TempMessage[] = [];
-      try { all = await fetchNumberMessages(number); } catch {}
-      // Only messages NOT seen at generation time
+      try { all = await fetchNumberMessages(number, country); } catch {}
       const fresh = all.filter(m => !seenFingerprints.has(msgFingerprint(m)));
       const stillWatching = ticks < WATCH_MAX_TICKS;
       await bot.telegram.editMessageText(
         chatId, messageId, undefined,
-        buildInboxText(number, fresh, ticks, stillWatching),
-        { parse_mode: "HTML", ...buildInboxKeyboard(number, stillWatching) }
+        buildInboxText(number, country, fresh, ticks, stillWatching),
+        { parse_mode: "HTML", ...buildInboxKeyboard(number, country, stillWatching) }
       ).catch(() => {});
       if (!stillWatching) stopWatching(userId);
     }, WATCH_INTERVAL);
-    tempNumWatchers.set(userId, { intervalId, chatId, messageId, number, ticks, seenFingerprints });
+    tempNumWatchers.set(userId, { intervalId, chatId, messageId, number, country, ticks, seenFingerprints });
   }
 
-  // ── Landing card: shown when user taps the TEMP NUMBER menu button ────────
+  // ── Landing card ──────────────────────────────────────────────────────────
   async function showTempNumHome(ctx: any) {
     const text =
       `<b>╔══════════════════════════════╗</b>\n` +
-      `<b>║  📱  TEMP US NUMBERS          ║</b>\n` +
+      `<b>║  📱  TEMP PHONE NUMBERS        ║</b>\n` +
       `<b>╚══════════════════════════════╝</b>\n\n` +
-      `<blockquote>Get a real US phone number instantly.\nReceive SMS &amp; OTPs — no account needed.</blockquote>\n\n` +
-      `Tap <b>Generate</b> to receive a random US number and watch its inbox live.\n` +
-      `Auto-refreshes every <b>5 seconds</b> for up to <b>5 minutes</b>.`;
+      `<blockquote>Get a real phone number instantly.\nReceive SMS &amp; OTPs — no account needed.</blockquote>\n\n` +
+      `Choose a country, then tap <b>Generate</b>.\n` +
+      `Auto-refreshes every <b>5 seconds</b> for <b>5 minutes</b>, showing only new messages.`;
     await ctx.reply(text, {
       parse_mode: "HTML",
-      ...Markup.inlineKeyboard([[Markup.button.callback("🔢  Generate New Number", "tmpnum_generate")]]),
+      ...Markup.inlineKeyboard([[
+        Markup.button.callback("🇺🇸  US Number", "tmpnum_gen_us"),
+        Markup.button.callback("🇬🇧  UK Number", "tmpnum_gen_uk"),
+      ]]),
     });
   }
 
-  // ── Generate: pick a random number from page 1 ───────────────────────────
-  bot.action("tmpnum_generate", async (ctx) => {
-    await ctx.answerCbQuery("Generating number…").catch(() => {});
+  // ── Shared generate logic ─────────────────────────────────────────────────
+  async function handleGenerate(ctx: any, country: CountryCode) {
+    await ctx.answerCbQuery(`Generating ${COUNTRY_META[country].label} number…`).catch(() => {});
     const enabled = await isTempNumEnabled();
     if (!enabled) {
       return ctx.answerCbQuery("Feature currently disabled.", { show_alert: true }).catch(() => {});
     }
     let numbers: TempNumber[] = [];
-    try { numbers = (await fetchUSNumbers(1)).numbers; } catch {}
+    try { numbers = (await fetchNumbers(country, 1)).numbers; } catch {}
     if (!numbers.length) {
       await ctx.editMessageText(`❌  <b>No numbers available right now.</b>\n\nTry again in a moment.`, { parse_mode: "HTML" }).catch(() => {});
       return;
     }
-    const picked   = numbers[Math.floor(Math.random() * numbers.length)];
-    const userId   = ctx.from!.id;
-    const chatId   = ctx.chat!.id;
-    const msgId    = (ctx.callbackQuery as any)?.message?.message_id;
+    const picked = numbers[Math.floor(Math.random() * numbers.length)];
+    const userId = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const msgId  = (ctx.callbackQuery as any)?.message?.message_id;
 
-    // Snapshot existing messages — these become the baseline (won't be shown)
     let initialMessages: TempMessage[] = [];
-    try { initialMessages = await fetchNumberMessages(picked.number); } catch {}
+    try { initialMessages = await fetchNumberMessages(picked.number, country); } catch {}
 
-    // Show inbox immediately with 0 new messages (watch hasn't started yet)
     await ctx.editMessageText(
-      buildInboxText(picked.number, [], 0, true),
-      { parse_mode: "HTML", ...buildInboxKeyboard(picked.number, true) }
+      buildInboxText(picked.number, country, [], 0, true),
+      { parse_mode: "HTML", ...buildInboxKeyboard(picked.number, country, true) }
     ).catch(() => {});
 
-    if (msgId) await startWatching(chatId, msgId, picked.number, userId, initialMessages);
-  });
+    if (msgId) await startWatching(chatId, msgId, picked.number, country, userId, initialMessages);
+  }
+
+  bot.action("tmpnum_gen_us", (ctx) => handleGenerate(ctx, "us"));
+  bot.action("tmpnum_gen_uk", (ctx) => handleGenerate(ctx, "uk"));
 
   // ── Stop watching ─────────────────────────────────────────────────────────
   bot.action("tmpnum_stop", async (ctx) => {
     await ctx.answerCbQuery("Stopped.").catch(() => {});
     const userId  = ctx.from!.id;
     const watcher = tempNumWatchers.get(userId);
-    const number  = watcher?.number ?? "";
+    const number  = watcher?.number  ?? "";
+    const country = watcher?.country ?? "us";
     const seenFps = watcher?.seenFingerprints ?? new Set<string>();
     stopWatching(userId);
     let all: TempMessage[] = [];
-    try { if (number) all = await fetchNumberMessages(number); } catch {}
+    try { if (number) all = await fetchNumberMessages(number, country); } catch {}
     const fresh = all.filter(m => !seenFps.has(msgFingerprint(m)));
     await ctx.editMessageText(
-      buildInboxText(number, fresh, WATCH_MAX_TICKS, false),
-      { parse_mode: "HTML", ...buildInboxKeyboard(number, false) }
+      buildInboxText(number, country, fresh, WATCH_MAX_TICKS, false),
+      { parse_mode: "HTML", ...buildInboxKeyboard(number, country, false) }
     ).catch(() => {});
   });
 
-  // ── Manual refresh (after watch session ends) — shows all current msgs ────
-  bot.action(/^tmpnum_refresh_(\d+)$/, async (ctx) => {
+  // ── Manual refresh ────────────────────────────────────────────────────────
+  bot.action(/^tmpnum_ref_(us|uk)_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery("Refreshing…").catch(() => {});
-    const number = (ctx.match as RegExpMatchArray)[1];
+    const [, cc, number] = ctx.match as RegExpMatchArray;
+    const country = cc as CountryCode;
     let all: TempMessage[] = [];
-    try { all = await fetchNumberMessages(number); } catch {}
+    try { all = await fetchNumberMessages(number, country); } catch {}
     await ctx.editMessageText(
-      buildInboxText(number, all, WATCH_MAX_TICKS, false),
-      { parse_mode: "HTML", ...buildInboxKeyboard(number, false) }
+      buildInboxText(number, country, all, WATCH_MAX_TICKS, false),
+      { parse_mode: "HTML", ...buildInboxKeyboard(number, country, false) }
     ).catch(() => {});
   });
 
-  // ── Watch again — current inbox becomes the new baseline ──────────────────
-  bot.action(/^tmpnum_watch_(\d+)$/, async (ctx) => {
+  // ── Watch again ───────────────────────────────────────────────────────────
+  bot.action(/^tmpnum_wch_(us|uk)_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery("Starting watch…").catch(() => {});
-    const number  = (ctx.match as RegExpMatchArray)[1];
+    const [, cc, number] = ctx.match as RegExpMatchArray;
+    const country = cc as CountryCode;
     const userId  = ctx.from!.id;
     const chatId  = ctx.chat!.id;
     const msgId   = (ctx.callbackQuery as any)?.message?.message_id;
-    // Snapshot current messages as baseline — only future ones will be shown
     let initialMessages: TempMessage[] = [];
-    try { initialMessages = await fetchNumberMessages(number); } catch {}
+    try { initialMessages = await fetchNumberMessages(number, country); } catch {}
     await ctx.editMessageText(
-      buildInboxText(number, [], 0, true),
-      { parse_mode: "HTML", ...buildInboxKeyboard(number, true) }
+      buildInboxText(number, country, [], 0, true),
+      { parse_mode: "HTML", ...buildInboxKeyboard(number, country, true) }
     ).catch(() => {});
-    if (msgId) await startWatching(chatId, msgId, number, userId, initialMessages);
+    if (msgId) await startWatching(chatId, msgId, number, country, userId, initialMessages);
   });
 
   launch();
