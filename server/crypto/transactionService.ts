@@ -1,8 +1,35 @@
 import { createHmac }    from "crypto";
+import https              from "https";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
-import nodeFetch           from "node-fetch";
 import { logger }          from "./logger";
+
+/** Minimal GET helper that works with or without a proxy agent. */
+function httpsGet(url: string, headers: Record<string, string>, agent?: https.AgentOptions | any): Promise<{ status: number; text(): Promise<string> }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const opts: https.RequestOptions = {
+      hostname: parsed.hostname,
+      path:     parsed.pathname + parsed.search,
+      headers,
+      method:   "GET",
+      ...(agent ? { agent } : {}),
+    };
+    const req = https.request(opts, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          status: res.statusCode ?? 0,
+          text:   () => Promise.resolve(body),
+        });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 export interface BinanceTransaction {
   transactionId: string;
@@ -54,20 +81,20 @@ export async function getRecentTransactions(
     params.append("signature", signature);
 
     const proxyUrl  = process.env.BINANCE_PROXY_URL;
-    const fetchOpts: Parameters<typeof nodeFetch>[1] = {
-      headers: { "X-MBX-APIKEY": apiKey },
-    };
+    let proxyAgent: any | undefined;
     if (proxyUrl) {
       const isSocks = proxyUrl.startsWith("socks5://") || proxyUrl.startsWith("socks4://") || proxyUrl.startsWith("socks://");
-      fetchOpts.agent = isSocks
-        ? new SocksProxyAgent(proxyUrl)
-        : new HttpsProxyAgent(proxyUrl);
+      proxyAgent = isSocks ? new SocksProxyAgent(proxyUrl) : new HttpsProxyAgent(proxyUrl);
       logger.debug("TransactionService", `Using ${isSocks ? "SOCKS" : "HTTP"} proxy for Binance API`, {
         proxy: proxyUrl.replace(/:[^:@]+@/, ":***@"),
       });
     }
 
-    const res = await nodeFetch(`${BINANCE_API_BASE}/sapi/v1/pay/transactions?${params}`, fetchOpts);
+    const res = await httpsGet(
+      `${BINANCE_API_BASE}/sapi/v1/pay/transactions?${params}`,
+      { "X-MBX-APIKEY": apiKey },
+      proxyAgent
+    );
 
     const rawText = await res.text();
     let json: Record<string, unknown>;

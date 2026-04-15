@@ -4716,7 +4716,9 @@ export function startShopBot(token: string) {
       return ctx.answerCbQuery("Feature currently disabled.", { show_alert: true }).catch(() => {});
     }
     let numbers: TempNumber[] = [];
-    try { numbers = (await fetchNumbers(country, 1)).numbers; } catch {}
+    try { numbers = (await fetchNumbers(country, 1)).numbers; } catch (e: any) {
+      console.error("[ShopBot/TempNum] fetchNumbers error:", e?.message);
+    }
     if (!numbers.length) {
       await ctx.editMessageText(`❌  <b>No numbers available right now.</b>\n\nTry again in a moment.`, { parse_mode: "HTML" }).catch(() => {});
       return;
