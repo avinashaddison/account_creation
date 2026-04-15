@@ -60,21 +60,19 @@ export async function fetchUSNumbers(page = 1): Promise<NumbersPage> {
   const pageMatch = html.match(/Page \d+ of (\d+)/i);
   const totalPages = pageMatch ? parseInt(pageMatch[1]) : 1;
 
-  // Parse number cards: data-number="14386195693"
+  // Parse number cards by splitting on data-number=" attribute
   const numbers: TempNumber[] = [];
-  const cardRegex = /data-number="(\d+)"[\s\S]*?<time[^>]*>(.*?)<\/time>[\s\S]*?class="card-title">\+(\d+)<\/h4>/g;
-  // Simpler pass: split by number-card
-  const cardChunks = html.split('class="country-box number-card"');
+  const cardChunks = html.split('data-number="');
   for (let i = 1; i < cardChunks.length; i++) {
     const chunk = cardChunks[i];
-    const numMatch = chunk.match(/data-number="(\d+)"/);
-    if (!numMatch) continue;
-    const num = numMatch[1];
+    const numEnd = chunk.indexOf('"');
+    const num = chunk.substring(0, numEnd);
+    if (!/^\d{10,15}$/.test(num)) continue;
 
-    const timeMatch = chunk.match(/<div class="add_time-top">(.*?)<\/div>/);
+    const timeMatch = chunk.match(/class="add_time-top">(.*?)<\/div>/);
     const timeAgo = timeMatch ? timeMatch[1].trim() : "";
 
-    const isNew = chunk.includes("ribbon-green") || chunk.includes("NEW");
+    const isNew = chunk.includes("ribbon-green") || chunk.includes("ribbon-wrapper-green");
 
     numbers.push({
       number:  num,
