@@ -15,6 +15,7 @@ import {
   getFullInbox as smtpDevInbox,
 } from "./smtpDevService";
 import { storage } from "./storage";
+import { fetchUSNumbers, fetchNumberMessages } from "./tempNumberService";
 
 const SUPPORT_CONTACT   = "@avinashaddison";
 
@@ -126,7 +127,7 @@ function stockLine(stock: number): string {
 
 // ── Main reply keyboard ──────────────────────────────────────────────────────
 // Menu button labels — mutable so Bot 1 admin can update them live
-type BtnKey = "ACCOUNTS" | "BALANCE" | "ORDERS" | "DEPOSIT" | "IDENTITY" | "SUPPORT" | "REFER" | "BIZ_MAIL";
+type BtnKey = "ACCOUNTS" | "BALANCE" | "ORDERS" | "DEPOSIT" | "IDENTITY" | "SUPPORT" | "REFER" | "BIZ_MAIL" | "TEMP_NUM";
 const BTN_DEFAULTS: Record<BtnKey, string> = {
   ACCOUNTS:     "⚡  𝗦𝗛𝗢𝗣  𝗔𝗜  𝗧𝗢𝗢𝗟𝗦",
   BALANCE:      "💰  𝗪𝗔𝗟𝗟𝗘𝗧",
@@ -136,6 +137,7 @@ const BTN_DEFAULTS: Record<BtnKey, string> = {
   SUPPORT:      "🎧  𝗦𝗨𝗣𝗣𝗢𝗥𝗧",
   REFER:        "🔗  𝗥𝗘𝗙𝗘𝗥  &  𝗘𝗔𝗥𝗡",
   BIZ_MAIL:     "📩  𝗧𝗘𝗠𝗣  𝗠𝗔𝗜𝗟",
+  TEMP_NUM:     "📱  𝗧𝗘𝗠𝗣  𝗡𝗨𝗠𝗕𝗘𝗥",
 };
 let BTN: Record<BtnKey, string> = { ...BTN_DEFAULTS };
 
@@ -178,11 +180,19 @@ function stickyDisplayLabel(base: string, index: number): string {
   return `${icon}  ${toBold(base)}`;
 }
 
+async function isTempNumEnabled(): Promise<boolean> {
+  try {
+    const r = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'temp_number_enabled'`);
+    return (r.rows[0]?.value ?? "true") !== "false";
+  } catch { return true; }
+}
+
 async function buildShopKeyboard() {
-  const res = await dbQuery(
-    `SELECT name, sticky_label FROM shop_products WHERE sticky = true AND active = true ORDER BY sort_order ASC, created_at ASC`
-  );
-  const labels: string[] = res.rows.map((p: any, i: number) => {
+  const [stickyRes, tempNumOn] = await Promise.all([
+    dbQuery(`SELECT name, sticky_label FROM shop_products WHERE sticky = true AND active = true ORDER BY sort_order ASC, created_at ASC`),
+    isTempNumEnabled(),
+  ]);
+  const labels: string[] = stickyRes.rows.map((p: any, i: number) => {
     const base = (p.sticky_label ?? "").trim() || p.name;
     return stickyDisplayLabel(base, i);
   });
@@ -190,14 +200,15 @@ async function buildShopKeyboard() {
   for (let i = 0; i < labels.length; i += 2) {
     stickyRows.push(labels[i + 1] ? [labels[i], labels[i + 1]] : [labels[i]]);
   }
-  return Markup.keyboard([
+  const rows: string[][] = [
     ...stickyRows,
     [BTN.ACCOUNTS],
-    [BTN.BALANCE,   BTN.ORDERS],
-    [BTN.DEPOSIT,   BTN.BIZ_MAIL],
-    [BTN.IDENTITY,  BTN.REFER],
-    [BTN.SUPPORT],
-  ]).resize().oneTime();
+    [BTN.BALANCE,  BTN.ORDERS],
+    [BTN.DEPOSIT,  BTN.BIZ_MAIL],
+    ...(tempNumOn ? [[BTN.TEMP_NUM, BTN.REFER]] : [[BTN.REFER]]),
+    [BTN.IDENTITY, BTN.SUPPORT],
+  ];
+  return Markup.keyboard(rows).resize().oneTime();
 }
 
 // ── Per-user state ───────────────────────────────────────────────────────────
@@ -4559,6 +4570,126 @@ export function startShopBot(token: string) {
       console.error("[ShopBot/Referral] Backfill error:", e.message);
     }
   }
+
+  // ── Temp Number feature ───────────────────────────────────────────────────
+
+  async function sendTempNumberList(ctx: any, page = 1, editMsg = false) {
+    await ctx.answerCbQuery?.().catch(() => {});
+    const loadingText = `⏳  <b>Fetching US numbers…</b>`;
+    let sentMsg: any = null;
+    if (!editMsg) {
+      sentMsg = await ctx.reply(loadingText, { parse_mode: "HTML" }).catch(() => null);
+    }
+
+    let data: any;
+    try {
+      data = await fetchUSNumbers(page);
+    } catch {
+      const errText = `❌  <b>Failed to fetch numbers.</b>\n\nTemp-number.com may be down. Try again.`;
+      if (editMsg) await ctx.editMessageText(errText, { parse_mode: "HTML" }).catch(() => {});
+      else if (sentMsg) await ctx.telegram.editMessageText(ctx.chat.id, sentMsg.message_id, undefined, errText, { parse_mode: "HTML" }).catch(() => {});
+      return;
+    }
+
+    const lines = data.numbers.map((n: any) =>
+      `${n.isNew ? "🆕" : "📱"}  <code>${n.display}</code>  <i>${n.timeAgo}</i>`
+    ).join("\n");
+
+    const text =
+      `<b>╔══════════════════════════════╗</b>\n` +
+      `<b>║  📱  US TEMP NUMBERS          ║</b>\n` +
+      `<b>╚══════════════════════════════╝</b>\n\n` +
+      `<blockquote>🇺🇸  <b>${data.totalCount.toLocaleString()}</b> numbers available  ·  Page <b>${data.currentPage}</b>/<b>${data.totalPages}</b></blockquote>\n\n` +
+      lines + `\n\n<i>Tap a number to view its inbox</i>`;
+
+    // Build number buttons (3 per row)
+    const numBtns: any[] = data.numbers.map((n: any) =>
+      Markup.button.callback(n.display, `tmpnum_inbox_${n.number}`)
+    );
+    const numRows: any[][] = [];
+    for (let i = 0; i < numBtns.length; i += 3) {
+      numRows.push(numBtns.slice(i, i + 3));
+    }
+
+    // Pagination row
+    const navBtns: any[] = [];
+    if (data.currentPage > 1) navBtns.push(Markup.button.callback("◀ Prev", `tmpnum_page_${data.currentPage - 1}`));
+    if (data.currentPage < data.totalPages) navBtns.push(Markup.button.callback("Next ▶", `tmpnum_page_${data.currentPage + 1}`));
+    navBtns.push(Markup.button.callback("🔄 Refresh", `tmpnum_page_${data.currentPage}`));
+
+    const keyboard = Markup.inlineKeyboard([...numRows, navBtns]);
+
+    if (editMsg) {
+      await ctx.editMessageText(text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
+    } else if (sentMsg) {
+      await ctx.telegram.editMessageText(ctx.chat.id, sentMsg.message_id, undefined, text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
+    }
+  }
+
+  async function sendNumberInbox(ctx: any, number: string) {
+    await ctx.answerCbQuery?.().catch(() => {});
+    const display = `+${number}`;
+    const loadingText = `⏳  <b>Loading inbox for ${display}…</b>`;
+    await ctx.editMessageText(loadingText, { parse_mode: "HTML" }).catch(() => {});
+
+    let messages: any[];
+    try {
+      messages = await fetchNumberMessages(number);
+    } catch {
+      await ctx.editMessageText(`❌  <b>Failed to load inbox.</b>`, { parse_mode: "HTML" }).catch(() => {});
+      return;
+    }
+
+    let text =
+      `<b>╔══════════════════════════════╗</b>\n` +
+      `<b>║  📬  INBOX                    ║</b>\n` +
+      `<b>╚══════════════════════════════╝</b>\n\n` +
+      `<blockquote>📱  <code>${display}</code>  ·  🇺🇸 United States</blockquote>\n\n`;
+
+    if (messages.length === 0) {
+      text += `<i>No messages received yet. Use this number and check back soon.</i>`;
+    } else {
+      text += `<b>━━━━━━  ${messages.length} MESSAGES  ━━━━━━</b>\n\n`;
+      for (const msg of messages) {
+        text += `<b>From:</b> <code>${escHtml(msg.from)}</code>   <i>${escHtml(msg.timeAgo)}</i>\n`;
+        if (msg.otp) text += `🔑  <b>OTP CODE:  <code>${msg.otp}</code></b>\n`;
+        text += `<blockquote>${escHtml(msg.body)}</blockquote>\n\n`;
+      }
+    }
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback("🔄 Refresh Inbox", `tmpnum_inbox_${number}`)],
+      [Markup.button.callback("◀ Back to Numbers", "tmpnum_page_1")],
+    ]);
+
+    await ctx.editMessageText(truncate(text, 4000), { parse_mode: "HTML", ...keyboard }).catch(() => {});
+  }
+
+  // Button: Temp Numbers menu entry
+  bot.hears((t) => t === BTN.TEMP_NUM, async (ctx) => {
+    await upsertCustomer(ctx.from.id, ctx.from.username, ctx.from.first_name);
+    const enabled = await isTempNumEnabled();
+    if (!enabled) {
+      return ctx.reply(`📱  <b>Temp Numbers</b> is currently <b>unavailable</b>.\n\nCheck back soon!`, { parse_mode: "HTML" });
+    }
+    await sendTempNumberList(ctx, 1, false);
+  });
+
+  // Pagination
+  bot.action(/^tmpnum_page_(\d+)$/, async (ctx) => {
+    const page = parseInt((ctx.match as RegExpMatchArray)[1]);
+    const enabled = await isTempNumEnabled();
+    if (!enabled) { await ctx.answerCbQuery("Feature disabled").catch(() => {}); return; }
+    await sendTempNumberList(ctx, page, true);
+  });
+
+  // Inbox view
+  bot.action(/^tmpnum_inbox_(\d+)$/, async (ctx) => {
+    const number = (ctx.match as RegExpMatchArray)[1];
+    const enabled = await isTempNumEnabled();
+    if (!enabled) { await ctx.answerCbQuery("Feature disabled").catch(() => {}); return; }
+    await sendNumberInbox(ctx, number);
+  });
 
   launch();
   // Delay backfill slightly so bot polling is ready before we send messages

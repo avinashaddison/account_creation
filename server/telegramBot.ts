@@ -1060,11 +1060,12 @@ export function startTelegramBot(config: BotConfig) {
 
   // ── Set bot commands (slash-command list) ─────────────────────────────────
   bot.telegram.setMyCommands([
-    { command: "id",     description: "Show your Telegram user ID" },
-    { command: "start",  description: "Open main menu" },
-    { command: "menu",   description: "Open main keyboard" },
-    { command: "stats",  description: "Account statistics" },
-    { command: "cancel", description: "Cancel running scan" },
+    { command: "id",      description: "Show your Telegram user ID" },
+    { command: "start",   description: "Open main menu" },
+    { command: "menu",    description: "Open main keyboard" },
+    { command: "stats",   description: "Account statistics" },
+    { command: "tempnum", description: "Toggle Temp Number in Bot 2 (on/off)" },
+    { command: "cancel",  description: "Cancel running scan" },
   ]).catch(() => {});
 
   // ── /start ── welcome only, no keyboard (keyboard only shown via /menu) ───
@@ -1241,6 +1242,33 @@ export function startTelegramBot(config: BotConfig) {
       parse_mode: mode,
       ...Markup.inlineKeyboard([[Markup.button.callback("🔄 Refresh", "refresh_stats")]]),
     });
+  });
+
+  // ── /tempnum — toggle Temp Number feature in Bot 2 ────────────────────────
+  bot.command("tempnum", async (ctx) => {
+    const arg = (ctx.message.text ?? "").split(" ")[1]?.toLowerCase();
+    const current = await dbQuery(`SELECT value FROM shop_settings WHERE key = 'temp_number_enabled'`)
+      .then((r: any) => r.rows[0]?.value ?? "true").catch(() => "true");
+
+    let newVal: string;
+    if (arg === "on")       newVal = "true";
+    else if (arg === "off") newVal = "false";
+    else                    newVal = current === "false" ? "true" : "false";
+
+    await dbQuery(
+      `INSERT INTO shop_settings (key, value) VALUES ('temp_number_enabled', $1)
+       ON CONFLICT (key) DO UPDATE SET value = $1`,
+      [newVal]
+    );
+
+    const statusEmoji = newVal === "true" ? "✅" : "🔴";
+    const statusWord  = newVal === "true" ? "ENABLED" : "DISABLED";
+    await ctx.reply(
+      `📱  <b>Temp Number  —  Bot 2</b>\n\n` +
+      `${statusEmoji}  Feature is now  <b>${statusWord}</b>\n\n` +
+      `<i>The button will appear/disappear from the shop menu on next user interaction.</i>`,
+      { parse_mode: "HTML" }
+    );
   });
 
   // ── Helper: dismiss reply keyboard then run handler ───────────────────────
