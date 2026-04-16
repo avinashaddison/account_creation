@@ -278,10 +278,24 @@ app.use((req, res, next) => {
 </head><body></body></html>`);
   });
 
+  // ── Webhook config (production) vs polling (dev) ────────────────────────
+  // Set WEBHOOK_DOMAIN to your production URL (e.g. https://myapp.replit.app)
+  // to enable webhook mode.  Without it, bots fall back to long-polling.
+  const webhookDomain = (process.env.WEBHOOK_DOMAIN || "").trim().replace(/\/$/, "");
+  const webhookConfig = webhookDomain
+    ? { domain: webhookDomain, register: (path: string, handler: any) => app.use(path, handler) }
+    : undefined;
+
+  if (webhookDomain) {
+    console.log(`[Bots] Webhook mode enabled — domain: ${webhookDomain}`);
+  } else {
+    console.log("[Bots] Polling mode (set WEBHOOK_DOMAIN secret to enable webhook mode in production)");
+  }
+
   // Start primary Telegram bot
   const primaryToken = process.env.TELEGRAM_BOT_TOKEN;
   if (primaryToken) {
-    startTelegramBot({ token: primaryToken, allowedIdsEnv: "TELEGRAM_ALLOWED_IDS", label: "Bot1" });
+    startTelegramBot({ token: primaryToken, allowedIdsEnv: "TELEGRAM_ALLOWED_IDS", label: "Bot1", webhook: webhookConfig });
   } else {
     console.warn("[TelegramBot] TELEGRAM_BOT_TOKEN not set — primary bot disabled");
   }
@@ -289,7 +303,7 @@ app.use((req, res, next) => {
   // Start secondary Telegram bot — Project Addison v2 (customer shop bot)
   const secondaryToken = process.env.TELEGRAM_BOT_TOKEN_2;
   if (secondaryToken) {
-    startShopBot(secondaryToken);
+    startShopBot(secondaryToken, webhookConfig);
     console.log("[ShopBot] Project Addison v2 shop bot starting...");
   }
 

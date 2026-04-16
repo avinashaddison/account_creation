@@ -1324,7 +1324,14 @@ function buildMarketplaceKeyboard(products: ProductWithStock[]) {
 
 
 // ── Main bot export ──────────────────────────────────────────────────────────
-export function startShopBot(token: string) {
+export interface ShopBotWebhookConfig {
+  /** Full origin, e.g. "https://myapp.replit.app" — no trailing slash */
+  domain: string;
+  /** Called once so index.ts can mount the webhook handler on Express */
+  register: (path: string, handler: (req: any, res: any) => void) => void;
+}
+
+export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
   if (!token) {
     console.warn("[ShopBot] No token provided — shop bot disabled");
     return;
@@ -4517,23 +4524,15 @@ export function startShopBot(token: string) {
     }
   }
 
-  // ── Launch with retry ─────────────────────────────────────────────────────
-  // Uses the same retry-on-conflict pattern as Bot 1 so that when the dev
-  // server is stopped, the production instance automatically takes over
-  // polling within one retry cycle (≤60 s).
+  // ── Launch: webhook (production) or long-polling (dev) ──────────────────
   async function launch(attempt = 1) {
     try {
-      await registerCommands();   // ← register BEFORE launch so commands are set
+      await registerCommands();
 
-      // Wrap launch in a promise so we can catch 409 Conflict errors and retry.
-      // bot.launch() resolves immediately (fire-and-forget polling loop) so we
-      // race it against a short window to catch synchronous/fast errors.
       await new Promise<void>((resolve, reject) => {
         bot.launch({ dropPendingUpdates: true })
-          .then(() => resolve())   // resolves when bot.stop() is called (normal shutdown)
-          .catch(reject);          // rejects on 409 / auth errors
-        // Give the launch a moment to throw synchronous errors; if it doesn't,
-        // consider it successfully started.
+          .then(() => resolve())
+          .catch(reject);
         setTimeout(resolve, 2000);
       });
 
@@ -4852,8 +4851,21 @@ export function startShopBot(token: string) {
     if (msgId) await startWatching(chatId, msgId, number, country, userId, initialMessages);
   });
 
-  launch();
-  // Delay backfill slightly so bot polling is ready before we send messages
+  if (webhook) {
+    // ── Webhook mode (production) ─────────────────────────────────────────────
+    // Register commands first, then mount webhook handler and tell Telegram
+    registerCommands().catch((e) => console.error("[ShopBot] registerCommands:", e.message));
+    const webhookPath = "/webhook/shopbot";
+    webhook.register(webhookPath, bot.webhookCallback(webhookPath) as any);
+    bot.telegram.setWebhook(`${webhook.domain}${webhookPath}`, { drop_pending_updates: true })
+      .then(() => console.log(`[ShopBot] webhook active → ${webhook.domain}${webhookPath}`))
+      .catch((e: any) => console.error(`[ShopBot] setWebhook failed: ${e.message}`));
+  } else {
+    // ── Long-polling mode (dev) ───────────────────────────────────────────────
+    launch();
+  }
+
+  // Delay backfill slightly so bot is ready before we send messages
   setTimeout(() => backfillUnprocessedReferrals(), 8000);
 
   process.once("SIGINT",  () => bot.stop("SIGINT"));

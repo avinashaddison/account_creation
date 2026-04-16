@@ -976,10 +976,18 @@ async function notifyAdminPrice(adminId: number, productId: string, productName:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+export interface BotWebhookConfig {
+  /** Full origin, e.g. "https://myapp.replit.app" — no trailing slash */
+  domain: string;
+  /** Called once so index.ts can mount the webhook handler on Express */
+  register: (path: string, handler: (req: any, res: any) => void) => void;
+}
+
 export interface BotConfig {
   token: string;
   allowedIdsEnv?: string;  // env var name for allowed IDs, defaults to TELEGRAM_ALLOWED_IDS
   label?: string;           // human-readable label for logs, e.g. "Bot1" or "Bot2"
+  webhook?: BotWebhookConfig; // if set, use webhook mode instead of long-polling
 }
 
 export function startTelegramBot(config: BotConfig) {
@@ -5949,18 +5957,30 @@ export function startTelegramBot(config: BotConfig) {
     }
   });
 
-  // ── Launch with auto-retry on transient polling errors ───────────────────
-  async function launch(attempt = 1) {
-    try {
-      await bot.launch({ dropPendingUpdates: true });
-      botLog(`✅ [${label}] polling started` + (ALLOWED.size ? ` (${ALLOWED.size} allowed users from ${allowedIdsEnv})` : " (open access)"));
-    } catch (err: any) {
-      const delay = Math.min(attempt * 5000, 60_000);
-      botErr(`[${label}] Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
-      setTimeout(() => launch(attempt + 1), delay);
+  // ── Launch: webhook (production) or long-polling (dev) ──────────────────
+  if (config.webhook) {
+    // ── Webhook mode ─────────────────────────────────────────────────────────
+    // Telegram pushes updates to our HTTPS URL — no polling conflict possible.
+    const { domain, register } = config.webhook;
+    const webhookPath = `/webhook/${label.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+    register(webhookPath, bot.webhookCallback(webhookPath) as any);
+    bot.telegram.setWebhook(`${domain}${webhookPath}`, { drop_pending_updates: true })
+      .then(() => botLog(`✅ [${label}] webhook active → ${domain}${webhookPath}`))
+      .catch((e: any) => botErr(`[${label}] setWebhook failed: ${e.message}`));
+  } else {
+    // ── Long-polling mode (dev) ───────────────────────────────────────────────
+    async function launch(attempt = 1) {
+      try {
+        await bot.launch({ dropPendingUpdates: true });
+        botLog(`✅ [${label}] polling started` + (ALLOWED.size ? ` (${ALLOWED.size} allowed users from ${allowedIdsEnv})` : " (open access)"));
+      } catch (err: any) {
+        const delay = Math.min(attempt * 5000, 60_000);
+        botErr(`[${label}] Launch attempt ${attempt} failed: ${err.message} — retrying in ${delay / 1000}s`);
+        setTimeout(() => launch(attempt + 1), delay);
+      }
     }
+    launch();
   }
-  launch();
 
   // ── MoviesDrive monitor startup — only start on the first bot ────────────
   if (!mdInterval) {
