@@ -278,18 +278,23 @@ app.use((req, res, next) => {
 </head><body></body></html>`);
   });
 
-  // ── Webhook config (production) vs polling (dev) ────────────────────────
-  // Set WEBHOOK_DOMAIN to your production URL (e.g. https://myapp.replit.app)
-  // to enable webhook mode.  Without it, bots fall back to long-polling.
-  const webhookDomain = (process.env.WEBHOOK_DOMAIN || "").trim().replace(/\/$/, "");
+  // ── Webhook domain auto-detection ───────────────────────────────────────
+  // Priority:
+  //  1. WEBHOOK_DOMAIN secret (explicit override, e.g. on production VM)
+  //  2. REPLIT_DEV_DOMAIN    (auto-set by Replit in every workspace)
+  //  3. None → long-polling fallback
+  const rawDomain =
+    process.env.WEBHOOK_DOMAIN ||
+    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
+  const webhookDomain = rawDomain.trim().replace(/\/$/, "");
   const webhookConfig = webhookDomain
     ? { domain: webhookDomain, register: (path: string, handler: any) => app.use(path, handler) }
     : undefined;
 
   if (webhookDomain) {
-    console.log(`[Bots] Webhook mode enabled — domain: ${webhookDomain}`);
+    console.log(`[Bots] Webhook mode → ${webhookDomain}`);
   } else {
-    console.log("[Bots] Polling mode (set WEBHOOK_DOMAIN secret to enable webhook mode in production)");
+    console.log("[Bots] Polling mode (no WEBHOOK_DOMAIN or REPLIT_DEV_DOMAIN found)");
   }
 
   // Start primary Telegram bot
