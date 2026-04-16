@@ -278,14 +278,24 @@ app.use((req, res, next) => {
 </head><body></body></html>`);
   });
 
-  // ── Webhook domain auto-detection ───────────────────────────────────────
+  // ── Webhook domain detection ─────────────────────────────────────────────
   // Priority:
-  //  1. WEBHOOK_DOMAIN secret (explicit override, e.g. on production VM)
-  //  2. REPLIT_DEV_DOMAIN    (auto-set by Replit in every workspace)
-  //  3. None → long-polling fallback
+  //  1. WEBHOOK_DOMAIN secret  – explicit override (use this on production VM
+  //                              or Replit deployment with a custom/app domain)
+  //  2. REPLIT_DEV_DOMAIN      – only used when NOT in a Replit deployment,
+  //                              i.e. the dev workspace server is actually live
+  //  3. None → long-polling fallback (safe default for deployed app)
+  //
+  // IMPORTANT: REPLIT_DEV_DOMAIN is the *dev-workspace* tunnel URL.  It only
+  // serves traffic while the dev workflow is running.  The deployed app must
+  // NOT register that URL as its webhook or bots will go silent the moment
+  // the dev workflow is stopped.
+  const isReplitDeployment = process.env.REPLIT_DEPLOYMENT === "1";
   const rawDomain =
     process.env.WEBHOOK_DOMAIN ||
-    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
+    (!isReplitDeployment && process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : "");
   const webhookDomain = rawDomain.trim().replace(/\/$/, "");
   const webhookConfig = webhookDomain
     ? { domain: webhookDomain, register: (path: string, handler: any) => app.use(path, handler) }
@@ -293,8 +303,10 @@ app.use((req, res, next) => {
 
   if (webhookDomain) {
     console.log(`[Bots] Webhook mode → ${webhookDomain}`);
+  } else if (isReplitDeployment) {
+    console.log("[Bots] Deployed app — polling mode (set WEBHOOK_DOMAIN secret to use webhook mode)");
   } else {
-    console.log("[Bots] Polling mode (no WEBHOOK_DOMAIN or REPLIT_DEV_DOMAIN found)");
+    console.log("[Bots] Polling mode (no WEBHOOK_DOMAIN found)");
   }
 
   // Start primary Telegram bot
