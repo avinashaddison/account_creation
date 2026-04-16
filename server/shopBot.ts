@@ -4202,7 +4202,9 @@ export function startShopBot(token: string) {
               ).catch(() => {});
             }
           }
-        } catch (_e) { /* retry silently */ }
+        } catch (e: any) {
+          console.error(`[ShopBot/BizMail] Poller error for ${email}:`, e?.message);
+        }
         await new Promise(r => setTimeout(r, 3_000));
       }
     })();
@@ -4326,29 +4328,89 @@ export function startShopBot(token: string) {
     await showBizMailList(ctx.chat!.id, ctx.from!.id);
   });
 
-  // Open a specific inbox — switch active inbox to this address
+  // ── Helper: fetch inbox and build a formatted message string ────────────────
+  async function buildInboxSnapshot(smtpId: string, email: string): Promise<string> {
+    let msgs: Awaited<ReturnType<typeof smtpDevInbox>> = [];
+    try { msgs = await smtpDevInbox(smtpId); } catch (e: any) {
+      console.error(`[ShopBot/BizMail] getFullInbox error for ${email}:`, e?.message);
+    }
+    if (!msgs.length) {
+      return (
+        `📩 <b>Inbox:</b> <code>${escHtml(email)}</code>\n\n` +
+        `<i>No messages yet. Any email sent here will appear instantly.</i>`
+      );
+    }
+    const lines = msgs.slice(0, 10).map((m, i) => {
+      const date = new Date(m.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short", timeStyle: "short" });
+      const preview = (m.text || m.subject || "").substring(0, 120).replace(/\n/g, " ");
+      return (
+        `<b>${i + 1}.</b> 👤 <code>${escHtml(m.from)}</code>\n` +
+        `   📌 ${escHtml(m.subject)}\n` +
+        `   📅 ${date}\n` +
+        `   <i>${escHtml(preview)}…</i>`
+      );
+    }).join("\n\n");
+    return (
+      `📩 <b>Inbox:</b> <code>${escHtml(email)}</code>\n` +
+      `<i>${msgs.length} message${msgs.length !== 1 ? "s" : ""} — showing latest ${Math.min(msgs.length, 10)}</i>\n\n` +
+      lines
+    );
+  }
+
+  // Open a specific inbox — switch active inbox to this address + show existing messages
   bot.action(/^bizmail_open:(.+)$/, async (ctx) => {
-    await ctx.answerCbQuery("Switching inbox…").catch(() => {});
-    const uid          = ctx.from!.id;
-    const chatId       = ctx.chat!.id;
-    const smtpId       = (ctx.match as RegExpMatchArray)[1];
+    await ctx.answerCbQuery("Loading inbox…").catch(() => {});
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const smtpId = (ctx.match as RegExpMatchArray)[1];
 
     const mails  = await storage.getBizMailsByTelegramId(uid);
     const target = mails.find(m => m.smtpAccountId === smtpId && !m.deletedAt);
     if (!target) {
-      await ctx.answerCbQuery("Mailbox not found.").catch(() => {});
+      await ctx.answerCbQuery("Mailbox not found.", { show_alert: true }).catch(() => {});
       return;
     }
 
     bizActiveInbox.set(uid, smtpId);
 
-    await bot.telegram.sendMessage(chatId,
-      `✅ <b>Inbox Switched!</b>\n\n` +
-      `📧 <b>Active:</b> <code>${escHtml(target.email)}</code>\n\n` +
-      `⏳ <b>Waiting for Mail…</b>\n` +
-      `Any email arriving at this address will appear here in realtime.`,
-      { parse_mode: "HTML" }
-    ).catch(() => {});
+    const snapshot = await buildInboxSnapshot(smtpId, target.email);
+    await bot.telegram.sendMessage(chatId, snapshot, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[
+        Markup.button.callback("🔄  Refresh Inbox", `bizmail_refresh:${smtpId}`),
+      ]]),
+    }).catch(() => {});
+  });
+
+  // Refresh inbox on demand
+  bot.action(/^bizmail_refresh:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Refreshing…").catch(() => {});
+    const uid    = ctx.from!.id;
+    const chatId = ctx.chat!.id;
+    const smtpId = (ctx.match as RegExpMatchArray)[1];
+
+    const mails  = await storage.getBizMailsByTelegramId(uid);
+    const target = mails.find(m => m.smtpAccountId === smtpId && !m.deletedAt);
+    if (!target) {
+      await ctx.answerCbQuery("Mailbox not found.", { show_alert: true }).catch(() => {});
+      return;
+    }
+
+    const snapshot = await buildInboxSnapshot(smtpId, target.email);
+    await ctx.editMessageText(snapshot, {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[
+        Markup.button.callback("🔄  Refresh Inbox", `bizmail_refresh:${smtpId}`),
+      ]]),
+    }).catch(async () => {
+      // If edit fails (e.g. message too old), send a fresh one
+      await bot.telegram.sendMessage(chatId, snapshot, {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[
+          Markup.button.callback("🔄  Refresh Inbox", `bizmail_refresh:${smtpId}`),
+        ]]),
+      }).catch(() => {});
+    });
   });
 
   // Resume inbox polling for all allocated accounts on startup
