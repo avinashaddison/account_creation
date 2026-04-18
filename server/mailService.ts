@@ -5,6 +5,7 @@ import {
   listAccounts as _smtpDevListAccounts,
   listMessages as _smtpDevListMessages,
   getMessage as _smtpDevGetMessage,
+  getActiveDomain,
 } from "./smtpDevService";
 
 const PROVIDERS = {
@@ -782,7 +783,9 @@ export function generateRandomUsername(): string {
 // All biz mail accounts on addison.asia are hosted on smtp.dev.
 // Inboxes are readable via API key — no IMAP password needed.
 
-const BIZ_DOMAIN = "addison.asia";
+async function getBizDomain(): Promise<string> {
+  return getActiveDomain();
+}
 
 function genBizPassword(): string {
   const rand = Math.random().toString(36).slice(2, 10).toUpperCase();
@@ -826,7 +829,8 @@ export async function createBizMailAccount(opts: {
     username = `account${accountNum}`;
   }
 
-  const email = `${username}@${BIZ_DOMAIN}`;
+  const domain = await getBizDomain();
+  const email = `${username}@${domain}`;
   const password = genBizPassword();
 
   try {
@@ -881,7 +885,7 @@ export interface BizMailForwarder {
   description?: string;
 }
 
-export async function listBizMailForwarders(_domain = BIZ_DOMAIN): Promise<BizMailForwarder[]> {
+export async function listBizMailForwarders(_domain?: string): Promise<BizMailForwarder[]> {
   console.warn("[BizMail] Forwarders not supported with smtp.dev");
   return [];
 }

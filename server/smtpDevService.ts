@@ -1,9 +1,48 @@
-const SMTP_DEV_BASE = "https://api.smtp.dev";
+// API base URL — override via SMTP_DEV_API_URL env var if the provider changed domains
+function getBase(): string {
+  return (process.env.SMTP_DEV_API_URL || "https://api.smtp.dev").replace(/\/$/, "");
+}
 
 function apiKey(): string {
   const key = process.env.SMTP_DEV_API_KEY;
   if (!key) throw new Error("SMTP_DEV_API_KEY is not configured");
   return key;
+}
+
+// ── Active domain store ─────────────────────────────────────────────────────
+// Persisted in shop_settings with key "biz_mail_domain".
+// Falls back to "addison.asia" if not set.
+
+import { Pool } from "pg";
+
+let _pool: Pool | null = null;
+function getPool(): Pool {
+  if (!_pool) {
+    _pool = new Pool({
+      connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 2,
+    });
+  }
+  return _pool;
+}
+
+export async function getActiveDomain(): Promise<string> {
+  try {
+    const res = await getPool().query(
+      `SELECT value FROM shop_settings WHERE key = 'biz_mail_domain' LIMIT 1`
+    );
+    if (res.rows.length > 0 && res.rows[0].value) return String(res.rows[0].value).trim();
+  } catch { /* fall through */ }
+  return "addison.asia";
+}
+
+export async function setActiveDomain(domain: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO shop_settings (key, value) VALUES ('biz_mail_domain', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [domain]
+  );
 }
 
 function hdrs() {
@@ -15,7 +54,7 @@ function hdrs() {
 }
 
 async function call<T>(method: string, path: string, body?: object): Promise<T> {
-  const res = await fetch(`${SMTP_DEV_BASE}${path}`, {
+  const res = await fetch(`${getBase()}${path}`, {
     method,
     headers: hdrs(),
     body: body ? JSON.stringify(body) : undefined,
@@ -119,7 +158,7 @@ export async function deleteAccount(accountId: string): Promise<void> {
 }
 
 export async function setAccountPassword(accountId: string, newPassword: string): Promise<void> {
-  const res = await fetch(`${SMTP_DEV_BASE}/accounts/${encodeURIComponent(accountId)}`, {
+  const res = await fetch(`${getBase()}/accounts/${encodeURIComponent(accountId)}`, {
     method: "PATCH",
     headers: { "X-API-KEY": apiKey(), "Content-Type": "application/merge-patch+json" },
     body: JSON.stringify({ password: newPassword }),

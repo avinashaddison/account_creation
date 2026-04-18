@@ -13,6 +13,7 @@ import { searchUpiPaymentEmail } from "./mailService";
 import {
   createAccount as smtpDevCreate,
   getFullInbox as smtpDevInbox,
+  getActiveDomain,
 } from "./smtpDevService";
 import { storage } from "./storage";
 import { fetchNumbers, fetchNumberMessages, TempMessage, TempNumber, CountryCode, COUNTRY_META } from "./tempNumberService";
@@ -4219,8 +4220,9 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
 
   // Shows the main Temp Mail menu with two options
   async function showBizMailPanel(chatId: number, _uid: number) {
+    const shopDomain = await getActiveDomain();
     await bot.telegram.sendMessage(chatId,
-      `📩  <b>TEMP MAIL</b>  ·  <i>@addison.asia</i>\n\n` +
+      `📩  <b>TEMP MAIL</b>  ·  <i>@${shopDomain}</i>\n\n` +
       `<code>⚡ Instant  ·  🔒 Private  ·  📬 Real-time</code>\n\n` +
       `Choose an option below:`,
       {
@@ -4284,7 +4286,8 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
       `⏳ <b>Creating your temp email address…</b>`, { parse_mode: "HTML" }
     ).catch(() => null);
 
-    const address  = `user${uid}m${Date.now() % 100000}@addison.asia`;
+    const genDomain = await getActiveDomain();
+    const address  = `user${uid}m${Date.now() % 100000}@${genDomain}`;
     const password = genBizPassword();
 
     let smtpAccountId: string;

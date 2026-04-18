@@ -11,6 +11,9 @@ import {
   createAccount as smtpDevCreate,
   deleteAccount as smtpDevDelete,
   getFullInbox as smtpDevInbox,
+  getActiveDomain,
+  setActiveDomain,
+  listDomains,
 } from "./smtpDevService";
 import {
   pendingActivations, adminApprovalStates,
@@ -1522,13 +1525,15 @@ export function startTelegramBot(config: BotConfig) {
   }
 
   bot.hears(KB.MAIL, (ctx) => handleMenu(ctx, async () => {
+    const activeDomain = await getActiveDomain();
     await ctx.reply(
-      `📧 <b>MAIL</b>\n\nChoose a mail type:`,
+      `📧 <b>MAIL</b>\n\nActive domain: <code>@${activeDomain}</code>\n\nChoose a mail type:`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📨 Temp Mail", "mail_temp"), Markup.button.callback("💼 Business Mail", "biz_mail_new")],
           [Markup.button.callback("📦 Bulk Create", "biz_bulk_create"), Markup.button.callback("♻️ Restore Biz Mail", "biz_mail_restore")],
+          [Markup.button.callback("🌐 Manage Domains", "biz_domain_menu")],
         ]),
       }
     );
@@ -1598,7 +1603,8 @@ export function startTelegramBot(config: BotConfig) {
       accountNum = null;
     }
 
-    const address  = `${username}@addison.asia`;
+    const bizDomain = await getActiveDomain();
+    const address  = `${username}@${bizDomain}`;
     const password = genBizPassword();
 
     let accountId: string;
@@ -1722,7 +1728,7 @@ export function startTelegramBot(config: BotConfig) {
     getState(uid).awaitingText = "biz_bulk_count";
     await bot.telegram.sendMessage(chatId,
       `📦 <b>Bulk Business Mail Creator</b>\n\n` +
-      `How many <code>@addison.asia</code> email accounts do you want to create?\n\n` +
+      `How many business email accounts do you want to create?\n\n` +
       `• Min: <b>1</b> &nbsp;•&nbsp; Max: <b>100,000</b>\n` +
       `• Accounts are created in parallel (10 at a time)\n` +
       `• Results delivered as a <code>.txt</code> file\n\n` +
@@ -1758,12 +1764,13 @@ export function startTelegramBot(config: BotConfig) {
     };
 
     // Process in batches of BATCH
+    const bulkDomain = await getActiveDomain();
     for (let i = 0; i < total; i += BATCH) {
       const batchSize = Math.min(BATCH, total - i);
       await Promise.all(
         Array.from({ length: batchSize }, async (_, j) => {
           const username = genRealisticUsername();
-          const address  = `${username}@addison.asia`;
+          const address  = `${username}@${bulkDomain}`;
           const password = genBizPassword();
           try {
             await smtpDevCreate(address, password);
@@ -1832,10 +1839,11 @@ export function startTelegramBot(config: BotConfig) {
     const uid    = ctx.from!.id;
     const chatId = ctx.chat!.id;
     getState(uid).awaitingText = "biz_mail_custom_user";
+    const customDomain = await getActiveDomain();
     await bot.telegram.sendMessage(chatId,
       `✏️ <b>Enter a custom username</b> for the email\n\n` +
-      `Example: type <code>john</code> to create <code>john@addison.asia</code>\n` +
-      `Or type <code>myshop</code> to get <code>myshop@addison.asia</code>\n\n` +
+      `Example: type <code>john</code> to create <code>john@${customDomain}</code>\n` +
+      `Or type <code>myshop</code> to get <code>myshop@${customDomain}</code>\n\n` +
       `<i>Allowed: letters, numbers, dots (.), hyphens (-), underscores (_)</i>`,
       { parse_mode: "HTML" }
     ).catch(() => {});
@@ -1847,10 +1855,11 @@ export function startTelegramBot(config: BotConfig) {
     const uid    = ctx.from!.id;
     const chatId = ctx.chat!.id;
     getState(uid).awaitingText = "biz_mail_restore_username";
+    const restoreDomain = await getActiveDomain();
     await bot.telegram.sendMessage(chatId,
       `♻️ <b>Recreate a Business Mail Account</b>\n\n` +
-      `Type the username you want to create at <b>@addison.asia</b>.\n\n` +
-      `Example: type <code>myshop</code> → <code>myshop@addison.asia</code>\n` +
+      `Type the username you want to create at <b>@${restoreDomain}</b>.\n\n` +
+      `Example: type <code>myshop</code> → <code>myshop@${restoreDomain}</code>\n` +
       `Or type <code>account42</code> to recreate a numbered account.\n\n` +
       `<i>Allowed: letters, numbers, dots (.), hyphens (-), underscores (_)</i>`,
       { parse_mode: "HTML" }
@@ -1897,6 +1906,52 @@ export function startTelegramBot(config: BotConfig) {
       await startBizMailSession(chatId, uid, { requestedNum: parseInt(numMatch[1], 10) });
     } else {
       await startBizMailSession(chatId, uid, { customUsername: username });
+    }
+  });
+
+  // ── BizMail Domain Manager ───────────────────────────────────────────────
+  async function sendDomainMenu(chatId: number, msgId?: number) {
+    const [currentDomain, domains] = await Promise.all([getActiveDomain(), listDomains().catch(() => [])]);
+
+    const text =
+      `🌐 <b>BizMail Domain Manager</b>\n\n` +
+      `<b>Active domain:</b> <code>@${currentDomain}</code>\n\n` +
+      (domains.length === 0
+        ? `⚠️ No domains found on smtp.dev account.`
+        : `<b>Available domains</b> (tap to activate):`);
+
+    const domainButtons = domains.map(d => [
+      Markup.button.callback(
+        `${d.name === currentDomain ? "✅ " : ""}@${d.name}`,
+        `biz_domain_set:${d.name}`
+      ),
+    ]);
+
+    const keyboard = Markup.inlineKeyboard([
+      ...domainButtons,
+      [Markup.button.callback("🔄 Refresh", "biz_domain_menu")],
+    ]);
+
+    if (msgId) {
+      await bot.telegram.editMessageText(chatId, msgId, undefined, text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
+    } else {
+      await bot.telegram.sendMessage(chatId, text, { parse_mode: "HTML", ...keyboard });
+    }
+  }
+
+  bot.action("biz_domain_menu", async (ctx) => {
+    await ctx.answerCbQuery("Loading domains...").catch(() => {});
+    await sendDomainMenu(ctx.chat!.id, (ctx.callbackQuery as any)?.message?.message_id);
+  });
+
+  bot.action(/^biz_domain_set:(.+)$/, async (ctx) => {
+    const domain = ctx.match[1].trim();
+    await ctx.answerCbQuery(`Setting @${domain}...`).catch(() => {});
+    try {
+      await setActiveDomain(domain);
+      await sendDomainMenu(ctx.chat!.id, (ctx.callbackQuery as any)?.message?.message_id);
+    } catch (err: any) {
+      await ctx.reply(`❌ Failed to set domain: <code>${esc(err.message?.substring(0, 200))}</code>`, { parse_mode: "HTML" }).catch(() => {});
     }
   });
 
@@ -3982,7 +4037,7 @@ export function startTelegramBot(config: BotConfig) {
     await ctx.reply(
       `🤖  <b>REGISTER CHATGPT ACCOUNTS</b>\n\n` +
       `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
-      `An existing <b>@addison.asia</b> email from the smtp.dev pool will be selected and allocated to you for each account.\n\n` +
+      `An existing email from the smtp.dev pool will be selected and allocated to you for each account.\n\n` +
       `How many ChatGPT accounts do you want to create?\n\n` +
       `<i>Enter a number between 1 and 10:</i>`,
       { parse_mode: "HTML" }
@@ -5802,7 +5857,7 @@ export function startTelegramBot(config: BotConfig) {
         `📩  <b>ALLOCATE MAIL TO ${escapeHtml(uName)}</b>\n\n` +
         `<code>◈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◈</code>\n\n` +
         `Now enter the <b>email address</b> you want to allocate:\n\n` +
-        `<i>Example: matthewthomas@addison.asia</i>`,
+        `<i>Example: matthewthomas@yourdomain.com</i>`,
         { parse_mode: "HTML" }
       );
       return;
