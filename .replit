@@ -18,9 +18,9 @@ externalPort = 3000
 PORT = "5000"
 
 [deployment]
-deploymentTarget = "vm"
+deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
-run = ["node", "dist/index.cjs"]
+run = ["node", "./dist/index.cjs"]
 
 [workflows]
 runButton = "Project"
