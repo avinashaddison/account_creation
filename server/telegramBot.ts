@@ -1564,12 +1564,11 @@ export function startTelegramBot(config: BotConfig) {
       "walker","allen","king","wright","scott","green","baker","adams","nelson","carter",
       "mitchell","perez","roberts","turner","phillips","campbell","parker","evans","edwards","collins",
       "stewart","morris","nguyen","rogers","reed","cook","morgan","bell","murphy","bailey"];
-    const sep   = [".", "_", ""][Math.floor(Math.random() * 3)];
-    const f     = first[Math.floor(Math.random() * first.length)];
-    const l     = last[Math.floor(Math.random() * last.length)];
-    // Occasionally add a short number suffix for uniqueness
-    const suffix = Math.random() < 0.45 ? String(Math.floor(Math.random() * 99) + 1) : "";
-    return `${f}${sep}${l}${suffix}`;
+    const f      = first[Math.floor(Math.random() * first.length)];
+    const l      = last[Math.floor(Math.random() * last.length)];
+    // Always add a number suffix for uniqueness; no dots/underscores (smtp.dev rejects them)
+    const suffix = String(Math.floor(Math.random() * 900) + 10);
+    return `${f}${l}${suffix}`;
   }
 
   async function startBizMailSession(chatId: number, uid: number, opts: {
@@ -1723,12 +1722,13 @@ export function startTelegramBot(config: BotConfig) {
   // ── Bulk Business Mail Creation ───────────────────────────────────────────
   bot.action("biz_bulk_create", async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
-    const uid    = ctx.from!.id;
-    const chatId = ctx.chat!.id;
+    const uid       = ctx.from!.id;
+    const chatId    = ctx.chat!.id;
     getState(uid).awaitingText = "biz_bulk_count";
+    const bulkPromptDomain = await getActiveDomain();
     await bot.telegram.sendMessage(chatId,
       `📦 <b>Bulk Business Mail Creator</b>\n\n` +
-      `How many business email accounts do you want to create?\n\n` +
+      `How many <code>@${bulkPromptDomain}</code> email accounts do you want to create?\n\n` +
       `• Min: <b>1</b> &nbsp;•&nbsp; Max: <b>100,000</b>\n` +
       `• Accounts are created in parallel (10 at a time)\n` +
       `• Results delivered as a <code>.txt</code> file\n\n` +
