@@ -11,9 +11,11 @@ function apiKey(): string {
 
 // ── Active domain store ─────────────────────────────────────────────────────
 // Persisted in shop_settings with key "biz_mail_domain".
-// Falls back to "addison.asia" if not set.
+// Auto-detected from smtp.dev API if not set or if stored value is stale.
 
 import { Pool } from "pg";
+
+const LEGACY_DOMAIN = "addison.asia"; // old hardcoded default — no longer valid
 
 let _pool: Pool | null = null;
 function getPool(): Pool {
@@ -27,14 +29,44 @@ function getPool(): Pool {
   return _pool;
 }
 
+/** Fetch the first active domain from smtp.dev API and persist it to DB. */
+async function fetchAndPersistDomainFromApi(): Promise<string | null> {
+  try {
+    const key = process.env.SMTP_DEV_API_KEY;
+    if (!key) return null;
+    const base = (process.env.SMTP_DEV_API_URL || "https://api.smtp.dev").replace(/\/$/, "");
+    const res = await fetch(`${base}/domains`, {
+      headers: { "X-API-KEY": key, "Accept": "application/json" },
+    });
+    if (!res.ok) return null;
+    const data: any[] = await res.json();
+    const domains: any[] = Array.isArray(data) ? data : (data?.member ?? data?.["hydra:member"] ?? []);
+    const active = domains.find(d => d.isActive !== false);
+    const domain = active?.domain ?? active?.name ?? null;
+    if (domain) {
+      // Persist so next calls don't need to hit the API
+      await setActiveDomain(domain);
+      console.log(`[smtp.dev] Auto-detected domain: ${domain}`);
+    }
+    return domain;
+  } catch {
+    return null;
+  }
+}
+
 export async function getActiveDomain(): Promise<string> {
   try {
     const res = await getPool().query(
       `SELECT value FROM shop_settings WHERE key = 'biz_mail_domain' LIMIT 1`
     );
-    if (res.rows.length > 0 && res.rows[0].value) return String(res.rows[0].value).trim();
-  } catch { /* fall through */ }
-  return "addison.asia";
+    const stored = res.rows[0]?.value ? String(res.rows[0].value).trim() : null;
+    // If a non-legacy domain is stored, use it directly
+    if (stored && stored !== LEGACY_DOMAIN) return stored;
+  } catch { /* fall through to API */ }
+
+  // Either nothing stored, or only the stale legacy domain — fetch live from API
+  const apiDomain = await fetchAndPersistDomainFromApi();
+  return apiDomain ?? LEGACY_DOMAIN;
 }
 
 export async function setActiveDomain(domain: string): Promise<void> {

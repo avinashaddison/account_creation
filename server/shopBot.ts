@@ -4211,7 +4211,13 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
             }
           }
         } catch (e: any) {
-          console.error(`[ShopBot/BizMail] Poller error for ${email}:`, e?.message);
+          const msg = e?.message ?? "";
+          // Stop polling if the account no longer exists (API returns 404)
+          if (msg.includes("404")) {
+            console.warn(`[ShopBot/BizMail] Account ${email} not found (404) — stopping poller`);
+            break;
+          }
+          console.error(`[ShopBot/BizMail] Poller error for ${email}:`, msg);
         }
         await new Promise(r => setTimeout(r, 3_000));
       }
