@@ -203,6 +203,28 @@ app.use((req, res, next) => {
       END $$;
     `);
     console.log("[Migration] Ensured biz_mail_accounts table exists");
+
+    // Ensure newer columns exist (idempotent via DO block)
+    await startupDb.execute(sqlRaw`
+      DO $$ BEGIN
+        ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS allocated_to_telegram_id BIGINT;
+        ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS smtp_dev_id TEXT;
+        ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS allocated_at TIMESTAMP;
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
+
+    // One-time cleanup: soft-delete all legacy @addison.asia accounts so pollers never resume them
+    const cleaned = await startupDb.execute(sqlRaw`
+      UPDATE biz_mail_accounts
+      SET deleted_at = NOW()
+      WHERE email LIKE '%@addison.asia'
+        AND deleted_at IS NULL
+    `);
+    const cleanedCount = (cleaned as any).rowCount ?? (cleaned as any).count ?? 0;
+    if (cleanedCount > 0) {
+      console.log(`[Migration] Soft-deleted ${cleanedCount} legacy @addison.asia biz_mail_account(s)`);
+    }
   } catch (err: any) {
     console.warn("[Migration] biz_mail_accounts bootstrap warning:", err.message);
   }

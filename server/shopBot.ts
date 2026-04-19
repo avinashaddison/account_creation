@@ -4185,6 +4185,11 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
   }
 
   function startBizInboxPoller(smtpAccountId: string, email: string, telegramId: number) {
+    // Hard guard: never poll legacy addison.asia addresses — they are dead
+    if (email.endsWith("@addison.asia")) {
+      console.log(`[ShopBot/BizMail] Skipping legacy account ${email} (addison.asia is retired)`);
+      return;
+    }
     if (!bizSeenIds.has(smtpAccountId)) bizSeenIds.set(smtpAccountId, new Set());
     const seen = bizSeenIds.get(smtpAccountId)!;
     console.log(`[ShopBot/BizMail] Polling inbox for ${email} → user ${telegramId}`);
