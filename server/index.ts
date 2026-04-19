@@ -302,33 +302,41 @@ app.use((req, res, next) => {
 
   // ── Webhook domain detection ─────────────────────────────────────────────
   // Priority:
-  //  1. WEBHOOK_DOMAIN secret  – explicit override (use this on production VM
-  //                              or Replit deployment with a custom/app domain)
-  //  2. REPLIT_DEV_DOMAIN      – only used when NOT in a Replit deployment,
-  //                              i.e. the dev workspace server is actually live
-  //  3. None → long-polling fallback (safe default for deployed app)
+  //  1. WEBHOOK_DOMAIN secret   – explicit override (custom domain, etc.)
+  //  2. REPLIT_DOMAINS          – auto-detected production URL (set by Replit
+  //                               in deployed apps; first entry is primary)
+  //  3. REPLIT_DEV_DOMAIN       – dev-workspace tunnel (only while dev server runs)
+  //  4. None → long-polling     – always works, no public URL needed
   //
-  // IMPORTANT: REPLIT_DEV_DOMAIN is the *dev-workspace* tunnel URL.  It only
-  // serves traffic while the dev workflow is running.  The deployed app must
-  // NOT register that URL as its webhook or bots will go silent the moment
-  // the dev workflow is stopped.
+  // Using REPLIT_DOMAINS means bots automatically register the correct
+  // production webhook URL and keep working even when the dev server is off.
   const isReplitDeployment = process.env.REPLIT_DEPLOYMENT === "1";
+
+  // REPLIT_DOMAINS is set by Replit in deployed apps (comma-separated list).
+  // Only use it when REPLIT_DEPLOYMENT=1 so we don't accidentally register the
+  // dev-workspace tunnel as the production webhook.
+  const replitProductionDomain = (isReplitDeployment && process.env.REPLIT_DOMAINS)
+    ? `https://${process.env.REPLIT_DOMAINS.split(",")[0].trim()}`
+    : "";
+
   const rawDomain =
-    process.env.WEBHOOK_DOMAIN ||
-    (!isReplitDeployment && process.env.REPLIT_DEV_DOMAIN
+    process.env.WEBHOOK_DOMAIN ||                                           // 1. Manual override
+    replitProductionDomain ||                                               // 2. Auto-detected production URL
+    (!isReplitDeployment && process.env.REPLIT_DEV_DOMAIN                  // 3. Dev tunnel (dev only)
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : "");
+      : "");                                                                // 4. Nothing → long-polling
   const webhookDomain = rawDomain.trim().replace(/\/$/, "");
   const webhookConfig = webhookDomain
     ? { domain: webhookDomain, register: (path: string, handler: any) => app.use(path, handler) }
     : undefined;
 
   if (webhookDomain) {
-    console.log(`[Bots] Webhook mode → ${webhookDomain}`);
-  } else if (isReplitDeployment) {
-    console.log("[Bots] Deployed app — polling mode (set WEBHOOK_DOMAIN secret to use webhook mode)");
+    const src = process.env.WEBHOOK_DOMAIN ? "WEBHOOK_DOMAIN secret"
+      : replitProductionDomain           ? "REPLIT_DOMAINS (auto, production)"
+      : "REPLIT_DEV_DOMAIN (dev tunnel)";
+    console.log(`[Bots] Webhook mode → ${webhookDomain}  [source: ${src}]`);
   } else {
-    console.log("[Bots] Polling mode (no WEBHOOK_DOMAIN found)");
+    console.log("[Bots] Long-polling mode — bots work without a public URL");
   }
 
   // Start primary Telegram bot
