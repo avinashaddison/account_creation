@@ -4293,35 +4293,62 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
     ).catch(() => null);
 
     const genDomain = await getActiveDomain();
-    const address  = `user${uid}m${Date.now() % 100000}@${genDomain}`;
+    const _firstNames = ["alex","sam","james","emma","noah","olivia","liam","ava","ethan","mia","lucas","sophia","mason","isabella","aiden","grace","logan","chloe","ryan","lily","jack","ella","henry","aria","owen","zoe","leo","nora","finn","hannah"];
+    const _lastNames  = ["smith","jones","brown","davis","clark","white","hall","lee","king","wood","reed","bell","fox","lane","stone","hayes","cole","ross","shaw","page"];
+    const fn = _firstNames[Math.floor(Math.random() * _firstNames.length)];
+    const ln = _lastNames[Math.floor(Math.random() * _lastNames.length)];
+    const num = Math.floor(Math.random() * 900) + 10;
+    const address  = `${fn}${ln}${num}@${genDomain}`;
     const password = genBizPassword();
 
     let smtpAccountId: string;
+    // Retry once with a fresh name if address is already taken
+    let finalAddress = address;
     try {
       const { account } = await smtpDevCreate(address, password);
       smtpAccountId = account.id;
-    } catch (err: any) {
-      if (loadMsg) {
-        await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
-          `❌ <b>Failed to create email account</b>\n<code>${escHtml(err.message?.substring(0, 200))}</code>`,
-          { parse_mode: "HTML" }
-        ).catch(() => {});
+    } catch (firstErr: any) {
+      // If 422 (conflict), try one more time with a different random name
+      if (firstErr.message?.includes("422")) {
+        try {
+          const fn2 = _firstNames[Math.floor(Math.random() * _firstNames.length)];
+          const ln2 = _lastNames[Math.floor(Math.random() * _lastNames.length)];
+          const num2 = Math.floor(Math.random() * 9000) + 1000;
+          finalAddress = `${fn2}${ln2}${num2}@${genDomain}`;
+          const { account } = await smtpDevCreate(finalAddress, password);
+          smtpAccountId = account.id;
+        } catch (err: any) {
+          if (loadMsg) {
+            await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+              `❌ <b>Failed to create email account</b>\n<code>${escHtml(err.message?.substring(0, 200))}</code>`,
+              { parse_mode: "HTML" }
+            ).catch(() => {});
+          }
+          return;
+        }
+      } else {
+        if (loadMsg) {
+          await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+            `❌ <b>Failed to create email account</b>\n<code>${escHtml(firstErr.message?.substring(0, 200))}</code>`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+        }
+        return;
       }
-      return;
     }
 
-    await storage.registerBizMailAccount(null, address, password, {
+    await storage.registerBizMailAccount(null, finalAddress, password, {
       allocatedTo: uid, smtpAccountId,
     });
-    alertAdminBizMailAllocated(address, password, uid, username);
+    alertAdminBizMailAllocated(finalAddress, password, uid, username);
 
     // Auto-set as active inbox and start polling
     bizActiveInbox.set(uid, smtpAccountId);
-    startBizInboxPoller(smtpAccountId, address, uid);
+    startBizInboxPoller(smtpAccountId, finalAddress, uid);
 
     const card =
       `📩 <b>Temp Mail Allocated!</b>\n\n` +
-      `📧 <b>Email:</b>     <code>${escHtml(address)}</code>\n` +
+      `📧 <b>Email:</b>     <code>${escHtml(finalAddress)}</code>\n` +
       `🔑 <b>Password:</b>  <code>${escHtml(password)}</code>\n\n` +
       `<b>This address is exclusively yours.</b>\n` +
       `<i>Any emails sent to it will be forwarded here in realtime.</i>`;
