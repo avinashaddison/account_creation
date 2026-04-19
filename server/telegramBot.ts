@@ -6018,7 +6018,7 @@ export function startTelegramBot(config: BotConfig) {
     // Telegram pushes updates to our HTTPS URL — no polling conflict possible.
     const { domain, register } = config.webhook;
     const webhookPath = `/webhook/${label.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
-    register(webhookPath, bot.webhookCallback(webhookPath) as any);
+    register(webhookPath, bot.webhookCallback('/') as any);
     bot.telegram.setWebhook(`${domain}${webhookPath}`, { drop_pending_updates: true })
       .then(() => botLog(`✅ [${label}] webhook active → ${domain}${webhookPath}`))
       .catch((e: any) => botErr(`[${label}] setWebhook failed: ${e.message}`));

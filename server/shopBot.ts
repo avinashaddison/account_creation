@@ -4859,7 +4859,7 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
     // Register commands first, then mount webhook handler and tell Telegram
     registerCommands().catch((e) => console.error("[ShopBot] registerCommands:", e.message));
     const webhookPath = "/webhook/shopbot";
-    webhook.register(webhookPath, bot.webhookCallback(webhookPath) as any);
+    webhook.register(webhookPath, bot.webhookCallback('/') as any);
     bot.telegram.setWebhook(`${webhook.domain}${webhookPath}`, { drop_pending_updates: true })
       .then(() => console.log(`[ShopBot] webhook active → ${webhook.domain}${webhookPath}`))
       .catch((e: any) => console.error(`[ShopBot] setWebhook failed: ${e.message}`));
