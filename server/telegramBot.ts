@@ -1773,7 +1773,11 @@ export function startTelegramBot(config: BotConfig) {
           const address  = `${username}@${bulkDomain}`;
           const password = genBizPassword();
           try {
-            await smtpDevCreate(address, password);
+            const { account } = await smtpDevCreate(address, password);
+            // Save to DB pool as unallocated so shop users can claim it
+            await storage.registerBizMailAccount(null, address, password, {
+              smtpAccountId: account.id,
+            }).catch(() => {/* ignore duplicate */});
             results.push({ email: address, password, ok: true });
           } catch (err: any) {
             results.push({ email: address, password, ok: false, err: err.message?.substring(0, 80) });
@@ -1802,12 +1806,14 @@ export function startTelegramBot(config: BotConfig) {
     const fileBuffer  = Buffer.from(fileContent, "utf8");
 
     // Edit progress to final summary
+    const poolCount = (await storage.getUnallocatedBizMails()).length;
     if (progressMsg) {
       await bot.telegram.editMessageText(chatId, progressMsg.message_id, undefined,
         `✅ <b>Bulk Create Complete!</b>\n\n` +
         `📧 Total requested: <b>${total}</b>\n` +
         `✅ Successfully created: <b>${okList.length}</b>\n` +
         `❌ Failed: <b>${failList.length}</b>\n\n` +
+        `📦 <b>Pool now has ${poolCount} unallocated address(es)</b> ready for shop users.\n\n` +
         `<i>Sending credentials file...</i>`,
         { parse_mode: "HTML" }
       ).catch(() => {});

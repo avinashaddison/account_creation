@@ -4288,59 +4288,102 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
   });
 
   bot.action("bizmail_generate", async (ctx) => {
-    await ctx.answerCbQuery("Creating your temp email…").catch(() => {});
+    await ctx.answerCbQuery("Allocating your temp email…").catch(() => {});
     const uid      = ctx.from.id;
     const chatId   = ctx.chat!.id;
     const username = ctx.from.username;
 
     const loadMsg = await bot.telegram.sendMessage(chatId,
-      `⏳ <b>Creating your temp email address…</b>`, { parse_mode: "HTML" }
+      `⏳ <b>Allocating your temp email address…</b>`, { parse_mode: "HTML" }
     ).catch(() => null);
 
-    const genDomain = await getActiveDomain();
-    const _firstNames = ["alex","sam","james","emma","noah","olivia","liam","ava","ethan","mia","lucas","sophia","mason","isabella","aiden","grace","logan","chloe","ryan","lily","jack","ella","henry","aria","owen","zoe","leo","nora","finn","hannah"];
-    const _lastNames  = ["smith","jones","brown","davis","clark","white","hall","lee","king","wood","reed","bell","fox","lane","stone","hayes","cole","ross","shaw","page"];
-    const fn = _firstNames[Math.floor(Math.random() * _firstNames.length)];
-    const ln = _lastNames[Math.floor(Math.random() * _lastNames.length)];
-    const num = Math.floor(Math.random() * 900) + 10;
-    const address  = `${fn}${ln}${num}@${genDomain}`;
-    const password = genBizPassword();
-
+    let finalAddress: string;
+    let password: string;
     let smtpAccountId: string;
-    // Retry once with a fresh name if address is already taken
-    let finalAddress = address;
-    try {
-      const { account } = await smtpDevCreate(address, password);
-      smtpAccountId = account.id;
-    } catch (firstErr: any) {
-      // If 422 (conflict), try one more time with a different random name
-      if (firstErr.message?.includes("422")) {
-        try {
-          const fn2 = _firstNames[Math.floor(Math.random() * _firstNames.length)];
-          const ln2 = _lastNames[Math.floor(Math.random() * _lastNames.length)];
-          const num2 = Math.floor(Math.random() * 9000) + 1000;
-          finalAddress = `${fn2}${ln2}${num2}@${genDomain}`;
-          const { account } = await smtpDevCreate(finalAddress, password);
-          smtpAccountId = account.id;
-        } catch (err: any) {
-          if (loadMsg) {
-            await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
-              `❌ <b>Failed to create email account</b>\n<code>${escHtml(err.message?.substring(0, 200))}</code>`,
-              { parse_mode: "HTML" }
-            ).catch(() => {});
-          }
-          return;
-        }
-      } else {
+
+    // ── Step 1: Try the pre-created pool first ────────────────────────────────
+    const poolAccounts = await storage.getUnallocatedBizMails();
+    if (poolAccounts.length > 0) {
+      // Pick the oldest unallocated account from the pool
+      const poolAcc = poolAccounts[0];
+      const allocated = await storage.allocateBizMailToUser(poolAcc.email, uid);
+      if (allocated) {
+        finalAddress  = allocated.email;
+        password      = allocated.password;
+        smtpAccountId = allocated.smtpAccountId!;
+        alertAdminBizMailAllocated(finalAddress, password, uid, username);
+        bizActiveInbox.set(uid, smtpAccountId);
+        startBizInboxPoller(smtpAccountId, finalAddress, uid);
+
+        const card =
+          `📩 <b>Temp Mail Allocated!</b>\n\n` +
+          `📧 <b>Email:</b>     <code>${escHtml(finalAddress)}</code>\n` +
+          `🔑 <b>Password:</b>  <code>${escHtml(password)}</code>\n\n` +
+          `<b>This address is exclusively yours.</b>\n` +
+          `<i>Any emails sent to it will be forwarded here in realtime.</i>`;
+
         if (loadMsg) {
-          await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
-            `❌ <b>Failed to create email account</b>\n<code>${escHtml(firstErr.message?.substring(0, 200))}</code>`,
-            { parse_mode: "HTML" }
-          ).catch(() => {});
+          await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined, card, {
+            parse_mode: "HTML",
+          }).catch(() => {});
         }
+        await bot.telegram.sendMessage(chatId,
+          `⏳ <b>Waiting for Mail…</b>\n\nYour inbox is live. Any email delivered to <code>${escHtml(finalAddress)}</code> will appear here instantly.`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
         return;
       }
     }
+
+    // ── Step 2: Pool empty — create a fresh one on smtp.dev ──────────────────
+    const genDomain = await getActiveDomain();
+    const _firstNames = ["alex","sam","james","emma","noah","olivia","liam","ava","ethan","mia","lucas","sophia","mason","isabella","aiden","grace","logan","chloe","ryan","lily","jack","ella","henry","aria","owen","zoe","leo","nora","finn","hannah"];
+    const _lastNames  = ["smith","jones","brown","davis","clark","white","hall","lee","king","wood","reed","bell","fox","lane","stone","hayes","cole","ross","shaw","page"];
+    const fn  = _firstNames[Math.floor(Math.random() * _firstNames.length)];
+    const ln  = _lastNames[Math.floor(Math.random() * _lastNames.length)];
+    const num = Math.floor(Math.random() * 900) + 10;
+    const newAddress = `${fn}${ln}${num}@${genDomain}`;
+    const newPassword = genBizPassword();
+
+    const tryCreate = async (addr: string, pwd: string) => {
+      const { account } = await smtpDevCreate(addr, pwd);
+      return account;
+    };
+
+    let account: any;
+    let usedAddress = newAddress;
+    try {
+      account = await tryCreate(newAddress, newPassword);
+    } catch (firstErr: any) {
+      // Retry once with a different name on 422 conflict
+      if (firstErr.message?.includes("422")) {
+        try {
+          const fn2  = _firstNames[Math.floor(Math.random() * _firstNames.length)];
+          const ln2  = _lastNames[Math.floor(Math.random() * _lastNames.length)];
+          usedAddress = `${fn2}${ln2}${Math.floor(Math.random() * 9000) + 1000}@${genDomain}`;
+          account = await tryCreate(usedAddress, newPassword);
+        } catch {
+          account = null;
+        }
+      }
+    }
+
+    // ── Step 3: If smtp.dev creation also failed — show unavailable ───────────
+    if (!account) {
+      if (loadMsg) {
+        await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+          `❌ <b>Email Not Available</b>\n\n` +
+          `No temp email addresses are available right now.\n` +
+          `Please try again later or contact support.`,
+          { parse_mode: "HTML" }
+        ).catch(() => {});
+      }
+      return;
+    }
+
+    finalAddress  = usedAddress;
+    password      = newPassword;
+    smtpAccountId = account.id;
 
     await storage.registerBizMailAccount(null, finalAddress, password, {
       allocatedTo: uid, smtpAccountId,
