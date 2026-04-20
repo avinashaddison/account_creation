@@ -291,6 +291,15 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
     console.error("[MailBot] Unhandled error:", err?.message ?? err);
   });
 
+  // ── Register slash commands (creates the "Menu" persistent button in chat) ─
+  bot.telegram.setMyCommands([
+    { command: "start", description: "Open mail panel" },
+    { command: "mails", description: "List all my mailboxes" },
+  ]).catch(() => {});
+
+  // Set the menu button type to 'commands' so Telegram shows the Menu button
+  bot.telegram.setChatMenuButton({ menuButton: { type: "commands" } }).catch(() => {});
+
   // ── /start ───────────────────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const uid    = ctx.from.id;
@@ -417,6 +426,11 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
       `⏳ <b>Waiting for Mail…</b>\n\nYour inbox is live. Any email delivered to <code>${escHtml(finalAddress)}</code> will appear here instantly.`,
       { parse_mode: "HTML" }
     ).catch(() => {});
+  });
+
+  // ── /mails command ────────────────────────────────────────────────────────
+  bot.command("mails", async (ctx) => {
+    await showList(bot, ctx.chat.id, ctx.from.id);
   });
 
   // ── List ──────────────────────────────────────────────────────────────────
