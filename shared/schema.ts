@@ -395,6 +395,7 @@ export const bizMailAccounts = pgTable("biz_mail_accounts", {
   allocatedTo:   bigint("allocated_to_telegram_id", { mode: "number" }),   // Telegram user ID
   smtpAccountId: text("smtp_dev_id"),                                       // smtp.dev account ID for polling
   allocatedAt:   timestamp("allocated_at"),
+  sourceBot:     text("source_bot").default("bot2"),                        // 'bot2' | 'bot3'
 });
 
 export const insertBizMailAccountSchema = createInsertSchema(bizMailAccounts).omit({ id: true, createdAt: true, deletedAt: true });

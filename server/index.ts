@@ -4,6 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { startTelegramBot } from "./telegramBot";
 import { startShopBot } from "./shopBot";
+import { startMailBot } from "./mailBot";
 import { ensureCryptoTable, startPaymentChecker, cryptoRouter } from "./crypto/index";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -210,6 +211,7 @@ app.use((req, res, next) => {
         ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS allocated_to_telegram_id BIGINT;
         ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS smtp_dev_id TEXT;
         ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS allocated_at TIMESTAMP;
+        ALTER TABLE biz_mail_accounts ADD COLUMN IF NOT EXISTS source_bot TEXT DEFAULT 'bot2';
       EXCEPTION WHEN others THEN NULL;
       END $$;
     `);
@@ -352,6 +354,14 @@ app.use((req, res, next) => {
   if (secondaryToken) {
     startShopBot(secondaryToken, webhookConfig);
     console.log("[ShopBot] Project Addison v2 shop bot starting...");
+  }
+
+  // Start Bot 3 — Dedicated temp mail bot
+  const mailBotToken = process.env.TELEGRAM_BOT_TOKEN_3;
+  if (mailBotToken) {
+    startMailBot(mailBotToken, webhookConfig);
+  } else {
+    console.warn("[MailBot] TELEGRAM_BOT_TOKEN_3 not set — mail bot (Bot 3) disabled");
   }
 
   // Start crypto payment auto-checker background job

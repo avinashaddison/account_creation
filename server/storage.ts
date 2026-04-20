@@ -107,7 +107,7 @@ export interface IStorage {
   getUsedBizMailNums(): Promise<number[]>;
   getBizMailByNum(accountNum: number): Promise<BizMailAccount | undefined>;
   getBizMailByEmail(email: string): Promise<BizMailAccount | undefined>;
-  registerBizMailAccount(accountNum: number | null, email: string, password: string, opts?: { allocatedTo?: number; smtpAccountId?: string }): Promise<BizMailAccount>;
+  registerBizMailAccount(accountNum: number | null, email: string, password: string, opts?: { allocatedTo?: number; smtpAccountId?: string; sourceBot?: string }): Promise<BizMailAccount>;
   markBizMailDeleted(accountNum: number): Promise<void>;
   markBizMailDeletedByEmail(email: string): Promise<void>;
   reactivateBizMailAccount(accountNum: number, password: string): Promise<void>;
@@ -117,8 +117,9 @@ export interface IStorage {
   getOldestActiveBizMailAccounts(limit: number): Promise<BizMailAccount[]>;
   getBizMailsByTelegramId(telegramId: number): Promise<BizMailAccount[]>;
   getAllAllocatedBizMails(): Promise<BizMailAccount[]>;
+  getAllAllocatedBizMailsByBot(sourceBot: string): Promise<BizMailAccount[]>;
   getUnallocatedBizMails(): Promise<BizMailAccount[]>;
-  allocateBizMailToUser(email: string, telegramId: number): Promise<BizMailAccount | null>;
+  allocateBizMailToUser(email: string, telegramId: number, sourceBot?: string): Promise<BizMailAccount | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -727,7 +728,7 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async registerBizMailAccount(accountNum: number | null, email: string, password: string, opts?: { allocatedTo?: number; smtpAccountId?: string }): Promise<BizMailAccount> {
+  async registerBizMailAccount(accountNum: number | null, email: string, password: string, opts?: { allocatedTo?: number; smtpAccountId?: string; sourceBot?: string }): Promise<BizMailAccount> {
     const [row] = await db.insert(bizMailAccounts)
       .values({
         accountNum,
@@ -737,6 +738,7 @@ export class DatabaseStorage implements IStorage {
         allocatedTo:   opts?.allocatedTo   ?? null,
         smtpAccountId: opts?.smtpAccountId ?? null,
         allocatedAt:   opts?.allocatedTo ? new Date() : null,
+        sourceBot:     opts?.sourceBot ?? "bot2",
       })
       .returning();
     return row;
@@ -797,15 +799,24 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(bizMailAccounts.allocatedAt));
   }
 
+  async getAllAllocatedBizMailsByBot(sourceBot: string): Promise<BizMailAccount[]> {
+    return db.select().from(bizMailAccounts)
+      .where(and(
+        isNotNull(bizMailAccounts.allocatedTo),
+        eq(bizMailAccounts.sourceBot, sourceBot),
+      ))
+      .orderBy(desc(bizMailAccounts.allocatedAt));
+  }
+
   async getUnallocatedBizMails(): Promise<BizMailAccount[]> {
     return db.select().from(bizMailAccounts)
       .where(and(isNull(bizMailAccounts.allocatedTo), isNull(bizMailAccounts.deletedAt)))
       .orderBy(bizMailAccounts.createdAt);
   }
 
-  async allocateBizMailToUser(email: string, telegramId: number): Promise<BizMailAccount | null> {
+  async allocateBizMailToUser(email: string, telegramId: number, sourceBot = "bot2"): Promise<BizMailAccount | null> {
     const [row] = await db.update(bizMailAccounts)
-      .set({ allocatedTo: telegramId, allocatedAt: new Date() })
+      .set({ allocatedTo: telegramId, allocatedAt: new Date(), sourceBot })
       .where(and(eq(bizMailAccounts.email, email), isNull(bizMailAccounts.deletedAt)))
       .returning();
     return row ?? null;
