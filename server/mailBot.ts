@@ -10,7 +10,8 @@ import { storage } from "./storage";
 import {
   getActiveDomain,
   createAccount as smtpDevCreate,
-  listMessages as smtpDevInbox,
+  getFullInbox as smtpDevInbox,
+  listAccounts as smtpDevListAccounts,
 } from "./smtpDevService";
 
 // ── Tiny shared utilities ──────────────────────────────────────────────────
@@ -40,25 +41,41 @@ function genUsername(domain: string): string {
 }
 
 // ── Bot state ──────────────────────────────────────────────────────────────
-const mailSeenIds     = new Map<string, Set<string>>();  // smtpAccountId → seen msg IDs
-const mailActiveInbox = new Map<number, string>();        // userId → active smtpAccountId
+// smtpAccountId → Set of seen message IDs
+const mailSeenIds     = new Map<string, Set<string>>();
+// userId → currently active smtpAccountId (receives realtime mail)
+const mailActiveInbox = new Map<number, string>();
+// smtpAccountId → is poller already running
+const mailPollerRunning = new Set<string>();
 
 export interface MailBotWebhookConfig {
   domain: string;
   register: (path: string, handler: any) => void;
 }
 
-// ── Inbox poller ───────────────────────────────────────────────────────────
-function startMailPoller(bot: Telegraf, smtpAccountId: string, email: string, telegramId: number) {
+// ── Inbox poller — with auto-recovery on 404 ──────────────────────────────
+function startMailPoller(
+  bot: Telegraf,
+  smtpAccountId: string,
+  email: string,
+  password: string,
+  telegramId: number,
+) {
   if (email.endsWith("@addison.asia")) return; // legacy guard
+  if (mailPollerRunning.has(smtpAccountId)) return; // already running
+  mailPollerRunning.add(smtpAccountId);
   if (!mailSeenIds.has(smtpAccountId)) mailSeenIds.set(smtpAccountId, new Set());
   const seen = mailSeenIds.get(smtpAccountId)!;
+
   console.log(`[MailBot/Poller] Polling ${email} → user ${telegramId}`);
+
+  let currentSmtpId = smtpAccountId;
+
   (async () => {
     while (true) {
       try {
-        if (mailActiveInbox.get(telegramId) === smtpAccountId) {
-          const msgs = await smtpDevInbox(smtpAccountId);
+        if (mailActiveInbox.get(telegramId) === currentSmtpId) {
+          const msgs = await smtpDevInbox(currentSmtpId);
           for (const msg of msgs) {
             if (seen.has(msg.id)) continue;
             seen.add(msg.id);
@@ -74,18 +91,97 @@ function startMailPoller(bot: Telegraf, smtpAccountId: string, email: string, te
               { parse_mode: "HTML" }
             ).catch(() => {});
           }
+        } else {
+          // Not the active inbox — still poll silently so seen-set stays current
+          const msgs = await smtpDevInbox(currentSmtpId);
+          for (const msg of msgs) seen.add(msg.id);
         }
       } catch (e: any) {
         const m = e?.message ?? "";
         if (m.includes("404")) {
-          console.warn(`[MailBot/Poller] Account ${email} not found (404) — stopping`);
+          // smtp.dev account ID is stale — look up real ID by email address first
+          console.warn(`[MailBot/Poller] 404 for ${email} — searching smtp.dev by address`);
+          let newId: string | null = null;
+          try {
+            const allAccts = await smtpDevListAccounts();
+            const found = allAccts.find(a => a.address.toLowerCase() === email.toLowerCase());
+            if (found) newId = found.id;
+          } catch { /* fallthrough to create */ }
+
+          // If not found in list, try creating it
+          if (!newId) {
+            try {
+              const res = await smtpDevCreate(email, password);
+              newId = res.account?.id ?? null;
+            } catch { /* account truly gone */ }
+          }
+
+          if (newId) {
+            console.log(`[MailBot/Poller] Recovered smtp.dev ID for ${email} → ${newId}`);
+            mailSeenIds.set(newId, seen);
+            mailSeenIds.delete(currentSmtpId);
+            mailPollerRunning.delete(currentSmtpId);
+            mailPollerRunning.add(newId);
+            await storage.updateBizMailSmtpId(email, newId).catch(() => {});
+            if (mailActiveInbox.get(telegramId) === currentSmtpId) {
+              mailActiveInbox.set(telegramId, newId);
+            }
+            currentSmtpId = newId;
+            await new Promise(r => setTimeout(r, 2_000));
+            continue;
+          }
+
+          console.warn(`[MailBot/Poller] Stopping poller for ${email} (cannot recover)`);
           break;
         }
         console.error(`[MailBot/Poller] Error for ${email}:`, m);
       }
       await new Promise(r => setTimeout(r, 3_000));
     }
+    mailPollerRunning.delete(currentSmtpId);
   })();
+}
+
+// ── Ensure smtp.dev account exists for an email ───────────────────────────
+// Returns the smtp.dev account ID to use. Strategy:
+// 1. Try existing ID first (fast path)
+// 2. If 404 or missing ID: search smtp.dev account list by address
+// 3. If not found in list: create new account
+async function ensureSmtpAccount(email: string, password: string, existingId?: string | null): Promise<string | null> {
+  // Fast path: existing ID works
+  if (existingId) {
+    try {
+      await smtpDevInbox(existingId);
+      return existingId;
+    } catch (e: any) {
+      if (!e.message?.includes("404")) return existingId; // non-404 error — try with it anyway
+      // 404: stale ID, fall through to lookup
+    }
+  }
+
+  // Lookup by email address in smtp.dev account list
+  try {
+    const accounts = await smtpDevListAccounts();
+    const found = accounts.find(a => a.address.toLowerCase() === email.toLowerCase());
+    if (found) {
+      console.log(`[MailBot] Found smtp.dev account for ${email} by lookup → ID: ${found.id}`);
+      await storage.updateBizMailSmtpId(email, found.id).catch(() => {});
+      return found.id;
+    }
+  } catch { /* fall through to create */ }
+
+  // Account doesn't exist on smtp.dev at all — create it
+  try {
+    const res = await smtpDevCreate(email, password);
+    const id  = res.account?.id;
+    if (id) {
+      await storage.updateBizMailSmtpId(email, id).catch(() => {});
+      return id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Inbox snapshot (for manual refresh) ───────────────────────────────────
@@ -137,7 +233,7 @@ function alertAdmin(email: string, password: string, telegramId: number, usernam
 
 // ── Main panel ─────────────────────────────────────────────────────────────
 async function showPanel(bot: Telegraf, chatId: number) {
-  const domain = await getActiveDomain();
+  const domain = await getActiveDomain().catch(() => "addison.monster");
   await bot.telegram.sendMessage(chatId,
     `📩  <b>TEMP MAIL</b>  ·  <i>@${domain}</i>\n\n` +
     `<code>⚡ Instant  ·  🔒 Private  ·  📬 Real-time</code>\n\n` +
@@ -201,12 +297,12 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
     const chatId = ctx.chat.id;
     await showPanel(bot, chatId);
 
-    // Resume this user's bot3 pollers if they have existing accounts
+    // Resume this user's bot3 pollers
     const mails = await storage.getBizMailsByTelegramId(uid).catch(() => []);
     for (const acc of mails) {
       if (acc.smtpAccountId && !acc.deletedAt && acc.sourceBot === "bot3") {
-        if (!mailSeenIds.has(acc.smtpAccountId)) {
-          startMailPoller(bot, acc.smtpAccountId, acc.email, uid);
+        if (!mailPollerRunning.has(acc.smtpAccountId)) {
+          startMailPoller(bot, acc.smtpAccountId, acc.email, acc.password, uid);
         }
         if (!mailActiveInbox.has(uid)) {
           mailActiveInbox.set(uid, acc.smtpAccountId);
@@ -236,12 +332,22 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
       const poolAcc   = pool[0];
       const allocated = await storage.allocateBizMailToUser(poolAcc.email, uid, "bot3");
       if (allocated) {
-        finalAddress  = allocated.email;
-        password      = allocated.password;
-        smtpAccountId = allocated.smtpAccountId!;
+        finalAddress = allocated.email;
+        password     = allocated.password;
+
+        // Ensure smtp.dev account exists (pool accounts may have stale/missing IDs)
+        const verifiedSmtpId = await ensureSmtpAccount(finalAddress, password, allocated.smtpAccountId);
+        if (!verifiedSmtpId) {
+          if (loadMsg) await bot.telegram.editMessageText(chatId, loadMsg.message_id, undefined,
+            `❌ <b>Email Not Available</b>\n\nCould not provision inbox. Please try again.`,
+            { parse_mode: "HTML" }
+          ).catch(() => {});
+          return;
+        }
+        smtpAccountId = verifiedSmtpId;
         alertAdmin(finalAddress, password, uid, username);
         mailActiveInbox.set(uid, smtpAccountId);
-        startMailPoller(bot, smtpAccountId, finalAddress, uid);
+        startMailPoller(bot, smtpAccountId, finalAddress, password, uid);
 
         const card =
           `📩 <b>Temp Mail Allocated!</b>\n\n` +
@@ -297,7 +403,7 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
     });
     alertAdmin(finalAddress, password, uid, username);
     mailActiveInbox.set(uid, smtpAccountId);
-    startMailPoller(bot, smtpAccountId, finalAddress, uid);
+    startMailPoller(bot, smtpAccountId, finalAddress, password, uid);
 
     const card =
       `📩 <b>Temp Mail Allocated!</b>\n\n` +
@@ -331,9 +437,9 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
     if (!target) { await ctx.answerCbQuery("Mailbox not found.", { show_alert: true }).catch(() => {}); return; }
 
     mailActiveInbox.set(uid, smtpId);
-    // Ensure poller is running (e.g. after restart)
-    if (!mailSeenIds.has(smtpId)) {
-      startMailPoller(bot, smtpId, target.email, uid);
+    // Ensure poller is running
+    if (!mailPollerRunning.has(smtpId)) {
+      startMailPoller(bot, smtpId, target.email, target.password, uid);
     }
 
     const snapshot = await buildSnapshot(smtpId, target.email);
@@ -353,6 +459,11 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
     const mails  = await storage.getBizMailsByTelegramId(uid);
     const target = mails.find(m => m.smtpAccountId === smtpId && !m.deletedAt);
     if (!target) { await ctx.answerCbQuery("Mailbox not found.", { show_alert: true }).catch(() => {}); return; }
+
+    // Ensure poller is running
+    if (!mailPollerRunning.has(smtpId)) {
+      startMailPoller(bot, smtpId, target.email, target.password, uid);
+    }
 
     const snapshot = await buildSnapshot(smtpId, target.email);
     await ctx.editMessageText(snapshot, {
@@ -384,7 +495,7 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
       for (const [userId, smtpId] of latestPerUser) mailActiveInbox.set(userId, smtpId);
       for (const acc of all) {
         if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
-          startMailPoller(bot, acc.smtpAccountId, acc.email, acc.allocatedTo);
+          startMailPoller(bot, acc.smtpAccountId, acc.email, acc.password, acc.allocatedTo);
           await new Promise(r => setTimeout(r, 100));
         }
       }
@@ -400,8 +511,8 @@ export function startMailBot(token: string, webhook?: MailBotWebhookConfig) {
       const all = await storage.getAllAllocatedBizMailsByBot("bot3");
       for (const acc of all) {
         if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
-          if (!mailSeenIds.has(acc.smtpAccountId)) {
-            startMailPoller(bot, acc.smtpAccountId, acc.email, acc.allocatedTo);
+          if (!mailPollerRunning.has(acc.smtpAccountId)) {
+            startMailPoller(bot, acc.smtpAccountId, acc.email, acc.password, acc.allocatedTo);
             if (!mailActiveInbox.has(acc.allocatedTo)) mailActiveInbox.set(acc.allocatedTo, acc.smtpAccountId);
           }
         }

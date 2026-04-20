@@ -4507,7 +4507,7 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
   // Resume inbox polling for all allocated accounts on startup
   (async () => {
     try {
-      const all = await storage.getAllAllocatedBizMails();
+      const all = await storage.getAllAllocatedBizMailsByBot("bot2");
       // Group by user and pick the most recently allocated as default active
       const latestPerUser = new Map<number, string>(); // userId → smtpAccountId
       for (const acc of all) {
@@ -4539,7 +4539,7 @@ export function startShopBot(token: string, webhook?: ShopBotWebhookConfig) {
   // newly allocated account that isn't already tracked.
   setInterval(async () => {
     try {
-      const all = await storage.getAllAllocatedBizMails();
+      const all = await storage.getAllAllocatedBizMailsByBot("bot2");
       for (const acc of all) {
         if (acc.smtpAccountId && acc.allocatedTo && !acc.deletedAt) {
           if (!bizSeenIds.has(acc.smtpAccountId)) {

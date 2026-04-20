@@ -120,6 +120,7 @@ export interface IStorage {
   getAllAllocatedBizMailsByBot(sourceBot: string): Promise<BizMailAccount[]>;
   getUnallocatedBizMails(): Promise<BizMailAccount[]>;
   allocateBizMailToUser(email: string, telegramId: number, sourceBot?: string): Promise<BizMailAccount | null>;
+  updateBizMailSmtpId(email: string, smtpAccountId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -820,6 +821,12 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(bizMailAccounts.email, email), isNull(bizMailAccounts.deletedAt)))
       .returning();
     return row ?? null;
+  }
+
+  async updateBizMailSmtpId(email: string, smtpAccountId: string): Promise<void> {
+    await db.update(bizMailAccounts)
+      .set({ smtpAccountId })
+      .where(eq(bizMailAccounts.email, email));
   }
 }
 
